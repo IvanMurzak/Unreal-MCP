@@ -10,25 +10,16 @@
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
-#include "Engine/Engine.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Framework/Docking/TabManager.h"
-#include "Misc/App.h"
-#include "Misc/CommandLine.h"
-#include "Misc/Parse.h"
-#include "Widgets/Docking/SDockTab.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "JsonObjectConverter.h"
-#include "LevelEditor.h"
-#include "Containers/Ticker.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersion.h"
-#include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #include "UObject/Package.h"
 #include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
@@ -50,10 +41,13 @@
 namespace UnrealMcpFabToolsLocal
 {
 	static const TCHAR* FabRoot = TEXT("https://www.fab.com");
-	/** How long the Fab panel's silent sign-in (the remembered Epic login) gets before Epic's sign-in page opens. */
-	static constexpr double FabSilentLoginSeconds = 4.0;
 	/** How long a call waits for the user to finish signing in on Epic's sign-in page. */
 	static constexpr double FabPortalWaitSeconds = 150.0;
+	/**
+	 * Epic's sign-in page is not opened again for this long: a second account-portal login while the first one still
+	 * waits for the user fails both (EOS_Auth_PinGrantPending).
+	 */
+	static constexpr double FabPortalReopenSeconds = 600.0;
 	/** One fab-add call waits at most this long for the import; a later call with the same listing keeps waiting. */
 	static constexpr double FabImportWaitSeconds = 240.0;
 	static constexpr int32 FabMaxCount = 48;
@@ -108,6 +102,14 @@ namespace UnrealMcpFabToolsLocal
 		return Result;
 	}
 
+	/** @p Field of @p Object as a string, or empty when it is missing or not a string (GetStringField logs an error then). */
+	static FString FabString(const FJsonObject& Object, const TCHAR* Field)
+	{
+		FString Value;
+		Object.TryGetStringField(Field, Value);
+		return Value;
+	}
+
 	static TSharedPtr<FJsonObject> FabParseObject(const FString& Text)
 	{
 		TSharedPtr<FJsonObject> Object;
@@ -117,18 +119,21 @@ namespace UnrealMcpFabToolsLocal
 		return Object;
 	}
 
-	/** "HTTP 403: <the first characters of the body>" for an error message. */
+	static bool FabHttpOk(const FFabHttpResult& Http) { return Http.bConnected && Http.Code >= 200 && Http.Code < 300; }
+
+	/** "HTTP 403: <the first characters of the body>" for an error message (a 2xx body is never shown). */
 	static FString FabDescribeHttp(const FFabHttpResult& Http)
 	{
 		if (!Http.bConnected)
 			return TEXT("no response (network error or timeout)");
+		if (FabHttpOk(Http))
+			return FString::Printf(TEXT("HTTP %d with an answer this tool does not understand"), Http.Code);
 		FString Body = Http.Body.Replace(TEXT("\n"), TEXT(" ")).TrimStartAndEnd();
 		if (Body.Len() > 300)
 			Body = Body.Left(300) + TEXT("...");
 		return FString::Printf(TEXT("HTTP %d: %s"), Http.Code, *Body);
 	}
 
-	static bool FabHttpOk(const FFabHttpResult& Http) { return Http.bConnected && Http.Code >= 200 && Http.Code < 300; }
 
 	// ---------------------------------------------------------------- per-call state (survives RetryLater)
 
@@ -140,7 +145,8 @@ namespace UnrealMcpFabToolsLocal
 		int32 Stage = 0;
 		double StageStarted = 0.0;
 		double LastTokenCheck = 0.0;
-		bool bOpenedPanel = false;
+		bool bAskedSignIn = false;
+		bool bSessionRetried = false;
 		FString Token;
 		FString Account;
 		// fab-library: the rows found so far and the page to read next (a filter reads every page).
@@ -234,8 +240,13 @@ namespace UnrealMcpFabToolsLocal
 		{
 			if (UClass* Class = FabFindClass(TEXT("FabBrowserApi")))
 			{
-				UObject* Object = NewObject<UObject>(GetTransientPackage(), Class, TEXT("UnrealMcpFabBrowserApi"));
-				Object->AddToRoot();
+				// A module reload resets the static: the rooted object (and the import workflows it owns) is still there.
+				UObject* Object = FindObject<UObject>(GetTransientPackage(), TEXT("UnrealMcpFabBrowserApi"));
+				if (!Object)
+				{
+					Object = NewObject<UObject>(GetTransientPackage(), Class, TEXT("UnrealMcpFabBrowserApi"));
+					Object->AddToRoot();
+				}
 				Api = Object;
 			}
 		}
@@ -296,65 +307,7 @@ namespace UnrealMcpFabToolsLocal
 		return Sub;
 	}
 
-	static const TCHAR* FabTabName = TEXT("FabTab");
-
-	static TSharedPtr<FTabManager> FabTabManager()
-	{
-		FLevelEditorModule* LevelEditor = FModuleManager::GetModulePtr<FLevelEditorModule>(TEXT("LevelEditor"));
-		return LevelEditor ? LevelEditor->GetLevelEditorTabManager() : nullptr;
-	}
-
-	/**
-	 * Whether the Fab panel can be opened here. It hosts a web view, which a -nullrhi or -RenderOffscreen editor cannot
-	 * create: FFabBrowser::OpenTab then asserts, and so does every later start of a layout that saved the panel.
-	 */
-	static bool FabPanelUsable()
-	{
-		return FSlateApplication::IsInitialized() && FApp::CanEverRender() && !FApp::IsUnattended()
-			&& !FParse::Param(FCommandLine::Get(), TEXT("RenderOffscreen")) && FabTabManager().IsValid();
-	}
-
-	/**
-	 * Open the Fab panel for its silent sign-in from the remembered Epic login (FFabBrowser::OpenTab starts it). True
-	 * when this opened it (it was closed): the caller closes it again, so it never lands in the saved editor layout.
-	 */
-	static bool FabOpenPanel()
-	{
-		TSharedPtr<FTabManager> Tabs = FabTabManager();
-		if (!FabPanelUsable() || Tabs->FindExistingLiveTab(FTabId(FabTabName)).IsValid())
-			return false;
-		const bool bOpened = Tabs->TryInvokeTab(FTabId(FabTabName)).IsValid();
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] fab: opened the Fab panel for its sign-in (%s)."), bOpened ? TEXT("ok") : TEXT("failed"));
-		return bOpened;
-	}
-
-	/**
-	 * Close the panel FabOpenPanel opened, then save the editor layout: opening a tab saves the layout at once but closing
-	 * one does not (only a normal editor exit does), so an editor killed afterwards would restore the panel on its next
-	 * start, and a headless start then asserts (see FabPanelUsable).
-	 */
-	static void FabClosePanel()
-	{
-		TSharedPtr<FTabManager> Tabs = FabTabManager();
-		TSharedPtr<SDockTab> Tab = Tabs ? Tabs->FindExistingLiveTab(FTabId(FabTabName)) : nullptr;
-		if (!Tab)
-			Tab = FGlobalTabmanager::Get()->FindExistingLiveTab(FTabId(FabTabName));
-		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] fab: closing the Fab panel (%s)."), Tab ? TEXT("found") : TEXT("not found"));
-		if (!Tab)
-			return;
-		Tab->RequestCloseTab();
-		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([](float)
-		{
-			if (TSharedPtr<FTabManager> Manager = FabTabManager())
-			{
-				Manager->SavePersistentLayout();
-				UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] fab: closed the Fab panel again and saved the editor layout."));
-			}
-			return false; // once
-		}), 0.5f);
-	}
-
-	/** When this editor last opened Epic's sign-in page, so repeated calls do not open a browser tab each. */
+	/** When this editor last opened Epic's sign-in page, so concurrent and repeated calls do not open a browser tab each. */
 	static double& FabPortalOpenedAt()
 	{
 		static double OpenedAt = -1.0e9;
@@ -362,10 +315,12 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * The user's token for this call. Without one: open the Fab panel (its silent sign-in from the remembered Epic login,
-	 * FFabBrowser::OpenTab), and when that does not sign in, Epic's sign-in page in the browser (the Fab plugin's
-	 * `Fab.Login`), then wait for the user (RetryLater) until the call's time runs out. The token is read at most once a
-	 * second: every failed read logs a LogFab error.
+	 * The user's token for this call. Without one, Epic's sign-in page opens in the browser (UFabBrowserApi::Login, the
+	 * Fab plugin's own account-portal login; at most once per FabPortalReopenSeconds in this editor) and the call waits for
+	 * the user (RetryLater) until the page's window or the call's time runs out. Opening the Fab panel in the editor signs
+	 * in silently from the remembered Epic login too; this family never opens the panel itself: the panel's web view
+	 * cannot exist in a -nullrhi editor, and the engine asserts there on a layout that saved it. The token is read at
+	 * most once a second, since every failed read logs a LogFab error.
 	 */
 	static bool FabEnsureToken(const FUnrealMcpToolCall& Call, FFabCallState& State, FString& OutToken, FUnrealMcpToolResult& OutWait)
 	{
@@ -375,53 +330,36 @@ namespace UnrealMcpFabToolsLocal
 			return true;
 		}
 		const double Now = FPlatformTime::Seconds();
-		if (State.StageStarted <= 0.0 || Now - State.LastTokenCheck >= 1.0)
+		if (Now - State.LastTokenCheck >= 1.0)
 		{
 			State.LastTokenCheck = Now;
 			OutToken = FabAuthToken();
 			if (!OutToken.IsEmpty())
 			{
 				State.Token = OutToken;
-				if (State.bOpenedPanel)
-				{
-					State.bOpenedPanel = false;
-					FabClosePanel();
-				}
 				return true;
 			}
 		}
-		if (State.StageStarted <= 0.0)
+		if (!State.bAskedSignIn)
 		{
-			State.StageStarted = Now;
-			State.bOpenedPanel = FabOpenPanel();
+			// Once per call: open the page unless one this editor opened is still waiting for the user.
+			State.bAskedSignIn = true;
+			if (Now - FabPortalOpenedAt() >= FabPortalReopenSeconds)
+			{
+				FabPortalOpenedAt() = Now;
+				FabInvoke(FabApi(), TEXT("Login"), [](UFunction*, uint8*) {}, [](UFunction*, uint8*) {});
+				UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] fab: not signed in to Fab; opened Epic's sign-in page in the browser."));
+			}
 		}
-		else if (State.bOpenedPanel)
-		{
-			// The sign-in started when the panel opened (last pass); close what this call opened.
-			State.bOpenedPanel = false;
-			FabClosePanel();
-		}
-		const bool bPortal = Now - FabPortalOpenedAt() < FabPortalWaitSeconds;
-		// No panel (a headless editor): nothing signs in silently, so Epic's sign-in page opens at once.
-		const double Silent = FabPanelUsable() ? FabSilentLoginSeconds : 0.0;
-		if (!bPortal && Now - State.StageStarted >= Silent)
-		{
-			FabPortalOpenedAt() = Now;
-			if (GEngine)
-				GEngine->Exec(nullptr, TEXT("Fab.Login"));
-			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] fab: not signed in to Fab; opened Epic's sign-in page in the browser."));
-		}
-		const double Limit = FMath::Min(bPortal ? FabPortalWaitSeconds : Silent + 1.0, FabTimeLeft(Call));
-		if (Now - State.StageStarted < Limit)
+		if (Now < FabPortalOpenedAt() + FabPortalWaitSeconds && FabTimeLeft(Call) > 0.0)
 		{
 			OutWait = FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the Fab sign-in."));
 			return false;
 		}
-		if (State.bOpenedPanel)
-			FabClosePanel();
 		OutWait = FabFinish(Call, FUnrealMcpToolResult::Error(TEXT(
-			"Not signed in to Fab. Epic's sign-in page was opened in the browser: the user signs in there with their Epic Games "
-			"account once (the editor remembers the login), then call this tool again.")));
+			"Not signed in to Fab. Epic's sign-in page was opened in the browser (it is not opened again for 10 minutes): the user "
+			"signs in there with their Epic Games account, or opens Fab in the editor's toolbar, which signs in from a remembered "
+			"login; then call this tool again.")));
 		return false;
 	}
 
@@ -490,34 +428,60 @@ namespace UnrealMcpFabToolsLocal
 		return Headers;
 	}
 
-	/** Every listing the Fab import workflows recorded in this project (UFabLocalAssets): lower-case uid -> content path. */
-	static TMap<FString, FString> FabImportedPaths()
+	/**
+	 * The import records of the Fab plugin (UFabLocalAssets::PathsListingID: content path -> listing uid), written when an
+	 * import completes; null when this engine's Fab plugin has no such map.
+	 */
+	static TOptional<FScriptMapHelper> FabImportRecords()
 	{
-		TMap<FString, FString> Paths;
 		UClass* Class = FabFindClass(TEXT("FabLocalAssets"));
 		const FMapProperty* Map = Class ? FindFProperty<FMapProperty>(Class, TEXT("PathsListingID")) : nullptr;
 		if (!Map || !CastField<FStrProperty>(Map->KeyProp) || !CastField<FStrProperty>(Map->ValueProp))
+			return {};
+		return FScriptMapHelper(Map, Map->ContainerPtrToValuePtr<void>(Class->GetDefaultObject()));
+	}
+
+	/**
+	 * Every listing imported into this project: lower-case uid -> content path. A record whose folder is gone (the user
+	 * deleted it; the plugin prunes records only on its next import) does not count.
+	 */
+	static TMap<FString, FString> FabImportedPaths()
+	{
+		TMap<FString, FString> Paths;
+		TOptional<FScriptMapHelper> Records = FabImportRecords();
+		IAssetRegistry* Registry = IAssetRegistry::Get();
+		if (!Records || !Registry)
 			return Paths;
-		FScriptMapHelper Helper(Map, Map->ContainerPtrToValuePtr<void>(Class->GetDefaultObject()));
-		for (FScriptMapHelper::FIterator It(Helper); It; ++It)
+		for (FScriptMapHelper::FIterator It(*Records); It; ++It)
 		{
-			Paths.Add(reinterpret_cast<const FString*>(Helper.GetValuePtr(It))->ToLower(),
-				*reinterpret_cast<const FString*>(Helper.GetKeyPtr(It)));
+			const FString& Path = *reinterpret_cast<const FString*>(Records->GetKeyPtr(It));
+			if (Registry->PathExists(Path))
+				Paths.Add(reinterpret_cast<const FString*>(Records->GetValuePtr(It))->ToLower(), Path);
 		}
 		return Paths;
 	}
 
-	/** Where the Fab import workflows recorded @p ListingUid (lower case) in this project, or empty. */
+	/** Where @p ListingUid (lower case) is imported in this project, or empty. */
 	static FString FabImportedPath(const FString& ListingUid)
 	{
 		return FabImportedPaths().FindRef(ListingUid);
 	}
 
-	/** Listings this editor started importing (uid -> title), so a repeated fab-add waits instead of starting again. */
-	static TMap<FString, FString>& FabImportsInFlight()
+	/**
+	 * Drop the import records of @p ListingUid before importing it again (a reimport, or a record whose folder is gone),
+	 * so the record the new import writes is what tells the import is done.
+	 */
+	static void FabForgetImport(const FString& ListingUid)
 	{
-		static TMap<FString, FString> Imports;
-		return Imports;
+		TOptional<FScriptMapHelper> Records = FabImportRecords();
+		if (!Records)
+			return;
+		for (int32 Index = Records->GetMaxIndex() - 1; Index >= 0; --Index)
+		{
+			if (Records->IsValidIndex(Index)
+				&& reinterpret_cast<const FString*>(Records->GetValuePtr(Index))->Equals(ListingUid, ESearchCase::IgnoreCase))
+				Records->RemoveAt(Index);
+		}
 	}
 
 	/** A listing uid from a uid or a fab.com listing URL (https://www.fab.com/listings/<uid>). */
@@ -570,9 +534,9 @@ namespace UnrealMcpFabToolsLocal
 	static TSharedPtr<FJsonObject> FabSearchRow(const FJsonObject& Listing, FString& OutLine)
 	{
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
-		const FString Uid = Listing.GetStringField(TEXT("uid"));
-		const FString Title = Listing.GetStringField(TEXT("title"));
-		const FString Type = Listing.GetStringField(TEXT("listingType"));
+		const FString Uid = FabString(Listing, TEXT("uid"));
+		const FString Title = FabString(Listing, TEXT("title"));
+		const FString Type = FabString(Listing, TEXT("listingType"));
 		Row->SetStringField(TEXT("uid"), Uid);
 		Row->SetStringField(TEXT("title"), Title);
 		Row->SetStringField(TEXT("listingType"), Type);
@@ -581,9 +545,9 @@ namespace UnrealMcpFabToolsLocal
 		const TSharedPtr<FJsonObject>* Price = nullptr;
 		bool bFree = false;
 		Listing.TryGetBoolField(TEXT("isFree"), bFree);
-		if (Listing.TryGetObjectField(TEXT("startingPrice"), Price))
+		double Value = 0.0;
+		if (Listing.TryGetObjectField(TEXT("startingPrice"), Price) && (*Price)->TryGetNumberField(TEXT("price"), Value))
 		{
-			const double Value = (*Price)->GetNumberField(TEXT("price"));
 			Row->SetNumberField(TEXT("price"), Value);
 			bFree |= Value <= 0.0;
 			PriceText = bFree ? TEXT("free") : FString::Printf(TEXT("from %.2f"), Value);
@@ -737,7 +701,7 @@ namespace UnrealMcpFabToolsLocal
 			const TSharedPtr<FJsonObject>* Item = nullptr;
 			if (!Value->TryGetObject(Item))
 				continue;
-			const FString Title = (*Item)->GetStringField(TEXT("title"));
+			const FString Title = FabString(**Item, TEXT("title"));
 			if (!Filter.IsEmpty() && !Title.Contains(Filter))
 				continue;
 			FString ItemUrl, ListingType, Distribution, AssetId, Seller;
@@ -803,8 +767,8 @@ namespace UnrealMcpFabToolsLocal
 			for (const TSharedPtr<FJsonValue>& File : Files)
 			{
 				const TSharedPtr<FJsonObject>* Object = nullptr;
-				if (File->TryGetObject(Object) && (*Object)->GetStringField(TEXT("name")).EndsWith(Suffix, ESearchCase::IgnoreCase))
-					return (*Object)->GetStringField(TEXT("uid"));
+				if (File->TryGetObject(Object) && FabString(**Object, TEXT("name")).EndsWith(Suffix, ESearchCase::IgnoreCase))
+					return FabString(**Object, TEXT("uid"));
 			}
 		}
 		return FString();
@@ -862,17 +826,32 @@ namespace UnrealMcpFabToolsLocal
 				if (Score > BestScore)
 				{
 					BestScore = Score;
-					Best = (*Object)->GetStringField(TEXT("uid"));
+					Best = FabString(**Object, TEXT("uid"));
 				}
 			}
 		}
 		return Best;
 	}
 
+	/**
+	 * After every route answered 401 / 403: drop the cached fab.com session (its cookies may have expired while the EOS
+	 * token did not) and go back to opening one, once per call. False when this call already did, or the answer was
+	 * something else.
+	 */
+	static bool FabRenewSession(FFabCallState& State, const FFabHttpResult& Http)
+	{
+		if (State.bSessionRetried || (Http.Code != 401 && Http.Code != 403))
+			return false;
+		FabSessionCache() = FFabSession();
+		State.bSessionRetried = true;
+		State.Route = 0;
+		State.Stage = AddSession;
+		return true;
+	}
+
 	static FUnrealMcpToolResult FabAddDone(const FUnrealMcpToolCall& Call, const FString& Uid, const FString& Title, const FString& Path,
 		bool bAlready)
 	{
-		FabImportsInFlight().Remove(Uid);
 		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
 		S->SetStringField(TEXT("uid"), Uid);
 		S->SetStringField(TEXT("title"), Title);
@@ -917,29 +896,18 @@ namespace UnrealMcpFabToolsLocal
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("'quality' is one of: low, medium, high, raw.")));
 
 		FFabCallState& State = FabState(Call);
-		FString Title = State.Listing.IsValid() ? State.Listing->GetStringField(TEXT("title")) : FString();
-		if (Title.IsEmpty())
-		{
-			if (const FString* InFlightTitle = FabImportsInFlight().Find(Uid))
-				Title = *InFlightTitle;
-		}
+		FString Title = State.Listing.IsValid() ? FabString(*State.Listing, TEXT("title")) : FString();
 
 		if (State.Stage == AddDetails)
 		{
-			// Already imported (or an import this editor started is still running): no second download.
+			// Already in the project: no second download. An import still running from an earlier call is not tracked
+			// here: AddToProject below ignores a listing whose import workflow is still running, and this call waits for it.
 			if (!Call.GetBool(TEXT("reimport")))
 			{
 				const FString Existing = FabImportedPath(Uid);
 				if (!Existing.IsEmpty())
 					return FabAddDone(Call, Uid, Title, Existing, true);
 			}
-			if (FabImportsInFlight().Contains(Uid))
-			{
-				State.Stage = AddImport;
-				State.StageStarted = FPlatformTime::Seconds();
-				State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
-			}
-			else
 			{
 				FFabHttpResult Http;
 				if (!FabFetch(State, TEXT("GET"), FString::Printf(TEXT("%s/i/listings/%s"), FabRoot, *Uid), {}, Http))
@@ -947,7 +915,7 @@ namespace UnrealMcpFabToolsLocal
 				State.Listing = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
 				if (!State.Listing.IsValid())
 					return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Fab listing %s not found: %s"), *Uid, *FabDescribeHttp(Http))));
-				Title = State.Listing->GetStringField(TEXT("title"));
+				Title = FabString(*State.Listing, TEXT("title"));
 				const TArray<FString> Formats = FabFormats(*State.Listing);
 				FString Format = Call.GetString(TEXT("format")).ToLower();
 				if (Format.IsEmpty())
@@ -1022,6 +990,8 @@ namespace UnrealMcpFabToolsLocal
 			{
 				if (++State.Route < UE_ARRAY_COUNT(FabRoutes))
 					return FUnrealMcpToolResult::RetryLater(TEXT("Reading the listing's files (library route)."));
+				if (FabRenewSession(State, Http))
+					return FUnrealMcpToolResult::RetryLater(TEXT("Renewing the Fab session."));
 				return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Could not read the %s files of '%s': %s"), *State.Format, *Title,
 					*FabDescribeHttp(Http))));
 			}
@@ -1041,8 +1011,9 @@ namespace UnrealMcpFabToolsLocal
 			else if (Json->TryGetArrayField(TEXT("files"), Items))
 			{
 				State.FileUid = FabIsQuixel(*State.Listing) ? FabQuixelFile(*Items, Quality) : FString();
-				if (State.FileUid.IsEmpty() && Items->Num() > 0)
-					State.FileUid = (*Items)[0]->AsObject()->GetStringField(TEXT("uid"));
+				const TSharedPtr<FJsonObject>* First = nullptr;
+				if (State.FileUid.IsEmpty() && Items->Num() > 0 && (*Items)[0]->TryGetObject(First))
+					State.FileUid = FabString(**First, TEXT("uid"));
 			}
 			if (State.FileUid.IsEmpty())
 				return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' has no downloadable %s file."), *Title, *State.Format)));
@@ -1058,31 +1029,34 @@ namespace UnrealMcpFabToolsLocal
 				return FUnrealMcpToolResult::RetryLater(TEXT("Requesting the download."));
 			const TSharedPtr<FJsonObject> Json = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Infos = nullptr;
-			if (!Json.IsValid() || !Json->TryGetArrayField(TEXT("downloadInfo"), Infos) || Infos->IsEmpty())
+			const TSharedPtr<FJsonObject>* InfoPtr = nullptr;
+			FString DownloadUrl;
+			if (!Json.IsValid() || !Json->TryGetArrayField(TEXT("downloadInfo"), Infos) || Infos->IsEmpty() || !(*Infos)[0]->TryGetObject(InfoPtr)
+				|| !(*InfoPtr)->TryGetStringField(TEXT("downloadUrl"), DownloadUrl) || DownloadUrl.IsEmpty())
 			{
 				if (++State.Route < UE_ARRAY_COUNT(FabRoutes))
 					return FUnrealMcpToolResult::RetryLater(TEXT("Requesting the download (library route)."));
-				if (Http.Code == 401)
-					FabSessionCache() = FFabSession(); // a stale session: the next call opens a new one
+				if (FabRenewSession(State, Http))
+					return FUnrealMcpToolResult::RetryLater(TEXT("Renewing the Fab session."));
 				return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Fab did not give a download for '%s' (%s). The user must own it: "
 					"buy it or, for a free listing, click 'Add to My Library' at %s, then call fab-add again."), *Title, *FabDescribeHttp(Http),
 					*FabListingUrl(Uid))));
 			}
-			const TSharedPtr<FJsonObject> Info = (*Infos)[0]->AsObject();
-			const FString DownloadUrl = Info->GetStringField(TEXT("downloadUrl"));
+			const FJsonObject& Info = **InfoPtr;
 
 			// The Fab panel's own "Add to Project": UFabBrowserApi::AddToProject picks the pack / Megascans / Interchange workflow.
 			TSharedPtr<FJsonObject> Metadata = MakeShared<FJsonObject>();
 			Metadata->SetStringField(TEXT("AssetId"), Uid);
 			Metadata->SetStringField(TEXT("AssetName"), Title);
 			Metadata->SetStringField(TEXT("AssetType"), State.Format);
-			Metadata->SetStringField(TEXT("ListingType"), State.Listing->GetStringField(TEXT("listingType")));
+			Metadata->SetStringField(TEXT("ListingType"), FabString(*State.Listing, TEXT("listingType")));
 			Metadata->SetStringField(TEXT("AssetNamespace"), TEXT("fab"));
 			Metadata->SetBoolField(TEXT("IsQuixel"), FabIsQuixel(*State.Listing) && State.Format != TEXT("unreal-engine"));
 			const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
 			Metadata->SetArrayField(TEXT("DistributionPointBaseUrls"),
-				Info->TryGetArrayField(TEXT("distributionPointBaseUrls"), Points) ? *Points : TArray<TSharedPtr<FJsonValue>>());
+				Info.TryGetArrayField(TEXT("distributionPointBaseUrls"), Points) ? *Points : TArray<TSharedPtr<FJsonValue>>());
 
+			FabForgetImport(Uid); // a reimport's old record, or one whose folder is gone, must not count as this import done
 			State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 			bool bFilled = false;
 			const bool bCalled = FabInvoke(FabApi(), TEXT("AddToProject"), [&](UFunction* Function, uint8* Params)
@@ -1099,20 +1073,17 @@ namespace UnrealMcpFabToolsLocal
 				return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("This engine's Fab plugin has no UFabBrowserApi::AddToProject(DownloadUrl, "
 					"AssetMetadata) this tool can call.")));
 			UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] fab-add: importing '%s' (%s, %s)"), *Title, *Uid, *State.Format);
-			FabImportsInFlight().Add(Uid, Title);
 			State.Stage = AddImport;
 			State.StageStarted = FPlatformTime::Seconds();
 		}
 
 		// AddImport: the workflow records the listing in UFabLocalAssets when it is done.
 		const FString Path = FabImportedPath(Uid);
-		// (A reimport rewrites the record it already has: the half second keeps the old one from counting as done.)
-		if (!Path.IsEmpty() && FPlatformTime::Seconds() - State.StageStarted > 0.5)
+		if (!Path.IsEmpty())
 			return FabAddDone(Call, Uid, Title, Path, false);
 		const FString Errors = FabImportErrors(State.LogSequence, Uid, Title);
 		if (!Errors.IsEmpty())
 		{
-			FabImportsInFlight().Remove(Uid);
 			return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Importing '%s' failed: %s"), *(Title.IsEmpty() ? Uid : Title), *Errors)));
 		}
 		const double Waited = FPlatformTime::Seconds() - State.StageStarted;
@@ -1122,7 +1093,8 @@ namespace UnrealMcpFabToolsLocal
 		S->SetStringField(TEXT("uid"), Uid);
 		S->SetBoolField(TEXT("inProgress"), true);
 		return FabFinish(Call, FUnrealMcpToolResult::Success(FString::Printf(TEXT("Still downloading/importing '%s' after %.0f s (large packs take "
-			"minutes; progress shows in the editor's notifications). Call fab-add with the same listing again to keep waiting."),
+			"minutes; progress shows in the editor's notifications). Call fab-add with the same listing again to keep waiting (it "
+			"does not start a second download while this one runs, and starts over if this one failed)."),
 			*(Title.IsEmpty() ? Uid : Title), Waited), S));
 	}
 }
@@ -1156,7 +1128,8 @@ namespace UnrealMcpFabTools
 			.Title(TEXT("List Fab Library"))
 			.Description(TEXT("List the Fab assets the signed-in user owns (their Fab library), with each listing's uid and where it is "
 			                  "already imported in this project. Needs the user's Fab sign-in in this editor: when missing, the tool "
-			                  "opens Epic's sign-in page in the browser and waits for the user (the login is remembered)."))
+			                  "opens Epic's sign-in page in the browser and waits for the user (opening Fab in the editor's toolbar also "
+			                  "signs in)."))
 			.ParamString(TEXT("filter"), TEXT("Only titles containing this text (case-insensitive), searched across the whole library."))
 			.ParamInt(TEXT("count"), TEXT("Items per page without a filter, 1-100 (default 24)."))
 			.ParamString(TEXT("cursor"), TEXT("The next-page cursor a previous call returned."))
@@ -1174,8 +1147,9 @@ namespace UnrealMcpFabTools
 				EUnrealMcpParamRequirement::Required)
 			.ParamString(TEXT("format"), TEXT("unreal-engine, glb, gltf or fbx (default: the best one the listing has)."))
 			.ParamString(TEXT("quality"), TEXT("Megascans only: low, medium (default), high or raw."))
-			.ParamBool(TEXT("reimport"), TEXT("Download and import again even when the listing is already in the project (default false)."))
-			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(true)
+			.ParamBool(TEXT("reimport"), TEXT("Download and import again even when the listing is already in the project, replacing its "
+			                                   "assets (default false)."))
+			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(true)
 			.Handle(&FabAdd);
 	}
 }

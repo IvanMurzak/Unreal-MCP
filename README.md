@@ -184,7 +184,7 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 Unreal-MCP ships **30 built-in ("core") tools** across **8 families** that your AI can call, plus **3 system tools** it cannot (see below). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), matching the Unity/Godot naming convention. Extensions can add more (see [Customize Tools, Prompts & Resources](#customize-tools-prompts--resources)).
 
-> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, tool list 1, python 1, source 6, screenshot 4 = **27**.
+> This list is generated from the STANDARD-surface registration sources (`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`, excluding `UnrealMcpSkillTools.cpp` — its tool is a system tool, listed separately below — plus `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`). Counts: rql 3, blueprint 11, console 1, tool list 1, python 1, source 6, screenshot 4, fab 3 = **30**.
 
 <details>
   <summary><b>RQL — the data layer (3)</b></summary>
@@ -274,8 +274,8 @@ wiring is not exposed to Python: use the Blueprint tools for that.
 | `fab-add` | Download a listing the user owns and import it like the Fab panel's *Add to Project* (Unreal Engine packs, Megascans with `quality`, glTF/FBX); returns the content folder, skips listings already in the project |
 
 They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic sign-in and its import workflows. The
-first `fab-library` / `fab-add` without a sign-in opens Epic's sign-in page in the browser; the editor remembers the
-login after that. Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code
+first `fab-library` / `fab-add` without a sign-in opens Epic's sign-in page in the browser (opening Fab from the
+editor's toolbar also signs in, from a remembered Epic login). Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code
 plugins are installed from the Epic Games Launcher, not added to a project.
 
 </details>
