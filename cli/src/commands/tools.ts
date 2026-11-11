@@ -1,3 +1,4 @@
+import { existsSync } from 'fs';
 import { Command } from 'commander';
 import { filterTools, listTools } from '../lib/tools.js';
 import { NULLRHI_OPTION_HELP, UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
@@ -43,6 +44,12 @@ export const toolsCommand = new Command('tools')
   .option('--token <token>', 'Bearer token override')
   .action(async (pathArg: string | undefined, opts: ToolsCliOptions) => {
     const out = new CommandOutput('tools', opts.format);
+    const projectArg = pathArg ?? opts.path;
+    // An explicit project path that does not exist: exit 2 NOT_FOUND, as in unity-mcp-cli and godot-cli.
+    if (projectArg !== undefined && !existsSync(projectArg)) {
+      out.fail(FAILURE.projectNotFound, `Project path does not exist: ${projectArg}`);
+      return;
+    }
     const readyTimeoutMs = parseWholeNumber(opts.readyTimeout ?? String(UNREAL_SESSION_READY_TIMEOUT_MS), '--ready-timeout', 1);
     const spinner = out.machine || !process.stdout.isTTY ? null : ui.startSpinner('Reading the tool list...');
     const result = await listTools({

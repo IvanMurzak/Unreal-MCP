@@ -1,5 +1,5 @@
 import { Command, Option } from 'commander';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { withBlockingDialogs, type CommandFailure, type EditorDialog } from '../lib/editor-dialogs.js';
 import { rqlErrorHint } from '../lib/rql.js';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
@@ -110,6 +110,11 @@ export async function callToolFromCli(
   /** Print a text answer as its text (`rql`); otherwise text mode prints the response JSON (`run-tool`'s contract). */
   textAnswers = false,
 ): Promise<{ ok: boolean; endpoint?: string }> {
+  // An explicit --path that does not exist: no project there (exit 2 NOT_FOUND), as in unity-mcp-cli and godot-cli.
+  if (opts.path !== undefined && !existsSync(opts.path)) {
+    out.fail(FAILURE.projectNotFound, `Project path does not exist: ${opts.path}`);
+    return { ok: false };
+  }
   const timeoutMs = opts.timeout === undefined ? undefined : parseWholeNumber(opts.timeout, '--timeout', 1);
   const readyTimeoutMs = parseWholeNumber(opts.readyTimeout ?? String(UNREAL_SESSION_READY_TIMEOUT_MS), '--ready-timeout', 1);
   const spinner = out.machine || !process.stdout.isTTY ? null : ui.startSpinner(`Running ${toolName}...`);
