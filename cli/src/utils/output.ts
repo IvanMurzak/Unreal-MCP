@@ -32,6 +32,8 @@ export type ErrorCode =
 export interface EnvelopeError {
   code: ErrorCode;
   message: string;
+  /** The HTTP status the MCP server answered with, when the failure is an HTTP answer. */
+  httpStatus?: number;
 }
 
 /** The `--format` option; `extra` adds command-specific formats (e.g. `github` for `test`). */
@@ -44,7 +46,7 @@ export const FAILURE = {
   usage: { exit: ExitCode.Usage, code: 'USAGE' },
   toolFailed: { exit: ExitCode.CommandFailed, code: 'TOOL_FAILED' },
   notFound: { exit: ExitCode.CommandFailed, code: 'NOT_FOUND' },
-  /** No project at the path the command was given. */
+  /** No project at the path the command was given, or no tool by that name (HTTP 404). */
   projectNotFound: { exit: ExitCode.Usage, code: 'NOT_FOUND' },
   projectOpen: { exit: ExitCode.CommandFailed, code: 'PROJECT_OPEN' },
   compilationFailed: { exit: ExitCode.CommandFailed, code: 'COMPILATION_FAILED' },
@@ -61,7 +63,8 @@ export const FAILURE = {
   error: { exit: ExitCode.Error, code: 'ERROR' },
 } as const satisfies Record<string, { exit: ExitCodeValue; code: ErrorCode }>;
 
-export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE];
+/** A failure kind; one classified from the server's HTTP answer carries its status (the envelope error's `httpStatus`). */
+export type FailureKind = (typeof FAILURE)[keyof typeof FAILURE] & { readonly httpStatus?: number };
 
 /**
  * Collects a command's errors and warnings and prints its result in the chosen format. In text mode errors and
@@ -80,14 +83,14 @@ export class CommandOutput extends ContractOutput<ErrorCode> {
     super(command, format, { stdout: write, stderr: writeErr });
   }
 
-  error(code: ErrorCode, message: string): void {
-    this.record(code, message);
+  error(code: ErrorCode, message: string, httpStatus?: number): void {
+    this.record(code, message, httpStatus);
     if (!this.machine) ui.error(message);
   }
 
   /** Record `failure` with `message` and finish with its exit code. */
-  fail(failure: { exit: ExitCodeValue; code: ErrorCode }, message: string, data: unknown = null): void {
-    this.error(failure.code, message);
+  fail(failure: { exit: ExitCodeValue; code: ErrorCode; httpStatus?: number }, message: string, data: unknown = null): void {
+    this.error(failure.code, message, failure.httpStatus);
     this.finish(failure.exit, data);
   }
 

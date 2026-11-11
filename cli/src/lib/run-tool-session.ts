@@ -58,7 +58,7 @@ export interface RunToolSessionResult {
 
 /** A failure that means "no editor / server answered there" (worth starting an editor for). */
 export function isUnreachableFailure(failure: RunToolFailure): boolean {
-  return classifyToolFailure(failure) === FAILURE.unreachable;
+  return classifyToolFailure(failure).code === FAILURE.unreachable.code;
 }
 
 function isCloudEndpoint(endpoint: string): boolean {

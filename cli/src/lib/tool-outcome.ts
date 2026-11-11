@@ -1,6 +1,12 @@
 // Map a tool call's outcome to the shared exit-code contract (utils/exit-codes.ts). Pure.
 
-import type { EditorSessionErrorReason } from '@baizor/gamedev-cli-core';
+import {
+  classifyEditorStartFailure,
+  classifyToolFailure as classifySharedToolFailure,
+  type EditorSessionErrorReason,
+  type ToolFailureClass,
+  type ToolFailureCode,
+} from '@baizor/gamedev-cli-core';
 import { modalDialogInToolError } from './editor-modal.js';
 import { FAILURE, type FailureKind } from '../utils/output.js';
 import { isToolSuccess } from './session.js';
@@ -19,32 +25,33 @@ export function toolErrorText(failure: RunToolFailure): string {
 export const NOT_STARTED_BUILD =
   'The project\'s C++ code does not compile, so no editor was started (fix it; `unreal-mcp-cli compile` rebuilds without an editor):';
 
-const NO_EDITOR_CONNECTED = /no connected clients|no game engine is connected/i;
+/** This CLI's failure kind of each shared error code. */
+const KIND_OF: Record<ToolFailureCode, FailureKind> = {
+  USAGE: FAILURE.usage,
+  NOT_FOUND: FAILURE.projectNotFound,
+  NOT_AUTHENTICATED: FAILURE.notAuthenticated,
+  TOOL_FAILED: FAILURE.toolFailed,
+  COMPILATION_FAILED: FAILURE.compilationFailed,
+  UNREACHABLE: FAILURE.unreachable,
+  TIMEOUT: FAILURE.timeout,
+  BUSY: FAILURE.busy,
+  ERROR: FAILURE.error,
+};
 
-/** Exit / error code of a failed tool call. */
+/** The shared class as this CLI's failure kind, keeping the server's HTTP status. */
+function kindOf(shared: ToolFailureClass, kind: FailureKind = KIND_OF[shared.code]): FailureKind {
+  return shared.httpStatus === undefined ? kind : { ...kind, httpStatus: shared.httpStatus };
+}
+
+/**
+ * Exit / error code of a failed tool call: the shared table of all three engine CLIs (`classifyToolFailure` in
+ * @baizor/gamedev-cli-core, keyed on the server's HTTP status), plus AWAITING_INPUT for a tool error that names the
+ * modal dialog blocking the editor.
+ */
 export function classifyToolFailure(failure: RunToolFailure): FailureKind {
-  switch (failure.reason) {
-    case 'invalid-input':
-      return FAILURE.usage;
-    case 'connection-refused':
-    case 'connection-reset':
-    case 'network-error':
-      return FAILURE.unreachable;
-    case 'timeout':
-      return FAILURE.timeout;
-    case 'http-error':
-      // The server is up but no editor is connected to it (local: "No connected clients"; cloud: "No game engine is
-      // connected for your account", HTTP 503): unreachable, not busy.
-      if (NO_EDITOR_CONNECTED.test(toolErrorText(failure))) return FAILURE.unreachable;
-      if (failure.httpStatus === 503) return FAILURE.busy;
-      if (failure.httpStatus === 404) return FAILURE.notFound; // no such tool
-      if (failure.httpStatus === 504) return FAILURE.timeout; // the server gave up waiting for the editor
-      if (failure.httpStatus === 502) return FAILURE.unreachable; // the server could not reach the editor
-      if (modalDialogInToolError(toolErrorText(failure)) !== undefined) return FAILURE.awaitingInput;
-      return FAILURE.toolFailed;
-    default:
-      return FAILURE.error;
-  }
+  const shared = classifySharedToolFailure(failure);
+  if (shared.code === 'TOOL_FAILED' && modalDialogInToolError(toolErrorText(failure)) !== undefined) return kindOf(shared, FAILURE.awaitingInput);
+  return kindOf(shared);
 }
 
 /**
@@ -126,7 +133,7 @@ export function editorCloseWarning(outcome: Pick<RunToolSessionResult, 'closed'>
 
 /** Exit / error code of a session that could not provide a ready editor. */
 export function classifySessionFailure(reason: EditorSessionErrorReason | undefined, invalidInput = false, buildFailed = false): FailureKind {
-  if (invalidInput) return FAILURE.projectNotFound; // no project at the path / a bad --url: nothing to start
-  if (buildFailed) return FAILURE.compilationFailed; // the C++ build before the launch failed: fix the code
-  return reason === 'lock-busy' ? FAILURE.busy : FAILURE.unreachable;
+  // No project at the path / a bad --url: nothing to start (NOT_FOUND); the pre-launch C++ build failed
+  // (COMPILATION_FAILED); another call holds the start lock (BUSY); else UNREACHABLE.
+  return kindOf(classifyEditorStartFailure({ projectNotFound: invalidInput, buildFailed, sessionReason: reason }));
 }

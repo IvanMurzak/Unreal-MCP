@@ -181,7 +181,7 @@ describe('tool outcome classification', () => {
     expect(classifyToolFailure(refused).exit).toBe(7);
     expect(classifyToolFailure(failure({ reason: 'timeout' })).exit).toBe(14);
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 503 })).exit).toBe(17);
-    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 404 }))).toMatchObject({ exit: 6, code: 'NOT_FOUND' });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 404 }))).toEqual({ exit: 2, code: 'NOT_FOUND', httpStatus: 404 });
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 504 })).exit).toBe(14);
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 502 })).exit).toBe(7);
     expect(classifySessionFailure(undefined, true)).toMatchObject({ exit: 2, code: 'NOT_FOUND' });
@@ -191,6 +191,15 @@ describe('tool outcome classification', () => {
     expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 500, data: { error: modal } }))).toMatchObject({ exit: 18, code: 'AWAITING_INPUT' });
     expect(classifySessionFailure('lock-busy').exit).toBe(17);
     expect(classifySessionFailure('not-ready').exit).toBe(7);
+    expect(classifySessionFailure(undefined, false, true)).toEqual({ exit: 6, code: 'COMPILATION_FAILED' });
+    // The same table as unity-mcp-cli and godot-cli (cli-core): refused credentials, bad arguments, no plugin, unclassified.
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 401 }))).toEqual({ exit: 6, code: 'NOT_AUTHENTICATED', httpStatus: 401 });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 400 }))).toEqual({ exit: 2, code: 'USAGE', httpStatus: 400 });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 422, data: { error: '[invalid_params] x' } }))).toEqual({ exit: 2, code: 'USAGE', httpStatus: 422 });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 503, data: { error: 'No engine plugin is connected to this session' } })))
+      .toEqual({ exit: 7, code: 'UNREACHABLE', httpStatus: 503 });
+    expect(classifyToolFailure(failure({ reason: 'aborted' }))).toEqual({ exit: 1, code: 'ERROR' });
+    expect(classifyToolFailure(failure({ reason: 'http-error', httpStatus: 500, data: { error: modal } })).httpStatus).toBe(500);
   });
 
   it('a response with status error is a failed command', () => {

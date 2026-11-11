@@ -190,7 +190,7 @@ export function reportToolOutcome(
       out.fail(blocked.kind, `Failed to run ${errorNoun} "${toolName}": ${blocked.message}`, blocked.data);
       return false;
     }
-    out.error(kind.code, message);
+    out.error(kind.code, message, kind.httpStatus);
     if (!out.machine && !text && result.data !== undefined) ui.json(withoutImageData(result.data));
     out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return false;

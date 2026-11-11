@@ -289,6 +289,6 @@ export function withBlockingDialogs(
   if (!DIALOG_SUSPECTS.has(failure.kind.code)) return failure;
   const dialogs = find(projectDir);
   if (dialogs.length === 0) return failure;
-  const message = failure.kind === FAILURE.awaitingInput ? failure.message : awaitingInputMessage(dialogs);
+  const message = failure.kind.code === FAILURE.awaitingInput.code ? failure.message : awaitingInputMessage(dialogs);
   return { kind: FAILURE.awaitingInput, message, data: { ...failure.data, dialogs } };
 }

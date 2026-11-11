@@ -126,20 +126,38 @@ Shared with `unity-mcp-cli` and `godot-cli` (`unreal-mcp-cli commands` prints th
 | --- | --- |
 | 0 | Success |
 | 1 | Generic or unclassified error |
-| 2 | Usage error: bad flag or argument (`--help` / `--version` exit 0). `update --check` keeps its own 2 = outdated |
-| 6 | The command ran and failed (tool error, compilation errors, test run without a verdict, project open) |
+| 2 | Usage error: bad flag or argument, an unknown tool or no project at the path (`NOT_FOUND`) (`--help` / `--version` exit 0). `update --check` keeps its own 2 = outdated |
+| 6 | The command ran and failed (tool error, compilation errors, test run without a verdict, project open, refused credentials) |
 | 7 | The editor or MCP server could not be started or reached |
 | 8 | The test run completed with failing tests |
-| 14 | Timed out |
-| 17 | Busy: the server answered 503 (or another CLI holds the editor startup lock) |
+| 14 | Timed out (also HTTP 408 / 504) |
+| 17 | Busy: the server answered 503 / 429 (or another CLI holds the editor startup lock) |
 | 18 | The editor is blocked by a modal dialog |
 
 `--format text|json|ndjson` (default `text`) on `run-tool`, `run-system-tool`, `exec`, `status`, `wait-for-ready`,
 `compile`, `test` and `commands`. `json`: stdout carries exactly one envelope
-`{"success","command","data","errors":[{"code","message"}],"warnings"}`; `ndjson`: progress lines
+`{"success","command","data","errors":[{"code","message","httpStatus"}],"warnings"}`; `ndjson`: progress lines
 `{"type":"progress",...}` on stderr and the envelope as one line on stdout. In both, logs go to stderr. Error codes:
 `USAGE`, `TOOL_FAILED`, `UNREACHABLE`, `TIMEOUT`, `BUSY`, `AWAITING_INPUT`, `TESTS_FAILED`, `TEST_RUN_ERROR`,
-`COMPILATION_FAILED`, `PROJECT_OPEN`, `NOT_FOUND`, `NOT_AUTHENTICATED`, `INTERRUPTED`.
+`COMPILATION_FAILED`, `PROJECT_OPEN`, `NOT_FOUND`, `NOT_AUTHENTICATED`, `INTERRUPTED`, `ERROR`.
+
+**A tool call that did not succeed** (`run-tool`, `run-system-tool`, `exec`, `rql`, `tools`) maps to the same exit code
+and error code in all three CLIs (the table lives in `@baizor/gamedev-cli-core`; `commands --format json` lists it as
+`errorCodes`). When the MCP server answered, its HTTP status decides, and the envelope error carries it:
+`errors[{code, message, httpStatus}]`.
+
+| Condition | HTTP status | Exit | `errors[].code` |
+|---|---|---|---|
+| Bad arguments: a bad flag, tool arguments the CLI or the server rejected (any 4xx not listed here) | 400 (a 422 `[invalid_params]`) | `2` | `USAGE` |
+| No tool by that name (list them with `tools`), or no project at the path | 404 | `2` | `NOT_FOUND` |
+| No usable credentials, or the server refused them: sign in with `login` | 401, 403 | `6` | `NOT_AUTHENTICATED` |
+| The tool ran and reported an error (`status: "error"`, any 5xx not listed here) | 409, 422, 500 | `6` | `TOOL_FAILED` |
+| The project's code did not build, so no editor was started | — | `6` | `COMPILATION_FAILED` |
+| Connection refused or reset, no engine plugin connected to the server, plugin lost after the call was sent | 502 | `7` | `UNREACHABLE` |
+| No answer in time: `--timeout`, or the server's own tool timeout | 408, 504 | `14` | `TIMEOUT` |
+| Busy and did not run the call (reloading, rate-limited, another CLI call holds the editor); retry later | 503, 429 | `17` | `BUSY` |
+| A modal dialog blocks the editor | — | `18` | `AWAITING_INPUT` |
+| Anything else (the call was aborted, an unexpected error) | — | `1` | `ERROR` |
 
 When `exec` / `run-tool` / `tools` must start an editor and the project's C++ does not compile, nothing is started:
 they exit 6 (`COMPILATION_FAILED`) with the `file(line,col)` errors and the build log path. An editor that started but
