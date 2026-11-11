@@ -150,7 +150,7 @@ mode: `exec` / `run-tool` call the editor connected to the cloud and never start
 used (expired, revoked, unreadable) fails with `NOT_AUTHENTICATED` (exit 6). Only a machine that never signed in falls
 back to the project's local server (an editor started by the CLI serves it; the project config is not changed). An
 explicit `--url` / `--token` is used as is. `exec --raw` is unchanged. `--nullrhi` (on `open --headless`,
-`exec`, `run-tool`, `tools`) starts a headless editor with `-nullrhi`, which renders nothing: the screenshot tools return
+`exec`, `run-tool`, `run-system-tool`, `tools`) starts a headless editor with `-nullrhi`, which renders nothing: the screenshot tools return
 an error instead of an image. Without it a headless editor renders offscreen (`-RenderOffscreen`), screenshots included.
 
 ## Engine resolution
