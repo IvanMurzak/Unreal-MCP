@@ -223,9 +223,16 @@ export function _resetXdotoolPresenceForTests(): void {
  * machine-wide `C:\Windows\Temp` (services, CI agents, some shells) may not write there and fails with "Source file
  * ... could not be found", so the user's own temp folder is used when it exists.
  */
+/** TEMP is the machine-wide `%SystemRoot%\Temp` (only then is it swapped: any other TEMP was chosen on purpose). */
+function isMachineTemp(env: NodeJS.ProcessEnv): boolean {
+  const temp = env['TEMP'];
+  const systemRoot = env['SystemRoot'] ?? env['SYSTEMROOT'] ?? 'C:\\Windows';
+  return !!temp && path.win32.resolve(temp).toLowerCase() === path.win32.resolve(systemRoot, 'Temp').toLowerCase();
+}
+
 export function powerShellEnv(env: NodeJS.ProcessEnv = process.env, exists: (dir: string) => boolean = fs.existsSync): NodeJS.ProcessEnv {
   const userTemp = env['LOCALAPPDATA'] ? path.join(env['LOCALAPPDATA'], 'Temp') : undefined;
-  return userTemp && exists(userTemp) ? { ...env, TEMP: userTemp, TMP: userTemp } : env;
+  return userTemp && isMachineTemp(env) && exists(userTemp) ? { ...env, TEMP: userTemp, TMP: userTemp } : env;
 }
 
 function tryDismissWindows(): Promise<DismissOutcome> {

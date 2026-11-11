@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { waitForReady } from '../lib/wait-for-ready.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
+import { isUnrealProjectDir } from '../utils/project.js';
 import * as ui from '../utils/ui.js';
 
 export const waitForReadyCommand = new Command('wait-for-ready')
@@ -18,7 +19,7 @@ export const waitForReadyCommand = new Command('wait-for-ready')
     const intervalMs = opts.interval === undefined ? undefined : parseWholeNumber(opts.interval, '--interval', 1);
     const spinner = out.machine ? null : ui.startSpinner('Waiting for Unreal MCP server...');
     const result = await waitForReady({
-      projectDir: opts.path ?? process.cwd(),
+      projectDir: opts.path ?? (isUnrealProjectDir(process.cwd()) ? process.cwd() : undefined),
       url: opts.url,
       token: opts.token,
       timeoutMs,

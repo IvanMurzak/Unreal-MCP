@@ -73,4 +73,9 @@ describe('powerShellEnv', () => {
     expect(powerShellEnv(input, () => false)).toBe(input);
     expect(powerShellEnv(input, () => true)).toBe(input);
   });
+
+  it('keeps a TEMP that is not the machine-wide one (chosen on purpose, e.g. a sandbox)', () => {
+    const input = { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local', TEMP: 'D:\\sandbox\\tmp', SystemRoot: 'C:\\Windows' };
+    expect(powerShellEnv(input, () => true)).toBe(input);
+  });
 });

@@ -191,7 +191,7 @@ export function reportToolOutcome(
       return false;
     }
     out.error(kind.code, message);
-    if (!out.machine && !text && result.data !== undefined) ui.json(result.data);
+    if (!out.machine && !text && result.data !== undefined) ui.json(withoutImageData(result.data));
     out.finish(kind.exit, blocked.data); // a call the modal watch ended (already AWAITING_INPUT) gains data.dialogs
     return false;
   }

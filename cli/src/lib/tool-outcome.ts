@@ -69,8 +69,8 @@ export function toolResponseText(data: unknown): string | undefined {
 }
 
 /**
- * A tool answer for the text-mode JSON print: each image block's base64 `data` (a screenshot is megabytes) is replaced
- * by a note naming its size; everything else is kept. `--format json` keeps the data. Pure.
+ * A tool answer for the text-mode JSON print: each image or audio block's base64 `data` (a screenshot is megabytes) is
+ * replaced by a note naming its size; everything else is kept. `--format json` keeps the data. Pure.
  */
 export function withoutImageData(data: unknown): unknown {
   const content = (data as { content?: unknown } | null | undefined)?.content;
@@ -78,8 +78,8 @@ export function withoutImageData(data: unknown): unknown {
   return {
     ...(data as object),
     content: content.map((block: { type?: string; data?: unknown } | null) =>
-      block?.type === 'image' && typeof block.data === 'string'
-        ? { ...block, data: `<${block.data.length} base64 chars omitted: pass savePath for a file, or --format json for the data>` }
+      (block?.type === 'image' || block?.type === 'audio') && typeof block.data === 'string'
+        ? { ...block, data: `<${block.data.length} base64 chars omitted: --format json keeps them>` }
         : block,
     ),
   };

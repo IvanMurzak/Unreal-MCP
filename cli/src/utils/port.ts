@@ -106,7 +106,7 @@ export function deriveProjectPin(dir: string): string {
 // `:8080`), which named a port the sidecar does not listen on. Highest wins:
 //   1. the committable project marker's `portOverride` (a deliberate pin);
 //   2. an explicit port the user typed into the Custom-mode LOOPBACK host;
-//   3. the deterministic `ProjectIdentity` v1 derivation (generatePortFromDirectory).
+//   3. the deterministic `ProjectIdentity` derivation of the root the sidecar hashes (deriveLocalServerPort).
 // Mirror of `bridge/src/Host/ProjectConnectionResolver.cs:100-139`.
 
 /** The inclusive maximum TCP port — mirrors McpPlugin `Consts.Hub.MaxPort`. */
