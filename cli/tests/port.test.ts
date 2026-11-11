@@ -7,6 +7,8 @@ import {
   tryGetExplicitLoopbackPort,
   isAbsoluteLoopbackHost,
   resolveLocalBindPort,
+  deriveLocalServerPort,
+  unrealProjectRoot,
 } from '../src/utils/port.js';
 
 describe('generatePortFromDirectory', () => {
@@ -170,7 +172,7 @@ describe('isAbsoluteLoopbackHost', () => {
 
 describe('resolveLocalBindPort — three-level precedence (marker → typed → derived)', () => {
   const projectDir = 'C:\\Projects\\MyGame';
-  const derived = generatePortFromDirectory(projectDir);
+  const derived = generatePortFromDirectory('C:/Projects/MyGame');
 
   it('1. marker portOverride wins over a typed loopback host AND the derivation', () => {
     const r = resolveLocalBindPort({ projectDir, host: 'http://localhost:8080', markerPortOverride: 21234 });
@@ -203,9 +205,26 @@ describe('resolveLocalBindPort — three-level precedence (marker → typed → 
     expect(resolveLocalBindPort({ projectDir, markerPortOverride: 8080.5 }).source).toBe('derived');
   });
 
-  it('parity: the derivation level uses the Windows backslash-root derivation byte-for-byte', () => {
-    // C:\\Users\\user\\my-game → 29310 (port.ts golden vector), proving level 3 == the binder.
+  it('parity: the derivation level hashes the root the sidecar gets (FPaths::ProjectDir, forward slashes)', () => {
+    // The CLI's C:\\Users\\user\\my-game is the plugin's C:/Users/user/my-game/ → 24298 (golden vector), not the
+    // backslash form's 29310: level 3 == the binder.
     expect(resolveLocalBindPort({ projectDir: 'C:\\Users\\user\\my-game', host: 'http://localhost' }))
-      .toEqual({ port: 29310, source: 'derived' });
+      .toEqual({ port: 24298, source: 'derived' });
+  });
+});
+
+describe('deriveLocalServerPort — the Unreal project root form', () => {
+  it('converts Windows separators to the forward slashes FPaths::ProjectDir() reports', () => {
+    expect(unrealProjectRoot('C:\\Users\\user\\my-game\\')).toBe('C:/Users/user/my-game/');
+    expect(unrealProjectRoot('/home/user/my-game')).toBe('/home/user/my-game');
+  });
+
+  it('gives the same port for the CLI form and the plugin form of one Windows project', () => {
+    expect(deriveLocalServerPort('C:\\Users\\user\\my-game')).toBe(24298);
+    expect(deriveLocalServerPort('C:/Users/user/my-game/')).toBe(24298);
+  });
+
+  it('leaves POSIX roots unchanged', () => {
+    expect(deriveLocalServerPort('/home/user/my-game')).toBe(23940);
   });
 });

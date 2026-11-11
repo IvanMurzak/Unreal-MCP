@@ -218,5 +218,19 @@ export function resolveLocalBindPort(opts: {
   if (typed !== undefined) {
     return { port: typed, source: 'typed-host' }; // 2. port typed into the loopback host
   }
-  return { port: generatePortFromDirectory(opts.projectDir), source: 'derived' }; // 3. deterministic derivation
+  return { port: deriveLocalServerPort(opts.projectDir), source: 'derived' }; // 3. deterministic derivation
+}
+
+/**
+ * The project root as the Unreal plugin hands it to the sidecar: `FPaths::ProjectDir()`, which uses `/` on every
+ * platform. `path.resolve` gives `C:\…` on Windows, and the v1 derivation hashes separators verbatim, so hashing the
+ * CLI's own form named a port the sidecar never binds. Pure.
+ */
+export function unrealProjectRoot(projectDir: string): string {
+  return projectDir.replace(/\\/g, '/');
+}
+
+/** The deterministic local-server port of an Unreal project, derived from the root the sidecar hashes. Pure. */
+export function deriveLocalServerPort(projectDir: string): number {
+  return generatePortFromDirectory(unrealProjectRoot(projectDir));
 }

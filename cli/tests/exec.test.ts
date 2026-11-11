@@ -15,7 +15,7 @@ import {
 } from '../src/lib/session.js';
 import { readCode } from '../src/commands/exec.js';
 import { PLUGIN_CONFIG_RELATIVE_PATH, resolveConnection } from '../src/utils/config.js';
-import { generatePortFromDirectory } from '../src/utils/port.js';
+import { deriveLocalServerPort } from '../src/utils/port.js';
 import type { RunToolOptions, RunToolResult } from '../src/lib/types.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
 
@@ -511,7 +511,7 @@ describe('session connection', () => {
   it('fills in the bound port for a port-less --url', async () => {
     const dir = project();
     const connection = await resolveSessionConnection(dir, { url: 'http://localhost' });
-    expect(connection.url).toBe(`http://localhost:${generatePortFromDirectory(dir)}`);
+    expect(connection.url).toBe(`http://localhost:${deriveLocalServerPort(dir)}`);
   });
 
   it('rejects a --url whose port the project portOverride overrules, and follows the override otherwise', async () => {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { decodeQueryFile, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
-import { toolResponseText } from '../src/lib/tool-outcome.js';
+import { toolResponseText, withoutImageData } from '../src/lib/tool-outcome.js';
 import { rqlCall } from '../src/commands/rql.js';
 import { reportToolOutcome } from '../src/commands/run-tool-builder.js';
 import { CommandOutput } from '../src/utils/output.js';
@@ -40,6 +40,23 @@ describe('toolResponseText', () => {
     expect(toolResponseText({ content: [{ type: 'image', data: 'AAA' }] })).toBeUndefined();
     expect(toolResponseText({ content: [{ type: 'text', text: 'a' }, { type: 'image', data: 'AAA' }] })).toBeUndefined();
     expect(toolResponseText({ error: 'boom' })).toBeUndefined();
+  });
+});
+
+describe('withoutImageData', () => {
+  it('replaces only image data with a size note, keeping the text and the rest of the answer', () => {
+    const answer = { status: 'success', content: [{ type: 'text', text: 'Saved to x.png' }, { type: 'image', mimeType: 'image/png', data: 'A'.repeat(4000) }] };
+    const printed = withoutImageData(answer) as typeof answer;
+    expect(printed.status).toBe('success');
+    expect(printed.content[0]).toEqual(answer.content[0]);
+    expect(printed.content[1]!.mimeType).toBe('image/png');
+    expect(printed.content[1]!.data).toMatch(/^<4000 base64 chars omitted/);
+    expect(answer.content[1]!.data).toHaveLength(4000);
+  });
+
+  it('leaves an answer without content as it is', () => {
+    const answer = { error: 'boom' };
+    expect(withoutImageData(answer)).toBe(answer);
   });
 });
 

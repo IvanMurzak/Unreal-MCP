@@ -3,6 +3,7 @@ import {
   _parseDismissOutputForTests,
   _resetXdotoolPresenceForTests,
   LINUX_WAYLAND_UNSUPPORTED_PREFIX,
+  powerShellEnv,
   tryDismissUnrealStartupDialog,
   UNSUPPORTED_PLATFORM_PREFIX,
 } from '../src/utils/startup-dialog-dismiss.js';
@@ -57,5 +58,19 @@ describe('startup-dialog-dismiss', () => {
       if (originalSession === undefined) delete process.env['XDG_SESSION_TYPE'];
       else process.env['XDG_SESSION_TYPE'] = originalSession;
     }
+  });
+});
+
+describe('powerShellEnv', () => {
+  it('points TEMP and TMP at the user temp folder, so Add-Type can compile under a machine-wide TEMP', () => {
+    const env = powerShellEnv({ LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local', TEMP: 'C:\\Windows\\Temp', TMP: 'C:\\Windows\\Temp' }, () => true);
+    expect(env['TEMP']).toMatch(/AppData[\\/]Local[\\/]Temp$/);
+    expect(env['TMP']).toBe(env['TEMP']);
+  });
+
+  it('keeps the environment when there is no user temp folder', () => {
+    const input = { TEMP: 'C:\\Windows\\Temp' };
+    expect(powerShellEnv(input, () => false)).toBe(input);
+    expect(powerShellEnv(input, () => true)).toBe(input);
   });
 });

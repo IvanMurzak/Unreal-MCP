@@ -18,7 +18,7 @@ export const waitForReadyCommand = new Command('wait-for-ready')
     const intervalMs = opts.interval === undefined ? undefined : parseWholeNumber(opts.interval, '--interval', 1);
     const spinner = out.machine ? null : ui.startSpinner('Waiting for Unreal MCP server...');
     const result = await waitForReady({
-      projectDir: opts.path,
+      projectDir: opts.path ?? process.cwd(),
       url: opts.url,
       token: opts.token,
       timeoutMs,
