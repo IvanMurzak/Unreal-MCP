@@ -15,7 +15,8 @@
 // feature-detect the desktop app uses for the same transition.)
 
 import { asError } from './error.js';
-import { fetchWithTimeout, networkErrorCategory, type NetworkErrorCategory } from './http.js';
+import { networkFailureReason, type NetworkFailureReason } from '@baizor/gamedev-cli-core';
+import { fetchWithTimeout } from './http.js';
 
 /** The system-tools route `ping` lives on since §2.4. Tried first. */
 export const PING_ENDPOINT = '/api/system-tools/ping';
@@ -121,15 +122,15 @@ async function probeEndpoint(
 }
 
 /** Human-readable text for each shared network-failure category. */
-const NETWORK_CATEGORY_TEXT: Record<NetworkErrorCategory, string> = {
+const NETWORK_CATEGORY_TEXT: Record<NetworkFailureReason, string> = {
   'connection-refused': 'connection refused',
   'connection-reset': 'connection reset',
-  'network-error': 'host not found',
+  'network-error': 'host not found or unreachable',
 };
 
 function classifyError(err: unknown): string {
   if (err instanceof Error && err.name === 'AbortError') return 'timed out';
-  const category = networkErrorCategory(err);
+  const category = networkFailureReason(err);
   if (category) return NETWORK_CATEGORY_TEXT[category];
   return asError(err).message;
 }
