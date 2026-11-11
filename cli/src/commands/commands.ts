@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { buildCommandManifest } from '@baizor/gamedev-cli-core';
+import { buildCommandManifest, toolFailureCodeLine } from '@baizor/gamedev-cli-core';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, formatOption } from '../utils/output.js';
 
@@ -17,6 +17,8 @@ export const commandsCommand = new Command('commands')
       }
       console.log('\nExit codes:');
       for (const e of manifest.exitCodes) console.log(`  ${String(e.code).padStart(2)}  ${e.name}: ${e.description}`);
+      console.log('\nError codes of a failed tool call (errors[].code):');
+      for (const e of manifest.errorCodes) console.log(`  ${toolFailureCodeLine(e)}`);
     }
     out.finish(ExitCode.Success, manifest);
   });

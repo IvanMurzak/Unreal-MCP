@@ -289,6 +289,8 @@ export function withBlockingDialogs(
   if (!DIALOG_SUSPECTS.has(failure.kind.code)) return failure;
   const dialogs = find(projectDir);
   if (dialogs.length === 0) return failure;
-  const message = failure.kind === FAILURE.awaitingInput ? failure.message : awaitingInputMessage(dialogs);
-  return { kind: FAILURE.awaitingInput, message, data: { ...failure.data, dialogs } };
+  // Already AWAITING_INPUT (the tool error named the dialog): keep its kind, with the server's HTTP status, and message.
+  const already = failure.kind.code === FAILURE.awaitingInput.code;
+  const message = already ? failure.message : awaitingInputMessage(dialogs);
+  return { kind: already ? failure.kind : FAILURE.awaitingInput, message, data: { ...failure.data, dialogs } };
 }
