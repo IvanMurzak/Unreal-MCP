@@ -1,24 +1,12 @@
-import { derivePin, derivePort, derivePortV2, normalize, PIN_LENGTH } from '@baizor/gamedev-cli-core';
+import { derivePortV2 } from '@baizor/gamedev-cli-core';
 
-// The v1 `ProjectIdentity` derivation shared with the .NET/Unity/Godot plugins
-// (`McpPlugin/src/AgentConfig/ProjectIdentity.cs`) is cli-core's, gated byte-for-byte
-// by the golden vectors: trim trailing separators (never convert them — `C:\a` and
-// `C:/a` hash differently), `ToLowerInvariant`, UTF-8, SHA-256; the port is
-// 20000 + (littleEndianUInt32(first 4 bytes) % 10000), the D14 routing pin the first
-// 4 bytes as 8 lowercase hex chars (never affected by a port override). The names
-// below are this CLI's.
-
-/** The exact string that gets hashed (trailing separators trimmed, `ToLowerInvariant`). Pure. */
-export const normalizeProjectRoot = normalize;
-
-/** The deterministic localhost port (20000–29999) of a project directory. Pure. */
-export const generatePortFromDirectory = derivePort;
-
-/** Number of hex characters in the routing pin (first 4 bytes of the hash). */
-export const PROJECT_PIN_LENGTH = PIN_LENGTH;
-
-/** The D14 routing pin of a project directory (8 lowercase hex chars). Pure. */
-export const deriveProjectPin = derivePin;
+// The v1 ProjectIdentity port / pin (separators never converted), golden-vector gated in cli-core; the names are this CLI's.
+export {
+  normalize as normalizeProjectRoot,
+  derivePort as generatePortFromDirectory,
+  derivePin as deriveProjectPin,
+  PIN_LENGTH as PROJECT_PIN_LENGTH,
+} from '@baizor/gamedev-cli-core';
 
 // --- Local-server bind-port precedence (defect D / D21) -------------------
 //
