@@ -75,9 +75,10 @@ namespace UnrealMcpPythonTools
  * handler runs ON the game thread (the dispatcher guarantees it, §4). Exported so the runtime wires it
  * on boot AND the Automation specs can register + exercise the GPU-free logic in isolation.
  *
- * Actual pixel capture needs a GPU-backed editor — headless `-nullrhi` cannot render, so the capture
- * paths return a structured error there and are LIVE-VERIFIED WINDOWED; the logic/clamp/error branches
- * (below) are GPU-free and covered by headless Automation specs.
+ * Actual pixel capture needs an editor that renders (windowed, or headless with `-RenderOffscreen`). Under
+ * `-nullrhi` nothing renders, so the capture paths return NullRhiScreenshotError() there and are LIVE-VERIFIED
+ * with a rendering editor; the logic/clamp/error branches (below) are GPU-free and covered by headless
+ * Automation specs.
  */
 namespace UnrealMcpScreenshotTools
 {
@@ -110,6 +111,18 @@ namespace UnrealMcpScreenshotTools
 	 * GetFilenameOnDisk returns the path unresolved (macOS, Linux). GPU-free (spec-testable).
 	 */
 	UNREALMCPEDITOR_API bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError);
+
+	/**
+	 * Whether a capture can render: false under `-nullrhi` (FApp::CanEverRender reads the flag) or when the engine fell back
+	 * to the null RHI on its own. A headless `-RenderOffscreen` editor renders.
+	 */
+	UNREALMCPEDITOR_API bool IsRenderingAvailable();
+
+	/**
+	 * The error every capture returns when the editor cannot render (`-nullrhi`, or the null RHI as a fallback): names the
+	 * cause and the fix (restart without -nullrhi; headless `-RenderOffscreen` renders). GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API FString NullRhiScreenshotError();
 
 	/** Write an encoded capture to @p FullPath (from ResolveCaptureSavePath), creating its folders; never replaces a file. GPU-free. */
 	UNREALMCPEDITOR_API bool WriteCapturePng(const FString& FullPath, TArrayView64<const uint8> Png, FString& OutError);

@@ -188,7 +188,7 @@ bool FUnrealMcpAuxWindows::TryInvokeSerializationCheckTab()
 	// a fresh layout window all the same. Slate then ticks and measures that window via GenericWindow's
 	// GetRestoredDimensions, which is FATAL with no RHI (issue #103: the crash fires on a deferred tick a few
 	// seconds after the invoke, so it lands on whichever spec is running then). Gate on FApp::CanEverRender()
-	// (false under `-nullrhi`) — the same "rendering present" check the screenshot family uses — so the window
+	// (false under `-nullrhi`; the screenshot family's IsRenderingAvailable() builds on it) so the window
 	// is never spawned headless. The DevControl `check` route + the main-window footer button both treat a
 	// false return as a no-op, preserving their headless coverage.
 	if (!FSlateApplication::IsInitialized() || !FApp::CanEverRender())

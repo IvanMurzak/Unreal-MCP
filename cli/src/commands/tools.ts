@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { filterTools, listTools } from '../lib/tools.js';
-import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
+import { NULLRHI_OPTION_HELP, UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import { classifyToolFailure, editorCloseWarning, sessionOutcomeFailure } from '../lib/tool-outcome.js';
 import { ExitCode } from '../utils/exit-codes.js';
 import { CommandOutput, FAILURE, formatOption, parseWholeNumber } from '../utils/output.js';
@@ -35,7 +35,7 @@ export const toolsCommand = new Command('tools')
   .addOption(formatOption())
   .option('--no-start', 'Without a current cache, do not start a headless editor to ask')
   .option('--once', 'Close the editor afterwards when this call started it')
-  .option('--nullrhi', 'A started editor runs with -nullrhi (no GPU)')
+  .option('--nullrhi', NULLRHI_OPTION_HELP)
   .option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready', String(UNREAL_SESSION_READY_TIMEOUT_MS))
   .option('--engine-root <dir>', 'Explicit engine install root (source builds)')
   .option('--no-build', 'Skip the pre-launch build of native modules when an editor is started')

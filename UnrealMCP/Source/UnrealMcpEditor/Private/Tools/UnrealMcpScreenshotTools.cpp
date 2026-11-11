@@ -19,6 +19,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
+#include "RHIGlobals.h"
 #include "UObject/GCObjectScopeGuard.h"
 
 #include "Editor.h"
@@ -50,10 +51,11 @@
  *
  * Every handler runs ON the game thread (the dispatcher guarantees it, §4). Captures are dimension-
  * capped (default 1024, hard cap 2048 per side; width/height clamped). Actual pixel capture needs a
- * GPU — headless `-nullrhi` cannot render, so each capture path validates its arguments first (those
- * branches are GPU-free and headless-spec-covered) and only then attempts the GPU read-back, returning
- * a structured "rendering unavailable" error under `-nullrhi` instead of crashing. The capture paths
- * themselves are LIVE-VERIFIED WINDOWED (issue #17 verification model).
+ * rendering editor: windowed, or headless with `-RenderOffscreen` (what unreal-mcp-cli starts). Under `-nullrhi`
+ * nothing renders at all, so each capture path validates its arguments first (those branches are GPU-free and
+ * headless-spec-covered) and only then attempts the GPU read-back, returning a structured error that names
+ * `-nullrhi` and the fix (NullRhiScreenshotError) instead of crashing or returning a black image. The capture
+ * paths themselves are LIVE-VERIFIED with a rendering editor (issue #17 verification model).
  *
  * Every capture renders a new frame at call time and states its freshness (docs/ARCHITECTURE.md §10 "Background
  * rendering", FormatFreshness).
@@ -94,6 +96,18 @@ namespace UnrealMcpScreenshotTools
 			Message += TEXT(" ") + Freshness;
 		UE_LOG(LogUnrealMcp, Log, TEXT("[Unreal-MCP] %s"), *Message);
 		return FUnrealMcpToolResult::SuccessWithImage(Message, Base64Png);
+	}
+
+	bool IsRenderingAvailable()
+	{
+		return FApp::CanEverRender() && !GUsingNullRHI;
+	}
+
+	FString NullRhiScreenshotError()
+	{
+		return TEXT("Screenshot tools are unavailable: this editor runs with the null RHI (-nullrhi), which renders nothing. "
+		            "Restart it without -nullrhi: windowed, or headless with -RenderOffscreen, which renders screenshots "
+		            "(unreal-mcp-cli starts headless editors that way; omit --nullrhi).");
 	}
 
 	bool ResolveCaptureSavePath(const FString& Requested, const FString& ProjectDir, FString& OutFullPath, FString& OutError)
@@ -258,13 +272,12 @@ namespace UnrealMcpScreenshotTools
 		// Keep the encoded payload well under the §1.2 64 MiB IPC line cap (base64 expands ~4/3).
 		static constexpr int64 MaxEncodedBytes = 40 * 1024 * 1024;
 
-		/** True when the editor can render; false under headless `-nullrhi`. */
+		/** IsRenderingAvailable(), with NullRhiScreenshotError() in @p OutError when it is not. */
 		bool EnsureRenderingAvailable(FString& OutError)
 		{
-			if (!FApp::CanEverRender())
+			if (!IsRenderingAvailable())
 			{
-				OutError = TEXT("Rendering is unavailable (headless/-nullrhi). Screenshot capture requires a "
-				                "GPU-backed editor; run the editor windowed and retry.");
+				OutError = NullRhiScreenshotError();
 				return false;
 			}
 			return true;
@@ -641,7 +654,8 @@ namespace UnrealMcpScreenshotTools
 			            "minimized. Returns a base64 PNG as MCP image content; the text states 'Frame: fresh' or 'Frame: "
 			            "possibly stale (reason)', and 'Simulation: live' or 'Simulation: paused (reason)' when effects and "
 			            "animation were not ticking. Optional 'width'/'height' are clamped to [1, 2048] per side (defaults: "
-			            "see each parameter). Requires a GPU-backed (windowed) editor.");
+			            "see each parameter). Needs an editor that renders: windowed, or headless with -RenderOffscreen; under "
+			            "-nullrhi nothing renders and the tool returns an error.");
 		}
 
 		/** Description tail of the tools that can save their capture. */
@@ -770,16 +784,20 @@ namespace UnrealMcpScreenshotTools
 		// screenshot-isolated — isolated actor render (transient SceneCapture2D + show-only list + background).
 		Registry.Tool(TEXT("screenshot-isolated"))
 			.Title(TEXT("Screenshot Isolated Actor"))
-			.Description(FString(TEXT("Render a single actor in isolation against a neutral background, auto-framed by its bounds.")) + SizeCapNote())
+			.Description(FString(TEXT("Render a single actor in isolation against a neutral background, auto-framed by its bounds.")) + SizeCapNote() + SavePathNote())
 			.ParamString(TEXT("actor"), TEXT("Target actor reference (label, object name, or path) to render in isolation."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamString(TEXT("background"), TEXT("Optional background color as hex ('#RRGGBB' or '#RRGGBBAA'); the alpha of '#RRGGBBAA' is accepted but ignored (the PNG is always opaque). Defaults to dark grey."))
 			.ParamNumber(TEXT("fov"), TEXT("Optional field-of-view override in degrees (clamped to [5, 170]); default 50."))
-			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
+			.ParamString(TEXT("savePath"), SavePathParamDoc())
+			.ReadOnlyHint(false).DestructiveHint(false).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) -> FUnrealMcpToolResult
 			{
 				// Validate arguments + resolve the actor FIRST (GPU-free, headless-spec-covered).
+				FString SavePath, Error;
+				if (!ScreenshotSavePath(Call, SavePath, Error))
+					return FUnrealMcpToolResult::Error(Error);
 				if (!Call.Has(TEXT("actor")))
 					return FUnrealMcpToolResult::Error(TEXT("'actor' is required."));
 
@@ -794,7 +812,6 @@ namespace UnrealMcpScreenshotTools
 
 				// Parse + validate the background BEFORE the GPU guard so malformed hex is a GPU-free error branch.
 				FLinearColor Background(0.05f, 0.05f, 0.05f, 1.0f);
-				FString Error;
 				if (Call.Has(TEXT("background")) && !ParseHexColor(Call.GetString(TEXT("background")), Background, Error))
 					return FUnrealMcpToolResult::Error(Error);
 
@@ -823,7 +840,7 @@ namespace UnrealMcpScreenshotTools
 				const FTransform CaptureXform(CamRotation, CamLocation);
 
 				const FString Source = FString::Printf(TEXT("isolated actor '%s'"), *TargetActor->GetActorNameOrLabel());
-				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, &Background, TargetActor);
+				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, &Background, TargetActor, SavePath);
 			});
 	}
 }

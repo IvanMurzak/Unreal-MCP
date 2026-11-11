@@ -186,6 +186,17 @@ describe('CLI contract: exit codes, --format, commands', () => {
     expect(envelope.data.exitCodes).toEqual(expect.arrayContaining([{ code: 18, name: 'AwaitingInput', description: expect.any(String) }]));
   });
 
+  it('every --nullrhi option says screenshots fail under it and render offscreen without it', () => {
+    const envelope = JSON.parse(runSplit(['commands', '--format', 'json']).stdout);
+    const helps = envelope.data.commands.flatMap((c: { name: string; options: { flags: string; description: string }[] }) =>
+      c.options.filter((o) => o.flags === '--nullrhi').map((o) => [c.name, o.description]));
+    expect(helps.map(([name]: string[]) => name).sort()).toEqual(['exec', 'open', 'run-system-tool', 'run-tool', 'tools']);
+    for (const [, description] of helps) {
+      expect(description).toContain('screenshot tools fail');
+      expect(description).toContain('-RenderOffscreen');
+    }
+  });
+
   it('a usage error exits 2 (unknown option, bad choice, bad number), --help / --version stay 0', () => {
     expect(runSplit(['status', '--bogus']).exitCode).toBe(2);
     expect(runSplit(['status', '--format', 'yaml']).exitCode).toBe(2);

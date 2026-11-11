@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { withBlockingDialogs, type CommandFailure, type EditorDialog } from '../lib/editor-dialogs.js';
 import { rqlErrorHint } from '../lib/rql.js';
 import { runToolWithSession, type RunToolSessionResult } from '../lib/run-tool-session.js';
-import { UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
+import { NULLRHI_OPTION_HELP, UNREAL_SESSION_READY_TIMEOUT_MS } from '../lib/session.js';
 import {
   classifyToolFailure,
   classifyToolResponseError,
@@ -57,7 +57,7 @@ export function toolSessionOptions(): Option[] {
     new Option('--url <url>', 'Explicit MCP server URL override'),
     new Option('--token <token>', 'Bearer token override'),
     new Option('--timeout <ms>', 'Request timeout in ms (default 60000)'),
-    new Option('--nullrhi', 'A started editor runs with -nullrhi (no GPU; screenshots and rendering tools degrade)'),
+    new Option('--nullrhi', NULLRHI_OPTION_HELP),
     new Option('--ready-timeout <ms>', 'How long to wait for a started editor to become ready').default(String(UNREAL_SESSION_READY_TIMEOUT_MS)),
     new Option('--engine-root <dir>', 'Explicit engine install root (source builds)'),
     new Option('--no-build', 'Skip the pre-launch build of native modules when an editor is started'),
