@@ -30,7 +30,7 @@ export const ROOT_RQL_RECIPES = 7;
 /** The RQL language in two lines (`rql --help`, the skill's RQL reference). */
 export const RQL_LANGUAGE = [
   'Stages: where, select a b, sort x [desc], first N, count, get <member>, set a = expr, call Method(args).',
-  'Operators: == != < <= > >= and or not, contains, starts-with, ends-with, matches "regex" (ECMAScript, case-sensitive), x in [a, b], $ is PointLight.',
+  'Operators: == != < <= > >= and or not, contains, starts-with, ends-with, matches "regex" (all case-insensitive), x in [a, b], $ is PointLight.',
 ];
 
 /** The editor commands the root help and the skill feature. */
