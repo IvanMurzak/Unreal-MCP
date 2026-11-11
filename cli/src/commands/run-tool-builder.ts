@@ -186,7 +186,7 @@ export function reportToolOutcome(
     const kind = classifyToolFailure(result);
     const message = withHint(`Failed to run ${errorNoun} "${toolName}" (${result.reason}): ${result.message}`);
     const blocked = withDialogs({ kind, message, data });
-    if (blocked.kind !== kind) {
+    if (blocked.kind.code !== kind.code) {
       out.fail(blocked.kind, `Failed to run ${errorNoun} "${toolName}": ${blocked.message}`, blocked.data);
       return false;
     }

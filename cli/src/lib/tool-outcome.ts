@@ -16,9 +16,12 @@ import type { RunToolSessionResult } from './run-tool-session.js';
 
 export type { FailureKind };
 
-/** A failed call's own error (the server's `{ "error": "<text>" }` or text body), else the HTTP reason. */
+/**
+ * A failed call's own error (the server answers a tool error as `{ "error": "<text>" }`), else the HTTP reason. A text
+ * body (a proxy's HTML page) is not a message.
+ */
 export function toolErrorText(failure: RunToolFailure): string {
-  return serverErrorText(failure.data) ?? failure.message;
+  return (typeof failure.data === 'string' ? undefined : serverErrorText(failure.data)) ?? failure.message;
 }
 
 /** Leads the message of a call whose editor could not start because the project's C++ does not compile. */

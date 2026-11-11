@@ -248,9 +248,12 @@ describe('awaiting input', () => {
     const cli = buildRunToolCommand({ name: 'run-tool', description: 'Test', errorNoun: 'tool', invoke: vi.fn(), run, findDialogs: () => [SAVE] });
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     await cli.parseAsync(['node', 'cli', 'x', '--format', 'json']);
-    const envelope = JSON.parse(String(stdout.mock.calls.at(-1)?.[0])) as { errors: Array<{ code: string }>; data: { dialogs: EditorDialog[] } };
+    const envelope = JSON.parse(String(stdout.mock.calls.at(-1)?.[0])) as { errors: Array<{ code: string; message: string; httpStatus?: number }>; data: { dialogs: EditorDialog[] } };
     expect(process.exitCode).toBe(18);
-    expect(envelope.errors[0]).toMatchObject({ code: 'AWAITING_INPUT' });
+    // One error with the server's status, its message said once.
+    expect(envelope.errors).toHaveLength(1);
+    expect(envelope.errors[0]).toMatchObject({ code: 'AWAITING_INPUT', httpStatus: 500 });
+    expect(envelope.errors[0]!.message.match(/Failed to run tool/g)).toHaveLength(1);
     expect(envelope.data.dialogs).toEqual([SAVE]);
   });
 
