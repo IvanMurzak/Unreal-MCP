@@ -3,7 +3,7 @@
 //   context for every later turn); depth lives in reference files it opens only when needed. Rendered from
 //   `cli-guide.ts`, the source the root --help and `rql --help` render from too, so the skill cannot drift from them.
 // - `ai-game-dev-app`: the companion app, for tasks that need creative tools the CLI does not have.
-import { CLI_NAME, CODE_COMMANDS, EDITOR_COMMANDS, PLUGIN_FOLDER, ROOT_RQL_RECIPES, RQL_LANGUAGE, RQL_RECIPES, RQL_RULES, type CommandRow } from './cli-guide.js';
+import { CLI_NAME, CODE_COMMANDS, EDITOR_COMMANDS, PLUGIN_FOLDER, RQL_LANGUAGE, RQL_RECIPES, RQL_RULES, type CommandRow } from './cli-guide.js';
 
 const APP_SKILL_NAME = 'ai-game-dev-app';
 /**
@@ -12,7 +12,7 @@ const APP_SKILL_NAME = 'ai-game-dev-app';
  */
 export const RETIRED_SKILL_NAMES: readonly string[] = ['unreal-mcp'];
 const APP_SKILL_DESCRIPTION = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
-const CLI_SKILL_DESCRIPTION = `How to use ${CLI_NAME} on this Unreal project (levels, actors, assets, C++, tests): read before the first ${CLI_NAME} command.`;
+const CLI_SKILL_DESCRIPTION = `Unreal editor work with ${CLI_NAME} (levels, actors, components, assets): read before the first editor command. Not needed to edit C++: \`${CLI_NAME} compile\` lists file:line errors.`;
 export const SKILL_METADATA = {
   'generated-by': 'unreal-mcp',
   'ai-game-dev': 'exclude',
@@ -37,7 +37,7 @@ const cmd = (args: string) => `${CLI_NAME} ${args}`;
 const recipeLine = ([query, what]: readonly [string, string]) => `rql '${query}'  # ${what}`;
 const usage = ([, use]: CommandRow) => `\`${use}\``;
 
-/** The skill's SKILL.md body: the root help's commands and recipes plus the rules, about 2 KB. Pure. */
+/** The skill's SKILL.md body: the commands, every RQL recipe and the rules, about 2.6 KB. Pure. */
 function buildCliSkill(): string {
   return [
     `# ${CLI_NAME}`,
@@ -50,7 +50,7 @@ function buildCliSkill(): string {
     'A query ending in `set` / `call` changes the editor; others only read. Strings inside take double quotes.',
     '',
     '```',
-    ...RQL_RECIPES.slice(0, ROOT_RQL_RECIPES).map(recipeLine),
+    ...RQL_RECIPES.map(recipeLine),
     '```',
     '',
     ...RQL_RULES.map((rule) => `- ${rule}`),
@@ -61,7 +61,7 @@ function buildCliSkill(): string {
     '',
     `Exit codes: ${Object.entries(EXIT_CODE_ACTIONS).map(([code, action]) => `${code} ${action}`).join('; ')}.`,
     '',
-    'Only when needed: [references/rql.md](references/rql.md) (more recipes, operators, members),',
+    'Only when needed: [references/rql.md](references/rql.md) (operators, sources, members),',
     '[references/install.md](references/install.md) (install the CLI or plugin), the `ai-game-dev-app` skill (images, 3D, audio).',
     '',
   ].join('\n');
@@ -75,10 +75,6 @@ function buildRqlReference(): string {
     `\`${cmd("rql '<query>'")}\` runs one query. A query ending in \`set\` / \`call\` changes the editor, all or nothing`,
     '(`--dry-run` shows the change without making it; `--max-targets <n>` allows more than 200 targets). Any other query',
     'only reads. A shell that strips the double quotes: put the query in a file and pass `-f <file>`.',
-    '',
-    '```',
-    ...RQL_RECIPES.map(recipeLine),
-    '```',
     '',
     ...RQL_LANGUAGE,
     '',

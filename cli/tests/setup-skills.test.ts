@@ -4,7 +4,7 @@ import * as path from 'path';
 import { EXIT_CODES } from '@baizor/gamedev-cli-core';
 import { setupSkills } from '../src/lib/setup-skills.js';
 import { buildGuideFiles, EXIT_CODE_ACTIONS } from '../src/lib/skill-guides.js';
-import { RQL_LANGUAGE, RQL_RECIPES, ROOT_RQL_RECIPES } from '../src/lib/cli-guide.js';
+import { RQL_LANGUAGE, RQL_RECIPES } from '../src/lib/cli-guide.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
 
 const dirs: string[] = [];
@@ -96,14 +96,11 @@ describe('setupSkills', () => {
 });
 
 describe('the unreal-mcp-cli skill', () => {
-  it('shows the root help\'s recipes; its RQL reference has them all and the language (one source)', () => {
+  it('shows every recipe; its RQL reference adds the language, not the recipes again (one source)', () => {
     const md = skillMd();
-    RQL_RECIPES.forEach(([query, what], i) => {
-      const line = `rql '${query}'  # ${what}`;
-      expect(md.includes(line)).toBe(i < ROOT_RQL_RECIPES);
-    });
+    for (const [query, what] of RQL_RECIPES) expect(md).toContain(`rql '${query}'  # ${what}`);
     const ref = buildGuideFiles().find((f) => f.relativePath.endsWith('references/rql.md'))!.content;
-    for (const [query] of RQL_RECIPES) expect(ref).toContain(`rql '${query}'`);
+    for (const [query] of RQL_RECIPES) expect(ref).not.toContain(query);
     for (const line of RQL_LANGUAGE) expect(ref).toContain(line);
   });
 
@@ -122,8 +119,15 @@ describe('the unreal-mcp-cli skill', () => {
     expect(md).not.toMatch(/editor must be running/i);
   });
 
+  it('scopes the description to editor work and names only compile for code edits (naming tests sent agents into test fixes)', () => {
+    const description = skillMd().split('\n').find((l) => l.startsWith('description: '))!;
+    expect(description).toMatch(/^description: "Unreal editor work with /);
+    expect(description).toContain('Not needed to edit C++: `unreal-mcp-cli compile` lists file:line errors.');
+    expect(description).not.toMatch(/\btest\b/);
+  });
+
   it('stays short (the agent re-reads every byte each turn) and uses neutral example names', () => {
-    expect(Buffer.byteLength(skillMd())).toBeLessThan(2600);
+    expect(Buffer.byteLength(skillMd())).toBeLessThan(2800);
     const all = buildGuideFiles().map((f) => f.content).join('\n');
     expect(all).not.toMatch(/\b(Arena|Crate|Platform|Level1|EnemyStats|GameMath)\b/);
   });

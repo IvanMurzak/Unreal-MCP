@@ -12,7 +12,7 @@ export const CLI_NAME = 'unreal-mcp-cli';
 
 /** The recipes `rql --help` and the skill show; the root help shows the first {@link ROOT_RQL_RECIPES}. */
 export const RQL_RECIPES: RqlRecipes = [
-  ['editor | call OpenLevel("/Game/Maps/Forest")', 'open a level (writes no file, drops unsaved edits): actors lists the open level and its loaded sublevels'],
+  ['editor | call OpenLevel("/Game/Maps/Forest")', 'open a level (changes no file; save your own edits first): actors lists the open level and its loaded sublevels'],
   ['editor | call NewLevel("/Game/Maps/Cave")', 'a new empty level, saved at that path, now open'],
   ['editor | call SpawnActor("/Engine/BasicShapes/Sphere", "Ball", [100, 0, 50])', 'class / asset, label, location (cm)'],
   ['actors | where Label starts-with "Tree" | select Label Location Scale', 'read'],
@@ -30,7 +30,7 @@ export const ROOT_RQL_RECIPES = 7;
 /** The RQL language in two lines (`rql --help`, the skill's RQL reference). */
 export const RQL_LANGUAGE = [
   'Stages: where, select a b, sort x [desc], first N, count, get <member>, set a = expr, call Method(args).',
-  'Operators: == != < <= > >= and or not, contains, starts-with, ends-with, matches "regex", x in [a, b], $ is PointLight.',
+  'Operators: == != < <= > >= and or not, contains, starts-with, ends-with, matches "regex" (all case-insensitive), x in [a, b], $ is PointLight.',
 ];
 
 /** The editor commands the root help and the skill feature. */
