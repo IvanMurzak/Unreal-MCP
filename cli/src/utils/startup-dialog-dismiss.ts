@@ -82,7 +82,8 @@ namespace UnrealMcp.StartupDialog {
     }
 
     static bool TryClickButton(IntPtr parent, string[] labels, out string clickedLabel) {
-      clickedLabel = "";
+      // A lambda cannot assign an out parameter (CS1628): it fills a local, copied out below.
+      string matchedLabel = "";
       IntPtr matchedButton = IntPtr.Zero;
       var sb = new StringBuilder(512);
       EnumChildWindows(parent, (hWnd, lParam) => {
@@ -95,12 +96,13 @@ namespace UnrealMcp.StartupDialog {
         for (int i = 0; i < labels.Length; i++) {
           if (string.Equals(text, labels[i], StringComparison.OrdinalIgnoreCase)) {
             matchedButton = hWnd;
-            clickedLabel = labels[i];
+            matchedLabel = labels[i];
             return false;
           }
         }
         return true;
       }, IntPtr.Zero);
+      clickedLabel = matchedLabel;
       if (matchedButton == IntPtr.Zero) return false;
       SendMessageW(matchedButton, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
       return true;
