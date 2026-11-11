@@ -88,6 +88,9 @@ public class UnrealMcpEditor : ModuleRules
 			// vendored code_exec runtime (Content/Python). PythonScriptPlugin is an Editor-only (UncookedOnly) engine plugin
 			// enabled by UnrealMCP.uplugin, so it never reaches a packaged game.
 			"PythonScriptPlugin",
+			// Fab tool family: open the Fab panel (a LevelEditor tab) to trigger the Fab sign-in. The Fab plugin itself is
+			// reached only by reflection, so the module has no dependency on it.
+			"LevelEditor",
 		});
 
 		// C++ source / script tool family (docs/ARCHITECTURE.md §10, issue #18): source-compile prefers

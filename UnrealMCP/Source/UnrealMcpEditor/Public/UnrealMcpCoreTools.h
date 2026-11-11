@@ -5,6 +5,8 @@
 
 #include "CoreMinimal.h"
 
+class FJsonObject;
+class FJsonValue;
 class FUnrealMcpToolRegistry;
 class IInterface_PostProcessVolume;
 class UWorld;
@@ -163,6 +165,25 @@ namespace UnrealMcpScreenshotTools
 namespace UnrealMcpSourceTools
 {
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+}
+
+/**
+ * The Fab tool family: `fab-search` (public Fab catalog), `fab-library` (the signed-in user's Fab library) and `fab-add`
+ * (download + import a listing through the engine Fab plugin's own import workflows). The Fab plugin is reached only by
+ * reflection (no link dependency); HTTP and imports run across frames through FUnrealMcpToolResult::RetryLater.
+ */
+namespace UnrealMcpFabTools
+{
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry);
+
+	/** A listing uid (lower case) from a uid or a https://www.fab.com/listings/<uid>[...] URL; empty when it is neither. */
+	UNREALMCPEDITOR_API FString ParseListingUid(const FString& Input);
+	/** The Epic account id (the JWT `sub`) inside an EOS access token ("eg1~<jwt>"); empty when unreadable. */
+	UNREALMCPEDITOR_API FString AccountIdFromToken(const FString& Token);
+	/** An unreal-engine format's distribution method ("asset_pack", "complete_project", "code_plugin"), lower case. */
+	UNREALMCPEDITOR_API FString DistributionMethod(const FJsonObject& Format);
+	/** The uid of the unreal-engine version to download for this editor: exact UE, else newest older, else oldest newer. */
+	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions);
 }
 
 /**
