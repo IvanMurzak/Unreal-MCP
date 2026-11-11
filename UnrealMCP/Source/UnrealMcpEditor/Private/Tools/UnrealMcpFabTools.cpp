@@ -3,6 +3,8 @@
 
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpLog.h"
+#include "UnrealMcpSchema.h"
+#include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"
 
@@ -19,7 +21,6 @@
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
-#include "Interfaces/IPluginManager.h"
 #include "JsonObjectConverter.h"
 #include "LevelEditor.h"
 #include "Containers/Ticker.h"
@@ -28,9 +29,8 @@
 #include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
-#include "Policies/CondensedJsonPrintPolicy.h"
 #include "UObject/Package.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 
 /**
@@ -44,8 +44,8 @@
  * when the Fab plugin is disabled; the tools then answer with an error.
  *
  * Handlers never block the game thread: an HTTP request or an import in flight answers RetryLater and the dispatcher
- * runs the handler again on a later frame (the per-call state is keyed by the call's arguments object, which the
- * dispatcher keeps across retries).
+ * runs the handler again on a later frame with the same call (the per-call state is keyed by the call's arguments
+ * object, which the dispatcher keeps alive across retries, and dropped once that object is gone).
  */
 namespace UnrealMcpFabToolsLocal
 {
@@ -56,11 +56,13 @@ namespace UnrealMcpFabToolsLocal
 	static constexpr double FabPortalWaitSeconds = 150.0;
 	/** One fab-add call waits at most this long for the import; a later call with the same listing keeps waiting. */
 	static constexpr double FabImportWaitSeconds = 240.0;
-	/** Forgotten per-call state (a call that ended by its timeout) is dropped after this long. */
-	static constexpr double FabCallStateTtlSeconds = 900.0;
 	static constexpr int32 FabMaxCount = 48;
 	/** fab-library with a filter reads at most this many pages of 100. */
 	static constexpr int32 FabLibraryMaxPages = 20;
+	/** Where a listing's files are read: the public listing, then the user's library (private entitlements). */
+	static const TCHAR* const FabRoutes[] = { TEXT("listings"), TEXT("library/assets") };
+	/** The formats the editor imports, in the order fab-add prefers them. */
+	static const TCHAR* const FabImportFormats[] = { TEXT("unreal-engine"), TEXT("glb"), TEXT("gltf"), TEXT("fbx") };
 
 	// ---------------------------------------------------------------- HTTP
 
@@ -133,12 +135,14 @@ namespace UnrealMcpFabToolsLocal
 	/** One fab-* call in flight: its stage, the request it waits on and what earlier stages found. */
 	struct FFabCallState
 	{
-		double Created = FPlatformTime::Seconds();
+		/** The call's arguments: a state whose call ended (freed arguments, maybe a new call at the same address) is dropped. */
+		TWeakPtr<FJsonObject> Arguments;
 		int32 Stage = 0;
 		double StageStarted = 0.0;
 		double LastTokenCheck = 0.0;
 		bool bOpenedPanel = false;
 		FString Token;
+		FString Account;
 		// fab-library: the rows found so far and the page to read next (a filter reads every page).
 		TArray<TSharedPtr<FJsonValue>> Rows;
 		TArray<FString> Lines;
@@ -146,12 +150,9 @@ namespace UnrealMcpFabToolsLocal
 		int32 Pages = 0;
 		TSharedPtr<FFabHttpResult> Http;
 		TSharedPtr<FJsonObject> Listing;
-		TArray<FString> RouteCandidates; // "listings" | "library/assets"
-		int32 Route = 0;
+		int32 Route = 0; // index into FabRoutes
 		FString Format;
 		FString FileUid;
-		FString DownloadUrl;
-		TArray<FString> DistributionPoints;
 		int64 LogSequence = 0;
 	};
 
@@ -164,15 +165,17 @@ namespace UnrealMcpFabToolsLocal
 	static FFabCallState& FabState(const FUnrealMcpToolCall& Call)
 	{
 		TMap<const FJsonObject*, TSharedPtr<FFabCallState>>& Calls = FabCalls();
-		const double Now = FPlatformTime::Seconds();
 		for (auto It = Calls.CreateIterator(); It; ++It)
 		{
-			if (Now - It.Value()->Created > FabCallStateTtlSeconds)
-				It.RemoveCurrent();
+			if (!It.Value()->Arguments.IsValid())
+				It.RemoveCurrent(); // a call that ended by its timeout or a cancel
 		}
 		TSharedPtr<FFabCallState>& State = Calls.FindOrAdd(Call.Arguments.Get());
 		if (!State.IsValid())
+		{
 			State = MakeShared<FFabCallState>();
+			State->Arguments = Call.Arguments;
+		}
 		return *State;
 	}
 
@@ -194,7 +197,7 @@ namespace UnrealMcpFabToolsLocal
 			State.Http = FabHttpStart(Verb, Url, Headers, Body);
 		if (!State.Http->bDone)
 			return false;
-		Out = *State.Http;
+		Out = MoveTemp(*State.Http);
 		State.Http.Reset();
 		return true;
 	}
@@ -202,7 +205,7 @@ namespace UnrealMcpFabToolsLocal
 	/** Seconds this call may still spend before its timeout, less a margin for the answer. */
 	static double FabTimeLeft(const FUnrealMcpToolCall& Call)
 	{
-		const double Timeout = (Call.TimeoutMs > 0 ? Call.TimeoutMs : 300000) / 1000.0;
+		const double Timeout = (Call.TimeoutMs > 0 ? Call.TimeoutMs : FUnrealMcpConfig::DefaultToolTimeoutMs) / 1000.0;
 		const double Elapsed = Call.ReceivedSeconds > 0.0 ? FPlatformTime::Seconds() - Call.ReceivedSeconds : 0.0;
 		return Timeout - Elapsed - 10.0;
 	}
@@ -246,15 +249,11 @@ namespace UnrealMcpFabToolsLocal
 		UFunction* Function = Target ? Target->FindFunction(FunctionName) : nullptr;
 		if (!Function)
 			return false;
-		uint8* Params = static_cast<uint8*>(FMemory_Alloca(FMath::Max<int32>(Function->ParmsSize, 1)));
-		FMemory::Memzero(Params, Function->ParmsSize);
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
-			It->InitializeValue_InContainer(Params);
+		FStructOnScope Frame(Function); // the parameter block, initialized and destroyed with the scope
+		uint8* Params = Frame.GetStructMemory();
 		Fill(Function, Params);
 		Target->ProcessEvent(Function, Params);
 		Read(Function, Params);
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
-			It->DestroyValue_InContainer(Params);
 		return true;
 	}
 
@@ -491,21 +490,27 @@ namespace UnrealMcpFabToolsLocal
 		return Headers;
 	}
 
-	/** Where the Fab import workflows recorded @p ListingUid in this project (UFabLocalAssets), or empty. */
-	static FString FabImportedPath(const FString& ListingUid)
+	/** Every listing the Fab import workflows recorded in this project (UFabLocalAssets): lower-case uid -> content path. */
+	static TMap<FString, FString> FabImportedPaths()
 	{
+		TMap<FString, FString> Paths;
 		UClass* Class = FabFindClass(TEXT("FabLocalAssets"));
 		const FMapProperty* Map = Class ? FindFProperty<FMapProperty>(Class, TEXT("PathsListingID")) : nullptr;
 		if (!Map || !CastField<FStrProperty>(Map->KeyProp) || !CastField<FStrProperty>(Map->ValueProp))
-			return FString();
+			return Paths;
 		FScriptMapHelper Helper(Map, Map->ContainerPtrToValuePtr<void>(Class->GetDefaultObject()));
 		for (FScriptMapHelper::FIterator It(Helper); It; ++It)
 		{
-			const FString& Value = *reinterpret_cast<const FString*>(Helper.GetValuePtr(It));
-			if (Value.Equals(ListingUid, ESearchCase::IgnoreCase))
-				return *reinterpret_cast<const FString*>(Helper.GetKeyPtr(It));
+			Paths.Add(reinterpret_cast<const FString*>(Helper.GetValuePtr(It))->ToLower(),
+				*reinterpret_cast<const FString*>(Helper.GetKeyPtr(It)));
 		}
-		return FString();
+		return Paths;
+	}
+
+	/** Where the Fab import workflows recorded @p ListingUid (lower case) in this project, or empty. */
+	static FString FabImportedPath(const FString& ListingUid)
+	{
+		return FabImportedPaths().FindRef(ListingUid);
 	}
 
 	/** Listings this editor started importing (uid -> title), so a repeated fab-add waits instead of starting again. */
@@ -614,6 +619,39 @@ namespace UnrealMcpFabToolsLocal
 		return FString::Join(Parts, TEXT("&"));
 	}
 
+	/** A listing page's `results`, or false when the request failed or the answer is not such a page. */
+	static bool FabResults(const FFabHttpResult& Http, TSharedPtr<FJsonObject>& OutJson, const TArray<TSharedPtr<FJsonValue>>*& OutResults)
+	{
+		OutJson = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
+		return OutJson.IsValid() && OutJson->TryGetArrayField(TEXT("results"), OutResults);
+	}
+
+	/** The page's next-page cursor (`cursors.next`), or empty on the last page. */
+	static FString FabNextCursor(const FJsonObject& Page)
+	{
+		FString Next;
+		const TSharedPtr<FJsonObject>* Cursors = nullptr;
+		if (Page.TryGetObjectField(TEXT("cursors"), Cursors))
+			(*Cursors)->TryGetStringField(TEXT("next"), Next);
+		return Next;
+	}
+
+	/** A search / library answer: the rows as structured content, the numbered lines as text, the paging hint and @p Footer. */
+	static FUnrealMcpToolResult FabPageResult(const FUnrealMcpToolCall& Call, const TArray<TSharedPtr<FJsonValue>>& Rows,
+		const TArray<FString>& Lines, const FString& Next, const FString& Header, const TCHAR* Footer)
+	{
+		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
+		S->SetArrayField(TEXT("results"), Rows);
+		S->SetStringField(TEXT("nextCursor"), Next);
+		FString Text = Header + TEXT("\n") + FString::Join(Lines, TEXT("\n"));
+		if (!Next.IsEmpty())
+			Text += FString::Printf(TEXT("\nMore: call again with cursor '%s'."), *Next);
+		Text += Footer;
+		FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, S);
+		Result.bMessageCoversStructured = true;
+		return FabFinish(Call, Result);
+	}
+
 	// ---------------------------------------------------------------- fab-search
 
 	static FUnrealMcpToolResult FabSearch(const FUnrealMcpToolCall& Call)
@@ -637,9 +675,9 @@ namespace UnrealMcpFabToolsLocal
 		FFabHttpResult Http;
 		if (!FabFetch(State, TEXT("GET"), Url, {}, Http))
 			return FUnrealMcpToolResult::RetryLater(TEXT("Searching Fab."));
-		const TSharedPtr<FJsonObject> Json = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
+		TSharedPtr<FJsonObject> Json;
 		const TArray<TSharedPtr<FJsonValue>>* Results = nullptr;
-		if (!Json.IsValid() || !Json->TryGetArrayField(TEXT("results"), Results))
+		if (!FabResults(Http, Json, Results))
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("Fab search failed: ") + FabDescribeHttp(Http)));
 
 		TArray<TSharedPtr<FJsonValue>> Rows;
@@ -653,22 +691,10 @@ namespace UnrealMcpFabToolsLocal
 			Rows.Add(MakeShared<FJsonValueObject>(FabSearchRow(**Listing, Line)));
 			Lines.Add(FString::Printf(TEXT("%d. %s"), Lines.Num() + 1, *Line));
 		}
-		FString Next;
-		const TSharedPtr<FJsonObject>* Cursors = nullptr;
-		if (Json->TryGetObjectField(TEXT("cursors"), Cursors))
-			(*Cursors)->TryGetStringField(TEXT("next"), Next);
-
-		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
-		S->SetArrayField(TEXT("results"), Rows);
-		S->SetStringField(TEXT("nextCursor"), Next);
-		FString Text = FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):\n%s"), Rows.Num(), *FString::Join(Lines, TEXT("\n")));
-		if (!Next.IsEmpty())
-			Text += FString::Printf(TEXT("\nMore: call again with cursor '%s'."), *Next);
-		Text += TEXT("\nfab-add imports a listing the user owns (fab-library lists them); a free listing must first be added to the "
-		             "user's library on fab.com.");
-		FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, S);
-		Result.bMessageCoversStructured = true;
-		return FabFinish(Call, Result);
+		return FabPageResult(Call, Rows, Lines, FabNextCursor(*Json),
+			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):"), Rows.Num()),
+			TEXT("\nfab-add imports a listing the user owns (fab-library lists them); a free listing must first be added to the "
+			     "user's library on fab.com."));
 	}
 
 	// ---------------------------------------------------------------- fab-library
@@ -683,8 +709,9 @@ namespace UnrealMcpFabToolsLocal
 		FUnrealMcpToolResult Wait;
 		if (!FabEnsureToken(Call, State, Token, Wait))
 			return Wait;
-		const FString Account = FabAccountIdFromToken(Token);
-		if (Account.IsEmpty())
+		if (State.Account.IsEmpty())
+			State.Account = FabAccountIdFromToken(Token);
+		if (State.Account.IsEmpty())
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("Could not read the Epic account id from the Fab sign-in token.")));
 
 		// A filter searches the whole library (every page, at most FabLibraryMaxPages of 100); without one, one page.
@@ -692,16 +719,17 @@ namespace UnrealMcpFabToolsLocal
 		const int32 Count = Filter.IsEmpty() ? (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("count"), 24), 1, 100) : 100;
 		if (State.Pages == 0)
 			State.Cursor = Call.GetString(TEXT("cursor"));
-		const FString Url = FString::Printf(TEXT("%s/e/accounts/%s/ue/library?%s"), FabRoot, *Account, *FabQuery({
+		const FString Url = FString::Printf(TEXT("%s/e/accounts/%s/ue/library?%s"), FabRoot, *State.Account, *FabQuery({
 			{ TEXT("count"), FString::FromInt(Count) }, { TEXT("cursor"), State.Cursor } }));
 		FFabHttpResult Http;
 		if (!FabFetch(State, TEXT("GET"), Url, { { TEXT("Authorization"), TEXT("Bearer ") + Token } }, Http))
 			return FUnrealMcpToolResult::RetryLater(TEXT("Reading the Fab library."));
-		const TSharedPtr<FJsonObject> Json = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
+		TSharedPtr<FJsonObject> Json;
 		const TArray<TSharedPtr<FJsonValue>>* Results = nullptr;
-		if (!Json.IsValid() || !Json->TryGetArrayField(TEXT("results"), Results))
+		if (!FabResults(Http, Json, Results))
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("Reading the Fab library failed: ") + FabDescribeHttp(Http)));
 
+		const TMap<FString, FString> ImportedPaths = FabImportedPaths();
 		TArray<TSharedPtr<FJsonValue>>& Rows = State.Rows;
 		TArray<FString>& Lines = State.Lines;
 		for (const TSharedPtr<FJsonValue>& Value : *Results)
@@ -721,7 +749,7 @@ namespace UnrealMcpFabToolsLocal
 			FString Uid = FabListingUid(ItemUrl);
 			if (Uid.IsEmpty())
 				Uid = FabListingUid(AssetId);
-			const FString Imported = Uid.IsEmpty() ? FString() : FabImportedPath(Uid);
+			const FString Imported = ImportedPaths.FindRef(Uid);
 			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 			Row->SetStringField(TEXT("uid"), Uid);
 			Row->SetStringField(TEXT("title"), Title);
@@ -736,10 +764,7 @@ namespace UnrealMcpFabToolsLocal
 				ListingType.IsEmpty() ? TEXT("?") : *ListingType, Distribution.IsEmpty() ? TEXT("") : *(TEXT(", ") + Distribution.ToLower()),
 				Imported.IsEmpty() ? TEXT("") : *(TEXT(" | already in the project at ") + Imported)));
 		}
-		FString Next;
-		const TSharedPtr<FJsonObject>* Cursors = nullptr;
-		if (Json->TryGetObjectField(TEXT("cursors"), Cursors))
-			(*Cursors)->TryGetStringField(TEXT("next"), Next);
+		FString Next = FabNextCursor(*Json);
 		if (!Filter.IsEmpty() && !Next.IsEmpty() && ++State.Pages < FabLibraryMaxPages)
 		{
 			State.Cursor = Next;
@@ -748,17 +773,9 @@ namespace UnrealMcpFabToolsLocal
 		if (!Filter.IsEmpty() && State.Pages < FabLibraryMaxPages)
 			Next.Reset(); // the filter read every page
 
-		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
-		S->SetArrayField(TEXT("results"), Rows);
-		S->SetStringField(TEXT("nextCursor"), Next);
-		FString Text = FString::Printf(TEXT("%d item(s) of the user's Fab library%s (uid | title | type):\n%s"), Rows.Num(),
-			Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" with '%s' in the title"), *Filter), *FString::Join(Lines, TEXT("\n")));
-		if (!Next.IsEmpty())
-			Text += FString::Printf(TEXT("\nMore: call again with cursor '%s'."), *Next);
-		Text += TEXT("\nImport one with fab-add {\"listing\": \"<uid>\"}.");
-		FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, S);
-		Result.bMessageCoversStructured = true;
-		return FabFinish(Call, Result);
+		return FabPageResult(Call, Rows, Lines, Next, FString::Printf(TEXT("%d item(s) of the user's Fab library%s (uid | title | type):"),
+			Rows.Num(), Filter.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" with '%s' in the title"), *Filter)),
+			TEXT("\nImport one with fab-add {\"listing\": \"<uid>\"}."));
 	}
 
 	// ---------------------------------------------------------------- fab-add
@@ -869,13 +886,18 @@ namespace UnrealMcpFabToolsLocal
 		return FabFinish(Call, Result);
 	}
 
-	/** The Fab plugin's errors about this import (LogFab lines naming the listing) since it started, as one message. */
-	static FString FabImportErrors(int64 Sequence, const FString& Uid, const FString& Title)
+	/**
+	 * The Fab plugin's errors about this import (LogFab lines naming the listing) logged since @p InOutSequence, as one
+	 * message; advances @p InOutSequence so the next pass reads only newer lines.
+	 */
+	static FString FabImportErrors(int64& InOutSequence, const FString& Uid, const FString& Title)
 	{
+		static const FName LogFab(TEXT("LogFab"));
 		TArray<FString> Errors;
-		for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(Sequence))
+		for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(InOutSequence))
 		{
-			if (Entry.Category == TEXT("LogFab") && Entry.Verbosity <= ELogVerbosity::Error
+			InOutSequence = FMath::Max(InOutSequence, Entry.Sequence);
+			if (Entry.Category == LogFab && Entry.Verbosity <= ELogVerbosity::Error
 				&& (Entry.Message.Contains(Uid) || (!Title.IsEmpty() && Entry.Message.Contains(Title))))
 				Errors.Add(Entry.Message.TrimStartAndEnd());
 		}
@@ -911,9 +933,8 @@ namespace UnrealMcpFabToolsLocal
 				if (!Existing.IsEmpty())
 					return FabAddDone(Call, Uid, Title, Existing, true);
 			}
-			if (const FString* InFlightTitle = FabImportsInFlight().Find(Uid))
+			if (FabImportsInFlight().Contains(Uid))
 			{
-				Title = *InFlightTitle;
 				State.Stage = AddImport;
 				State.StageStarted = FPlatformTime::Seconds();
 				State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
@@ -931,8 +952,7 @@ namespace UnrealMcpFabToolsLocal
 				FString Format = Call.GetString(TEXT("format")).ToLower();
 				if (Format.IsEmpty())
 				{
-					static const TCHAR* Preference[] = { TEXT("unreal-engine"), TEXT("glb"), TEXT("gltf"), TEXT("fbx") };
-					for (const TCHAR* Candidate : Preference)
+					for (const TCHAR* Candidate : FabImportFormats)
 					{
 						if (Formats.Contains(Candidate))
 						{
@@ -944,10 +964,10 @@ namespace UnrealMcpFabToolsLocal
 					if (FabIsQuixel(*State.Listing) && Formats.Contains(TEXT("gltf")) && Format != TEXT("unreal-engine"))
 						Format = TEXT("gltf");
 				}
-				static const TCHAR* Importable[] = { TEXT("unreal-engine"), TEXT("glb"), TEXT("gltf"), TEXT("fbx") };
-				bool bImportable = false;
-				for (const TCHAR* Candidate : Importable)
-					bImportable |= Format == Candidate;
+				const bool bImportable = MakeArrayView(FabImportFormats).ContainsByPredicate([&Format](const TCHAR* Candidate)
+				{
+					return Format == Candidate;
+				});
 				if (!bImportable || !Formats.Contains(Format))
 					return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' has no format the editor imports (unreal-engine, glb, gltf, fbx)%s; "
 						"its formats: %s."), *Title, Format.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" matching '%s'"), *Format),
@@ -971,38 +991,36 @@ namespace UnrealMcpFabToolsLocal
 		{
 			// The Fab panel's own sign-in to fab.com (window.ue.fab.onLoginSuccessful): the EOS access token in Authorization and
 			// the refresh token in the body; the answer sets the session cookies the /i/ routes need.
-			const FString Token = FabAuthToken();
-			TSharedRef<FJsonObject> AuthBody = MakeShared<FJsonObject>();
-			AuthBody->SetStringField(TEXT("refresh_token"), FabApiString(TEXT("GetRefreshToken")));
-			FString AuthBodyText;
-			FJsonSerializer::Serialize(AuthBody, TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&AuthBodyText));
+			FString AuthBody;
+			if (!State.Http.IsValid()) // the body is needed only to start the request
+			{
+				TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+				Body->SetStringField(TEXT("refresh_token"), FabApiString(TEXT("GetRefreshToken")));
+				AuthBody = UnrealMcpSerializeCondensed(Body);
+			}
 			FFabHttpResult Http;
-			if (!FabFetch(State, TEXT("POST"), FString::Printf(TEXT("%s/p/authenticate"), FabRoot), { { TEXT("Authorization"), Token } }, Http,
-				AuthBodyText))
+			if (!FabFetch(State, TEXT("POST"), FString::Printf(TEXT("%s/p/authenticate"), FabRoot), { { TEXT("Authorization"), State.Token } }, Http,
+				AuthBody))
 				return FUnrealMcpToolResult::RetryLater(TEXT("Opening a Fab session."));
 			if (!FabHttpOk(Http))
 				return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("Fab refused the editor's sign-in: ") + FabDescribeHttp(Http)));
 			FFabSession& Session = FabSessionCache();
 			Session = FFabSession();
-			Session.Token = Token;
+			Session.Token = State.Token;
 			FabReadCookies(Http.Headers, Session);
 			State.Stage = AddFormat;
-			State.RouteCandidates = { TEXT("listings"), TEXT("library/assets") };
-			State.Route = 0;
 		}
 
 		if (State.Stage == AddFormat)
 		{
-			if (State.RouteCandidates.IsEmpty())
-				State.RouteCandidates = { TEXT("listings"), TEXT("library/assets") };
 			FFabHttpResult Http;
-			const FString Url = FString::Printf(TEXT("%s/i/%s/%s/asset-formats/%s"), FabRoot, *State.RouteCandidates[State.Route], *Uid, *State.Format);
+			const FString Url = FString::Printf(TEXT("%s/i/%s/%s/asset-formats/%s"), FabRoot, FabRoutes[State.Route], *Uid, *State.Format);
 			if (!FabFetch(State, TEXT("GET"), Url, FabSessionHeaders(), Http))
 				return FUnrealMcpToolResult::RetryLater(TEXT("Reading the listing's files."));
 			const TSharedPtr<FJsonObject> Json = FabHttpOk(Http) ? FabParseObject(Http.Body) : nullptr;
 			if (!Json.IsValid())
 			{
-				if (++State.Route < State.RouteCandidates.Num())
+				if (++State.Route < UE_ARRAY_COUNT(FabRoutes))
 					return FUnrealMcpToolResult::RetryLater(TEXT("Reading the listing's files (library route)."));
 				return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Could not read the %s files of '%s': %s"), *State.Format, *Title,
 					*FabDescribeHttp(Http))));
@@ -1034,7 +1052,7 @@ namespace UnrealMcpFabToolsLocal
 		if (State.Stage == AddDownloadInfo)
 		{
 			FFabHttpResult Http;
-			const FString Url = FString::Printf(TEXT("%s/i/%s/%s/asset-formats/%s/files/%s/download-info"), FabRoot, *State.RouteCandidates[State.Route],
+			const FString Url = FString::Printf(TEXT("%s/i/%s/%s/asset-formats/%s/files/%s/download-info"), FabRoot, FabRoutes[State.Route],
 				*Uid, *State.Format, *State.FileUid);
 			if (!FabFetch(State, TEXT("GET"), Url, FabSessionHeaders(), Http))
 				return FUnrealMcpToolResult::RetryLater(TEXT("Requesting the download."));
@@ -1042,11 +1060,8 @@ namespace UnrealMcpFabToolsLocal
 			const TArray<TSharedPtr<FJsonValue>>* Infos = nullptr;
 			if (!Json.IsValid() || !Json->TryGetArrayField(TEXT("downloadInfo"), Infos) || Infos->IsEmpty())
 			{
-				if (State.Route + 1 < State.RouteCandidates.Num())
-				{
-					++State.Route;
+				if (++State.Route < UE_ARRAY_COUNT(FabRoutes))
 					return FUnrealMcpToolResult::RetryLater(TEXT("Requesting the download (library route)."));
-				}
 				if (Http.Code == 401)
 					FabSessionCache() = FFabSession(); // a stale session: the next call opens a new one
 				return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Fab did not give a download for '%s' (%s). The user must own it: "
@@ -1054,14 +1069,7 @@ namespace UnrealMcpFabToolsLocal
 					*FabListingUrl(Uid))));
 			}
 			const TSharedPtr<FJsonObject> Info = (*Infos)[0]->AsObject();
-			State.DownloadUrl = Info->GetStringField(TEXT("downloadUrl"));
-			State.DistributionPoints.Reset();
-			const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
-			if (Info->TryGetArrayField(TEXT("distributionPointBaseUrls"), Points))
-			{
-				for (const TSharedPtr<FJsonValue>& Point : *Points)
-					State.DistributionPoints.Add(Point->AsString());
-			}
+			const FString DownloadUrl = Info->GetStringField(TEXT("downloadUrl"));
 
 			// The Fab panel's own "Add to Project": UFabBrowserApi::AddToProject picks the pack / Megascans / Interchange workflow.
 			TSharedPtr<FJsonObject> Metadata = MakeShared<FJsonObject>();
@@ -1071,10 +1079,9 @@ namespace UnrealMcpFabToolsLocal
 			Metadata->SetStringField(TEXT("ListingType"), State.Listing->GetStringField(TEXT("listingType")));
 			Metadata->SetStringField(TEXT("AssetNamespace"), TEXT("fab"));
 			Metadata->SetBoolField(TEXT("IsQuixel"), FabIsQuixel(*State.Listing) && State.Format != TEXT("unreal-engine"));
-			TArray<TSharedPtr<FJsonValue>> PointValues;
-			for (const FString& Point : State.DistributionPoints)
-				PointValues.Add(MakeShared<FJsonValueString>(Point));
-			Metadata->SetArrayField(TEXT("DistributionPointBaseUrls"), PointValues);
+			const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+			Metadata->SetArrayField(TEXT("DistributionPointBaseUrls"),
+				Info->TryGetArrayField(TEXT("distributionPointBaseUrls"), Points) ? *Points : TArray<TSharedPtr<FJsonValue>>());
 
 			State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 			bool bFilled = false;
@@ -1084,7 +1091,7 @@ namespace UnrealMcpFabToolsLocal
 				const FStructProperty* MetaParam = CastField<FStructProperty>(Function->FindPropertyByName(TEXT("AssetMetadata")));
 				if (!UrlParam || !MetaParam)
 					return;
-				UrlParam->SetPropertyValue_InContainer(Params, State.DownloadUrl);
+				UrlParam->SetPropertyValue_InContainer(Params, DownloadUrl);
 				bFilled = FJsonObjectConverter::JsonObjectToUStruct(Metadata.ToSharedRef(), MetaParam->Struct,
 					MetaParam->ContainerPtrToValuePtr<void>(Params));
 			}, [](UFunction*, uint8*) {});
@@ -1099,7 +1106,8 @@ namespace UnrealMcpFabToolsLocal
 
 		// AddImport: the workflow records the listing in UFabLocalAssets when it is done.
 		const FString Path = FabImportedPath(Uid);
-		if (!Path.IsEmpty() && (State.StageStarted <= 0.0 || FPlatformTime::Seconds() - State.StageStarted > 0.5))
+		// (A reimport rewrites the record it already has: the half second keeps the old one from counting as done.)
+		if (!Path.IsEmpty() && FPlatformTime::Seconds() - State.StageStarted > 0.5)
 			return FabAddDone(Call, Uid, Title, Path, false);
 		const FString Errors = FabImportErrors(State.LogSequence, Uid, Title);
 		if (!Errors.IsEmpty())
