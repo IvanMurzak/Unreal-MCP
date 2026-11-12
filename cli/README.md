@@ -2,7 +2,7 @@
   <h1>Unreal MCP — <i>CLI</i></h1>
 
 [![npm](https://img.shields.io/npm/v/unreal-mcp-cli?label=npm&labelColor=333A41 'npm package')](https://www.npmjs.com/package/unreal-mcp-cli)
-[![Node.js](https://img.shields.io/badge/Node.js-%5E20.19.0%20%7C%7C%20%3E%3D22.12.0-5FA04E?logo=nodedotjs&labelColor=333A41 'Node.js')](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.14.0-5FA04E?logo=nodedotjs&labelColor=333A41 'Node.js')](https://nodejs.org/)
 [![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
 [![Website](https://img.shields.io/badge/website-ai--game.dev-bc6c25?labelColor=333A41)](https://ai-game.dev)
 [![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
@@ -71,7 +71,7 @@ npm i -g unreal-mcp-cli
 unreal-mcp-cli status
 ```
 
-> **Requirements:** [Node.js](https://nodejs.org/) `^20.19.0 || >=22.12.0`.
+> **Requirements:** [Node.js](https://nodejs.org/) 22.14 or later.
 
 > **Plugin distribution.** For end users, the **recommended** way to install the UnrealMCP plugin
 > itself is **Fab / Epic Marketplace** (precompiled per-engine binaries, auto-updated by the Epic

@@ -61,7 +61,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 
 - **UE plugin** (`UnrealMCP/**`): see [`UnrealMCP/AGENTS.md`](UnrealMCP/AGENTS.md).
 - **bridge** (`bridge/**`): `dotnet restore|build|test bridge/Unreal-MCP-Bridge.sln` (Debug; `--no-restore` / `--no-build`).
-- **cli** (`cli/**`, Node 20.19+/22.12+): `cd cli && npm install && npm run build && npm test`.
+- **cli** (`cli/**`, Node 22.14+): `cd cli && npm install && npm run build && npm test`.
 - **Live bridge e2e** (any tool-family change): server ⇄ bridge ⇄ headless editor over HTTP. Boot the
   editor with `UNREAL_MCP_BRIDGE_PATH`, `UNREAL_MCP_HOST=http://localhost:<port>` **and**
   `UNREAL_MCP_CONNECTION_MODE=Custom` (without it the sidecar dials Cloud and the server returns HTTP 500
@@ -109,7 +109,7 @@ handshake is independent of it. NuGet pins: see `bridge/AGENTS.md`.
 ## CI
 
 `test_pull_request.yml` (`test-pull-request`) on PRs into `main`: bridge build + xUnit (ubuntu + windows),
-`test-cli` on Node 20 and 22 (`test_cli.yml`), and two UE jobs — `plugin BuildPlugin + Automation` and
+`test-cli` on Node 22, 24 and 26 (`test_cli.yml`), and two UE jobs — `plugin BuildPlugin + Automation` and
 `connection + tool smoke` (matrix `ue`: plugin `['5.5', '5.6', '5.7', '5.8']` like `release.yml`, smoke
 `['5.8']`; `UE_ROOT` resolved per runner by the `.github/actions/ue-env` action). UE jobs run on self-hosted
 runners that carry the engine's label (e.g. `unreal-5-8`): PR `plugin` and `connection-smoke` on any OS

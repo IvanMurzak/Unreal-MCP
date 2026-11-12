@@ -51,8 +51,8 @@ npm/tag/Release/Discord job.
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 20/22, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. A PR changing only `docs/**` and the root `AGENTS.md` skips the legs and stays green through the `docs-only gate` job (`.github/scripts/docs-only.mjs`); a dispatch or a `train/` label always runs in full. |
-| `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 20 & 22. Called by both `test_pull_request.yml` and `release.yml`. |
+| `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 22/24/26, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. A PR changing only `docs/**` and the root `AGENTS.md` skips the legs and stays green through the `docs-only gate` job (`.github/scripts/docs-only.mjs`); a dispatch or a `train/` label always runs in full. |
+| `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 22, 24 & 26. Called by both `test_pull_request.yml` and `release.yml`. |
 | `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI installs and an executable-free **Fab** asset, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
