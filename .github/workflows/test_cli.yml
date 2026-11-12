@@ -7,7 +7,7 @@
 # └──────────────────────────────────────────────────────────────────┘
 
 # Reusable workflow: build + test the unreal-mcp-cli npm package (cli/) on a
-# Node 20 & 22 matrix. Mirrors Unity-MCP / Godot-MCP test_cli.yml. Called by
+# Node 22, 24 & 26 matrix. Mirrors Unity-MCP / Godot-MCP test_cli.yml. Called by
 # both test_pull_request.yml (PR signal) and release.yml (pre-publish gate).
 #
 # Chain leg (node `unreal-mcp`, job `test-cli`, scope `--edges npm`): a reusable
