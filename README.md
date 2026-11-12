@@ -88,7 +88,7 @@ Unlike Unity and Godot (C# engines that host the .NET `McpPlugin` in-process), U
 
 - **Unreal Engine 5.5+** (developed and CI-tested against **5.7**, and verified to build & run on **5.8**). The plugin deliberately ships **no `EngineVersion` pin** — UE treats that field as an exact-build match, not a floor, and would refuse to load on newer engines.
 - **.NET 9 SDK** to build the bridge sidecar **from source**. (End users of a packaged release do NOT need it — the self-contained sidecar is bundled inside the plugin and auto-spawned, ARCHITECTURE §6. The local MCP server is downloaded as a prebuilt [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) release binary, never built here.)
-- **Node.js** `^20.19.0 || >=22.12.0` for the optional `unreal-mcp-cli`.
+- **Node.js** 22.14 or later for the optional `unreal-mcp-cli`.
 - A **C++ Unreal project** (the plugin builds an Editor module, so the host project must be able to compile C++).
 
 ![AI Game Developer — Unreal MCP](https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)

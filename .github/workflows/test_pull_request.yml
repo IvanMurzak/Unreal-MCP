@@ -10,7 +10,7 @@
 # three-leg mono-repo — docs/ARCHITECTURE.md §9.3/§9.4). Fans out with fail-fast
 # disabled so every leg reports independently:
 #   (a) bridge  — dotnet build + xUnit on hosted ubuntu-latest + windows-latest
-#   (b) cli     — unreal-mcp-cli node 20/22 tests via the reusable test_cli.yml
+#   (b) cli     — unreal-mcp-cli node 22/24/26 tests via the reusable test_cli.yml
 #   (c) plugin  — UE 5.5–5.8 BuildPlugin + Automation specs (UnrealMcp. filter) on a
 #                 SELF-HOSTED runner of any OS (Windows, macOS, Linux) labelled
 #                 `unreal-<major>-<minor>` (e.g. `unreal-5-8`)
@@ -233,7 +233,7 @@ jobs:
           # A few-KB JSON leg record; whoever dispatched the chain run collects it right after the run.
           retention-days: 1
 
-  # (b) cli — unreal-mcp-cli node tests (Node 20 & 22) via the reusable workflow.
+  # (b) cli — unreal-mcp-cli node tests (Node 22, 24 & 26) via the reusable workflow.
   # A reusable workflow does not inherit this workflow's `env`, so the chain lock is
   # forwarded as inputs (both empty on an ordinary run).
   test-cli:
