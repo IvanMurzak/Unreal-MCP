@@ -65,6 +65,10 @@ def panel(w, h, body, label, extra_css="", haze=True):
     <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#A8C2D2" fill-opacity="0.08"/></pattern>
     <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{RED}" stop-opacity="0"/><stop offset="0.3" stop-color="#FF2448" stop-opacity="0.6"/><stop offset="0.7" stop-color="{BLUE2}" stop-opacity="0.55"/><stop offset="1" stop-color="{BLUE2}" stop-opacity="0"/></linearGradient>
     <linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0C1620"/><stop offset="1" stop-color="#070D14"/></linearGradient>
+    <linearGradient id="logoL" gradientUnits="userSpaceOnUse" x1="512" y1="190" x2="512" y2="785"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#8395AD"/></linearGradient>
+    <linearGradient id="logoR" gradientUnits="userSpaceOnUse" x1="512" y1="190" x2="512" y2="785"><stop offset="0" stop-color="#E1E8F1"/><stop offset="1" stop-color="#455974"/></linearGradient>
+    <linearGradient id="logoB" gradientUnits="userSpaceOnUse" x1="512" y1="190" x2="512" y2="785"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#AABBD0"/></linearGradient>
+    <radialGradient id="logoGlow"><stop offset="0" stop-color="#6FA8D0" stop-opacity=".18"/><stop offset="1" stop-color="#6FA8D0" stop-opacity="0"/></radialGradient>
     <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{RED_TEXT}"/><stop offset="1" stop-color="{BLUE}"/></linearGradient>
     <clipPath id="frame"><rect width="{w}" height="{h}" rx="18"/></clipPath>
   </defs>
@@ -126,16 +130,24 @@ def wire(d, color=BLUE, dur=2.4, begin=0.0, reverse=False):
             f'<circle r="4" fill="{color}"><animateMotion dur="{dur}s" begin="-{begin}s" repeatCount="indefinite"{kp}><mpath href="#{pid}"/></animateMotion></circle>')
 
 
+def logo(cx, cy, size=120):
+    """The AI Game Dev brand mark (the 'vertex' logo of the desktop app, packages/desktop/src/assets/logo.svg),
+    centred at (cx, cy), `size` px tall. Uses the logoL/logoR/logoB gradients defined by panel()."""
+    s = size / 650
+    tx, ty = cx - 512 * s, cy - 495 * s
+    return (f'<g transform="translate({tx:.2f} {ty:.2f}) scale({s:.4f})">'
+            '<path d="M512 194 L512 504 L366 785 L185 785 Z" fill="url(#logoL)"/>'
+            '<path d="M512 194 L839 785 L658 785 L512 504 Z" fill="url(#logoR)"/>'
+            '<path d="M512 194 L512 294 L223 767 L185 785 Z" fill="url(#logoB)"/></g>')
+
+
 def mark(cx, cy, size=120):
-    """Abstract brand-style mark: hexagon outline + diamond in the red→blue gradient, with slow orbit rings."""
-    s = size / 24
-    hexp = " ".join(f"{cx + (px - 12) * s},{cy + (py - 12) * s}" for px, py in [(12, 2), (21, 7), (21, 17), (12, 22), (3, 17), (3, 7)])
-    dia = " ".join(f"{cx + (px - 12) * s},{cy + (py - 12) * s}" for px, py in [(12, 7), (16, 12), (12, 17), (8, 12)])
-    r1, r2 = size * 0.78, size * 1.02
-    return (f'<circle class="spin" cx="{cx}" cy="{cy}" r="{r1}" fill="none" stroke="{RED_TEXT}" stroke-opacity=".35" stroke-dasharray="2 10"/>'
+    """Hero visual: the brand logo with slow red/blue orbit rings and a soft glow."""
+    r1, r2 = size * 0.95, size * 1.22
+    return (f'<circle cx="{cx}" cy="{cy}" r="{size * 0.9}" fill="url(#logoGlow)"/>'
+            f'<circle class="spin" cx="{cx}" cy="{cy}" r="{r1}" fill="none" stroke="{RED_TEXT}" stroke-opacity=".35" stroke-dasharray="2 10"/>'
             f'<circle class="spin r" cx="{cx}" cy="{cy}" r="{r2}" fill="none" stroke="{BLUE}" stroke-opacity=".25" stroke-dasharray="36 18"/>'
-            f'<g class="pulse"><polygon points="{hexp}" fill="{BG2}" stroke="url(#brand)" stroke-width="{1.6 * s}" stroke-linejoin="round"/>'
-            f'<polygon points="{dia}" fill="url(#brand)" opacity=".9"/></g>')
+            f'<g class="pulse">{logo(cx, cy, size * 1.25)}</g>')
 
 
 def hero(title, accent="", eyebrow_text="", subtitle=(), chip_items=(), right=None, w=1200, h=380, label=None):
@@ -151,7 +163,7 @@ def hero(title, accent="", eyebrow_text="", subtitle=(), chip_items=(), right=No
     return panel(w, h, body, label or f"{title}{accent} — {' '.join(subtitle)}")
 
 
-def terminal(lines, title="~/project", w=1200, label="A terminal session", hold=6.0, note_x=None, open_finished=False):
+def terminal(lines, title="~/project", w=1200, label="A terminal session", hold=6.0, note_x=None, open_finished=True):
     """Animated terminal in the site style. lines: list of dicts
         {"cmd": "unity-mcp-cli login"}                       typed command
         {"out": [("muted","Open "),("link","https://..."),("ok","✓ ")], "note": "deviceLogin()"}
