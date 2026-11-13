@@ -277,8 +277,9 @@ UNREAL_MCP_CLI_INTEGRATION=1 npm test
 # Supported AI Agents
 
 `unreal-mcp-cli setup-mcp <agent>` writes a ready-to-use MCP client config so your favorite AI coding
-agent can drive the Unreal Editor. Core support today: **Claude Code**, **Cursor**, and
-**VS Code (Copilot)** — with the shared AI Game Developer ecosystem below.
+agent can drive the Unreal Editor: Claude Code, Claude Desktop, Cursor, VS Code / Visual Studio Copilot, Rider (Junie),
+GitHub Copilot CLI, Gemini, Antigravity, Cline, OpenCode, Codex, Kilo Code, or a custom config. `setup-mcp --list`
+shows each agent's id and config path.
 
 <div align="center">
   <p>
@@ -290,17 +291,17 @@ agent can drive the Unreal Editor. Core support today: **Claude Code**, **Cursor
     <a href="https://antigravity.google/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/antigravity-64.png" alt="Antigravity" title="Antigravity" height="36"></a>&nbsp;&nbsp;
     <a href="https://code.visualstudio.com/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/vs-code-64.png" alt="VS Code" title="VS Code" height="36"></a>&nbsp;&nbsp;
     <a href="https://www.jetbrains.com/rider/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/rider-64.png" alt="Rider" title="Rider" height="36"></a>&nbsp;&nbsp;
-    <a href="https://github.com/anthropics/claude-code"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/open-code-64.png" alt="Open Code" title="Open Code" height="36"></a>&nbsp;&nbsp;
+    <a href="https://opencode.ai/"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/open-code-64.png" alt="Open Code" title="Open Code" height="36"></a>&nbsp;&nbsp;
     <a href="https://github.com/cline/cline"><img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/mcp-clients/cline-64.png" alt="Cline" title="Cline" height="36"></a>
   </p>
 </div>
 
 ```bash
-unreal-mcp-cli setup-mcp claude-code ./MyGame       # pinned <base>/mcp/p/<pin> URL (routes to this project)
-unreal-mcp-cli setup-mcp claude-code ./MyGame --no-pin   # bare, unpinned <base>/mcp URL instead
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame    # pinned <base>/mcp/p/<pin> URL (routes to this project)
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --no-pin   # bare, unpinned <base>/mcp URL instead
 unreal-mcp-cli setup-mcp claude-code -p ./MyGame --oauth           # URL-only; the agent signs in itself
 unreal-mcp-cli setup-mcp claude-code -p ./MyGame --regenerate-key  # new project key; the old one is revoked
-unreal-mcp-cli setup-mcp cursor ./MyGame --transport stdio
+unreal-mcp-cli setup-mcp cursor -p ./MyGame --transport stdio
 ```
 
 > For the full Unreal-MCP project documentation, see the

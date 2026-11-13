@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="Unreal MCP — let AI agents drive the Unreal Editor: Blueprints, C++, levels, assets and screenshots">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="0.55" stop-color="#111a33"/>
+      <stop offset="1" stop-color="#1a1238"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.5" stop-color="#a5b4fc"/>
+      <stop offset="1" stop-color="#e879f9"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#06b6d4" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.045"/>
+    </pattern>
+    <clipPath id="frame"><rect width="1200" height="340" rx="20"/></clipPath>
+    <path id="p1" d="M930 170 L800 78"/>
+    <path id="p2" d="M930 170 L1060 78"/>
+    <path id="p3" d="M930 170 L1100 170"/>
+    <path id="p4" d="M930 170 L1060 262"/>
+    <path id="p5" d="M930 170 L800 262"/>
+    <path id="p6" d="M930 170 L760 170"/>
+  </defs>
+  <style>
+    .sans { font-family: "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace; }
+    .ring { transform-origin: 930px 170px; animation: spin 28s linear infinite; }
+    .ring.r2 { animation-duration: 44s; animation-direction: reverse; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .pulse { transform-origin: 930px 170px; animation: pulse 3.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    .link { stroke-dasharray: 4 7; }
+    .caret { animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="340" fill="url(#bg)"/>
+    <rect width="1200" height="340" fill="url(#grid)"/>
+    <circle cx="930" cy="170" r="230" fill="url(#glow)"/>
+    <circle cx="160" cy="300" r="220" fill="url(#glow2)"/>
+
+    <!-- left: title block -->
+    <g class="sans">
+      <rect x="64" y="58" width="300" height="28" rx="14" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.12"/>
+      <circle cx="82" cy="72" r="4" fill="#34d399"><animate attributeName="opacity" values="1;.3;1" dur="2s" repeatCount="indefinite"/></circle>
+      <text x="94" y="77" font-size="13" fill="#cbd5e1" letter-spacing=".4">UNREAL ENGINE 5.5 – 5.8 · BETA</text>
+      <text x="62" y="146" font-size="54" font-weight="700" fill="url(#title)" letter-spacing="-1">Unreal MCP</text>
+      <text x="64" y="186" font-size="21" fill="#cbd5e1">Let Claude, Cursor, Copilot or any MCP agent</text>
+      <text x="64" y="214" font-size="21" fill="#cbd5e1">inspect and drive the Unreal Editor.</text>
+      <rect x="64" y="246" width="364" height="44" rx="10" fill="#020617" fill-opacity="0.7" stroke="#334155"/>
+      <text class="mono" x="84" y="274" font-size="16" fill="#94a3b8">$ <tspan fill="#e2e8f0">npm i -g </tspan><tspan fill="#67e8f9">unreal-mcp-cli</tspan></text>
+      <rect class="caret" x="336" y="259" width="8" height="18" fill="#67e8f9"/>
+    </g>
+
+    <!-- right: the plugin and what it reaches -->
+    <g fill="none" stroke-width="1.6">
+      <use href="#p1" class="link" stroke="#67e8f9" stroke-opacity=".7"/>
+      <use href="#p2" class="link" stroke="#a5b4fc" stroke-opacity=".7"/>
+      <use href="#p3" class="link" stroke="#e879f9" stroke-opacity=".7"/>
+      <use href="#p4" class="link" stroke="#34d399" stroke-opacity=".7"/>
+      <use href="#p5" class="link" stroke="#fbbf24" stroke-opacity=".7"/>
+      <use href="#p6" class="link" stroke="#818cf8" stroke-opacity=".7"/>
+    </g>
+    <g>
+      <circle r="3.5" fill="#67e8f9"><animateMotion dur="2.2s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
+      <circle r="3.5" fill="#a5b4fc"><animateMotion dur="2.6s" begin=".4s" repeatCount="indefinite"><mpath href="#p2"/></animateMotion></circle>
+      <circle r="3.5" fill="#e879f9"><animateMotion dur="2.4s" begin=".9s" repeatCount="indefinite"><mpath href="#p3"/></animateMotion></circle>
+      <circle r="3.5" fill="#34d399"><animateMotion dur="2.8s" begin=".2s" repeatCount="indefinite"><mpath href="#p4"/></animateMotion></circle>
+      <circle r="3.5" fill="#fbbf24"><animateMotion dur="2.5s" begin="1.2s" repeatCount="indefinite"><mpath href="#p5"/></animateMotion></circle>
+      <circle r="3.5" fill="#818cf8"><animateMotion dur="2.3s" begin=".6s" repeatCount="indefinite"><mpath href="#p6"/></animateMotion></circle>
+    </g>
+
+    <circle class="ring" cx="930" cy="170" r="72" fill="none" stroke="#a5b4fc" stroke-opacity=".35" stroke-dasharray="2 10"/>
+    <circle class="ring r2" cx="930" cy="170" r="92" fill="none" stroke="#67e8f9" stroke-opacity=".18" stroke-dasharray="30 14"/>
+    <g class="pulse">
+      <polygon points="930,118 975,144 975,196 930,222 885,196 885,144" fill="#0b1020" stroke="url(#core)" stroke-width="2.5"/>
+      <polygon points="930,132 963,151 963,189 930,208 897,189 897,151" fill="url(#core)" fill-opacity=".14"/>
+      <text class="mono" x="930" y="167" text-anchor="middle" font-size="14" font-weight="700" fill="#e2e8f0">UnrealMCP</text>
+      <text class="mono" x="930" y="186" text-anchor="middle" font-size="11" fill="#94a3b8">C++ plugin</text>
+    </g>
+
+    <g class="sans" font-size="14" font-weight="600">
+      <g transform="translate(800 78)"><rect x="-56" y="-17" width="112" height="34" rx="17" fill="#0f172a" stroke="#67e8f9" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">Levels</text></g>
+      <g transform="translate(1060 78)"><rect x="-60" y="-17" width="120" height="34" rx="17" fill="#0f172a" stroke="#a5b4fc" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">Blueprints</text></g>
+      <g transform="translate(1100 170)"><rect x="-50" y="-17" width="100" height="34" rx="17" fill="#0f172a" stroke="#e879f9" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">C++</text></g>
+      <g transform="translate(1060 262)"><rect x="-62" y="-17" width="124" height="34" rx="17" fill="#0f172a" stroke="#34d399" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">Screenshots</text></g>
+      <g transform="translate(800 262)"><rect x="-56" y="-17" width="112" height="34" rx="17" fill="#0f172a" stroke="#fbbf24" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">Assets</text></g>
+      <g transform="translate(760 170)"><rect x="-50" y="-17" width="100" height="34" rx="17" fill="#0f172a" stroke="#818cf8" stroke-opacity=".6"/><text y="5" text-anchor="middle" fill="#e2e8f0">Python</text></g>
+    </g>
+  </g>
+  <rect x=".5" y=".5" width="1199" height="339" rx="20" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+</svg>

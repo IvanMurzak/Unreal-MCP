@@ -9,7 +9,7 @@ The MCP server is the shared [GameDev-MCP-Server](https://github.com/IvanMurzak/
 **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is authoritative** (defer to it on conflict; read the
 relevant section before non-trivial work): IPC §1, tool registration §2, schema §3, dispatcher §4,
 extensions §5, sidecar §6, UI §7, config §8, repo/CI §9, roadmap §10, risks §11, runtime §12, prompts &
-resources §A. Other docs: [`README.md`](README.md) (users; canonical tool inventory),
+resources §A. Other docs: [`README.md`](README.md) (users), [`docs/TOOLS.md`](docs/TOOLS.md) (canonical tool inventory),
 [`docs/RELEASING.md`](docs/RELEASING.md), [`docs/EXTENSIONS.md`](docs/EXTENSIONS.md) (extension
 authors), [`docs/RUNTIME-E2E.md`](docs/RUNTIME-E2E.md) (in-game walkthrough).
 
@@ -72,7 +72,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 ## Tool / prompt / resource surface
 
 Built-in editor tools come in 8 families (Fab: `fab-search` / `fab-library` / `fab-add` reach the engine Fab plugin only by reflection, never link it; Python: `python-execute`, PythonScriptPlugin + the Code-Exec runtime vendored in
-`UnrealMCP/Content/Python/Lib/site-packages/code_exec` — copy it from IvanMurzak/Code-Exec, never edit it here); the README holds the canonical, source-generated inventory. The editor
+`UnrealMCP/Content/Python/Lib/site-packages/code_exec` — copy it from IvanMurzak/Code-Exec, never edit it here); [`docs/TOOLS.md`](docs/TOOLS.md) holds the canonical, source-generated inventory. The editor
 data layer is RQL ([`docs/rql.md`](docs/rql.md)): `rql-query` / `rql-mutate` / `rql-schema` (module `UnrealMcpRql`;
 the sidecar parses the query text, the vendored C++ runtime executes the plan) — add editor data access as RQL members,
 sources or operations (or an extension's `IUnrealMcpRqlModule`), not as new per-operation tools.

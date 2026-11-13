@@ -16,7 +16,7 @@
 This document is the authoritative **design**; the M10 feature set has now shipped and this block
 reconciles the design with the implementation. Each numbered section is marked with the PR(s) that
 delivered it. Identifiers below (tool ids, command names, env vars, paths) were verified against
-`main` source; the README carries the user-facing, source-generated tool list.
+`main` source; [TOOLS.md](TOOLS.md) carries the user-facing, source-generated tool list.
 
 | Section | Status | Shipped by |
 |---|---|---|
@@ -1410,7 +1410,7 @@ type right; if it cannot, every `python-execute` result carries a warning saying
 
 Sections 0-11 describe the editor-only plugin. §12 adds runtime MCP (PIE, Standalone, packaged
 Development/Shipping) at Unity-MCP parity (Unity's `UnityMcpPluginRuntime.Initialize().Build().Connect()`,
-README "Runtime usage (in-game)"). Three locked decisions: (a) reuse the .NET sidecar (no in-process
+[RUNTIME.md](RUNTIME.md)). Three locked decisions: (a) reuse the .NET sidecar (no in-process
 C++ server); (b) new `UnrealMcpRuntime` module (Type Runtime) holds engine-agnostic machinery +
 runtime-safe tools, `UnrealMcpEditor` depends on it; (c) runtime connect is explicit opt-in — never
 auto-connect in a shipped game.
@@ -1629,8 +1629,8 @@ in *their own* `.uproject` reference: `{ "Name": "UnrealMCP", "Enabled": true, "
 `RuntimeDependencies` (§12.5) are excluded from packaged `Game`/`Client`/`Server` builds entirely — zero
 compiled footprint. This is a **consumer-side** opt-out (not a plugin default, since the plugin must stay
 runtime-shippable for §12.7 in-game usage); a direct `*.Build.cs` dependency on an `UnrealMcp*` module
-from a game module overrides the deny-list. See README → [Editor-only — exclude Unreal-MCP from packaged
-games](../README.md#editor-only-exclude-from-packaged-games) for the full recipe and caveat.
+from a game module overrides the deny-list. See [RUNTIME.md → Editor-only — exclude Unreal-MCP from packaged
+games](RUNTIME.md#editor-only-exclude-from-packaged-games) for the full recipe and caveat.
 
 ### 12.9 Runtime extension tool registration
 `IModularFeatures` (§5) is runtime-available — `IUnrealMcpToolProvider` works identically at runtime; the
