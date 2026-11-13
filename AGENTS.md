@@ -2,7 +2,7 @@
 
 Unreal-MCP connects MCP clients (Claude, Cursor, Copilot, …) to [Unreal Engine](https://www.unrealengine.com/)
 — the Unreal sibling of Unity-MCP and Godot-MCP. **Editor mode** (default) drives the Unreal Editor;
-opt-in **runtime mode** drives a running PIE / Standalone / packaged Development build. Status: beta.
+opt-in **runtime mode** drives a running PIE / Standalone / packaged Development build.
 The MCP server is the shared [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server)
 (`gamedev-mcp-server`); **no server code lives here** — server changes go to that repo.
 

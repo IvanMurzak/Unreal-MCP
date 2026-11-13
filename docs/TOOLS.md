@@ -1,38 +1,29 @@
 # Unreal-MCP tools
 
-The canonical inventory of the tools the **UnrealMCP** editor plugin registers. Unreal-MCP ships
-**30 built-in tools in 8 families** that your AI agent can call, plus **4 system tools** it cannot (host
-plumbing for the CLI and the desktop app). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), the same
-convention as Unity-MCP and Godot-MCP. [Extensions](#extensions) and [your own plugins](EXTENSIONS.md) add more.
+The canonical inventory of the tools the **UnrealMCP** editor plugin registers. Unreal-MCP ships **30 built-in tools in 8 families** that your AI agent can call, plus **4 system tools** it cannot (host plumbing for the CLI and the desktop app). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), the same convention as Unity-MCP and Godot-MCP. [Extensions](#extensions) and [your own plugins](EXTENSIONS.md) add more.
 
 | Family | Tools | Count |
 | --- | --- | ---: |
 | RQL data layer | `rql-query`, `rql-mutate`, `rql-schema` | 3 |
-| Blueprint | `blueprint-create`, `-get`, `-add-component`, `-remove-component`, `-add-variable`, `-modify-variable`, `-set-default`, `-add-function`, `-add-event`, `-compile`, `-spawn` | 11 |
-| Source / C++ | `source-read`, `-create-class`, `-update`, `-delete`, `-list`, `-compile` | 6 |
-| Screenshot | `screenshot-viewport`, `-game-view`, `-camera`, `-isolated` | 4 |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
+| Source / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
+| Screenshot | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
 | Fab | `fab-search`, `fab-library`, `fab-add` | 3 |
 | Console | `console-run-command` | 1 |
 | Python | `python-execute` | 1 |
 | Tool list | `unreal-tool-list` | 1 |
 | **System** (not shown to the AI) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` | 4 |
 
-> Generated from the standard-surface registration sources: `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/UnrealMcp*Tools.cpp`
-> (excluding `UnrealMcpSkillTools.cpp`, a system tool) and `UnrealMCP/Source/UnrealMcpRql/Private/UnrealMcpRqlTools.cpp`.
-> System tools: `UnrealMcpPingTool.cpp` (runtime module), `UnrealMcpSkillTools.cpp`, `Session/UnrealMcpEditorSession.cpp`
-> and the sidecar's `bridge/src/Tools/SkillGenerateTool.cs`. Update this page when a registration changes.
+> **Source of truth.** Standard tools: `UnrealMcp*Tools.cpp` in `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` (except `UnrealMcpSkillTools.cpp`) and `UnrealMcpRqlTools.cpp` in `UnrealMcpRql`. System tools: `UnrealMcpPingTool.cpp`, `UnrealMcpSkillTools.cpp`, `UnrealMcpEditorSession.cpp` and the sidecar's `SkillGenerateTool.cs`. Update this page when a registration changes.
 
-All 30 standard tools are **editor-only**. A runtime (in-game) connection serves only `ping` plus the tools your game
-registers: see [RUNTIME.md](RUNTIME.md).
+All 30 standard tools are **editor-only**. A runtime (in-game) connection serves only `ping` plus the tools your game registers: see [RUNTIME.md](RUNTIME.md).
 
 ## Families in detail
 
 <details>
   <summary><b>RQL — the data layer (3)</b></summary>
 
-One query language for the whole editor instead of one tool per operation ([`docs/rql.md`](rql.md)): find actors,
-components and assets, read members, filter, aggregate, and change them in one call. It replaces the former actor,
-object, asset, level, editor-state, selection, console-log and reflection tools.
+One query language for the whole editor instead of one tool per operation ([`docs/rql.md`](rql.md)): find actors, components and assets, read members, filter, aggregate, and change them in one call. It replaces the former actor, object, asset, level, editor-state, selection, console-log and reflection tools.
 
 | Tool id | What it does |
 | --- | --- |
@@ -40,10 +31,7 @@ object, asset, level, editor-state, selection, console-log and reflection tools.
 | `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews |
 | `rql-schema` | Sources, functions and the classes in the editor world; `type` lists one type's members and methods |
 
-Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text
-(`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`)
-Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint
-trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`).
+Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`) Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`).
 
 The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language and lists what installed extensions add.
 
@@ -75,11 +63,7 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 | --- | --- |
 | `console-run-command` | Run a console command / CVar |
 
-Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`,
-`editor | set Selection = [...]`. Play testing simulates the game inside the call (deterministic, independent of the
-editor ticking between calls): `editor | call StartPlay()`, `editor | call AdvancePlay(1.5, 0, "W, LeftShift")` (holds keys
-for 1.5 s, returns the pawn's location, velocity, how far the call moved it, movement mode and applied mapping contexts), `editor | call StopPlay()`;
-the Enhanced Input extension adds `enhancedInput | call InjectInput(action, value, seconds)` ([docs/rql.md](rql.md#play-testing)).
+Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"`, `editor | set IsPlaying = true`, `editor | set Selection = [...]`. Play testing simulates the game inside the call (deterministic, independent of the editor ticking between calls): `editor | call StartPlay()`, `editor | call AdvancePlay(1.5, 0, "W, LeftShift")` (holds keys for 1.5 s, returns the pawn's location, velocity, how far the call moved it, movement mode and applied mapping contexts), `editor | call StopPlay()`; the Enhanced Input extension adds `enhancedInput | call InjectInput(action, value, seconds)` ([docs/rql.md](rql.md#play-testing)).
 
 </details>
 
@@ -99,9 +83,7 @@ the Enhanced Input extension adds `enhancedInput | call InjectInput(action, valu
 | --- | --- |
 | `python-execute` | Run Python in the editor (full `unreal` API, pre-imported): plain statements, the last expression is the result, `print` comes back as logs, errors point at `snippet.py` lines; `include` adds helper files/folders from `<Project>/.ai-game-dev/snippets`; `timeout` (seconds, default 30) stops a runaway snippet |
 
-Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never in a packaged game) and the
-[Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime vendored in `UnrealMCP/Content/Python`. Blueprint graph
-wiring is not exposed to Python: use the Blueprint tools for that.
+Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never in a packaged game) and the [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime vendored in `UnrealMCP/Content/Python`. Blueprint graph wiring is not exposed to Python: use the Blueprint tools for that.
 
 </details>
 
@@ -114,10 +96,7 @@ wiring is not exposed to Python: use the Blueprint tools for that.
 | `fab-library` | List the Fab assets the signed-in user owns, with where each is already imported; `filter` searches the whole library |
 | `fab-add` | Download a listing the user owns and import it like the Fab panel's *Add to Project* (Unreal Engine packs, Megascans with `quality`, glTF/FBX); returns the content folder, skips listings already in the project |
 
-They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic sign-in and its import workflows. The
-first `fab-library` / `fab-add` without a sign-in opens Epic's sign-in page in the browser (opening Fab from the
-editor's toolbar also signs in, from a remembered Epic login). Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code
-plugins are installed from the Epic Games Launcher, not added to a project.
+They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic sign-in and its import workflows. The first `fab-library` / `fab-add` without a sign-in opens Epic's sign-in page in the browser (opening Fab from the editor's toolbar also signs in, from a remembered Epic login). Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code plugins are installed from the Epic Games Launcher, not added to a project.
 
 </details>
 
@@ -154,9 +133,7 @@ Captures return a base64 **PNG as MCP image content** so the LLM can inspect the
 <details>
   <summary><b>System tools (4) — NOT exposed to your AI</b></summary>
 
-These are **system tools**: host plumbing the `unreal-mcp-cli` and the desktop app drive directly over
-`POST /api/system-tools/<name>`. They are deliberately absent from MCP `tools/list`, so they never appear
-to (or spend tokens in) an AI session — the same split Unity and Godot use for their system tools.
+These are **system tools**: host plumbing the `unreal-mcp-cli` and the desktop app drive directly over `POST /api/system-tools/<name>`. They are deliberately absent from MCP `tools/list`, so they never appear to (or spend tokens in) an AI session — the same split Unity and Godot use for their system tools.
 
 | Tool id | What it does |
 | --- | --- |
@@ -175,16 +152,16 @@ Install an extension when your project uses one of the engine systems below, or 
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Extensions are beta and need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same project, and a C++ toolchain: releases ship as source and compile for your project (on next editor open, or now with `--build`). The install options (`--version`, `--build`, offline `--source`) are in [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
+Extensions need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same project, and a C++ toolchain: releases ship as source and compile for your project (on next editor open, or now with `--build`). The install id is `com.ivanmurzak.unreal-ai-<id>` with the id from the table. Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
 
-| Extension | Install id | Description |
+| Extension | Id | Description |
 | --- | --- | --- |
-| **[AI ControlRig](../extensions/UnrealAIControlRig/README.md)** | `com.ivanmurzak.unreal-ai-control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
-| **[AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md)** | `com.ivanmurzak.unreal-ai-enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
-| **[AI GAS](../extensions/UnrealAIGAS/README.md)** | `com.ivanmurzak.unreal-ai-gas` | Gameplay Ability System authoring without C++: effects (cost, cooldown, damage, regeneration), ability Blueprints, ability system components with a ready-made Health / Mana / Stamina attribute set, input bindings, Play In Editor checks |
-| **[AI Landscape](../extensions/UnrealAILandscape/README.md)** | `com.ivanmurzak.unreal-ai-landscape` | Landscape and Water: create, sculpt and paint landscapes; create oceans, lakes and rivers; query landscapes, water bodies and water zones |
-| **[AI Niagara](../extensions/UnrealAINiagara/README.md)** | `com.ivanmurzak.unreal-ai-niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
-| **[AI PCG](../extensions/UnrealAIPCG/README.md)** | `com.ivanmurzak.unreal-ai-pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |
+| **[AI&nbsp;Control&nbsp;Rig](../extensions/UnrealAIControlRig/README.md)** | `control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
+| **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)** | `enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
+| **[AI GAS](../extensions/UnrealAIGAS/README.md)** | `gas` | Gameplay Ability System authoring without C++: effects (cost, cooldown, damage, regeneration), ability Blueprints, ability system components with a ready-made Health / Mana / Stamina attribute set, input bindings, Play In Editor checks |
+| **[AI Landscape](../extensions/UnrealAILandscape/README.md)** | `landscape` | Landscape and Water: create, sculpt and paint landscapes; create oceans, lakes and rivers; query landscapes, water bodies and water zones |
+| **[AI Niagara](../extensions/UnrealAINiagara/README.md)** | `niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
+| **[AI PCG](../extensions/UnrealAIPCG/README.md)** | `pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |
 
 ## Per-tool visibility
 

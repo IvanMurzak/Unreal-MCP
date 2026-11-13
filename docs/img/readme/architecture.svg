@@ -1,113 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="How it works: an AI agent talks MCP to the server (ai-game.dev cloud or a local gamedev-mcp-server); the server relays over SignalR to the unreal-mcp-bridge .NET sidecar, which reaches the UnrealMCP C++ plugin inside the Unreal Editor over loopback TCP">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-label="An AI agent talks MCP to the server (ai-game.dev cloud or a local gamedev-mcp-server); the server relays over SignalR to the unreal-mcp-bridge .NET sidecar, which reaches the UnrealMCP C++ plugin in the Unreal Editor over loopback TCP. 30 built-in tools in 8 families.">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0b1020"/>
-      <stop offset="1" stop-color="#151036"/>
-    </linearGradient>
-    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#22d3ee"/>
-      <stop offset="1" stop-color="#d946ef"/>
-    </linearGradient>
-    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#ffffff" fill-opacity=".06"/>
-    </pattern>
-    <clipPath id="frame"><rect width="1200" height="400" rx="20"/></clipPath>
-    <!-- request paths (left to right) and reply paths (right to left) -->
-    <path id="a1" d="M260 132 L340 132"/><path id="b1" d="M340 152 L260 152"/>
-    <path id="a2" d="M560 132 L640 132"/><path id="b2" d="M640 152 L560 152"/>
-    <path id="a3" d="M860 132 L940 132"/><path id="b3" d="M940 152 L860 152"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#080F17"/><stop offset="1" stop-color="#030609"/></linearGradient>
+    <radialGradient id="hzR" cx="0.18" cy="0" r="0.6"><stop offset="0" stop-color="#FF002A" stop-opacity="0.16"/><stop offset="1" stop-color="#FF002A" stop-opacity="0"/></radialGradient>
+    <radialGradient id="hzB" cx="0.85" cy="0" r="0.6"><stop offset="0" stop-color="#3B9BFF" stop-opacity="0.14"/><stop offset="1" stop-color="#3B9BFF" stop-opacity="0"/></radialGradient>
+    <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#A8C2D2" fill-opacity="0.08"/></pattern>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FF002A" stop-opacity="0"/><stop offset="0.3" stop-color="#FF2448" stop-opacity="0.6"/><stop offset="0.7" stop-color="#3B9BFF" stop-opacity="0.55"/><stop offset="1" stop-color="#3B9BFF" stop-opacity="0"/></linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0C1620"/><stop offset="1" stop-color="#070D14"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF5A73"/><stop offset="1" stop-color="#6FA8D0"/></linearGradient>
+    <clipPath id="frame"><rect width="1200" height="480" rx="18"/></clipPath>
   </defs>
   <style>
-    .sans { font-family: "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; }
-    .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace; }
-    .head { font-size: 12px; letter-spacing: 2px; fill: #64748b; font-weight: 700; }
-    .card { fill: #0f172a; stroke: #1e293b; }
-    .t1 { font-size: 15px; font-weight: 600; fill: #e2e8f0; }
-    .t2 { font-size: 12px; fill: #94a3b8; }
-    .wl { font-size: 12px; font-weight: 700; fill: #cbd5e1; }
-    .ws { font-size: 11px; fill: #64748b; }
-    .wire { fill: none; stroke-width: 1.6; stroke-dasharray: 4 6; }
-    .chip .box { fill: #111c35; stroke: #273454; }
-    .chip text { font-size: 12px; fill: #cbd5e1; }
-    .chip .hl { fill: #22d3ee; fill-opacity: .1; stroke: #67e8f9; stroke-width: 1.4; opacity: 0; animation: hl 8s ease-in-out infinite; }
-    @keyframes hl { 0%, 14%, 100% { opacity: 0; } 4%, 9% { opacity: 1; } }
-    .c2 .hl { animation-delay: 1s; } .c3 .hl { animation-delay: 2s; } .c4 .hl { animation-delay: 3s; }
-    .c5 .hl { animation-delay: 4s; } .c6 .hl { animation-delay: 5s; } .c7 .hl { animation-delay: 6s; } .c8 .hl { animation-delay: 7s; }
+    .s { font-family: Inter, 'Segoe UI', system-ui, -apple-system, Helvetica, Arial, sans-serif; } .m { font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, Menlo, monospace; white-space: pre; }
+    .pulse { animation: pulse 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes pulse { 0%,100% { opacity: .85; transform: scale(1); } 50% { opacity: 1; transform: scale(1.04); } }
+    .spin { animation: spin 40s linear infinite; transform-box: fill-box; transform-origin: center; }
+    .spin.r { animation-duration: 60s; animation-direction: reverse; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .blink { animation: blink 1.1s steps(1) infinite; } @keyframes blink { 50% { opacity: 0; } }
+    
     @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
   </style>
-
-  <g clip-path="url(#frame)" class="sans">
-    <rect width="1200" height="400" fill="url(#bg)"/>
-    <rect width="1200" height="400" fill="url(#dots)"/>
-
-    <text x="40" y="54" class="head">AI AGENT</text>
-    <text x="340" y="54" class="head">MCP SERVER</text>
-    <text x="640" y="54" class="head">SIDECAR</text>
-    <text x="940" y="54" class="head">UNREAL EDITOR</text>
-
-    <!-- wires -->
-    <g>
-      <use href="#a1" class="wire" stroke="#22d3ee"/><use href="#b1" class="wire" stroke="#e879f9"/>
-      <use href="#a2" class="wire" stroke="#22d3ee"/><use href="#b2" class="wire" stroke="#e879f9"/>
-      <use href="#a3" class="wire" stroke="#22d3ee"/><use href="#b3" class="wire" stroke="#e879f9"/>
-    </g>
-    <g>
-      <circle r="3.5" fill="#67e8f9"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#a1"/></animateMotion></circle>
-      <circle r="3.5" fill="#67e8f9"><animateMotion dur="1.6s" begin=".5s" repeatCount="indefinite"><mpath href="#a2"/></animateMotion></circle>
-      <circle r="3.5" fill="#67e8f9"><animateMotion dur="1.6s" begin="1s" repeatCount="indefinite"><mpath href="#a3"/></animateMotion></circle>
-      <circle r="3.5" fill="#f0abfc"><animateMotion dur="1.6s" begin=".8s" repeatCount="indefinite"><mpath href="#b3"/></animateMotion></circle>
-      <circle r="3.5" fill="#f0abfc"><animateMotion dur="1.6s" begin="1.3s" repeatCount="indefinite"><mpath href="#b2"/></animateMotion></circle>
-      <circle r="3.5" fill="#f0abfc"><animateMotion dur="1.6s" begin="1.8s" repeatCount="indefinite"><mpath href="#b1"/></animateMotion></circle>
-    </g>
-    <text x="300" y="118" text-anchor="middle" class="wl">MCP</text>
-    <text x="300" y="174" text-anchor="middle" class="ws">http / stdio</text>
-    <text x="600" y="118" text-anchor="middle" class="wl">SignalR</text>
-    <text x="600" y="174" text-anchor="middle" class="ws">relay</text>
-    <text x="900" y="118" text-anchor="middle" class="wl">TCP IPC</text>
-    <text x="900" y="174" text-anchor="middle" class="ws">loopback</text>
-
-    <!-- cards -->
-    <g>
-      <rect x="40" y="82" width="220" height="120" rx="12" class="card"/><rect x="40" y="82" width="4" height="120" rx="2" fill="#22d3ee"/>
-      <text x="60" y="112" class="t1">Your AI agent</text>
-      <text x="60" y="138" class="t2">Claude Code, Cursor,</text>
-      <text x="60" y="156" class="t2">Copilot, Codex, Gemini,</text>
-      <text x="60" y="174" class="t2">any MCP client</text>
-
-      <rect x="340" y="82" width="220" height="120" rx="12" class="card"/><rect x="340" y="82" width="4" height="120" rx="2" fill="#818cf8"/>
-      <text x="360" y="112" class="t1">MCP server</text>
-      <text x="360" y="138" class="t2">ai-game.dev cloud (default)</text>
-      <text x="360" y="156" class="t2">or a local</text>
-      <text x="360" y="174" class="mono t2">gamedev-mcp-server</text>
-
-      <rect x="640" y="82" width="220" height="120" rx="12" class="card"/><rect x="640" y="82" width="4" height="120" rx="2" fill="#a78bfa"/>
-      <text x="660" y="112" class="mono t1">unreal-mcp-bridge</text>
-      <text x="660" y="138" class="t2">.NET 9 sidecar, McpPlugin</text>
-      <text x="660" y="156" class="t2">started and restarted</text>
-      <text x="660" y="174" class="t2">by the plugin</text>
-    </g>
-
-    <!-- the plugin -->
-    <rect x="940" y="82" width="220" height="120" rx="14" fill="#0d1428" stroke="url(#edge)" stroke-width="2" stroke-opacity=".85"/>
-    <text x="960" y="112" class="mono t1">UnrealMCP</text>
-    <text x="960" y="138" class="t2">C++ editor plugin</text>
-    <text x="960" y="156" class="t2">tools run on the</text>
-    <text x="960" y="174" class="t2">game thread</text>
-
-    <!-- tool families -->
-    <text x="40" y="254" class="head">30 BUILT-IN TOOLS · 8 FAMILIES</text>
-    <g transform="translate(40 272)">
-      <g class="chip c1"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#22d3ee"/><text x="30" y="23">RQL data · 3</text></g>
-      <g class="chip c2" transform="translate(140 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#818cf8"/><text x="30" y="23">Blueprint · 11</text></g>
-      <g class="chip c3" transform="translate(280 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#a78bfa"/><text x="30" y="23">C++ source · 6</text></g>
-      <g class="chip c4" transform="translate(420 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#e879f9"/><text x="30" y="23">Screenshot · 4</text></g>
-      <g class="chip c5" transform="translate(560 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#f472b6"/><text x="30" y="23">Fab · 3</text></g>
-      <g class="chip c6" transform="translate(700 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#fbbf24"/><text x="30" y="23">Console · 1</text></g>
-      <g class="chip c7" transform="translate(840 0)"><rect class="box" width="130" height="38" rx="10"/><rect class="hl" width="130" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#34d399"/><text x="30" y="23">Python · 1</text></g>
-      <g class="chip c8" transform="translate(980 0)"><rect class="box" width="140" height="38" rx="10"/><rect class="hl" width="140" height="38" rx="10"/><circle cx="18" cy="19" r="4" fill="#67e8f9"/><text x="30" y="23">Tool list · 1</text></g>
-    </g>
-
-    <text x="600" y="362" text-anchor="middle" font-size="13" fill="#64748b">The plugin listens on loopback; the sidecar dials it with a one-shot token sent over stdin. Extensions add RQL modules and tools.</text>
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="480" fill="url(#bg)"/><rect width="1200" height="480" fill="url(#hzR)"/><rect width="1200" height="480" fill="url(#hzB)"/>
+    <rect width="1200" height="480" fill="url(#dots)"/>
+    <text x="40" y="72" text-anchor="start" class="s" font-size="16" font-weight="700" letter-spacing="2.4" fill="#FF5A73">HOW IT WORKS</text><rect x="40" y="104" width="220" height="130" rx="14" fill="url(#card)" stroke="rgba(111,168,208,0.16)"/><rect x="40" y="116" width="3" height="106" rx="1.5" fill="#6FA8D0"/><text x="62" y="165.0" class="s" font-size="20" font-weight="700" fill="#FAFFFD">Your AI agent</text><text x="62" y="191.0" class="s" font-size="16" fill="#8AA6B8">Claude Code, Cursor,</text><text x="62" y="213.0" class="s" font-size="16" fill="#8AA6B8">Copilot, Codex, …</text><rect x="340" y="104" width="220" height="130" rx="14" fill="url(#card)" stroke="rgba(111,168,208,0.16)"/><rect x="340" y="116" width="3" height="106" rx="1.5" fill="#6FA8D0"/><text x="362" y="165.0" class="s" font-size="20" font-weight="700" fill="#FAFFFD">MCP server</text><text x="362" y="191.0" class="s" font-size="16" fill="#8AA6B8">ai-game.dev cloud or</text><text x="362" y="213.0" class="s" font-size="16" fill="#8AA6B8">gamedev-mcp-server</text><rect x="640" y="104" width="220" height="130" rx="14" fill="url(#card)" stroke="rgba(111,168,208,0.16)"/><rect x="640" y="116" width="3" height="106" rx="1.5" fill="#EAB308"/><text x="662" y="165.0" class="s" font-size="20" font-weight="700" fill="#FAFFFD">Sidecar</text><text x="662" y="191.0" class="s" font-size="16" fill="#8AA6B8">unreal-mcp-bridge</text><text x="662" y="213.0" class="s" font-size="16" fill="#8AA6B8">.NET 9, auto-started</text><rect x="940" y="104" width="220" height="130" rx="14" fill="url(#card)" stroke="rgba(111,168,208,0.16)"/><rect x="940" y="116" width="3" height="106" rx="1.5" fill="#FF5A73"/><text x="962" y="165.0" class="s" font-size="20" font-weight="700" fill="#FAFFFD">UnrealMCP plugin</text><text x="962" y="191.0" class="s" font-size="16" fill="#8AA6B8">C++, inside the editor</text><text x="962" y="213.0" class="s" font-size="16" fill="#8AA6B8">tools on game thread</text><text x="300.0" y="148" text-anchor="middle" class="s" font-size="16" font-weight="700" fill="#A8C2D2">MCP</text><path id="w1" d="M266 166 L334 166" fill="none" stroke="#6FA8D0" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#6FA8D0"><animateMotion dur="1.6s" begin="-0.0s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle><path id="w2" d="M266 186 L334 186" fill="none" stroke="#FF5A73" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#FF5A73"><animateMotion dur="1.6s" begin="-0.8s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w2"/></animateMotion></circle><text x="600.0" y="148" text-anchor="middle" class="s" font-size="16" font-weight="700" fill="#A8C2D2">SignalR</text><path id="w3" d="M566 166 L634 166" fill="none" stroke="#6FA8D0" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#6FA8D0"><animateMotion dur="1.6s" begin="-0.5s" repeatCount="indefinite"><mpath href="#w3"/></animateMotion></circle><path id="w4" d="M566 186 L634 186" fill="none" stroke="#FF5A73" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#FF5A73"><animateMotion dur="1.6s" begin="-1.3s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w4"/></animateMotion></circle><text x="900.0" y="148" text-anchor="middle" class="s" font-size="16" font-weight="700" fill="#A8C2D2">TCP</text><path id="w5" d="M866 166 L934 166" fill="none" stroke="#6FA8D0" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#6FA8D0"><animateMotion dur="1.6s" begin="-1.0s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle><path id="w6" d="M866 186 L934 186" fill="none" stroke="#FF5A73" stroke-opacity=".55" stroke-width="1.6" stroke-dasharray="4 6"/><circle r="4" fill="#FF5A73"><animateMotion dur="1.6s" begin="-1.8s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w6"/></animateMotion></circle><text x="40" y="296" text-anchor="start" class="s" font-size="16" font-weight="700" letter-spacing="2.4" fill="#FF5A73">30 BUILT-IN TOOLS · 8 FAMILIES</text><g transform="translate(40 316)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">RQL data · 3</text></g><g transform="translate(324 316)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Blueprint · 11</text></g><g transform="translate(608 316)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">C++ source · 6</text></g><g transform="translate(892 316)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Screenshot · 4</text></g><g transform="translate(40 364)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Fab · 3</text></g><g transform="translate(324 364)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Console · 1</text></g><g transform="translate(608 364)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Python · 1</text></g><g transform="translate(892 364)"><rect width="268" height="34" rx="17" fill="#0D1A25" stroke="rgba(111,168,208,0.45)" stroke-opacity=".6"/><text x="134.0" y="23" text-anchor="middle" class="m" font-size="16" fill="#A8C2D2">Tool list · 1</text></g><text x="600.0" y="446" text-anchor="middle" class="s" font-size="16" fill="#8AA6B8">Loopback only: the plugin listens, the sidecar dials in with a one-shot token.</text>
+    <rect x="0" y="478" width="1200" height="2" fill="url(#rule)"/>
   </g>
-  <rect x=".5" y=".5" width="1199" height="399" rx="20" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+  <rect x=".5" y=".5" width="1199" height="479" rx="18" fill="none" stroke="rgba(111,168,208,0.16)"/>
 </svg>
