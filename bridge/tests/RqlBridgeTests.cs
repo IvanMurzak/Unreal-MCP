@@ -423,16 +423,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(Rql.RqlParser.TryParse("actors | where Label == \"a;b\" | count", out var plan, out _));
             Assert.Equal(Rql.PlanCodec.Serialize(plan!), args["plan"]!.GetValue<string>());
 
-            // A trailing ';' leaves one statement too.
-            var trailing = new JsonObject { ["query"] = "actors | count;" };
-            Assert.Null(RqlBridge.AddPlan(trailing, out statements));
+            // Blank statements around one leave one statement too; the plugin names its undo step after the statement.
+            var blanks = new JsonObject { ["query"] = ";actors | count;" };
+            Assert.Null(RqlBridge.AddPlan(blanks, out statements));
             Assert.Null(statements);
-            Assert.Contains("\"op\":\"count\"", trailing["plan"]!.GetValue<string>());
+            Assert.Contains("\"op\":\"count\"", blanks["plan"]!.GetValue<string>());
+            Assert.Equal("actors | count", blanks["query"]!.GetValue<string>());
 
-            // A syntax error after a leading ';' keeps its position in the request text.
+            // A syntax error after a leading ';' keeps its position in the request text: the ';' counts as a blank.
             var error = RqlBridge.AddPlan(new JsonObject { ["query"] = ";actors | where (" }, out statements);
-            Assert.NotNull(error);
             Assert.Null(statements);
+            Assert.Equal(RqlBridge.AddPlan(new JsonObject { ["query"] = " actors | where (" }, out _)!.Content!.Single().Text, error!.Content!.Single().Text);
         }
 
         [Fact]
@@ -568,8 +569,66 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, channel);
             var response = await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"));
             Assert.Equal(ResponseStatus.Error, response.Status);
-            Assert.Equal("[1/2] actors | count\n2\n\n[2/2] levels | count\nerror internal-error: " + IpcDisconnectedException.DefaultMessage,
+            Assert.Equal("[1/2] actors | count\n2\n\n[2/2] levels | count\nerror internal-error: " + IpcDisconnectedException.DefaultMessage +
+                " — hint: the editor may have run this statement: check it before running it again", response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AnIpcTimeoutOnALaterStatementKeepsTheEarlierReceipts()
+        {
+            // Statement 1 changed the editor; statement 2 timed out (it may have run); statement 3 never runs.
+            var sent = 0;
+            var channel = new FakeToolCallChannel((tool, args) =>
+            {
+                if (++sent > 1) throw new TimeoutException("the editor did not answer in time");
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Receipt("A") }) };
+            });
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole }, channel);
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | set Label = \\\"A2\\\"; actors | set Label = \\\"B2\\\"; actors | set Label = \\\"C2\\\"\"}"));
+            Assert.Equal(2, sent);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal(
+                "[1/3] actors | set Label = \"A2\"\n1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2\n\n" +
+                "[2/3] actors | set Label = \"B2\"\nerror internal-error: the editor did not answer in time — hint: the editor may have run this statement: check it before running it again\n\n" +
+                "[3/3] actors | set Label = \"C2\"\nnot run: statement 2 failed: the statements after a failed change do not run",
                 response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AnEditorGoneBeforeALaterStatementFailsItWithoutTheMayHaveRunHint()
+        {
+            FakeToolCallChannel? channel = null;
+            channel = new FakeToolCallChannel((tool, args) =>
+            {
+                channel!.Connected = false; // the link is gone before the next call
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Count2 }) };
+            });
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, channel);
+            var text = (await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"))).Content!.Single().Text!;
+            Assert.StartsWith("[1/2] actors | count\n2\n\n[2/2] levels | count\nerror internal-error: Unreal editor bridge disconnected: the editor is not connected", text);
+            Assert.DoesNotContain("may have run", text);
+        }
+
+        [Fact]
+        public async Task Proxy_DuplicateStatementsAreEachSentWithTheirOwnText()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, Plugin(calls, _ => Count1));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count; actors|count; actors | count\"}"));
+            Assert.Equal(new[] { "actors | count", "actors|count", "actors | count" }, calls.Select(c => c["query"]!.GetValue<string>()));
+            Assert.Equal(ResponseStatus.Success, response.Status);
+        }
+
+        [Fact]
+        public async Task Proxy_AnAnswerThatIsNotRqlFailsItsStatement()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole },
+                Plugin(calls, query => query.StartsWith("actors") ? "Tool 'rql-query' failed: boom" : Count1));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"));
+            Assert.Equal(2, calls.Count);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal("[1/2] actors | count\nerror internal-error: Tool 'rql-query' failed: boom\n\n[2/2] levels | count\n1", response.Content!.Single().Text);
         }
 
         [Fact]

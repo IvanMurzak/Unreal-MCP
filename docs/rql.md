@@ -35,8 +35,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   statement; a mutation runs nothing unless every statement parses and ends with `set` / `call`, and the first statement
   that fails stops the rest (the earlier changes stay, the later ones report `not run`). The answer is one `[i/n]
   <statement>` block per statement (`AgentFormat`), followed by the plugin's "Editor diagnostics" notes of each call; it
-  is an error when any statement failed or did not run. A query without `;` is one plan, one call, as before. The C++
-  runtime is unchanged: it still executes one plan per call.
+  is an error when any statement failed or did not run. The tool timeout (`UNREAL_MCP_TOOL_TIMEOUT`) applies to each
+  statement's call; a later statement whose call times out or loses the link fails on its own (the earlier blocks stay,
+  its hint says the editor may have run it). A query without `;` is one plan, one call, as before. The C++ runtime is
+  unchanged: it still executes one plan per call.
 - **Plugin** (module `UnrealMcpRql`, `UnrealMCP/Source/UnrealMcpRql/`): the vendored RQL C++ runtime
   (`Source/ThirdParty/RQL/`, unmodified) plus the **Unreal provider** the RQL roadmap describes ("`UClass`/`FProperty`,
   `TArray`/`TMap` adapters, `IsValid` liveness"), built on the runtime's provider seam (`TypeDescriptor` /

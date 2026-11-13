@@ -68,7 +68,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             // blank the separators before it, so diagnostic positions stay the request's. Text without a ';' is unchanged.
             var span = split[0].Span;
             if (span.Start > 0 || span.End < text.Length)
+            {
                 text = text.Substring(0, span.Start).Replace(';', ' ') + text.Substring(span.Start, span.End - span.Start);
+                arguments[QueryArgument] = split[0].Text; // the plugin's undo step is named after the query
+            }
             if (!RqlParser.TryParse(text, out var plan, out var error))
                 return Failure(error ?? Diagnostic.Error("syntax-error", "the query does not parse"));
             arguments[PlanArgument] = PlanCodec.Serialize(plan!);
@@ -83,8 +86,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// statement that parses; a mutation runs nothing unless every statement parses and ends with set / call, and stops at
         /// the first statement that fails. The answer is one <c>[i/n]</c> block per statement, followed by the text blocks the
         /// plugin added after each answer (its "Editor diagnostics" notes), in order.
-        /// A call that fails to reach the plugin before any statement was sent ends the request with that exception (the
-        /// caller answers it as for a single statement); after one was sent, it fails only its own statement.
+        /// An exception of the first call ends the request (the caller answers it as for a single statement: nothing else
+        /// ran). One of a later call (a link drop, an IPC timeout) fails only its own statement, so the blocks still show what
+        /// the earlier statements did; cancellation always ends the request.
         /// </summary>
         public static async Task<ResponseCallTool> RunStatementsAsync(string role, JsonObject arguments, IReadOnlyList<RqlStatement> statements,
             Func<JsonObject, Task<ResponseCallTool>> call)
@@ -105,7 +109,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
                 ResponseCallTool response;
                 try { response = call(statementArguments).GetAwaiter().GetResult(); }
-                catch (IpcDisconnectedException ex) when (calls > 0) { return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message) }); }
+                catch (IpcDisconnectedException ex) when (calls > 0 && ex.NotSent)
+                {
+                    return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message) });
+                }
+                catch (Exception ex) when (calls > 0 && !(ex is OperationCanceledException))
+                {
+                    return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message,
+                        "the editor may have run this statement: check it before running it again") });
+                }
                 finally { calls++; }
 
                 var first = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text);
