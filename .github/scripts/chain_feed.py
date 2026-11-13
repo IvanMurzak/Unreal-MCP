@@ -2,7 +2,7 @@
 # VENDORED from ai-game-dev-software .scripts/chain/leg/chain_feed.py — edit there, re-vendor
 """The one contract every per-repo chain leg implements (`p2-chain-feed-script` §C1…§C9).
 
-ONE stdlib-only file, copied byte-identically into each of the nine node repos as
+ONE stdlib-only file, copied byte-identically into each of the ten node repos as
 `.github/scripts/chain_feed.py` (§C8, the `cascade_pr_flow.py` precedent). A leg is dispatched
 with the lock as its single input, self-builds its lower layers from the lock's SHAs into a
 LOCAL feed, applies the same override the P1 modules apply locally, asserts identity, and
@@ -24,7 +24,7 @@ ARTIFACT it was read from (`project.assets.json`, a DLL sha256, `chain-identity.
 an exit code.
 """
 
-CHAIN_FEED_VERSION = "5"
+CHAIN_FEED_VERSION = "10"
 
 import argparse
 import hashlib
@@ -74,6 +74,9 @@ LOCK_SHA_RE = re.compile(r"^[0-9a-f]{40}\Z")
 #: cmd.exe, path-separator or XML metacharacter, and no leading `-`.
 LOCK_WS_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,3}(?:-[0-9A-Za-z.-]+)?-ws\.g([0-9a-f]{8})\Z")
 LOCK_STATES = ("main", "released", "sha", "branch", "pr")
+#: A lock `nodes` key. Unknown ids are accepted (`validate_lock`), so the key's own shape is
+#: what keeps it out of a log line or a path.
+LOCK_NODE_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}\Z")
 LOCK_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 #: A ref as `lock.py` records it (`refs/heads/<branch>`, `refs/pull/<n>/head`, a sha). This file
 #: never reads it, so its shape is git's own ref grammar, the grammar `lock.parse_state` accepts,
@@ -115,6 +118,10 @@ PNPM_PINS = ("package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml")
 UNITY_PACKAGE_PREFIX = "com.IvanMurzak."
 UNITY_LIB_ENTRY = "lib/netstandard2.1/{name}"
 UNITY_MANIFEST_NAME = ".nuget-installed.json"
+#: The Unity resolver config whose `new NuGetPackage("<id>", "<ver>"` literals are the consumer's
+#: REAL pins (mirrors `chain/manifest.py` `read_pin` for `NuGetConfig.cs`; parity-tested).
+UNITY_RESOLVER_CONFIG_NAME = "NuGetConfig.cs"
+UNITY_RESOLVER_PIN_TEMPLATE = r'new\s+NuGetPackage\(\s*"{id}"\s*,\s*"([^"]+)"'
 
 SERVER_MARKER_NAME = "chain-identity.json"
 SERVER_MARKER_FIELDS = ("ws_version", "sha", "rid", "publish_cmd", "exe_sha256", "product_version")
@@ -152,6 +159,24 @@ RECIPES = {
         ],
         "artifacts": {
             "nupkg": {"kind": "nupkg", "id": "com.IvanMurzak.ReflectorNet"},
+        },
+        "consumes": [],
+    },
+    "rql": {
+        "path": "shared/RQL",
+        "slug": "IvanMurzak/RQL",
+        "ecosystem": "dotnet",
+        "kind": "repo",
+        "build": "dotnet build dotnet/Rql.Package/Rql.Package.csproj -c Release -p:Version={ws_version}",
+        "pack": [
+            "dotnet pack dotnet/Rql.Package/Rql.Package.csproj --configuration Release --output {feed} -p:Version={ws_version}",
+        ],
+        "artifacts": {
+            # ONE package, THREE assemblies: `dlls` names every flat DLL a Unity drop carries for it.
+            "nupkg": {
+                "kind": "nupkg", "id": "com.IvanMurzak.Rql",
+                "dlls": ["Rql.Contracts.dll", "Rql.Execution.dll", "Rql.Parser.dll"],
+            },
         },
         "consumes": [],
     },
@@ -259,11 +284,11 @@ RECIPES = {
                 "drops": [
                     "Unity-MCP-Plugin/Assets/Plugins/NuGet",
                     "Unity-Tests/2022.3.62f3/Assets/Plugins/NuGet",
-                    "Unity-Tests/2023.2.22f1/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.3.1f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.0.85f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.3.27f1/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.5.0b3/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.6.0a2/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.6.3f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.6.7f1/Assets/Plugins/NuGet",
                 ],
             },
             {
@@ -273,11 +298,11 @@ RECIPES = {
                 "drops": [
                     "Unity-MCP-Plugin/Assets/Plugins/NuGet",
                     "Unity-Tests/2022.3.62f3/Assets/Plugins/NuGet",
-                    "Unity-Tests/2023.2.22f1/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.3.1f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.0.85f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.3.27f1/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.5.0b3/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.6.0a2/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.6.3f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.6.7f1/Assets/Plugins/NuGet",
                 ],
             },
             {
@@ -290,11 +315,28 @@ RECIPES = {
                 "drops": [
                     "Unity-MCP-Plugin/Assets/Plugins/NuGet",
                     "Unity-Tests/2022.3.62f3/Assets/Plugins/NuGet",
-                    "Unity-Tests/2023.2.22f1/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.3.1f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.0.85f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.3.27f1/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.5.0b3/Assets/Plugins/NuGet",
                     "Unity-Tests/6000.6.0a2/Assets/Plugins/NuGet",
-                    "Unity-Tests/6000.6.3f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.6.7f1/Assets/Plugins/NuGet",
+                ],
+            },
+            {
+                "ref": "rql/nupkg", "node": "rql", "artifact": "nupkg",
+                "mode": "unity-dll",
+                "pins": [
+                    "Unity-MCP-Plugin/Packages/com.ivanmurzak.unity.mcp/Editor/DependencyResolver/NuGetConfig.cs",
+                    "Unity-MCP-Plugin/Assets/Plugins/NuGet/.nuget-installed.json",
+                ],
+                "drops": [
+                    "Unity-MCP-Plugin/Assets/Plugins/NuGet",
+                    "Unity-Tests/2022.3.62f3/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.0.85f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.3.27f1/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.5.0b3/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.6.0a2/Assets/Plugins/NuGet",
+                    "Unity-Tests/6000.6.7f1/Assets/Plugins/NuGet",
                 ],
             },
             {
@@ -351,6 +393,15 @@ RECIPES = {
                 ],
             },
             {
+                "ref": "rql/nupkg", "node": "rql", "artifact": "nupkg",
+                "mode": "nuget",
+                "pins": [
+                    "Godot-MCP.csproj",
+                    "Godot-MCP.Tests/Godot-MCP.Tests.csproj",
+                    "Godot-Tests/Godot-Tests.csproj",
+                ],
+            },
+            {
                 "ref": "gamedev-mcp-server/binary", "node": "gamedev-mcp-server", "artifact": "binary",
                 "mode": "server-binary", "env": "GODOT_MCP_SERVER_PATH",
                 "pins": [
@@ -386,6 +437,10 @@ RECIPES = {
                 "mode": "nuget", "pins": ["bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj"],
             },
             {
+                "ref": "rql/nupkg", "node": "rql", "artifact": "nupkg",
+                "mode": "nuget", "pins": ["bridge/src/com.IvanMurzak.Unreal.MCP.Bridge.csproj"],
+            },
+            {
                 "ref": "gamedev-mcp-server/binary", "node": "gamedev-mcp-server", "artifact": "binary",
                 "mode": "server-binary", "env": "UNREAL_MCP_SERVER_PATH",
                 "pins": [
@@ -396,6 +451,38 @@ RECIPES = {
             {
                 "ref": "cli-core/tgz", "node": "cli-core", "artifact": "tgz",
                 "mode": "npm", "path": "cli", "pins": ["cli/package.json"],
+            },
+        ],
+    },
+    # PRIVATE repo, CENTRAL package management: its pins are `<PackageVersion>` items in one
+    # `Directory.Packages.props`. It vendors no leg yet (the manifest declares `legs: []`;
+    # `apply`'s NuGet override does not support CPM), so this row only keeps `recipes-check`
+    # exact and `vendored: False` keeps it out of VENDOR_NODES.
+    "brutal-mcp": {
+        "vendored": False,
+        "path": "engines/brutal/Brutal-MCP",
+        "slug": "IvanMurzak/Brutal-MCP",
+        "ecosystem": "dotnet",
+        "kind": "repo",
+        "build": "dotnet build Brutal-MCP.sln -c Release -p:Version={ws_version}",
+        "pack": [
+            "dotnet pack Brutal-MCP.sln -c Release --no-build -o {feed} -p:Version={ws_version}",
+        ],
+        "artifacts": {
+            "nupkg": {"kind": "nupkg", "id": "com.IvanMurzak.Brutal.MCP"},
+        },
+        "consumes": [
+            {
+                "ref": "reflectornet/nupkg", "node": "reflectornet", "artifact": "nupkg",
+                "mode": "nuget", "pins": ["Directory.Packages.props"],
+            },
+            {
+                "ref": "mcp-plugin-dotnet/mcpplugin", "node": "mcp-plugin-dotnet", "artifact": "mcpplugin",
+                "mode": "nuget", "pins": ["Directory.Packages.props"],
+            },
+            {
+                "ref": "rql/nupkg", "node": "rql", "artifact": "nupkg",
+                "mode": "nuget", "pins": ["Directory.Packages.props"],
             },
         ],
     },
@@ -479,8 +566,10 @@ RECIPES = {
     },
 }
 
-#: Which nodes a `p2-dispatch-*` row vendors this file into (`kind: repo`).
-VENDOR_NODES = tuple(sorted(nid for nid, body in RECIPES.items() if body.get("kind") == "repo"))
+#: Which nodes a `p2-dispatch-*` row vendors this file into (`kind: repo`, unless the row says
+#: `vendored: False`: a repo node with no chain leg yet).
+VENDOR_NODES = tuple(sorted(nid for nid, body in RECIPES.items()
+                            if body.get("kind") == "repo" and body.get("vendored", True)))
 
 #: Unity is the one leg whose workflow has no `concurrency:` today and needs a NEW block
 #: (`04` §2). Everything else either keeps its existing expression or needs none.
@@ -740,8 +829,10 @@ def validate_lock(lock):
     the recipes or any writer reads a value — so a value that would change a shell command, a
     git argv, a feed path, `$GITHUB_ENV` or `$GITHUB_OUTPUT` never reaches one:
 
-    * `nodes` keys — the node ids this file knows (`RECIPES`, which `recipes-check` pins to the
-      manifest); `follows` names one of them too;
+    * `nodes` keys — a node-id shape (`LOCK_NODE_ID_RE`). A key this file has NO recipe for (a
+      node added to the manifest after this copy was vendored) is ACCEPTED and IGNORED: no
+      RECIPES edge can name it, so it is outside every leg's ancestor set and nothing here reads
+      it. Its scalars are still validated. `follows` names a recipe node or another lock key;
     * `sha` — exactly 40 lowercase hex (never an option-shaped `--upload-pack=...` git argv);
     * `ws_version` — `<version>-ws.g<8 hex>`, and those 8 hex are the node's own `sha[:8]`
       whenever the node carries a sha (`lock.ws_version_for`);
@@ -756,10 +847,8 @@ def validate_lock(lock):
             raise _lock_field_refusal("lock_hash", lock_hash, "sha256:<64 lowercase hex>")
     for node_id, entry in nodes.items():
         where = "nodes.%s" % (node_id,)
-        if node_id not in RECIPES:
-            raise _lock_field_refusal(
-                "nodes key", node_id, "a node id this file knows (%s)" % ", ".join(sorted(RECIPES))
-            )
+        if not (isinstance(node_id, str) and LOCK_NODE_ID_RE.match(node_id)):
+            raise _lock_field_refusal("nodes key", node_id, "a node id (lowercase letters, digits, `-`)")
         if not isinstance(entry, dict):
             raise _lock_field_refusal(where, entry, "an object")
         for key, value in entry.items():
@@ -792,7 +881,7 @@ def validate_lock(lock):
         if ref is not None and not (isinstance(ref, str) and LOCK_REF_RE.match(ref)):
             raise _lock_field_refusal(where + ".ref", ref, "a git ref name (no whitespace, ~^:?*[\\, `..` or leading -)")
         follows = entry.get("follows")
-        if follows is not None and follows not in RECIPES:
+        if follows is not None and follows not in RECIPES and follows not in nodes:
             raise _lock_field_refusal(where + ".follows", follows, "a node id this file knows")
     return lock
 
@@ -971,6 +1060,26 @@ def observed_head_sha():
     if head and os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
         return str(head)
     return os.environ.get("GITHUB_SHA") or ""
+
+
+def unknown_lock_nodes(lock):
+    """`[(node id, state)]` for every lock node this file has no recipe for, sorted."""
+    return sorted(
+        (nid, (entry or {}).get("state")) for nid, entry in (lock.get("nodes") or {}).items()
+        if nid not in RECIPES
+    )
+
+
+def unknown_node_warnings(ctx):
+    """One named caveat per MOVING lock node this copy cannot see. A released one restores from
+    its registry like any released node, so it needs none; a moving one is ignored here because
+    no recipe edge names it, which is only right while no node of this leg consumes it — the
+    warning keeps that assumption visible in the record (re-vendor if it stops holding)."""
+    return [
+        "lock node %r (state %r) has no recipe in this chain_feed.py v%s: ignored; re-vendor if %s "
+        "consumes it" % (nid, state, CHAIN_FEED_VERSION, ctx.node)
+        for nid, state in unknown_lock_nodes(ctx.lock) if state != "released"
+    ]
 
 
 def assert_head_sha(ctx):
@@ -1673,13 +1782,21 @@ def write_nuget_override(ctx, root, rows):
 # ----------------------------------------------------------------------
 
 
-def unity_dll_name(package_id):
+def artifact_dll_names(body):
+    """Every assembly a nupkg artifact ships for itself — the flat DLLs a Unity drop carries for
+    it and the ones a root's own-pack proof reads: its declared `dlls` (one package, several
+    assemblies, e.g. `com.IvanMurzak.Rql`), else the one `<Name>.dll` its
+    `com.IvanMurzak.<Name>` id names."""
+    declared = body.get("dlls")
+    if declared:
+        return [str(name) for name in declared]
+    package_id = body.get("id")
     if not package_id or not package_id.startswith(UNITY_PACKAGE_PREFIX):
         raise Refusal(
-            "artifact id %r does not start with %r; cannot derive a flat-drop DLL filename"
+            "artifact id %r does not start with %r; cannot derive a DLL filename"
             % (package_id, UNITY_PACKAGE_PREFIX)
         )
-    return package_id[len(UNITY_PACKAGE_PREFIX):] + ".dll"
+    return [package_id[len(UNITY_PACKAGE_PREFIX):] + ".dll"]
 
 
 def find_nupkg(feed, package_id, ws_version):
@@ -1714,8 +1831,13 @@ def apply_unity_dll(ctx, edges):
     """
     dll_map = {}
     for edge in edges:
-        package_id = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]["id"]
-        dll_map[unity_dll_name(package_id)] = (edge, package_id)
+        body = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]
+        for dll_name in artifact_dll_names(body):
+            owner = dll_map.get(dll_name)
+            if owner is not None and owner[1] != body["id"]:
+                raise Refusal("two different artifact ids map to the same DLL name %r: %r and %r"
+                              % (dll_name, owner[1], body["id"]))
+            dll_map[dll_name] = (edge, body["id"])
     drops = []
     for edge in edges:
         for drop in edge.get("drops") or ():
@@ -1842,6 +1964,129 @@ def drop_patch_key_text(raw, key):
     return "\n".join(lines), True
 
 
+# `pnpm-workspace.yaml` `patchedDependencies:` — the minimal stdlib reader of overrides/pnpm.py.
+# pnpm 11+ reads `patchedDependencies` ONLY from that file; pnpm 10 also reads package.json `pnpm`.
+# Exactly one shape is read — a top-level block mapping of one-line `key: value` scalars — and
+# everything else (flow style, anchors/aliases/tags, multi-line or nested values, escapes,
+# duplicate keys) is refused: an entry it cannot read with confidence could be mis-edited.
+
+PNPM_PACKAGE_JSON = "package.json"
+PNPM_WORKSPACE_YAML = "pnpm-workspace.yaml"
+_YAML_HEADER_RE = re.compile(
+    r"""^(?:patchedDependencies|"patchedDependencies"|'patchedDependencies')[ \t]*:(?P<rest>.*)$"""
+)
+_YAML_SCALAR = r"""(?:"[^"\\\r\n]*"|'[^'\r\n]*'|[A-Za-z0-9._/~+=<^-][^\s'"#:,\[\]{}]*)"""
+_YAML_ENTRY_RE = re.compile(
+    r"^(?P<indent> +)(?P<key>" + _YAML_SCALAR + r")[ \t]*:[ \t]+(?P<value>" + _YAML_SCALAR
+    + r")(?:[ \t]+#.*)?[ \t]*$"
+)
+_YAML_NON_STRING_RE = re.compile(
+    r"(?i:null|true|false|yes|no|on|off|~)|[-+]?(?:[0-9][0-9_.]*|\.[0-9]+)(?:e[-+]?[0-9]+)?"
+)
+
+
+def _yaml_unquote(scalar):
+    return scalar[1:-1] if scalar[:1] in ("'", '"') else scalar
+
+
+def _workspace_patch_block(text):
+    """`(header line index or None, [(line index, key, value)])` of the top-level
+    `patchedDependencies:` mapping in raw `pnpm-workspace.yaml` TEXT (lines split on `\\n`)."""
+    lines = text.split("\n")
+    headers = []
+    for index, line in enumerate(lines):
+        match = _YAML_HEADER_RE.match(line.rstrip("\r").lstrip("\ufeff") if index == 0 else line.rstrip("\r"))
+        if match:
+            headers.append((index, match.group("rest")))
+    if not headers:
+        return None, []
+    if len(headers) > 1:
+        raise Refusal("pnpm-workspace.yaml declares `patchedDependencies:` more than once — refusing")
+    header, rest = headers[0]
+    rest = rest.strip()
+    if rest and not rest.startswith("#"):
+        if re.fullmatch(r"\{\s*\}(?:\s+#.*)?", rest):
+            return header, []
+        raise Refusal(
+            "pnpm-workspace.yaml `patchedDependencies:` is not a block mapping (%r); only one-line "
+            "`key: value` entries are read — refusing" % rest
+        )
+    entries = []
+    seen = set()
+    indent = None
+    for index in range(header + 1, len(lines)):
+        body = lines[index].rstrip("\r")
+        stripped = body.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if body[0] not in " \t":
+            break
+        match = _YAML_ENTRY_RE.match(body)
+        if match is None or (indent is not None and match.group("indent") != indent):
+            raise Refusal(
+                "pnpm-workspace.yaml line %d: cannot read this `patchedDependencies` entry with "
+                "confidence (%r); only one-line `key: value` scalars at one indentation are read "
+                "— refusing" % (index + 1, stripped)
+            )
+        indent = match.group("indent")
+        key = _yaml_unquote(match.group("key"))
+        raw_value = match.group("value")
+        if raw_value[:1] not in ("'", '"') and _YAML_NON_STRING_RE.fullmatch(raw_value):
+            raise Refusal(
+                "pnpm-workspace.yaml patchedDependencies[%r] is not a patch-file path: %r"
+                % (key, raw_value)
+            )
+        if key in seen:
+            raise Refusal("pnpm-workspace.yaml declares patchedDependencies[%r] twice — refusing" % key)
+        seen.add(key)
+        entries.append((index, key, _yaml_unquote(raw_value)))
+    return header, entries
+
+
+def workspace_patched_dependencies(text):
+    return dict((key, value) for _, key, value in _workspace_patch_block(text)[1])
+
+
+def rekey_workspace_yaml_text(raw, pkg, old_ver, new_ver):
+    """Re-point `<pkg>@<old>` to `<pkg>@<new>` on that ONE `patchedDependencies` line."""
+    old_token = "%s@%s" % (pkg, old_ver)
+    new_token = "%s@%s" % (pkg, new_ver)
+    lines = raw.split("\n")
+    for index, entry_key, _ in _workspace_patch_block(raw)[1]:
+        if entry_key == old_token:
+            end = _YAML_ENTRY_RE.match(lines[index].rstrip("\r")).end("value")
+            entry, tail = lines[index][:end], lines[index][end:]
+            lines[index] = entry.replace(old_token, new_token) + tail
+            return "\n".join(lines), entry.count(old_token)
+    return raw, 0
+
+
+def drop_workspace_patch_key_text(raw, key):
+    """Remove the `key: value` line; the LAST entry takes the `patchedDependencies:` header too."""
+    header, entries = _workspace_patch_block(raw)
+    hits = [index for index, entry_key, _ in entries if entry_key == key]
+    if not hits:
+        return raw, False
+    doomed = {hits[0]} if len(entries) > 1 else {hits[0], header}
+    lines = raw.split("\n")
+    return "\n".join(line for i, line in enumerate(lines) if i not in doomed), True
+
+
+def _workspace_yaml_view(text):
+    """The comparable form of the file: its mapping, and every line outside it."""
+    header, entries = _workspace_patch_block(text)
+    skip = {header} | set(index for index, _, _ in entries)
+    return {
+        "patched": dict((key, value) for _, key, value in entries),
+        "rest": [line for i, line in enumerate(text.split("\n")) if i not in skip],
+    }
+
+
+#: The text surgery per declaring file: `(raw, pkg, old_ver, new_ver)` and `(raw, key)`.
+PNPM_PATCH_REKEY = {PNPM_PACKAGE_JSON: rekey_package_json_text, PNPM_WORKSPACE_YAML: rekey_workspace_yaml_text}
+PNPM_PATCH_DROP = {PNPM_PACKAGE_JSON: drop_patch_key_text, PNPM_WORKSPACE_YAML: drop_workspace_patch_key_text}
+
+
 def git_blob_sha1(data):
     header = b"blob " + str(len(data)).encode("ascii") + b"\x00"
     return hashlib.sha1(header + data).hexdigest()  # noqa: S324 - git's own blob hash
@@ -1879,11 +2124,32 @@ def read_tarball_member(tgz, in_package_relpath):
 
 
 def _patched_dependencies(app_dir):
-    data = json.loads(read_text(Path(app_dir) / "package.json"))
+    """`{file name: patchedDependencies}` from BOTH places pnpm reads them (11+: the YAML only)."""
+    data = json.loads(read_text(Path(app_dir) / PNPM_PACKAGE_JSON))
     block = (data.get("pnpm") or {}).get("patchedDependencies") or {}
     if not isinstance(block, dict):
         raise Refusal("package.json: pnpm.patchedDependencies is not an object")
-    return block
+    workspace_yaml = Path(app_dir) / PNPM_WORKSPACE_YAML
+    workspace = workspace_patched_dependencies(read_text(workspace_yaml)) if workspace_yaml.is_file() else {}
+    return {PNPM_PACKAGE_JSON: block, PNPM_WORKSPACE_YAML: workspace}
+
+
+def patch_entries_for(patched, prefix):
+    """`[(file name, key)]` of every `<prefix>*` entry; one package in BOTH files is refused."""
+    hits = [(name, key) for name, block in patched.items()
+            for key in block if isinstance(key, str) and key.startswith(prefix)]
+    if len(set(name for name, _ in hits)) > 1:
+        raise Refusal(
+            "`%s*` is declared in BOTH package.json pnpm.patchedDependencies and "
+            "pnpm-workspace.yaml patchedDependencies (%s) — ambiguous (pnpm 11+ reads only the "
+            "workspace file); keep one. Refusing" % (prefix, [key for _, key in hits])
+        )
+    if len(hits) > 1:
+        raise Refusal(
+            "expected at most one `%s*` patchedDependencies entry, found %d: %s"
+            % (prefix, len(hits), [key for _, key in hits])
+        )
+    return hits
 
 
 def rekey_pnpm_patches(ctx, app_dir, plans):
@@ -1895,27 +2161,23 @@ def rekey_pnpm_patches(ctx, app_dir, plans):
     never regenerated: only the operator may decide a patch guarding a crash is obsolete.
     """
     notes = []
-    package_json = Path(app_dir) / "package.json"
+    package_json = Path(app_dir) / PNPM_PACKAGE_JSON
     if not package_json.is_file():
         raise Refusal("no package.json at %s" % as_posix_abs(app_dir))
     patched = _patched_dependencies(app_dir)
     for plan in plans:
         prefix = "%s@" % plan["package_id"]
-        keys = [key for key in patched if isinstance(key, str) and key.startswith(prefix)]
-        if not keys:
+        hits = patch_entries_for(patched, prefix)
+        if not hits:
             continue
-        if len(keys) > 1:
-            raise Refusal(
-                "expected at most one `%s*` patchedDependencies entry, found %d: %s"
-                % (prefix, len(keys), keys)
-            )
-        old_key = keys[0]
+        name, old_key = hits[0]
+        target = Path(app_dir) / name
         old_ver = old_key[len(prefix):]
         new_key = "%s@%s" % (plan["package_id"], plan["ws_version"])
         if old_key == new_key:
             notes.append("patch already keyed to %s (idempotent)" % new_key)
             continue
-        old_value = patched[old_key]
+        old_value = patched[name][old_key]
         if not isinstance(old_value, str) or not old_value:
             raise Refusal("patchedDependencies[%r] is not a patch-file path: %r" % (old_key, old_value))
         new_value = old_value.replace(old_key, new_key)
@@ -1938,7 +2200,7 @@ def rekey_pnpm_patches(ctx, app_dir, plans):
                 "%s has no `package/%s` member (the patched file) — cannot verify the patch base"
                 % (plan["tarball_abs"], relpath)
             )
-        raw = read_text(package_json)
+        raw = read_text(target)
         recorded = info["from_hash"]
         matches = bool(recorded) and published[: len(recorded)].lower() == recorded.lower()
         if matches:
@@ -1946,27 +2208,27 @@ def rekey_pnpm_patches(ctx, app_dir, plans):
                 if run(["git", "mv", old_value, new_value], cwd=app_dir,
                        env=dict(os.environ, **_GIT_ENV)) != 0:
                     raise Refusal("`git mv %s %s` failed in %s" % (old_value, new_value, as_posix_abs(app_dir)))
-            updated, count = rekey_package_json_text(raw, plan["package_id"], old_ver, plan["ws_version"])
+            updated, count = PNPM_PATCH_REKEY[name](raw, plan["package_id"], old_ver, plan["ws_version"])
             if count == 0:
-                raise Refusal("expected to re-point `%s` in package.json but found no occurrence" % old_key)
-            _assert_only_patch_entry_changed(raw, updated, old_key, new_key, new_value)
-            write_text(package_json, updated)
+                raise Refusal("expected to re-point `%s` in %s but found no occurrence" % (old_key, name))
+            _assert_only_patch_entry_changed(name, raw, updated, old_key, new_key, new_value)
+            write_text(target, updated)
             notes.append(
-                "patch re-keyed: %s -> %s (base blob %s matches the ws tarball's %s); patch "
-                "file renamed to %s" % (old_key, new_key, recorded, relpath, new_value)
+                "patch re-keyed in %s: %s -> %s (base blob %s matches the ws tarball's %s); patch "
+                "file renamed to %s" % (name, old_key, new_key, recorded, relpath, new_value)
             )
         else:
-            updated, removed = drop_patch_key_text(raw, old_key)
+            updated, removed = PNPM_PATCH_DROP[name](raw, old_key)
             if not removed:
-                raise Refusal("could not locate the `%s` line in package.json to drop it" % old_key)
-            _assert_only_patch_entry_changed(raw, updated, old_key, None, None)
-            write_text(package_json, updated)
+                raise Refusal("could not locate the `%s` line in %s to drop it" % (old_key, name))
+            _assert_only_patch_entry_changed(name, raw, updated, old_key, None, None)
+            write_text(target, updated)
             message = (
                 "patch dropped: base mismatch (%s vs ws %s) — the patch's recorded base blob %s "
-                "is not the ws tarball's %s (%s); the key was removed for this checkout and %s "
-                "was left in place. NEVER regenerated here." % (
+                "is not the ws tarball's %s (%s); the key was removed from %s for this checkout "
+                "and %s was left in place. NEVER regenerated here." % (
                     old_key, plan["ws_version"], recorded, relpath,
-                    published[: len(recorded)], old_value,
+                    published[: len(recorded)], name, old_value,
                 )
             )
             log(message)
@@ -1975,16 +2237,23 @@ def rekey_pnpm_patches(ctx, app_dir, plans):
     return notes
 
 
-def _assert_only_patch_entry_changed(before_raw, after_raw, old_key, new_key, new_value):
-    before = json.loads(before_raw)
-    after = json.loads(after_raw)
-    patched = before.setdefault("pnpm", {}).setdefault("patchedDependencies", {})
+def _assert_only_patch_entry_changed(name, before_raw, after_raw, old_key, new_key, new_value):
+    """Structural proof the surgical edit changed ONLY that entry (YAML: the parsed mapping plus
+    every line outside the `patchedDependencies` block byte for byte)."""
+    if name == PNPM_WORKSPACE_YAML:
+        before = _workspace_yaml_view(before_raw)
+        after = _workspace_yaml_view(after_raw)
+        patched = before["patched"]
+    else:
+        before = json.loads(before_raw)
+        after = json.loads(after_raw)
+        patched = before.setdefault("pnpm", {}).setdefault("patchedDependencies", {})
     patched.pop(old_key, None)
     if new_key is not None:
         patched[new_key] = new_value
     if before != after:
         raise Refusal(
-            "package.json edit touched more than the `%s` patch entry — refusing" % old_key
+            "%s edit touched more than the `%s` patch entry — refusing" % (name, old_key)
         )
 
 
@@ -2748,8 +3017,9 @@ def cmd_dry_run(args):
                     if drop not in drops:
                         drops.append(drop)
             for edge in mode_edges:
-                package_id = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]["id"]
-                log("chain:   unity   %s (%s)" % (unity_dll_name(package_id), ctx.ws_version(edge["node"])))
+                body = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]
+                for dll_name in artifact_dll_names(body):
+                    log("chain:   unity   %s (%s)" % (dll_name, ctx.ws_version(edge["node"])))
             for drop in drops:
                 log("chain:   drop    %s (metas and %s untouched)" % (drop, UNITY_MANIFEST_NAME))
         elif mode == "pnpm":
@@ -2802,7 +3072,7 @@ def cmd_record(args):
     for raw in getattr(args, "skip", None) or ():
         step, _, reason = str(raw).partition("=")
         skipped.append({"step": step, "reason": reason or "unspecified"})
-    warnings = list(state.get("warnings") or [])
+    warnings = list(state.get("warnings") or []) + unknown_node_warnings(ctx)
     # `--warn TEXT` (repeatable): a named caveat the job wants in the record (a pin drift, a
     # step it could not reach). Every non-blank value lands, in order, repeats included. A
     # warning NEVER changes `result`.
@@ -2989,13 +3259,40 @@ def _nuget_proofs(ctx, edges):
     return proofs
 
 
+def unity_consumer_pin(ctx, edge):
+    """The version the consumer's `NuGetConfig.cs` pins for `edge`'s package, or None.
+
+    A package the resolver does not pin directly (`McpPlugin.Common` follows `McpPlugin`
+    transitively) takes the pin of a sibling unity-dll artifact of the SAME producer node (one
+    node, one version), looked up in the full recipe so an `--edges` subset cannot hide it.
+    """
+    siblings = [
+        other for other in RECIPES[ctx.node].get("consumes") or ()
+        if other is not edge and other["mode"] == edge["mode"] and other["node"] == edge["node"]
+    ]
+    for candidate in [edge] + siblings:
+        package_id = RECIPES[candidate["node"]]["artifacts"][candidate["artifact"]]["id"]
+        pattern = re.compile(UNITY_RESOLVER_PIN_TEMPLATE.format(id=re.escape(package_id)))
+        for pin_rel in candidate.get("pins") or ():
+            path = ctx.checkout / pin_rel
+            if Path(pin_rel).name != UNITY_RESOLVER_CONFIG_NAME or not path.is_file():
+                continue
+            try:
+                match = pattern.search(path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            if match:
+                return match.group(1)
+    return None
+
+
 def _unity_proofs(ctx, edges):
     """sha256(dropped DLL) == sha256 of the same DLL inside the ws nupkg (byte identity)."""
     proofs = []
     for edge in edges:
-        package_id = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]["id"]
+        body = RECIPES[edge["node"]]["artifacts"][edge["artifact"]]
+        package_id = body["id"]
         ws_version = ctx.ws_version(edge["node"])
-        dll_name = unity_dll_name(package_id)
         nupkg = find_nupkg(ctx.feed_nuget, package_id, ws_version)
         if nupkg is None:
             proofs.append(_proof(
@@ -3003,22 +3300,26 @@ def _unity_proofs(ctx, edges):
                 package_id, None, ws_version, False,
             ))
             continue
-        expected_sha = sha256_bytes(extract_lib_dll(nupkg, dll_name))
-        for drop in edge.get("drops") or ():
-            target = ctx.checkout / drop / dll_name
-            if not target.is_file():
+        for dll_name in artifact_dll_names(body):
+            expected_sha = sha256_bytes(extract_lib_dll(nupkg, dll_name))
+            for drop in edge.get("drops") or ():
+                target = ctx.checkout / drop / dll_name
+                if not target.is_file():
+                    proofs.append(_proof(
+                        "%s/%s" % (drop, dll_name), "missing on disk", package_id, None, expected_sha, False
+                    ))
+                    continue
+                observed = sha256_file(target)
                 proofs.append(_proof(
-                    "%s/%s" % (drop, dll_name), "missing on disk", package_id, None, expected_sha, False
+                    "%s/%s" % (drop, dll_name),
+                    "sha256 vs %s!%s" % (nupkg.name, UNITY_LIB_ENTRY.format(name=dll_name)),
+                    package_id, observed, expected_sha, observed == expected_sha,
                 ))
-                continue
-            observed = sha256_file(target)
-            proofs.append(_proof(
-                "%s/%s" % (drop, dll_name),
-                "sha256 vs %s!%s" % (nupkg.name, UNITY_LIB_ENTRY.format(name=dll_name)),
-                package_id, observed, expected_sha, observed == expected_sha,
-            ))
-        # The manifest MUST stay at the pin (A2): a ws value there makes the in-editor
-        # resolver re-download the released nupkg and delete these very DLLs.
+        # The manifest MUST stay at the CONSUMER'S pin (A2): a ws value there makes the
+        # in-editor resolver re-download the released nupkg and delete these very DLLs. The
+        # pin is read from the consumer's own NuGetConfig.cs, never derived from ws_version: a
+        # train tests the producer's NEXT version while the consumer still pins the released one.
+        pin = unity_consumer_pin(ctx, edge)
         for drop in edge.get("drops") or ():
             manifest_path = ctx.checkout / drop / UNITY_MANIFEST_NAME
             if not manifest_path.is_file():
@@ -3028,11 +3329,11 @@ def _unity_proofs(ctx, edges):
             except (OSError, ValueError):
                 continue
             recorded = ((data.get("packages") or {}).get(package_id) or {}).get("version")
-            pin = (ws_version or "").split("-ws.g", 1)[0]
             proofs.append(_proof(
                 "%s/%s" % (drop, UNITY_MANIFEST_NAME),
-                "%s[%s].version stays at the PIN (A2)" % (UNITY_MANIFEST_NAME, package_id),
-                package_id, recorded, pin, recorded == pin,
+                "%s[%s].version stays at the consumer's %s pin (A2)"
+                % (UNITY_MANIFEST_NAME, package_id, UNITY_RESOLVER_CONFIG_NAME),
+                package_id, recorded, pin, pin is not None and recorded == pin,
             ))
     return proofs
 
@@ -3138,16 +3439,10 @@ def _server_proofs(ctx, edges):
     return proofs
 
 
-def _own_dll_name(package_id):
-    """`com.IvanMurzak.McpPlugin.Common` -> `McpPlugin.Common.dll`: the assembly a nupkg ships for itself."""
-    return (package_id[len(UNITY_PACKAGE_PREFIX):] if package_id.startswith(UNITY_PACKAGE_PREFIX) else package_id) + ".dll"
-
-
-def _own_nupkg_dll(archive, package_id):
-    """The package's own assembly inside its nupkg: `<Name>.dll` under `lib/netstandard2.1/`
-    first, then under any other `lib/<tfm>/`. `None` when no `lib/` entry carries that name —
-    another assembly's `ProductVersion` is never evidence for this package."""
-    wanted = _own_dll_name(package_id)
+def _own_nupkg_dll(archive, wanted):
+    """One of the package's own assemblies (`wanted`, a DLL filename) inside its nupkg: under
+    `lib/netstandard2.1/` first, then under any other `lib/<tfm>/`. `None` when no `lib/` entry
+    carries that name — another assembly's `ProductVersion` is never evidence for this package."""
     by_name = sorted(
         n for n in archive.namelist()
         if n.startswith("lib/") and n.rsplit("/", 1)[-1].lower() == wanted.lower()
@@ -3157,6 +3452,34 @@ def _own_nupkg_dll(archive, package_id):
         if group:
             return group[0]
     return None
+
+
+def _own_dll_proof(ctx, found, package_id, wanted, ws_version):
+    """One own-pack proof: the `ProductVersion` the assembly `wanted` inside nupkg `found` was
+    actually built at, against this leg's ws version."""
+    try:
+        with zipfile.ZipFile(str(found)) as archive:
+            member = _own_nupkg_dll(archive, wanted)
+            data = archive.read(member) if member else None
+    except (OSError, zipfile.BadZipFile, KeyError) as exc:
+        return _proof(ctx.node, "%s unreadable: %s" % (found.name, exc), package_id, None, ws_version, False)
+    if data is None:
+        return _proof(
+            ctx.node, "%s has no lib/<tfm>/%s" % (found.name, wanted), package_id, None, ws_version, False,
+        )
+    try:
+        product = pe_version_strings_from_bytes(data).get("ProductVersion")
+    except (PeFormatError, struct.error, IndexError, ValueError) as exc:
+        return _proof(
+            ctx.node, "%s!%s ProductVersion unreadable: %s" % (found.name, member, exc),
+            package_id, None, ws_version, False,
+        )
+    # SourceLink appends `+<sha>`; the version half is what `-p:Version` stamped.
+    core = (product or "").split("+", 1)[0] or None
+    return _proof(
+        ctx.node, "%s!%s ProductVersion %r" % (found.name, member, product),
+        package_id, core, ws_version, core == ws_version,
+    )
 
 
 def _own_pack_proofs(ctx, artifacts):
@@ -3195,32 +3518,14 @@ def _own_pack_proofs(ctx, artifacts):
             ))
             continue
         try:
-            with zipfile.ZipFile(str(found)) as archive:
-                member = _own_nupkg_dll(archive, package_id)
-                data = archive.read(member) if member else None
-        except (OSError, zipfile.BadZipFile, KeyError) as exc:
-            proofs.append(_proof(ctx.node, "%s unreadable: %s" % (found.name, exc), package_id, None, ws_version, False))
+            wanted_dlls = artifact_dll_names(body)
+        except Refusal as exc:
+            # An id this file cannot name an assembly for is a FAILING proof, never a crash of
+            # `record` (a leg must always upload its record, red or green).
+            proofs.append(_proof(ctx.node, "%s: %s" % (found.name, exc), package_id, None, ws_version, False))
             continue
-        if data is None:
-            proofs.append(_proof(
-                ctx.node, "%s has no lib/<tfm>/%s" % (found.name, _own_dll_name(package_id)),
-                package_id, None, ws_version, False,
-            ))
-            continue
-        try:
-            product = pe_version_strings_from_bytes(data).get("ProductVersion")
-        except (PeFormatError, struct.error, IndexError, ValueError) as exc:
-            proofs.append(_proof(
-                ctx.node, "%s!%s ProductVersion unreadable: %s" % (found.name, member, exc),
-                package_id, None, ws_version, False,
-            ))
-            continue
-        # SourceLink appends `+<sha>`; the version half is what `-p:Version` stamped.
-        core = (product or "").split("+", 1)[0] or None
-        proofs.append(_proof(
-            ctx.node, "%s!%s ProductVersion %r" % (found.name, member, product),
-            package_id, core, ws_version, core == ws_version,
-        ))
+        for wanted in wanted_dlls:
+            proofs.append(_own_dll_proof(ctx, found, package_id, wanted, ws_version))
     return proofs
 
 
