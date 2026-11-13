@@ -144,7 +144,10 @@ describe('rql command line', () => {
     expect(rqlCall('actors | count', { schema: true })).toHaveProperty('usage');
     expect(rqlCall(undefined, { schema: 'actors | count' })).toHaveProperty('usage');
     expect(rqlCall('actors | count', { dryRun: true })).toHaveProperty('usage');
-    expect(rqlCall(undefined, {})).toHaveProperty('usage');
+    expect(rqlCall(undefined, {})).toEqual({ usage: expect.stringMatching(/^No query given: unreal-mcp-cli rql /) });
+    expect(rqlCall(' ; ;', {})).toEqual(rqlCall(undefined, {})); // only separators: RQL's empty query, never sent
+    expect(() => rqlCall('actors | set Scale = 2', { maxTargets: '0' })).toThrow(/--max-targets must be a whole number of at least 1/);
+    expect(() => rqlCall('actors | set Scale = 2', { maxTargets: '1e3' })).toThrow(/--max-targets/);
     // Several statements: the whole text goes to one tool, rql-mutate when any statement changes the editor.
     expect(rqlCall('actors | count; levels | count', {})).toEqual({ toolName: 'rql-query', input: { query: 'actors | count; levels | count' } });
     expect(rqlCall('actors | count; actors | set Scale = 2', { maxTargets: '300' }))
