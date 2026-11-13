@@ -152,16 +152,16 @@ Install an extension when your project uses one of the engine systems below, or 
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Extensions need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same project, and a C++ toolchain: releases ship as source and compile for your project (on next editor open, or now with `--build`). The install id is `com.ivanmurzak.unreal-ai-<id>` with the id from the table. Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
+Extensions need Unreal Engine 5.7+, Unreal MCP 0.26.0+ in the same project, and a C++ toolchain: releases ship as source and compile for your project (on next editor open, or now with `--build`). The install id is `com.ivanmurzak.unreal-ai-<id>` with the id from the table below. Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
 
-| Extension | Id | Description |
-| --- | --- | --- |
-| **[AI&nbsp;Control&nbsp;Rig](../extensions/UnrealAIControlRig/README.md)** | `control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
-| **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)** | `enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
-| **[AI GAS](../extensions/UnrealAIGAS/README.md)** | `gas` | Gameplay Ability System authoring without C++: effects (cost, cooldown, damage, regeneration), ability Blueprints, ability system components with a ready-made Health / Mana / Stamina attribute set, input bindings, Play In Editor checks |
-| **[AI Landscape](../extensions/UnrealAILandscape/README.md)** | `landscape` | Landscape and Water: create, sculpt and paint landscapes; create oceans, lakes and rivers; query landscapes, water bodies and water zones |
-| **[AI Niagara](../extensions/UnrealAINiagara/README.md)** | `niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
-| **[AI PCG](../extensions/UnrealAIPCG/README.md)** | `pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |
+| Extension (id) | Description |
+| --- | --- |
+| **[AI&nbsp;Control&nbsp;Rig](../extensions/UnrealAIControlRig/README.md)**<br>`control-rig` | Create rigs with bones, controls and a two-bone IK solver; query Control Rig blueprints and components |
+| **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | Query Input Actions and Mapping Contexts, create actions and contexts, map keys |
+| **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | Gameplay Ability System authoring without C++: effects (cost, cooldown, damage, regeneration), ability Blueprints, ability system components with a ready-made Health / Mana / Stamina attribute set, input bindings, Play In Editor checks |
+| **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape and Water: create, sculpt and paint landscapes; create oceans, lakes and rivers; query landscapes, water bodies and water zones |
+| **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara VFX: query systems and their emitters, place systems in the level |
+| **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: author PCG graphs (nodes, connections, settings, parameters), place them on volumes, generate scatters (forests, rocks, props) and read the counts |
 
 ## Per-tool visibility
 
