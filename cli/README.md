@@ -1,10 +1,10 @@
 <div align="center" width="100%">
   <h1>Unreal MCP — <i>CLI</i></h1>
 
-[![npm](https://img.shields.io/npm/v/unreal-mcp-cli?label=npm&labelColor=333A41 'npm package')](https://www.npmjs.com/package/unreal-mcp-cli)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.14.0-5FA04E?logo=nodedotjs&labelColor=333A41 'Node.js')](https://nodejs.org/)
-[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=License&labelColor=333A41)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
-[![Website](https://img.shields.io/badge/website-ai--game.dev-bc6c25?labelColor=333A41)](https://ai-game.dev)
+[![CLI](https://img.shields.io/npm/v/unreal-mcp-cli?label=CLI&color=BE185D&logo=npm&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.npmjs.com/package/unreal-mcp-cli)
+[![Node.js](https://img.shields.io/badge/Node.js-22.14%2B-0E7490?logo=nodedotjs&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=license&color=047857&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-ai--game.dev-4338CA?style=for-the-badge&labelColor=0F172A&logoColor=white)](https://ai-game.dev)
 [![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 
   <img src="https://github.com/IvanMurzak/Unity-MCP/raw/main/docs/img/promo/ai-developer-banner-glitch.gif" alt="AI Game Developer" title="Unreal MCP CLI" width="100%">
@@ -34,18 +34,18 @@ Backed by **[ai-game.dev](https://ai-game.dev)**. See the
 
 ## ![AI Game Developer — Unreal SKILLS and MCP](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-features.svg?raw=true)
 
-- :white_check_mark: **Open & Connect** — launch the Unreal Editor with `UNREAL_MCP_*` connection env vars (engine auto-resolved)
-- :white_check_mark: **Create projects** — scaffold a minimal Unreal Engine C++ project
-- :white_check_mark: **Install plugin** — copy (or junction) the UnrealMCP plugin into a project's `Plugins/`
-- :white_check_mark: **Install extensions** — add third-party Unreal-MCP AI tool-family plugins and their gating engine plugins
-- :white_check_mark: **Configure** — write `UNREAL_MCP_*` connection settings into the project `.env`
-- :white_check_mark: **Setup MCP** — write MCP client config for AI agents (optionally download the shared server for stdio)
-- :white_check_mark: **Login** — OAuth device-code auth against `ai-game.dev`
-- :white_check_mark: **Status & wait-for-ready** — report project/plugin/connection state; block until the MCP server answers
-- :white_check_mark: **Run tools** — invoke MCP and system tools over the local HTTP path
-- :white_check_mark: **Install engine** — detect installed engines and link to the Epic launcher for missing versions
-- :white_check_mark: **Cross-platform** — Windows, macOS, and Linux
-- :white_check_mark: **Library API** — a side-effect-free, typed library surface for embedding
+- ✅ **Open & Connect** — launch the Unreal Editor with `UNREAL_MCP_*` connection env vars (engine auto-resolved)
+- ✅ **Create projects** — scaffold a minimal Unreal Engine C++ project
+- ✅ **Install plugin** — copy (or junction) the UnrealMCP plugin into a project's `Plugins/`
+- ✅ **Install extensions** — add third-party Unreal-MCP AI tool-family plugins and their gating engine plugins
+- ✅ **Configure** — write `UNREAL_MCP_*` connection settings into the project `.env`
+- ✅ **Setup MCP** — write MCP client config for AI agents (optionally download the shared server for stdio)
+- ✅ **Login** — OAuth device-code auth against `ai-game.dev`
+- ✅ **Status & wait-for-ready** — report project/plugin/connection state; block until the MCP server answers
+- ✅ **Run tools** — invoke MCP and system tools over the local HTTP path
+- ✅ **Install engine** — detect installed engines and link to the Epic launcher for missing versions
+- ✅ **Cross-platform** — Windows, macOS, and Linux
+- ✅ **Library API** — a side-effect-free, typed library surface for embedding
 
 ![divider](https://github.com/IvanMurzak/Unity-MCP/blob/main/docs/img/promo/hazzard-divider.svg?raw=true)
 

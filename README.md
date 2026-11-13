@@ -4,12 +4,13 @@
 
 <br/>
 
-[![npm](https://img.shields.io/npm/v/unreal-mcp-cli?style=flat-square&color=8b5cf6&label=unreal-mcp-cli)](https://www.npmjs.com/package/unreal-mcp-cli)
-[![release](https://github.com/IvanMurzak/Unreal-MCP/workflows/release/badge.svg)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)
-![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%E2%80%935.8-22d3ee?style=flat-square)
-[![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
-[![Discord](https://img.shields.io/badge/Discord-join-7289da?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/cfbdMZX99G)
-[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?style=flat-square&color=a5b4fc)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/IvanMurzak/Unreal-MCP?label=release&color=6D28D9&logo=github&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/releases)
+[![CLI](https://img.shields.io/npm/v/unreal-mcp-cli?label=CLI&color=BE185D&logo=npm&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.npmjs.com/package/unreal-mcp-cli)
+[![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%E2%80%935.8-0E7490?logo=unrealengine&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.unrealengine.com/)
+[![Release build](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Unreal-MCP/release.yml?label=release%20build&logo=githubactions&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)
+[![Docs](https://img.shields.io/badge/docs-ai--game.dev-4338CA?style=for-the-badge&labelColor=0F172A&logoColor=white)](https://ai-game.dev)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://discord.gg/cfbdMZX99G)
+[![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=license&color=047857&style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE)
 [![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 
 </div>
@@ -19,7 +20,7 @@ words and the agent spawns actors, edits levels, authors and compiles Blueprints
 assets and checks its work with screenshots. It is the Unreal sibling of
 [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) and [Godot-MCP](https://github.com/IvanMurzak/Godot-MCP), and
 uses the same cloud backend ([ai-game.dev](https://ai-game.dev)) or your own
-[GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server). Status: **beta**.
+[GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server).
 
 <p align="center">
   <img src="docs/img/readme/architecture.svg" alt="An AI agent talks MCP to the server; the server relays over SignalR to the unreal-mcp-bridge sidecar, which reaches the UnrealMCP C++ plugin in the Unreal Editor over loopback TCP" width="100%"/>
@@ -30,17 +31,16 @@ plugin starts, watches and restarts for you. Design details: [docs/ARCHITECTURE.
 
 ## Features
 
-| | Feature | What you get |
-|---|---|---|
-| 🔎 | **RQL data layer** | One query language for actors, components, assets, levels, settings and editor state: `rql-query`, `rql-mutate` (one undo step, `dry_run`), `rql-schema` ([docs/rql.md](docs/rql.md)) |
-| 🧩 | **Blueprints** | Create, edit and **compile** Blueprints, with a structured error list the agent can act on |
-| 🛠️ | **C++** | Read, scaffold and edit project source, then compile (Live Coding or UBT) with a structured report |
-| 📸 | **Visual feedback** | Viewport, game view, camera and isolated-actor screenshots the model can inspect |
-| 🐍 | **Python** | `python-execute` runs editor Python with the full `unreal` API |
-| 🛒 | **Fab** | Search Fab, list your library and add owned content to the project |
-| 🔌 | **Extensions** | GAS, Niagara, PCG, Landscape, Control Rig and Enhanced Input as optional plugins, or [your own](docs/EXTENSIONS.md) tools, prompts and resources |
-| 🎮 | **Runtime mode** | Opt in to drive a running game (PIE, Standalone, Development build) with your own tools ([docs/RUNTIME.md](docs/RUNTIME.md)) |
-| ☁️ | **Cloud or local** | `ai-game.dev` out of the box, or a self-hosted `gamedev-mcp-server` |
+- ✅ **RQL data layer** — query and change actors, assets and levels in one language ([RQL](docs/rql.md))
+- ✅ **Blueprints** — create, edit and compile, with structured errors the agent can fix
+- ✅ **C++** — scaffold, edit and compile project source (Live Coding or UBT)
+- ✅ **Visual feedback** — viewport, game-view, camera and isolated-actor screenshots
+- ✅ **Python** — run editor Python with the full `unreal` API
+- ✅ **Fab** — search Fab, list your library, add owned content
+- ✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input
+- ✅ **Your own tools** — add tools, prompts and resources from any plugin ([guide](docs/EXTENSIONS.md))
+- ✅ **Runtime mode** — opt in to drive a running game ([docs/RUNTIME.md](docs/RUNTIME.md))
+- ✅ **Cloud or local** — `ai-game.dev` out of the box, or a self-hosted `gamedev-mcp-server`
 
 30 built-in tools in 8 families; the full list is in [docs/TOOLS.md](docs/TOOLS.md).
 
