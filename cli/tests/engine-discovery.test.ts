@@ -35,6 +35,7 @@ describe('commonEngineRoots', () => {
   });
   it('includes the Shared + Applications roots on macOS', () => {
     const roots = commonEngineRoots('darwin', {});
+    expect(roots).toContain('/Users/Shared/Epic Games');
     expect(roots).toContain('/Users/Shared/Epic');
     expect(roots).toContain('/Applications/Epic Games');
   });
@@ -46,6 +47,18 @@ describe('commonEngineRoots', () => {
   it('promotes the PARENT of $UE_ROOT to the front when set', () => {
     const roots = commonEngineRoots('linux', { UE_ROOT: '/data/UnrealEngine' });
     expect(roots[0]).toBe('/data');
+  });
+});
+
+describe('scanCommonLocationEngines (macOS launcher default)', () => {
+  it('finds a UE_5.8 install under /Users/Shared/Epic Games without $UE_ROOT', () => {
+    const root = '/Users/Shared/Epic Games';
+    const install = '/Users/Shared/Epic Games/UE_5.8';
+    const fs = fakeFs(new Set([root, editorBinaryPath(install, 'darwin')]), { [root]: ['UE_5.8'] });
+    const engines = scanCommonLocationEngines('darwin', {}, fs);
+    expect(engines).toHaveLength(1);
+    expect(engines[0].engineAssociation).toBe('5.8');
+    expect(engines[0].installLocation).toBe(install);
   });
 });
 
