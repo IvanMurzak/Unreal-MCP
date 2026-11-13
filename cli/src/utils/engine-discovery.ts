@@ -72,7 +72,8 @@ const UE_DIRNAME_RE = /^UE_(\d+(?:\.\d+)*)$/;
  *
  * Windows : `%PROGRAMFILES%\Epic Games`, `%PROGRAMW6432%\Epic Games`, common
  *           alt drives `D:`/`E:\Epic Games`.
- * macOS   : `/Users/Shared/Epic`, `/Applications/Epic Games`.
+ * macOS   : `/Users/Shared/Epic Games` (the Epic Games Launcher's default
+ *           install location), `/Users/Shared/Epic`, `/Applications/Epic Games`.
  * Linux   : `/opt`, `/usr/local`, `$HOME`, `$HOME/.local/share` — no launcher
  *           manifest exists, so this is the ONLY discovery layer on Linux.
  */
@@ -93,6 +94,7 @@ export function commonEngineRoots(os: NodeJS.Platform, env: NodeJS.ProcessEnv = 
     }
     case 'darwin': {
       const pj = path.posix;
+      roots.push(pj.join('/Users', 'Shared', 'Epic Games'));
       roots.push(pj.join('/Users', 'Shared', 'Epic'));
       roots.push(pj.join('/Applications', 'Epic Games'));
       const home = env['HOME'];
