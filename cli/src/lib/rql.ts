@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRqlMutation } from '@baizor/gamedev-cli-core';
+import { isRqlMutation, stripToolName } from '@baizor/gamedev-cli-core';
 
 export { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlMutation, rqlStages, stripToolName } from '@baizor/gamedev-cli-core';
 
@@ -46,6 +46,12 @@ export function rqlStatements(text: string): string[] {
  */
 export function isRqlChange(text: string): boolean {
   return rqlStatements(text).some(isRqlMutation);
+}
+
+/** The text without a leading tool name on any of its statements ("rql-query actors | count; rql-query levels | count"). */
+export function stripToolNames(text: string): string {
+  const statements = rqlStatements(text);
+  return statements.length > 1 ? statements.map(stripToolName).join('; ') : stripToolName(text);
 }
 
 /** Operators agents bring from other languages, with RQL's spelling. */

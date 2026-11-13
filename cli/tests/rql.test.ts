@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { decodeQueryFile, isRqlChange, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, rqlStatements, saveReceipt, stripToolName } from '../src/lib/rql.js';
+import { decodeQueryFile, isRqlChange, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, rqlStatements, saveReceipt, stripToolName, stripToolNames } from '../src/lib/rql.js';
 import { toolResponseText, withoutImageData } from '../src/lib/tool-outcome.js';
 import { rqlCall } from '../src/commands/rql.js';
 import { reportToolOutcome } from '../src/commands/run-tool-builder.js';
@@ -35,6 +35,7 @@ describe('rql query routing', () => {
     expect(rqlStatements('actors | select `a;b`; levels')).toEqual(['actors | select `a;b`', 'levels']);
     expect(rqlStatements('actors | select [1; 2] | where (x; y)')).toEqual(['actors | select [1; 2] | where (x; y)']);
     expect(rqlStatements('actors | count;;')).toEqual(['actors | count']);
+    expect(rqlStatements(') ; x')).toEqual([')', 'x']); // a closer without an opener keeps the depth at 0
     expect(rqlStatements(';;')).toEqual(['']);
     expect(rqlStatements('actors | where Label == "unterminated; levels')).toEqual(['actors | where Label == "unterminated; levels']);
   });
@@ -46,6 +47,13 @@ describe('rql query routing', () => {
     expect(isRqlChange('actors | set Scale = 2; actors | count')).toBe(true);
     expect(isRqlChange('actors | count; actors | set Scale = 2')).toBe(true);
     expect(isRqlChange('actors | where Label == "x; set Scale = 2" | count')).toBe(false);
+    expect(isRqlChange(';actors | set X = 1;')).toBe(true);
+  });
+
+  it('strips a pasted tool name from each statement', () => {
+    expect(stripToolNames('rql-query actors | count; rql-query levels | count')).toBe('actors | count; levels | count');
+    expect(stripToolNames('rql-mutate actors | set X = 1')).toBe('actors | set X = 1');
+    expect(stripToolNames('actors | where Label == "a; rql-query b" | count')).toBe('actors | where Label == "a; rql-query b" | count');
   });
 
   it('knows which calls may write packages', () => {

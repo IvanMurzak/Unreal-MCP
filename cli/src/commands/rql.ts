@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { Command, Option } from 'commander';
-import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlChange, packagesWrittenSince, rqlMaySave, saveReceipt, stripToolName } from '../lib/rql.js';
+import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlChange, packagesWrittenSince, rqlMaySave, saveReceipt, rqlStatements, stripToolNames } from '../lib/rql.js';
 import { runTool } from '../lib/run-tool.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { readUProject } from '../utils/project.js';
@@ -21,9 +21,9 @@ const RQL_HELP_FOOTER = [
   '',
   ...RQL_LANGUAGE,
   'Quote the query with single quotes; strings inside it take double quotes (a shell that strips them: -f <file> or -f -).',
-  'Several queries separated by ; run in order, each with its own [i/n] block. In a change every query must end in set /',
-  'call and is its own all-or-nothing change (nothing runs when one does not); the first that fails stops the rest.',
-  '--max-targets applies to each query.',
+  'Several queries separated by ; (at most 10) run in order, each with its own [i/n] block; a read runs them all. In a',
+  'change every query must end in set / call and is its own all-or-nothing change (nothing runs when one does not); the',
+  'first that fails stops the rest, the earlier changes stay. --max-targets applies to each query.',
   'A receipt (set / call) lists every change, so a separate check is rarely needed. Level and asset edits stay unsaved',
   'until SaveLevel() / SaveAsset() / SaveAll() (NewLevel(path) saves; settings and gameplay tags are written at once).',
   'Sources, types and members: unreal-mcp-cli rql --schema [Type]  (full language: unreal-mcp-cli tools --filter rql-query)',
@@ -78,7 +78,7 @@ export const rqlCommand = command
     let query: string | undefined;
     try {
       const text = readQuery(queryArg, opts.file);
-      query = text === undefined ? undefined : stripToolName(text);
+      query = text === undefined ? undefined : stripToolNames(text);
     } catch (err) {
       out.fail(FAILURE.usage, err instanceof Error ? err.message : String(err));
       return;
@@ -96,10 +96,12 @@ export const rqlCommand = command
       return runTool(options);
     };
     const { ok, endpoint } = await callToolFromCli({ errorNoun: 'tool', invoke }, call.toolName, JSON.stringify(call.input), opts, out, true);
-    const projectDir = ok && call.toolName === RQL_MUTATE_TOOL && !opts.dryRun && !out.machine && endpoint !== undefined
+    // Several statements: the changes before a failed one stay, so a failed call still lists the files they wrote.
+    const reported = ok || rqlStatements(query!).length > 1;
+    const projectDir = reported && call.toolName === RQL_MUTATE_TOOL && !opts.dryRun && !out.machine && endpoint !== undefined
       && isAbsoluteLoopbackHost(new URL(endpoint).origin) ? readUProject(opts.path ?? process.cwd())?.projectDir : undefined;
     if (projectDir !== undefined) {
-      const receipt = saveReceipt(packagesWrittenSince(projectDir, calledAt), rqlMaySave(query!));
+      const receipt = saveReceipt(packagesWrittenSince(projectDir, calledAt), ok && rqlMaySave(query!));
       if (receipt) console.log(receipt);
     }
   });
