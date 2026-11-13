@@ -72,9 +72,12 @@ function buildRqlReference(): string {
   return [
     `# RQL with ${CLI_NAME}`,
     '',
-    `\`${cmd("rql '<query>'")}\` runs one query. A query ending in \`set\` / \`call\` changes the editor, all or nothing`,
+    `\`${cmd("rql '<query>'")}\` runs a query. A query ending in \`set\` / \`call\` changes the editor, all or nothing`,
     '(`--dry-run` shows the change without making it; `--max-targets <n>` allows more than 200 targets). Any other query',
     'only reads. A shell that strips the double quotes: put the query in a file and pass `-f <file>`.',
+    'Several queries separated by `;` run in order in one call, each with its own `[i/n]` block (at most 10). In a change',
+    'every query must end in `set` / `call` and is its own all-or-nothing change (nothing runs when one does not); the',
+    'first that fails stops the rest, the earlier changes stay. `--max-targets` applies to each query.',
     '',
     ...RQL_LANGUAGE,
     '',

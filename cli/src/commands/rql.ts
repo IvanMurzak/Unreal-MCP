@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { Command, Option } from 'commander';
-import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlMutation, packagesWrittenSince, rqlMaySave, saveReceipt, stripToolName } from '../lib/rql.js';
+import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlChange, packagesWrittenSince, rqlMaySave, saveReceipt, stripToolName } from '../lib/rql.js';
 import { runTool } from '../lib/run-tool.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { readUProject } from '../utils/project.js';
@@ -21,6 +21,9 @@ const RQL_HELP_FOOTER = [
   '',
   ...RQL_LANGUAGE,
   'Quote the query with single quotes; strings inside it take double quotes (a shell that strips them: -f <file> or -f -).',
+  'Several queries separated by ; run in order, each with its own [i/n] block. In a change every query must end in set /',
+  'call and is its own all-or-nothing change (nothing runs when one does not); the first that fails stops the rest.',
+  '--max-targets applies to each query.',
   'A receipt (set / call) lists every change, so a separate check is rarely needed. Level and asset edits stay unsaved',
   'until SaveLevel() / SaveAsset() / SaveAll() (NewLevel(path) saves; settings and gameplay tags are written at once).',
   'Sources, types and members: unreal-mcp-cli rql --schema [Type]  (full language: unreal-mcp-cli tools --filter rql-query)',
@@ -40,7 +43,7 @@ export function rqlCall(query: string | undefined, opts: Pick<RqlCliOptions, 'sc
   if (query === undefined || query.trim() === '') {
     return { usage: 'No query given: unreal-mcp-cli rql \'actors | where Label starts-with "Tree" | count\' (recipes: rql --help)' };
   }
-  if (!isRqlMutation(query)) {
+  if (!isRqlChange(query)) {
     if (opts.dryRun || maxTargets !== undefined) return { usage: '--dry-run and --max-targets are for a query ending in set / call.' };
     return { toolName: RQL_QUERY_TOOL, input: { query } };
   }
@@ -55,8 +58,8 @@ function readQuery(query: string | undefined, file: string | undefined): string 
 }
 
 const command = new Command('rql')
-  .description('Read or change the editor with one RQL query: levels, actors, components, assets (a query ending in set / call changes the editor, any other only reads); starts a headless editor when none answers')
-  .argument('[query]', 'RQL query, e.g. \'actors | where Label starts-with "Tree" | count\'')
+  .description('Read or change the editor with RQL: levels, actors, components, assets (a query ending in set / call changes the editor, any other only reads; several queries separated by ; run in order in one call); starts a headless editor when none answers')
+  .argument('[query]', 'RQL query, e.g. \'actors | where Label starts-with "Tree" | count\' (several: separate them with ;)')
   .option('-p, --path <dir>', 'Unreal project directory (defaults to cwd)')
   .option('-f, --file <file>', 'Read the query from a file ("-" for stdin)')
   .option('--schema [type]', 'List the RQL sources (or one type\'s members) instead of running a query')

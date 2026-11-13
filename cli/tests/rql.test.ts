@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { decodeQueryFile, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, saveReceipt, stripToolName } from '../src/lib/rql.js';
+import { decodeQueryFile, isRqlChange, isRqlMutation, packagesWrittenSince, rqlErrorHint, rqlMaySave, rqlStages, rqlStatements, saveReceipt, stripToolName } from '../src/lib/rql.js';
 import { toolResponseText, withoutImageData } from '../src/lib/tool-outcome.js';
 import { rqlCall } from '../src/commands/rql.js';
 import { reportToolOutcome } from '../src/commands/run-tool-builder.js';
@@ -25,6 +25,27 @@ describe('rql query routing', () => {
     expect(isRqlMutation('actors | where Label starts-with "Tree" | count')).toBe(false);
     expect(isRqlMutation('actors | where Label == "set | call" | select Label')).toBe(false);
     expect(isRqlMutation('actors | select settings')).toBe(false);
+  });
+
+  it('splits statements at ; outside strings, quoted identifiers and brackets, as RQL does', () => {
+    expect(rqlStatements('actors | count')).toEqual(['actors | count']);
+    expect(rqlStatements(' actors | count; levels | count ')).toEqual(['actors | count', 'levels | count']);
+    expect(rqlStatements('actors | where Label == "a;b" | count; levels | count')).toEqual(['actors | where Label == "a;b" | count', 'levels | count']);
+    expect(rqlStatements("actors | where Label == 'it\\'s;' | count")).toEqual(["actors | where Label == 'it\\'s;' | count"]);
+    expect(rqlStatements('actors | select `a;b`; levels')).toEqual(['actors | select `a;b`', 'levels']);
+    expect(rqlStatements('actors | select [1; 2] | where (x; y)')).toEqual(['actors | select [1; 2] | where (x; y)']);
+    expect(rqlStatements('actors | count;;')).toEqual(['actors | count']);
+    expect(rqlStatements(';;')).toEqual(['']);
+    expect(rqlStatements('actors | where Label == "unterminated; levels')).toEqual(['actors | where Label == "unterminated; levels']);
+  });
+
+  it('sends text with any statement ending in set / call to rql-mutate', () => {
+    expect(isRqlChange('actors | count; levels | count')).toBe(false);
+    expect(isRqlChange('actors | set Scale = 2; actors | where Label == "A" | call Destroy()')).toBe(true);
+    // Mixed text goes to rql-mutate, which refuses it naming the statement that only reads (nothing runs).
+    expect(isRqlChange('actors | set Scale = 2; actors | count')).toBe(true);
+    expect(isRqlChange('actors | count; actors | set Scale = 2')).toBe(true);
+    expect(isRqlChange('actors | where Label == "x; set Scale = 2" | count')).toBe(false);
   });
 
   it('knows which calls may write packages', () => {
@@ -116,6 +137,13 @@ describe('rql command line', () => {
     expect(rqlCall(undefined, { schema: 'actors | count' })).toHaveProperty('usage');
     expect(rqlCall('actors | count', { dryRun: true })).toHaveProperty('usage');
     expect(rqlCall(undefined, {})).toHaveProperty('usage');
+    // Several statements: the whole text goes to one tool, rql-mutate when any statement changes the editor.
+    expect(rqlCall('actors | count; levels | count', {})).toEqual({ toolName: 'rql-query', input: { query: 'actors | count; levels | count' } });
+    expect(rqlCall('actors | count; actors | set Scale = 2', { maxTargets: '300' }))
+      .toEqual({ toolName: 'rql-mutate', input: { query: 'actors | count; actors | set Scale = 2', max_targets: 300 } });
+    expect(rqlCall('actors | set Scale = 2; actors | set Scale = 3', { dryRun: true }))
+      .toEqual({ toolName: 'rql-mutate', input: { query: 'actors | set Scale = 2; actors | set Scale = 3', dry_run: true } });
+    expect(rqlCall('actors | count; levels | count', { dryRun: true })).toHaveProperty('usage');
   });
 
   it('reads || as or, not as a stage break', () => {

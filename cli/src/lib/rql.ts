@@ -3,8 +3,50 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { isRqlMutation } from '@baizor/gamedev-cli-core';
 
 export { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlMutation, rqlStages, stripToolName } from '@baizor/gamedev-cli-core';
+
+/**
+ * The statements of a request text (RQL spec section 14, `RqlParser.SplitStatements`): split at `;` outside string
+ * literals (backslash escapes honoured), `backtick` identifiers and brackets, trimmed, blank ones dropped. Text without
+ * a separator is one statement, the whole text trimmed; text of nothing but separators and blanks is its first segment.
+ */
+export function rqlStatements(text: string): string[] {
+  const segments: string[] = [];
+  let depth = 0;
+  let quote: string | undefined;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\' && quote !== '`') i++;
+      else if (ch === quote) quote = undefined;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+    } else if (ch === '(' || ch === '[' || ch === '{') {
+      depth++;
+    } else if (ch === ')' || ch === ']' || ch === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (ch === ';' && depth === 0) {
+      segments.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  segments.push(text.slice(start).trim());
+  if (segments.length === 1) return segments;
+  const statements = segments.filter((s) => s.length > 0);
+  return statements.length > 0 ? statements : segments.slice(0, 1);
+}
+
+/**
+ * Text that asks for a change goes to rql-mutate: a statement whose last stage is `set` or `call`. With several
+ * statements one is enough, so mixed text reaches rql-mutate, which refuses it with the statement that does not end in
+ * set / call (nothing runs); text of reads only goes to rql-query.
+ */
+export function isRqlChange(text: string): boolean {
+  return rqlStatements(text).some(isRqlMutation);
+}
 
 /** Operators agents bring from other languages, with RQL's spelling. */
 const OPERATOR_HINTS: ReadonlyArray<readonly [RegExp, string]> = [
