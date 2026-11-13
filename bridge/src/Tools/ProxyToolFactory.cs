@@ -12,9 +12,11 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin;
 using com.IvanMurzak.McpPlugin.Common.Model;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
+using Rql;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 {
@@ -52,16 +54,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 {
                     var arguments = ToArguments(namedParameters);
                     // RQL (docs/rql.md): the C++ runtime executes plans, so the query text is parsed here; a parse error
-                    // is the agent's answer without a round trip.
-                    if (RqlBridge.ParsesQuery(rql) && RqlBridge.AddPlan(arguments) is ResponseCallTool parseError)
+                    // is the agent's answer without a round trip. Several statements (RQL spec §14) are one call each.
+                    IReadOnlyList<RqlStatement>? statements = null;
+                    if (RqlBridge.ParsesQuery(rql) && RqlBridge.AddPlan(arguments, out statements) is ResponseCallTool parseError)
                         return parseError.SetRequestID(requestId);
                     try
                     {
                         var timeoutMs = toolTimeoutMs?.Invoke() ?? IpcProtocol.DefaultToolTimeoutMs;
-                        var response = await channel
-                            .CallToolAsync(toolName, arguments, timeoutMs, cancellationToken)
-                            .ConfigureAwait(false);
-                        var mapped = ProxyResponseMapper.Map(response, requestId);
+                        async Task<ResponseCallTool> Call(JsonObject callArguments) => ProxyResponseMapper.Map(
+                            await channel.CallToolAsync(toolName, callArguments, timeoutMs, cancellationToken).ConfigureAwait(false), requestId);
+                        if (statements != null)
+                            return (await RqlBridge.RunStatementsAsync(rql!, arguments, statements, Call).ConfigureAwait(false)).SetRequestID(requestId);
+                        var mapped = await Call(arguments).ConfigureAwait(false);
                         return rql != null ? RqlBridge.Render(rql, mapped) : mapped;
                     }
                     catch (IpcDisconnectedException ex)
