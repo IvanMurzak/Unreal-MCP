@@ -461,11 +461,32 @@ describe('closeOwned (editor-quit)', () => {
       pid, nonce: 'old', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
       hostId: os.hostname(), processStart: `start-${pid}`,
     }));
+    // A lease from before leases named their project (cli-core 0.12) is trusted when the editor's command line opens it.
     const result = await closeOwnedSession({
-      projectDir: dir, url: 'http://127.0.0.1:5166', timeoutMs: 1000, processOps: editors.ops, listProcessesImpl: () => [], invokeSystemTool: quit,
+      projectDir: dir, url: 'http://127.0.0.1:5166', timeoutMs: 1000, listProcessesImpl: () => [], invokeSystemTool: quit,
+      processOps: { ...editors.ops, commandLine: async () => `UnrealEditor "${path.join(dir, 'Game.uproject')}" -unattended` },
     });
     expect(result).toMatchObject({ kind: 'success', result: { kind: 'closed', pid } });
     expect(quit).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://127.0.0.1:5166', input: { nonce: 'old' } }));
+  });
+
+  it('never closes the editor of an old lease copied with the project (its command line opens another project)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    const quit = vi.fn();
+    const pid = await editors.ops.spawnDetached!('UnrealEditor.exe', [], { cwd: dir, env: {}, hideWindow: true });
+    fs.mkdirSync(path.join(dir, '.ai-game-dev'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.ai-game-dev', 'session.json'), JSON.stringify({
+      pid, nonce: 'old', engine: 'unreal', mode: 'headless', startedAt: new Date().toISOString(), ownedBy: 'cli',
+      hostId: os.hostname(), processStart: `start-${pid}`,
+    }));
+    const result = await closeOwnedSession({
+      projectDir: dir, url: 'http://127.0.0.1:5166', timeoutMs: 1000, listProcessesImpl: () => [], invokeSystemTool: quit,
+      processOps: { ...editors.ops, commandLine: async () => `UnrealEditor "${path.join(dir, '..', 'Original', 'Game.uproject')}"` },
+    });
+    expect(result).toMatchObject({ kind: 'success', result: { kind: 'not-owned' } });
+    expect(quit).not.toHaveBeenCalled();
+    expect(editors.alive.has(pid)).toBe(true);
   });
 
   it('never touches an editor without our lease', async () => {

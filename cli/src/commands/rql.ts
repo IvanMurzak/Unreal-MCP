@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { Command, Option } from 'commander';
-import { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlChange, packagesWrittenSince, rqlMaySave, saveReceipt, rqlStatements, stripToolNames } from '../lib/rql.js';
+import { RQL_MUTATE_TOOL, decodeQueryFile, packagesWrittenSince, rqlMaySave, rqlToolCall, saveReceipt, splitRqlStatements, type RqlToolCall } from '../lib/rql.js';
 import { runTool } from '../lib/run-tool.js';
 import { isAbsoluteLoopbackHost } from '../utils/port.js';
 import { readUProject } from '../utils/project.js';
@@ -29,25 +29,15 @@ const RQL_HELP_FOOTER = [
   'Sources, types and members: unreal-mcp-cli rql --schema [Type]  (full language: unreal-mcp-cli tools --filter rql-query)',
 ].join('\n');
 
-/** The rql-* tool and its input for the command line, or a usage error. */
-export function rqlCall(query: string | undefined, opts: Pick<RqlCliOptions, 'schema' | 'dryRun' | 'maxTargets'>):
-  { toolName: string; input: Record<string, unknown> } | { usage: string } {
+const NO_QUERY_USAGE = 'No query given: unreal-mcp-cli rql \'actors | where Label starts-with "Tree" | count\' (recipes: rql --help)';
+
+/**
+ * The rql-* tool and its input for the command line, or a usage error: cli-core's {@link rqlToolCall}, after
+ * `--max-targets` is parsed here (a whole number of at least 1; anything else throws the usage error).
+ */
+export function rqlCall(query: string | undefined, opts: Pick<RqlCliOptions, 'schema' | 'dryRun' | 'maxTargets'>): RqlToolCall | { usage: string } {
   const maxTargets = opts.maxTargets === undefined ? undefined : parseWholeNumber(opts.maxTargets, '--max-targets', 1);
-  if (opts.schema !== undefined) {
-    // `rql --schema 'actors | count'` hands the query to --schema as its value.
-    if (query !== undefined || (typeof opts.schema === 'string' && /[|\s]/.test(opts.schema.trim()))) {
-      return { usage: 'Pass either a query or --schema [type] (a type name), not both.' };
-    }
-    return { toolName: RQL_SCHEMA_TOOL, input: typeof opts.schema === 'string' ? { type: opts.schema } : {} };
-  }
-  if (query === undefined || query.trim() === '') {
-    return { usage: 'No query given: unreal-mcp-cli rql \'actors | where Label starts-with "Tree" | count\' (recipes: rql --help)' };
-  }
-  if (!isRqlChange(query)) {
-    if (opts.dryRun || maxTargets !== undefined) return { usage: '--dry-run and --max-targets are for a query ending in set / call.' };
-    return { toolName: RQL_QUERY_TOOL, input: { query } };
-  }
-  return { toolName: RQL_MUTATE_TOOL, input: { query, ...(opts.dryRun ? { dry_run: true } : {}), ...(maxTargets !== undefined ? { max_targets: maxTargets } : {}) } };
+  return rqlToolCall(query, { schema: opts.schema, dryRun: opts.dryRun, maxTargets }, NO_QUERY_USAGE);
 }
 
 /** The query from the argument or `-f <file>` (`-f -`: stdin; stdin is never read unasked). */
@@ -77,17 +67,18 @@ export const rqlCommand = command
     const out = new CommandOutput('rql', opts.format);
     let query: string | undefined;
     try {
-      const text = readQuery(queryArg, opts.file);
-      query = text === undefined ? undefined : stripToolNames(text);
+      query = readQuery(queryArg, opts.file);
     } catch (err) {
       out.fail(FAILURE.usage, err instanceof Error ? err.message : String(err));
       return;
     }
+    // cli-core strips a pasted tool name from each statement and picks rql-query / rql-mutate for the whole text.
     const call = rqlCall(query, opts);
     if ('usage' in call) {
       out.fail(FAILURE.usage, call.usage);
       return;
     }
+    const sent = String(call.input['query'] ?? '');
     // A save answers `null`; which files a change wrote is read from the disk, so nobody re-opens the level to check:
     // only for an editor on this machine, and only files written since the tool call itself (not the editor start).
     let calledAt = Date.now();
@@ -97,11 +88,11 @@ export const rqlCommand = command
     };
     const { ok, endpoint } = await callToolFromCli({ errorNoun: 'tool', invoke }, call.toolName, JSON.stringify(call.input), opts, out, true);
     // Several statements: the changes before a failed one stay, so a failed call still lists the files they wrote.
-    const reported = ok || rqlStatements(query!).length > 1;
+    const reported = ok || splitRqlStatements(sent).length > 1;
     const projectDir = reported && call.toolName === RQL_MUTATE_TOOL && !opts.dryRun && !out.machine && endpoint !== undefined
       && isAbsoluteLoopbackHost(new URL(endpoint).origin) ? readUProject(opts.path ?? process.cwd())?.projectDir : undefined;
     if (projectDir !== undefined) {
-      const receipt = saveReceipt(packagesWrittenSince(projectDir, calledAt), ok && rqlMaySave(query!));
+      const receipt = saveReceipt(packagesWrittenSince(projectDir, calledAt), ok && rqlMaySave(sent));
       if (receipt) console.log(receipt);
     }
   });
