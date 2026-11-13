@@ -89,11 +89,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public static async Task<ResponseCallTool> RunStatementsAsync(string role, JsonObject arguments, IReadOnlyList<RqlStatement> statements,
             Func<JsonObject, Task<ResponseCallTool>> call)
         {
-            var mutate = role == MutateRole;
             var notes = new List<ContentBlock>();
-            // The plan each statement parses to, to give a plan RqlScript runs its statement's text (the undo step's title).
+            // Each statement's plan, to find the statement of a plan RqlScript runs: its text is the call's query (the undo step's title).
             var plans = statements.Select(st => RqlParser.TryParse(st.Text, out var p, out _) ? PlanCodec.Serialize(p!) : null).ToList();
-            int next = 0, sent = 0;
+            int next = 0, calls = 0;
 
             QueryResult Execute(QueryPlan plan)
             {
@@ -106,8 +105,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
                 ResponseCallTool response;
                 try { response = call(statementArguments).GetAwaiter().GetResult(); }
-                catch (IpcDisconnectedException ex) when (sent > 0) { return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message) }); }
-                finally { sent++; }
+                catch (IpcDisconnectedException ex) when (calls > 0) { return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message) }); }
+                finally { calls++; }
 
                 var first = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text);
                 if (response.Content != null)
@@ -119,7 +118,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             }
 
             // RqlScript runs the statements synchronously, one after another: off the caller's thread, each IPC call awaited in turn.
-            var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = mutate }, Execute)).ConfigureAwait(false);
+            var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = role == MutateRole }, Execute)).ConfigureAwait(false);
             var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result) } };
             content.AddRange(notes);
             return new ResponseCallTool { Status = result.Ok ? ResponseStatus.Success : ResponseStatus.Error, Content = content };
