@@ -303,11 +303,14 @@ jobs:
       - name: Clean staged bridge binaries (gitignored)
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py clean-staged-bridge
 
-      # The C++ plugin consumes nothing from the chain: under a lock, only assert that the lock's
-      # unreal-mcp sha is this run's commit, then record.
+      # The C++ plugin consumes one thing from the chain: the Code-Exec Python runtime it vendors
+      # (Content/Python/Lib/site-packages/code_exec, run by `python-execute` and its spec). When the lock moves
+      # Code-Exec, apply copies it from the lock's Code-Exec sha over the committed copy (a tracked-file change
+      # the next checkout's --force discards) and record proves every file; otherwise it only asserts that the
+      # lock's unreal-mcp sha is this run's commit.
       - name: chain feed
         id: chain
-        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job plugin --edges none
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py apply --node unreal-mcp --job plugin --edges vendored
 
       # Machine-wide UE lock (#293; see the header and docs/RELEASING.md). Held from here until
       # the always() release step that ends this job.
@@ -340,7 +343,7 @@ jobs:
       - name: chain leg record
         id: chain_record
         if: always() && env.CHAIN_PY != ''
-        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job plugin --edges none --matrix ue${{ matrix.ue }} --engine unreal --engine-version ${{ matrix.ue }} --tier T3 --job-status ${{ job.status }} --out chain-leg.json
+        run: ${{ env.CHAIN_PY }} .github/scripts/chain_feed.py record --node unreal-mcp --job plugin --edges vendored --matrix ue${{ matrix.ue }} --engine unreal --engine-version ${{ matrix.ue }} --tier T3 --job-status ${{ job.status }} --out chain-leg.json
 
       - name: chain leg artifact
         if: always() && steps.chain_record.outputs.artifact_name != ''
