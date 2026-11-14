@@ -71,21 +71,40 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 - **A C++ project**, because the plugin ships as source and Unreal compiles its modules for your project with your platform's C++ toolchain. A Blueprint-only project becomes a C++ project in one step: in the editor, **Tools → New C++ Class…** and create any class. A new project: `unreal-mcp-cli create-project ./MyGame` scaffolds a minimal C++ one.
 - **No .NET install.** The MCP host is a self-contained .NET program (`unreal-mcp-bridge`) bundled inside the plugin for your platform; the plugin starts and restarts it. (The Fab build has no executables; its **Get bridge** button installs the bridge once.) Only building the bridge from source needs the .NET 9 SDK.
 - **Node.js 22.14+**, only for `unreal-mcp-cli` (an npm package; 22.14 is its minimum Node version).
-- Windows, macOS or Linux.
+- **Windows or macOS** (every release is tested on both). **Linux x64:** the sidecar is built and shipped, but no release test runs on Linux.
 
 ## Quick start
 
-**Easiest install: [AI Game Developer on Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33).** Add it to your engine from Fab / the Epic Games Launcher, enable it under **Edit → Plugins**, open your project, and in **Tools → AI Game Developer** click **Get bridge** once: the Fab build carries no executables, so this installs the `unreal-mcp-bridge` sidecar. Then connect your agent with one of the two options below and skip their `install-plugin` line (that line installs the plugin into the project instead, from GitHub).
+**1. Install the plugin**, one of:
 
-Pick how your agent reaches the editor. Both are fully supported; you can switch later.
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)** (no terminal): add **AI Game Developer** to your engine, enable it under **Edit → Plugins**, open your project.
+- **Two commands** (Node.js 22.14+):
+
+  ```bash
+  npx unreal-mcp-cli install-plugin ./MyGame   # plugin + bundled bridge into MyGame/Plugins
+  npx unreal-mcp-cli open ./MyGame             # build if needed and open the editor
+  ```
+
+**2. Connect, in the editor:** open **Tools → AI Game Developer**.
+
+- Fab install only: click **Get bridge** once (the Fab build carries no executables, so this installs the `unreal-mcp-bridge` sidecar).
+- **Cloud** (default): click **Authorize** and approve the sign-in in your browser. **Local**: switch to **Custom** and click **Start** next to **MCP server**; the editor downloads the checksum-verified `gamedev-mcp-server` (with a Fab install, install that server by hand: the log names the download).
+- Under **AI agent**, pick yours (Claude Code, Cursor, Codex, …) and click **Configure**.
+
+**3. Ask your agent:** *"Spawn three cubes in a row and a point light above them, then take a screenshot."*
+
+Local or Cloud? Both are fully supported; you can switch later.
 
 | | **Local** | **Cloud** |
 | --- | --- | --- |
 | Account | none | ai-game.dev sign-in |
-| MCP server | `gamedev-mcp-server` on your machine, started by the agent | ai-game.dev relay |
+| MCP server | `gamedev-mcp-server` on your machine, started by the editor or by your agent | ai-game.dev relay |
 | Traffic | stays on `localhost` | passes through ai-game.dev ([what it logs](#what-the-cloud-relay-sees)) |
 | Auth | none on loopback, or a shared token (one flag) | OAuth or a per-project key |
 | Good for | offline work, CI, private projects | one account across several projects and machines |
+
+<details>
+<summary><b>Everything from the terminal</b> (CLI: Cloud, Local, token auth)</summary>
 
 <p align="center">
   <img src="docs/img/readme/terminal.svg" alt="Terminal: npm install -g unreal-mcp-cli, install-plugin, login, setup-mcp claude-code, open the editor" width="100%"/>
@@ -122,15 +141,15 @@ unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secr
 
 Why no auth is the local default: the server binds to loopback only and rejects requests from non-local browser origins, so only programs on your own machine can reach it. Use a token when you do not trust every program or user on that machine. The secret lands in the project's `.env` (gitignored by `configure`) and in the agent's config file, so keep that file out of version control.
 
+</details>
+
 <a id="what-the-cloud-relay-sees"></a>**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them without storing their contents. It logs request metadata (tool name, timing, sizes, IP address) and MCP events, used mainly within a rolling 90-day window. It does not collect your source code, project files or assets. Details: [privacy policy](https://ai-game.dev/legal/privacy).
 
-`install-plugin` downloads the signed plugin source release that matches the CLI version. In the editor, open **Tools → AI Game Developer** to see the connection, the bridge status and the connected agents. Then ask your agent:
-
-> *"Spawn three cubes in a row and a point light above them, then take a screenshot."*
+`install-plugin` downloads the signed plugin source release that matches the CLI version.
 
 Other ways to install:
 
-- **Fab**: [AI Game Developer on Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33), see above. Each GitHub release also carries a Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) without executables; with either, the window's **Get bridge** button walks you through installing the sidecar once.
+- **Fab-format zip**: besides the [Fab listing](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33), each GitHub release also carries a Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) without executables; with either, the window's **Get bridge** button walks you through installing the sidecar once.
 - **Manual**: copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/`. A source checkout has no bundled sidecar: run `unreal-mcp-cli bootstrap-local` or set `UNREAL_MCP_BRIDGE_PATH`.
 
 Updating (`unreal-mcp-cli update`), connection modes, environment variables and troubleshooting: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
@@ -219,7 +238,13 @@ All commands and options: [cli/README.md](cli/README.md) or `unreal-mcp-cli comm
 - **Plugin ↔ sidecar:** the plugin listens on a loopback TCP port; the sidecar dials it with a one-shot token sent over stdin (never on the command line, never logged).
 - **Local server:** `gamedev-mcp-server` binds to loopback by default and answers `403` to a request whose `Origin` is not allowed (DNS-rebinding defense). On loopback the plugin starts it without authentication unless you choose a token (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`). Server options: [hosting and authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
 - **Cloud:** the agent signs in with OAuth or uses a per-project key you can replace with `setup-mcp --regenerate-key`.
-- **What the tools can do:** edit files under `<Project>/Source/`, run console commands and editor Python, change any reflected property. Hide tools from the agent in the **MCP Tools** window, or serve only a whitelist with `UNREAL_MCP_TOOLS` ([docs/TOOLS.md](docs/TOOLS.md)).
+- **What the tools can do:** edit files under `<Project>/Source/`, run console commands and editor Python, change any reflected property.
+- **Controls over them:**
+  - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` serves only the listed tools; any other tool is neither listed nor callable.
+  - **Hide** (soft): the **Visible** checkbox in the **MCP Tools** window removes a tool from `tools/list`, but a client that calls it by name still runs it.
+  - **Bounded changes:** C++ file tools stay inside `<Project>/Source/`; an `rql-mutate` call is all-or-nothing, one undo step, previewable with `dry_run`, and refused above 200 targets unless the call raises `max_targets` (up to 1000); `python-execute` stops after `timeout` (30 s by default); every tool call has a time limit (`UNREAL_MCP_TOOL_TIMEOUT`, 5 min by default).
+  - **Not for the AI:** the system tools (`ping`, skill generation, `editor-quit`) are absent from `tools/list`, and `editor-quit` refuses unless the CLI session's nonce matches.
+  - Details: [docs/TOOLS.md](docs/TOOLS.md).
 - **Runtime mode is off by default:** a game never connects on its own. It needs the `bRuntimeMcpEnabled` setting (default off) and an explicit `Connect()` call, accepts only a loopback host unless you allow a remote one, and is refused in Shipping builds unless compiled in. Keep the plugin out of packaged games with a `TargetDenyList` ([docs/RUNTIME.md](docs/RUNTIME.md)).
 
 ## Extensions
