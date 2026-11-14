@@ -19,7 +19,7 @@ K.write(out("hero.svg"), K.hero(
     title="Unreal ", accent="MCP", eyebrow_text="AI Game Developer",
     subtitle=["Let any AI agent inspect and drive", "the Unreal Editor."],
     chip_items=["UE 5.5–5.8", "npm i -g unreal-mcp-cli"],
-    label="Unreal MCP — let any AI agent inspect and drive the Unreal Editor"))
+    label="Unreal MCP — let any AI agent inspect and drive the Unreal Editor", accent_fx="flow"))
 
 # ── architecture ────────────────────────────────────────────────────────────────────────────────────
 W, H = 1200, 480
