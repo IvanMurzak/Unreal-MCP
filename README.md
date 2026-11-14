@@ -21,6 +21,8 @@
     <a href="https://github.com/Kilo-Org/kilocode"><img src="docs/img/mcp-clients/kilo-code-64.png" alt="Kilo Code" title="Kilo Code" height="36"></a>
   </p>
 
+  <b>[English](README.md) | [中文](docs/README.zh-CN.md) | [日本語](docs/README.ja.md) | [Español](docs/README.es.md) | [فارسی](docs/README.fa.md) | [हिन्दी](docs/README.hi.md) | [العربية](docs/README.ar.md)</b>
+
 </div>
 
 **Unreal MCP** (AI Game Developer for Unreal) connects any MCP-aware AI agent to the **Unreal Editor**. Ask in plain words and the agent spawns actors, edits levels, authors and compiles Blueprints, edits and compiles C++, manages assets and checks its work with screenshots. It is the Unreal sibling of [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) and [Godot-MCP](https://github.com/IvanMurzak/Godot-MCP), and uses the same cloud backend ([ai-game.dev](https://ai-game.dev)) or your own [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server).

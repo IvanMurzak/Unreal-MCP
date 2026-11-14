@@ -1,3 +1,5 @@
+<b>[English](TOOLS.md) | [中文](TOOLS.zh-CN.md) | [日本語](TOOLS.ja.md) | [Español](TOOLS.es.md) | [فارسی](TOOLS.fa.md) | [हिन्दी](TOOLS.hi.md) | [العربية](TOOLS.ar.md)</b>
+
 # Unreal-MCP tools
 
 The canonical inventory of the tools the **UnrealMCP** editor plugin registers. Unreal-MCP ships **30 built-in tools in 8 families** that your AI agent can call, plus **4 system tools** it cannot (host plumbing for the CLI and the desktop app). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), the same convention as Unity-MCP and Godot-MCP. [Extensions](#extensions) and [your own plugins](EXTENSIONS.md) add more.

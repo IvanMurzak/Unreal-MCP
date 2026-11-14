@@ -1,3 +1,5 @@
+<b>[English](CONFIGURATION.md) | [中文](CONFIGURATION.zh-CN.md) | [日本語](CONFIGURATION.ja.md) | [Español](CONFIGURATION.es.md) | [فارسی](CONFIGURATION.fa.md) | [हिन्दी](CONFIGURATION.hi.md) | [العربية](CONFIGURATION.ar.md)</b>
+
 # Configuration, updates and troubleshooting
 
 How to connect the editor, keep the plugin current, tune it with environment variables, and fix the common problems. Install steps are in the [README](../README.md#quick-start); the design behind all of this is in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -29,7 +31,14 @@ Updating in place must always leave you running the **new** code. The risk is UE
 - **Fab / Epic Marketplace (once the listing is live) → automatic.** The Epic Games Launcher replaces the precompiled binaries in place; nothing to compile, no cache to clear.
 - **`unreal-mcp-cli update` → automatic clean rebuild.** `update` re-copies the plugin source and, by **default**, deletes the installed plugin's stale `Intermediate/` and the C++ `Binaries/` so UE performs a clean compile on the next editor launch — no manual steps. The bundled sidecar bridge under `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is kept intact: release-source installs refresh it from `Source/ThirdParty/...`, while repo/dev installs preserve the previously bundled copy when needed. Dev **junction** installs are never cleaned (that would wipe your live source tree's outputs). Pass `--no-clean` to opt out of the cache wipe.
 
-  ```bash   unreal-mcp-cli update <YourProject>            # default: clean rebuild on version change   unreal-mcp-cli update <YourProject> --force    # re-copy even when versions match   unreal-mcp-cli update <YourProject> --no-clean # keep the existing build cache   unreal-mcp-cli update <YourProject> --no-extensions # leave the installed extensions as they are   unreal-mcp-cli update <YourProject> --no-self  # leave the CLI as it is   unreal-mcp-cli update <YourProject> --check    # only report; exit code 2 when something is outdated   ```
+  ```bash
+  unreal-mcp-cli update <YourProject>            # default: clean rebuild on version change
+  unreal-mcp-cli update <YourProject> --force    # re-copy even when versions match
+  unreal-mcp-cli update <YourProject> --no-clean # keep the existing build cache
+  unreal-mcp-cli update <YourProject> --no-extensions # leave the installed extensions as they are
+  unreal-mcp-cli update <YourProject> --no-self  # leave the CLI as it is
+  unreal-mcp-cli update <YourProject> --check    # only report; exit code 2 when something is outdated
+  ```
 
 - **Manual copy → clear the cache yourself.** If you overwrite `<YourProject>/Plugins/UnrealMCP/` by hand, **close the editor first**, delete `<YourProject>/Plugins/UnrealMCP/Intermediate/` and the C++ `Binaries/` (keep `Binaries/ThirdParty/` if a bundled bridge is present), then relaunch so UE recompiles cleanly.
 

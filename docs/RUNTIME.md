@@ -1,3 +1,5 @@
+<b>[English](RUNTIME.md) | [中文](RUNTIME.zh-CN.md) | [日本語](RUNTIME.ja.md) | [Español](RUNTIME.es.md) | [فارسی](RUNTIME.fa.md) | [हिन्दी](RUNTIME.hi.md) | [العربية](RUNTIME.ar.md)</b>
+
 # Runtime usage (in-game)
 
 By default Unreal-MCP drives the **editor**. It can also run **inside a running game** — PIE, Standalone, or a packaged **Development** build — so an AI assistant can drive your game live. This is the Unreal counterpart of [Unity-MCP's runtime (in-game) support](https://github.com/IvanMurzak/Unity-MCP#runtime-usage-in-game): the UE analog of Unity's `UnityMcpPluginRuntime.Initialize().Build().Connect()` and its `[AiTool]` Chess-bot sample.
