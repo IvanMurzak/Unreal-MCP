@@ -968,6 +968,7 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 		"them in one call. Prefer one precise query over many exploratory calls.\n\n");
 	Out += TEXT("- `rql-query` - read-only queries, compact table results.\n");
 	Out += TEXT("- `rql-mutate` - queries ending with `set` / `call`; all-or-nothing, one undo step (Ctrl+Z), `dry_run: true` previews. "
+		"Several queries separated by `;` run in order, each its own change and undo step; the first that fails stops the rest. "
 		"Changes are not saved to disk until `editor | call SaveAll()` (or SaveLevel / SaveAsset).\n");
 	Out += TEXT("- `rql-schema` - sources and the actor / component classes in the editor world; `rql-schema(type)` lists one type's members and methods.\n\n");
 	Out += TEXT("```bash\n");

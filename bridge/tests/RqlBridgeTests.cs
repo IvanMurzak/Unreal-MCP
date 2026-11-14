@@ -58,7 +58,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void AddPlan_StoresTheCanonicalPlanOfTheQuery()
         {
             var args = new JsonObject { ["query"] = "actors | where Label == \"Lamp\" | first 2" };
-            Assert.Null(RqlBridge.AddPlan(args));
+            Assert.Null(RqlBridge.AddPlan(args, out _));
             var plan = JsonNode.Parse(args["plan"]!.GetValue<string>())!.AsObject();
             Assert.Equal("0.1", plan["rql"]!.GetValue<string>());
             Assert.Equal("actors", plan["source"]!["path"]![0]!.GetValue<string>());
@@ -77,7 +77,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 ["max_targets"] = 300,
                 ["dry_run"] = true,
             };
-            Assert.Null(RqlBridge.AddPlan(args));
+            Assert.Null(RqlBridge.AddPlan(args, out _));
             var plan = JsonNode.Parse(args["plan"]!.GetValue<string>())!.AsObject();
             var expr = plan["stages"]![0]!["fields"]![0]!["expr"]!;
             Assert.Equal("if", expr["call"]!.GetValue<string>());
@@ -85,7 +85,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(300, args["max_targets"]!.GetValue<int>());
             Assert.True(args["dry_run"]!.GetValue<bool>());
 
-            var incomplete = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | select k = ($ is PointLight ? \"point\")" });
+            var incomplete = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | select k = ($ is PointLight ? \"point\")" }, out _);
             Assert.NotNull(incomplete);
             Assert.Contains("syntax-error", incomplete!.Content!.Single().Text);
         }
@@ -93,7 +93,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public void AddPlan_AnswersSyntaxErrorsLikeAFailingQuery()
         {
-            var error = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | where (" });
+            var error = RqlBridge.AddPlan(new JsonObject { ["query"] = "actors | where (" }, out _);
             Assert.NotNull(error);
             Assert.Equal(ResponseStatus.Error, error!.Status);
             Assert.StartsWith("error ", error.Content!.Single().Text);
@@ -102,11 +102,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public void AddPlan_RequiresAQuery()
         {
-            var error = RqlBridge.AddPlan(new JsonObject());
+            var error = RqlBridge.AddPlan(new JsonObject(), out _);
             Assert.NotNull(error);
             Assert.Contains("'query' is required", error!.Content!.Single().Text);
-            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = "  " })!.Content!.Single().Text);
-            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = null })!.Content!.Single().Text);
+            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = "  " }, out _)!.Content!.Single().Text);
+            Assert.Contains("'query' is required", RqlBridge.AddPlan(new JsonObject { ["query"] = null }, out _)!.Content!.Single().Text);
         }
 
         [Theory]
@@ -117,7 +117,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void AddPlan_NamesTheTypeOfANonStringQuery(string json, string kind)
         {
             var args = new JsonObject { ["query"] = JsonNode.Parse(json) };
-            var text = RqlBridge.AddPlan(args)!.Content!.Single().Text;
+            var text = RqlBridge.AddPlan(args, out _)!.Content!.Single().Text;
             Assert.Contains($"'query' must be a string (got {kind})", text);
             Assert.DoesNotContain("is required", text);
             Assert.False(args.ContainsKey("plan"));
@@ -389,6 +389,257 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var response = await proxy.Run("req", Args("{\"query\":\"x\"}"));
             Assert.False(channel.LastArguments!.ContainsKey("plan"));
             Assert.Equal("{\"ok\":true}", response.Content!.Single().Text);
+        }
+
+        // ------------------------------------------------------------ several statements (RQL spec §14)
+
+        /// <summary>A plugin that answers each call with <paramref name="answer"/>(its query text) and records the calls.</summary>
+        private static FakeToolCallChannel Plugin(List<JsonObject> calls, Func<string, string> answer, string? note = null) =>
+            new FakeToolCallChannel((tool, args) =>
+            {
+                calls.Add((JsonObject)args!.DeepClone());
+                var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = answer(args["query"]!.GetValue<string>()) });
+                if (note != null) content.Add(new JsonObject { ["type"] = "text", ["text"] = note + " " + calls.Count });
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = content };
+            });
+
+        private const string Count2 = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":2}";
+        private const string Count1 = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":1}";
+
+        private static string Receipt(string label, bool dryRun = false) =>
+            "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"member\",\"old\",\"new\"]," +
+            $"\"rows\":[[\"StaticMeshActor#1\",\"Label\",\"{label}\",\"{label}2\"]]" + (dryRun ? ",\"dryRun\":true" : "") + "}";
+
+        private const string UnknownMember = "{\"rql\":\"0.1\",\"ok\":false,\"diagnostics\":[{\"severity\":\"error\",\"code\":\"unknown-member\"," +
+                                             "\"message\":\"Nope is not a member of StaticMeshActor\"}]}";
+
+        [Fact]
+        public void AddPlan_OneStatementKeepsTheWholeText()
+        {
+            // No ';' outside strings: one statement, parsed from the text as it is (positions and plan exactly as before).
+            var args = new JsonObject { ["query"] = "actors | where Label == \"a;b\" | count" };
+            Assert.Null(RqlBridge.AddPlan(args, out var statements));
+            Assert.Null(statements);
+            Assert.True(Rql.RqlParser.TryParse("actors | where Label == \"a;b\" | count", out var plan, out _));
+            Assert.Equal(Rql.PlanCodec.Serialize(plan!), args["plan"]!.GetValue<string>());
+
+            // Blank statements around one leave one statement too; the plugin names its undo step after the statement.
+            var blanks = new JsonObject { ["query"] = ";actors | count;" };
+            Assert.Null(RqlBridge.AddPlan(blanks, out statements));
+            Assert.Null(statements);
+            Assert.Contains("\"op\":\"count\"", blanks["plan"]!.GetValue<string>());
+            Assert.Equal("actors | count", blanks["query"]!.GetValue<string>());
+
+            // A syntax error after a leading ';' keeps its position in the request text: the ';' counts as a blank.
+            var error = RqlBridge.AddPlan(new JsonObject { ["query"] = ";actors | where (" }, out statements);
+            Assert.Null(statements);
+            Assert.Equal(RqlBridge.AddPlan(new JsonObject { ["query"] = " actors | where (" }, out _)!.Content!.Single().Text, error!.Content!.Single().Text);
+        }
+
+        [Fact]
+        public void AddPlan_SeveralStatementsAreLeftToRunStatements()
+        {
+            var args = new JsonObject { ["query"] = "actors | count; levels | count" };
+            Assert.Null(RqlBridge.AddPlan(args, out var statements));
+            Assert.Equal(new[] { "actors | count", "levels | count" }, statements!.Select(st => st.Text));
+            Assert.False(args.ContainsKey("plan"));
+        }
+
+        [Fact]
+        public async Task Proxy_SingleStatementAnswerIsUnchanged()
+        {
+            // One statement: one call with the request's own text, rendered exactly as RqlBridge.Render renders the answer.
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole },
+                Plugin(calls, _ => Receipt("A"), note: "Editor diagnostics"));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | where Label == \\\"A\\\" | set Label = \\\"A2\\\"\"}"));
+            var call = Assert.Single(calls);
+            Assert.Equal("actors | where Label == \"A\" | set Label = \"A2\"", call["query"]!.GetValue<string>());
+            Assert.Equal(ResponseStatus.Success, response.Status);
+            Assert.Equal(new[] { "1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2", "Editor diagnostics 1" },
+                response.Content!.Select(c => c.Text));
+        }
+
+        [Fact]
+        public async Task Proxy_TwoStatementQueryRunsEachAndAnswersOneBlockPerStatement()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole },
+                Plugin(calls, query => query.StartsWith("actors") ? Count2 : Count1, note: "Editor diagnostics"));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count;\\n  levels | count\"}"));
+
+            Assert.Equal(new[] { "actors | count", "levels | count" }, calls.Select(c => c["query"]!.GetValue<string>()));
+            Assert.Contains("\"actors\"", calls[0]["plan"]!.GetValue<string>());
+            Assert.Contains("\"levels\"", calls[1]["plan"]!.GetValue<string>());
+            Assert.Equal(ResponseStatus.Success, response.Status);
+            Assert.Equal("req", response.RequestID);
+            // The rendered blocks first, then each call's editor note in order.
+            Assert.Equal(new[] { "[1/2] actors | count\n2\n\n[2/2] levels | count\n1", "Editor diagnostics 1", "Editor diagnostics 2" },
+                response.Content!.Select(c => c.Text));
+        }
+
+        [Fact]
+        public async Task Proxy_AReadRunsTheOtherStatementsWhenOneFails()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, Plugin(calls, _ => Count1));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | where; levels | count\"}"));
+
+            Assert.Equal(new[] { "levels | count" }, calls.Select(c => c["query"]!.GetValue<string>()));
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            var text = response.Content!.Single().Text!;
+            Assert.StartsWith("[1/2] actors | where\nerror syntax-error", text);
+            Assert.EndsWith("\n\n[2/2] levels | count\n1", text);
+        }
+
+        [Fact]
+        public async Task Proxy_AMutationStopsAtTheFirstFailedStatement()
+        {
+            // Statement 1 is changed (and stays changed), statement 2 fails, statement 3 is never sent.
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole },
+                Plugin(calls, query => query.Contains("Nope") ? UnknownMember : Receipt("A")));
+            var response = await proxy.Run("req", Args(
+                "{\"query\":\"actors | where Label == \\\"A\\\" | set Label = \\\"A2\\\"; actors | set Nope = 1; actors | where Label == \\\"C\\\" | set Label = \\\"C2\\\"\",\"max_targets\":300}"));
+
+            Assert.Equal(new[] { "actors | where Label == \"A\" | set Label = \"A2\"", "actors | set Nope = 1" },
+                calls.Select(c => c["query"]!.GetValue<string>()));
+            Assert.All(calls, c => Assert.Equal(300, c["max_targets"]!.GetValue<int>())); // the target limit applies per statement
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal(
+                "[1/3] actors | where Label == \"A\" | set Label = \"A2\"\n1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2\n\n" +
+                "[2/3] actors | set Nope = 1\nerror unknown-member: Nope is not a member of StaticMeshActor\n\n" +
+                "[3/3] actors | where Label == \"C\" | set Label = \"C2\"\nnot run: statement 2 failed: the statements after a failed change do not run",
+                response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AMutationRunsNothingUnlessEveryStatementEndsWithSetOrCall()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole }, Plugin(calls, _ => Receipt("A")));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | set Label = \\\"A\\\"; actors | count\"}"));
+
+            Assert.Empty(calls);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            var text = response.Content!.Single().Text!;
+            Assert.StartsWith("[1/2] actors | set Label = \"A\"\nnot run: statement 2 is invalid", text);
+            Assert.Contains("[2/2] actors | count\nerror invalid-plan: a mutation request must end with a set or call stage", text);
+        }
+
+        [Fact]
+        public async Task Proxy_ADryRunOfTwoStatementsPreviewsEach()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole },
+                Plugin(calls, query => Receipt(query.Contains("\"A\"") ? "A" : "B", dryRun: true)));
+            var response = await proxy.Run("req", Args(
+                "{\"query\":\"actors | where Label == \\\"A\\\" | set Label = \\\"A2\\\"; actors | where Label == \\\"B\\\" | set Label = \\\"B2\\\"\",\"dry_run\":true}"));
+
+            Assert.Equal(2, calls.Count);
+            Assert.All(calls, c => Assert.True(c["dry_run"]!.GetValue<bool>()));
+            Assert.Equal(ResponseStatus.Success, response.Status);
+            Assert.Equal(
+                "[1/2] actors | where Label == \"A\" | set Label = \"A2\"\nDRY RUN — nothing changed; 1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2\n\n" +
+                "[2/2] actors | where Label == \"B\" | set Label = \"B2\"\nDRY RUN — nothing changed; 1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|B|B2",
+                response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_MoreThanTenStatementsSendNothing()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, Plugin(calls, _ => Count1));
+            var query = string.Join("; ", Enumerable.Repeat("actors | count", 11));
+            var response = await proxy.Run("req", Args(JsonSerializer.Serialize(new { query })));
+            Assert.Empty(calls);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.StartsWith("error syntax-error: 11 statements in one call", response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_ALinkDropAfterAStatementWasSentFailsOnlyTheLaterStatements()
+        {
+            var sent = 0;
+            var channel = new FakeToolCallChannel((tool, args) =>
+            {
+                if (++sent > 1) throw new IpcDisconnectedException();
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Count2 }) };
+            });
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, channel);
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"));
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal("[1/2] actors | count\n2\n\n[2/2] levels | count\nerror internal-error: " + IpcDisconnectedException.DefaultMessage +
+                " — hint: the editor may have run this statement: check it before running it again", response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AnIpcTimeoutOnALaterStatementKeepsTheEarlierReceipts()
+        {
+            // Statement 1 changed the editor; statement 2 timed out (it may have run); statement 3 never runs.
+            var sent = 0;
+            var channel = new FakeToolCallChannel((tool, args) =>
+            {
+                if (++sent > 1) throw new TimeoutException("the editor did not answer in time");
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Receipt("A") }) };
+            });
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole }, channel);
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | set Label = \\\"A2\\\"; actors | set Label = \\\"B2\\\"; actors | set Label = \\\"C2\\\"\"}"));
+            Assert.Equal(2, sent);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal(
+                "[1/3] actors | set Label = \"A2\"\n1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2\n\n" +
+                "[2/3] actors | set Label = \"B2\"\nerror internal-error: the editor did not answer in time — hint: the editor may have run this statement: check it before running it again\n\n" +
+                "[3/3] actors | set Label = \"C2\"\nnot run: statement 2 failed: the statements after a failed change do not run",
+                response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AnEditorGoneBeforeALaterStatementFailsItWithoutTheMayHaveRunHint()
+        {
+            FakeToolCallChannel? channel = null;
+            channel = new FakeToolCallChannel((tool, args) =>
+            {
+                channel!.Connected = false; // the link is gone before the next call
+                return new ToolResponseMessage { RequestId = "r", Status = IpcProtocol.Status.Success, Content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = Count2 }) };
+            });
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, channel);
+            var text = (await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"))).Content!.Single().Text!;
+            Assert.StartsWith("[1/2] actors | count\n2\n\n[2/2] levels | count\nerror internal-error: Unreal editor bridge disconnected: the editor is not connected", text);
+            Assert.DoesNotContain("may have run", text);
+        }
+
+        [Fact]
+        public async Task Proxy_DuplicateStatementsAreEachSentWithTheirOwnText()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole }, Plugin(calls, _ => Count1));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count; actors|count; actors | count\"}"));
+            Assert.Equal(new[] { "actors | count", "actors|count", "actors | count" }, calls.Select(c => c["query"]!.GetValue<string>()));
+            Assert.Equal(ResponseStatus.Success, response.Status);
+        }
+
+        [Fact]
+        public async Task Proxy_AnAnswerThatIsNotRqlFailsItsStatement()
+        {
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole },
+                Plugin(calls, query => query.StartsWith("actors") ? "Tool 'rql-query' failed: boom" : Count1));
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | count; levels | count\"}"));
+            Assert.Equal(2, calls.Count);
+            Assert.Equal(ResponseStatus.Error, response.Status);
+            Assert.Equal("[1/2] actors | count\nerror internal-error: Tool 'rql-query' failed: boom\n\n[2/2] levels | count\n1", response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AnEditorThatIsNotConnectedAnswersNotExecutedAsForOneStatement()
+        {
+            var channel = new FakeToolCallChannel { Connected = false };
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-mutate", Rql = RqlBridge.MutateRole }, channel);
+            var response = await proxy.Run("req", Args("{\"query\":\"actors | set Label = \\\"A\\\"; actors | set Label = \\\"B\\\"\"}"));
+            Assert.Equal(1, channel.Calls);
+            Assert.Equal(ResponseCallTool.NotExecuted("x").Status, response.Status);
+            Assert.Equal("req", response.RequestID);
         }
 
         // ------------------------------------------------------------ unreal-rql skill

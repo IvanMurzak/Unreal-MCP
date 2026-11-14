@@ -1443,8 +1443,12 @@ void FUnrealMcpRqlSpec::Define()
 					&& Found->Description.Contains(TEXT("Bulk create: range(start, end[, step])"))
 					&& Found->Description.Contains(TEXT("range(0, 150) | call editor.SpawnActor(\"/Engine/BasicShapes/Cube\""))
 					&& !Found->Description.Contains(TEXT("range(0, 300) | call editor.SpawnActor(\"/Engine/BasicShapes/Cube\", \"Tile_\""))
-					&& Found->Description.Contains(TEXT("Trigonometry is in radians")));
+					&& Found->Description.Contains(TEXT("Trigonometry is in radians"))
+					// RQL 0.4.0 (spec section 14): several statements separated by ; in one call.
+					&& Found->Description.Contains(TEXT("Several statements in one call: separate them with ;")));
 			}
+			const FUnrealMcpRegisteredTool* Mutate = Registry.Find(TEXT("rql-mutate"));
+			TestTrue(TEXT("rql-mutate: the target limit is per statement"), Mutate && Mutate->Description.Contains(TEXT("At most 200 targets per statement")));
 		});
 	});
 

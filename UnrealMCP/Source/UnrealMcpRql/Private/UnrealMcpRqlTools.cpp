@@ -64,7 +64,7 @@ namespace UnrealMcpRqlToolsLocal
 			// The unreal-rql skill (sources and guides of the installed modules): the sidecar writes it beside the tool pages.
 			.Skill(Text(UnrealMcpRqlGuide::SkillName()), Text(UnrealMcpRqlGuide::SkillDescription()), Skill)
 			.Rql(TEXT("query"))
-			.ParamString(TEXT("query"), TEXT("RQL query, e.g. actors | where $ is PointLight | select $ref Label Location"),
+			.ParamString(TEXT("query"), TEXT("RQL query, e.g. actors | where $ is PointLight | select $ref Label Location (several: separate them with ;)"),
 				EUnrealMcpParamRequirement::Required)
 			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) { return Run(Call, /*bAllowMutation*/ false); });
@@ -76,10 +76,10 @@ namespace UnrealMcpRqlToolsLocal
 				+ Text(UnrealMcpRqlGuide::QuerySyntaxShort()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::LanguageRules()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::MutateBlurb()))
 			.Rql(TEXT("mutate"))
-			.ParamString(TEXT("query"), TEXT("RQL query ending with a set or call stage, e.g. actors | where Label == \"Player\" | set HiddenInEditor = true"),
+			.ParamString(TEXT("query"), TEXT("RQL query ending with a set or call stage, e.g. actors | where Label == \"Player\" | set HiddenInEditor = true (several: separate them with ;, each ending with set or call)"),
 				EUnrealMcpParamRequirement::Required)
 			.ParamBool(TEXT("dry_run"), TEXT("true = preview the receipt without changing anything"))
-			.ParamInt(TEXT("max_targets"), FString::Printf(TEXT("Most objects set / call may change in this call (default %d, at most %d); raise it for a bigger bulk edit"),
+			.ParamInt(TEXT("max_targets"), FString::Printf(TEXT("Most objects set / call may change in each statement of this call (default %d, at most %d); raise it for a bigger bulk edit"),
 				FUnrealMcpRqlSession::DefaultMaxTargets, FUnrealMcpRqlSession::HardMaxTargets))
 			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call) { return Run(Call, /*bAllowMutation*/ true); });
