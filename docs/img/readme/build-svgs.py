@@ -41,9 +41,9 @@ for i, label in enumerate(["MCP", "SignalR", "TCP"]):
     body.append(K.wire(f"M{gx + 6} {Y + 62} L{gx + GAP - 6} {Y + 62}", color=K.BLUE, dur=1.6, begin=i * 0.5))
     body.append(K.wire(f"M{gx + 6} {Y + 82} L{gx + GAP - 6} {Y + 82}", color=K.RED_TEXT, dur=1.6, begin=0.8 + i * 0.5, reverse=True))
 
-body.append(K.eyebrow(X0, 296, "30 built-in tools · 8 families"))
-fams = ["RQL data · 3", "Blueprint · 11", "C++ source · 6", "Screenshot · 4",
-        "Fab · 3", "Console · 1", "Python · 1", "Tool list · 1"]
+body.append(K.eyebrow(X0, 296, "Built-in tool groups"))
+fams = ["RQL data layer", "Blueprint", "C++ source", "Screenshot",
+        "Fab", "Console", "Python", "Tool list"]
 PW = 268
 for i, f in enumerate(fams):
     s, _ = K.pill(X0 + (i % 4) * (PW + 16), 316 + (i // 4) * 48, f, w=PW)
@@ -53,7 +53,7 @@ body.append(f'<text x="{W / 2}" y="446" text-anchor="middle" class="s" font-size
 K.write(out("architecture.svg"), K.panel(W, H, "".join(body),
         label="An AI agent talks MCP to the server (ai-game.dev cloud or a local gamedev-mcp-server); the server relays "
               "over SignalR to the unreal-mcp-bridge .NET sidecar, which reaches the UnrealMCP C++ plugin in the "
-              "Unreal Editor over loopback TCP. 30 built-in tools in 8 families."))
+              "Unreal Editor over loopback TCP. Built-in tool groups: RQL data layer, Blueprint, C++ source, Screenshot, Fab, Console, Python, Tool list."))
 
 # ── terminal (message formats are the CLI's own) ───────────────────────────────────────────────────
 K.write(out("terminal.svg"), K.terminal(
