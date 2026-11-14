@@ -59,7 +59,7 @@ if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
 
 ランタイム接続に含まれる組み込みツールは**ひとつ**だけです: **`ping`**（死活確認）。`ping` は[システムツール](TOOLS.ja.md)なので、`POST /api/system-tools/ping` で応答し、AI エージェントには公開されません。つまり、独自のものを何も登録していないパッケージ化ゲームのツール一覧は**空**になり、それがそのゲームの正直な姿です。ランタイムの AI エージェントにできることはすべて**持ち込み**です。上の拡張バス（`RegisterToolProvider`）で独自のツールを登録すれば、普通に現れます。
 
-エンジン開発用のファミリーはすべて**エディター専用**です（[30 個のエディターツール](TOOLS.ja.md)）。RQL データレイヤー（アクター、コンポーネント、アセット、レベル、コンソール、エディターの状態を扱う `rql-query` / `rql-mutate` / `rql-schema`）、すべてのスクリーンショットツール、さらに Blueprint の作成、C++ ソースの編集とコンパイル、`console-run-command`、`unreal-tool-list`、`python-execute`、Fab ツールがこれにあたります。これらはエディターを操作し、いくつかは RCE クラス（例: `rql-mutate`、`console-run-command`、`python-execute`）なので、既定では出荷するゲームにコンパイルされません。パッケージ化したゲームにはエディターがないため、ランタイムの組み込み機能は意図的に `ping` + ゲームが登録したツールだけになっています。
+エンジン開発用のファミリーはすべて**エディター専用**です（[エディターツール](TOOLS.ja.md)）。RQL データレイヤー（アクター、コンポーネント、アセット、レベル、コンソール、エディターの状態を扱う `rql-query` / `rql-mutate` / `rql-schema`）、すべてのスクリーンショットツール、さらに Blueprint の作成、C++ ソースの編集とコンパイル、`console-run-command`、`unreal-tool-list`、`python-execute`、Fab ツールがこれにあたります。これらはエディターを操作し、いくつかは RCE クラス（例: `rql-mutate`、`console-run-command`、`python-execute`）なので、既定では出荷するゲームにコンパイルされません。パッケージ化したゲームにはエディターがないため、ランタイムの組み込み機能は意図的に `ping` + ゲームが登録したツールだけになっています。
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>エディター専用 — パッケージ化したゲームから Unreal-MCP を除外する
 

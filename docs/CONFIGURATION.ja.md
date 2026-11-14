@@ -28,7 +28,7 @@
 
 その場で更新したときは、必ず**新しい**コードで動いている状態にならなければなりません。リスクは UE のインクリメンタルコンパイラーです。プラグインのソースが変わった（新しい `.cpp` ファイル、新しいモジュール）のに古い `UnrealMCP/Intermediate/` のビルドキャッシュが残っていると、UE は古いモジュールのファイル一覧をもとに部分的な再コンパイルを行い、気づかないうちに古い/不完全なコードのままになることがあります。チャネルごとに扱いが異なります:
 
-- **Fab / Epic Marketplace→ 自動。** Epic Games Launcher がプリコンパイル済みのバイナリをその場で置き換えます。コンパイルも、キャッシュの削除も不要です。bridge はプラグインのバージョンごとに保持されるため、更新後は **Get bridge** をもう一度クリックしてください。
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) / Epic Marketplace→ 自動。** Epic Games Launcher がプリコンパイル済みのバイナリをその場で置き換えます。コンパイルも、キャッシュの削除も不要です。bridge はプラグインのバージョンごとに保持されるため、更新後は **Get bridge** をもう一度クリックしてください。
 - **`unreal-mcp-cli update` → 自動でクリーンビルド。** `update` はプラグインのソースをコピーし直し、**既定で**インストール済みプラグインの古い `Intermediate/` と C++ の `Binaries/` を削除するので、次にエディターを起動したとき UE がクリーンにコンパイルします。手作業は不要です。`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` にある同梱のサイドカー bridge はそのまま残ります。リリースソースからのインストールでは `Source/ThirdParty/...` から更新され、リポジトリ/開発用のインストールでは必要に応じて以前同梱したコピーが保持されます。開発用の **junction** インストールは決して削除されません（削除すると、作業中のソースツリーの出力が消えてしまうためです）。キャッシュの削除を行わないようにするには `--no-clean` を渡します。
 
   ```bash
@@ -52,7 +52,7 @@
 | `UNREAL_MCP_HOST` | サーバーの URL（Custom モード）。例: `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | クラウドバックエンドの URL（既定は ai-game.dev） |
 | `UNREAL_MCP_TOKEN` | 認証トークン（サイドカーの IPC トークン / サーバートークン）。**シークレット。絶対にコミットしないこと。** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` または `oauth`（ローカルサーバーの認証） |
+| `UNREAL_MCP_AUTH_OPTION` | `none`、`token` または `oauth`（ローカルサーバーの認証） |
 | `UNREAL_MCP_KEEP_CONNECTED` | 接続状態を保存/復元 |
 | `UNREAL_MCP_TOOLS` | 有効なツールの上書き指定（ホワイトリスト。空 = フィルターなし） |
 | `UNREAL_MCP_START_SERVER` | `true`: bridge がプロジェクトのポートを報告した時点で、エディター自身がローカルの `gamedev-mcp-server` を起動し（Custom モード + http のみ。`startServer` として保存）、終了時に停止します。`unreal-mcp-cli exec` / `open --headless` がこれを設定します。 |

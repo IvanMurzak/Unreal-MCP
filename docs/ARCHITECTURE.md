@@ -16,7 +16,7 @@
 This document is the authoritative **design**; the M10 feature set has now shipped and this block
 reconciles the design with the implementation. Each numbered section is marked with the PR(s) that
 delivered it. Identifiers below (tool ids, command names, env vars, paths) were verified against
-`main` source; [TOOLS.md](TOOLS.md) carries the user-facing, source-generated tool list.
+`main` source; [TOOLS.md](TOOLS.md) carries the user-facing tool list (hand-maintained; update it when a registration changes).
 
 | Section | Status | Shipped by |
 |---|---|---|
@@ -1147,7 +1147,7 @@ Unreal-MCP/
 │                                       #   compile (standalone UBT), test (headless Automation),
 │                                       #   bootstrap-local, update, install-engine (LauncherInstalled.dat
 │                                       #   detection at minimum), setup-skills, commands (manifest);
-│                                       #   shared exit codes + --format json|ndjson (cli/README.md)
+│                                       #   shared exit codes + --format json|ndjson (cli/docs/commands.md)
 ├── samples/UnrealAITemplate/           # §5 extension template plugin
 ├── docs/  (ARCHITECTURE.md ← this doc, RELEASING.md, EXTENSIONS.md, claude/)
 ├── .github/workflows/  (test_pull_request.yml, test_cli.yml, release.yml)

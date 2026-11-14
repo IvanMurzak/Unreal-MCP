@@ -28,7 +28,7 @@ Connection settings `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.j
 
 Update के बाद हमेशा **नया** code ही चलना चाहिए। खतरा UE के incremental compiler से है: अगर plugin source बदल जाए (नई `.cpp` files, नया module) लेकिन पुराना `UnrealMCP/Intermediate/` build cache बचा रहे, तो UE पुरानी module file-list के आधार पर आंशिक recompile कर सकता है और चुपचाप आपको पुराने/अधूरे code पर छोड़ सकता है। हर channel इसे अलग तरह से संभालता है:
 
-- **Fab / Epic Marketplace → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना। Bridge हर plugin version के लिए अलग रखा जाता है, इसलिए update के बाद **Get bridge** पर एक बार फिर click करें।
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) / Epic Marketplace → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना। Bridge हर plugin version के लिए अलग रखा जाता है, इसलिए update के बाद **Get bridge** पर एक बार फिर click करें।
 - **`unreal-mcp-cli update` → अपने-आप clean rebuild।** `update` plugin source दोबारा copy करता है और **default रूप से** installed plugin का पुराना `Intermediate/` और C++ `Binaries/` delete कर देता है, ताकि अगली बार editor launch होने पर UE clean compile करे — कोई manual step नहीं। `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` के तहत bundled sidecar bridge जस का तस रहता है: release-source installs उसे `Source/ThirdParty/...` से refresh करते हैं, जबकि repo/dev installs ज़रूरत पड़ने पर पहले से bundled copy बचाए रखते हैं। Dev **junction** installs कभी साफ़ नहीं किए जाते (इससे आपके live source tree के outputs मिट जाते)। Cache मिटाने से बचने के लिए `--no-clean` दें।
 
   ```bash
@@ -52,7 +52,7 @@ Plugin configuration को इस प्राथमिकता से पढ�
 | `UNREAL_MCP_HOST` | Server URL (Custom mode), जैसे `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | Cloud backend URL (default ai-game.dev) |
 | `UNREAL_MCP_TOKEN` | Auth token (sidecar IPC token / server token)। **Secret — कभी commit न करें।** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` या `oauth` (local server auth) |
+| `UNREAL_MCP_AUTH_OPTION` | `none`, `token` या `oauth` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Connected state को save/restore करता है |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; खाली = कोई filter नहीं) |
 | `UNREAL_MCP_START_SERVER` | `true`: bridge के project का port बताते ही editor local `gamedev-mcp-server` खुद start करता है (सिर्फ़ Custom mode + http; `startServer` के रूप में save होता है) और exit पर उसे stop करता है। `unreal-mcp-cli exec` / `open --headless` इसे set करते हैं। |

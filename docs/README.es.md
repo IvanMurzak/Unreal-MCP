@@ -70,8 +70,8 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 ## Requisitos
 
 - **Unreal Engine 5.5 – 5.8** (el pipeline de release valida cada una).
-- **Un proyecto C++**, porque el plugin se distribuye como código fuente y Unreal compila sus módulos para tu proyecto con la toolchain de C++ de tu plataforma. Un proyecto solo de Blueprints pasa a ser C++ en un paso: en el editor, **Tools → New C++ Class…** y crea cualquier clase. Para un proyecto nuevo, `unreal-mcp-cli create-project ./MyGame` genera uno mínimo en C++.
-- **Sin instalar .NET.** El host MCP es un programa .NET autocontenido (`unreal-mcp-bridge`) incluido en el plugin para tu plataforma; el plugin lo inicia y lo reinicia. (La build de Fab no contiene ejecutables; su botón **Get bridge** instala el bridge una sola vez.) Solo compilar el bridge desde el código fuente requiere el SDK de .NET 9.
+- **Un proyecto C++**, porque el plugin se distribuye como código fuente y Unreal compila sus módulos para tu proyecto con la toolchain de C++ de tu plataforma. Un proyecto solo de Blueprints pasa a ser C++ en un paso: en el editor, **Tools → New C++ Class…** y crea cualquier clase. Para un proyecto nuevo, `unreal-mcp-cli create-project ./MyGame` genera uno mínimo en C++. La build de Fab no necesita un proyecto C++: el Epic Games Launcher la instala precompilada.
+- **Sin instalar .NET.** El host MCP es un programa .NET autocontenido (`unreal-mcp-bridge`) incluido en el plugin para tu plataforma; el plugin lo inicia y lo reinicia. (La build de Fab no contiene ejecutables: su botón **Get bridge** abre la página de la release y extraes el bridge en la carpeta del bridge del plugin una sola vez.) Solo compilar el bridge desde el código fuente requiere el SDK de .NET 9.
 - **Node.js 22.14+**, solo para `unreal-mcp-cli` (un paquete npm; 22.14 es su versión mínima de Node).
 - **Windows o macOS** (cada release se prueba en ambos). **Linux x64:** el sidecar se compila y se publica, pero ninguna prueba de release se ejecuta en Linux.
 
@@ -89,7 +89,7 @@ npx unreal-mcp-cli open ./MyGame             # build if needed and open the edit
 
 **2. Conecta, en el editor:** abre **Tools → AI Game Developer**.
 
-- Solo instalación desde Fab: pulsa **Get bridge** una vez (la build de Fab no lleva ejecutables, así que esto instala el sidecar `unreal-mcp-bridge`).
+- Solo instalación desde Fab: instala una vez el sidecar `unreal-mcp-bridge` (la build de Fab no lleva ejecutables): pulsa **Get bridge** para abrir la página de la release, extrae el zip de tu plataforma en la carpeta que muestra **Open bridge folder** y pulsa **Connect**.
 - **Cloud** (por defecto): pulsa **Authorize** y aprueba el inicio de sesión en tu navegador. **Local**: cambia a **Custom** y pulsa **Start** junto a **MCP server**; el editor descarga el `gamedev-mcp-server` con checksum verificado (con una instalación de Fab, instala ese servidor a mano: el log indica la descarga).
 - En **AI agent**, elige el tuyo (Claude Code, Cursor, Codex, …) y pulsa **Configure**.
 
@@ -145,7 +145,7 @@ Por qué en local no hay autenticación por defecto: el servidor solo escucha en
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**Qué ve el relay en la nube.** En modo Cloud, las llamadas a herramientas pasan por el relay MCP de ai-game.dev. El relay no guarda estado: enruta las llamadas entre tu cliente de IA y el editor sin inspeccionar ni almacenar su contenido, y no recoge tus conversaciones, código fuente, archivos del proyecto, assets ni datos de escena. Registra metadatos de eventos MCP (tipo de evento, tiempos, estado, identificadores de sesión, el nombre de la herramienta, prompt o recurso, y los detalles de errores); los logs de peticiones y los eventos MCP se usan dentro de una ventana móvil de 90 días. Detalles: [Política de privacidad](https://ai-game.dev/legal/privacy).
+<a id="what-the-cloud-relay-sees"></a>**Qué ve el relay en la nube.** En modo Cloud, las llamadas a herramientas pasan por el relay MCP de ai-game.dev. El relay no guarda estado: enruta las llamadas entre tu cliente de IA y el editor sin inspeccionar ni almacenar su contenido, y no recoge tus conversaciones, código fuente, archivos del proyecto, assets ni datos de escena. Registra metadatos de las peticiones (dirección IP del cliente, marca de tiempo y duración, código de estado y ruta de la petición, nombre de la herramienta, tamaño de la petición y de la respuesta) y metadatos de eventos MCP (tipo de evento, tiempos, estado, identificadores de sesión, el nombre de la herramienta, prompt o recurso, y los detalles de errores). Los logs de peticiones y los eventos MCP se usan principalmente dentro de una ventana móvil de 90 días; la política no garantiza el borrado automático a una edad fija. Detalles: [Política de privacidad](https://ai-game.dev/legal/privacy).
 
 `install-plugin` descarga la release firmada del código fuente del plugin que coincide con la versión de la CLI.
 
@@ -233,13 +233,13 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-Todos los comandos y opciones: [cli/README.md](../cli/docs/README.es.md) o `unreal-mcp-cli commands`.
+Todos los comandos y opciones: [cli/docs/commands.md](../cli/docs/commands.md) o `unreal-mcp-cli commands`.
 
 ## Seguridad
 
 - **Plugin ↔ sidecar:** el plugin escucha en un puerto TCP de loopback; el sidecar se conecta con un token de un solo uso enviado por stdin (nunca en la línea de comandos, nunca en los logs).
 - **Servidor local:** `gamedev-mcp-server` escucha en loopback por defecto y responde `403` a una petición cuyo `Origin` no está permitido (defensa contra DNS rebinding). En loopback el plugin lo inicia sin autenticación salvo que elijas un token (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`). Opciones del servidor: [hosting y autenticación](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
-- **Cloud:** el agente inicia sesión con OAuth o usa una clave por proyecto que puedes reemplazar con `setup-mcp --regenerate-key`. El relay no guarda estado ni almacena el contenido de las llamadas; registra metadatos de eventos MCP ([detalles](#what-the-cloud-relay-sees)).
+- **Cloud:** el agente inicia sesión con OAuth o usa una clave por proyecto que puedes reemplazar con `setup-mcp --regenerate-key`. El relay no guarda estado ni almacena el contenido de las llamadas; registra metadatos de peticiones y de eventos MCP ([detalles](#what-the-cloud-relay-sees)).
 - **Qué pueden hacer las herramientas:** editar archivos en `<Project>/Source/`, ejecutar comandos de consola y Python del editor, cambiar cualquier propiedad reflejada.
 - **Controles sobre ellas:**
   - **Lista blanca** (límite estricto): `UNREAL_MCP_TOOLS` sirve solo las herramientas indicadas; cualquier otra no se lista ni se puede llamar.
@@ -277,7 +277,7 @@ Las extensiones se compilan desde el código fuente en tu proyecto (la próxima 
 | [docs/CONFIGURATION.md](CONFIGURATION.es.md) | Primer arranque, actualización, variables de entorno, solución de problemas |
 | [docs/EXTENSIONS.md](EXTENSIONS.md) | Escribe tus propios módulos RQL, herramientas, prompts y recursos |
 | [docs/RUNTIME.md](RUNTIME.es.md) | Modo runtime (dentro del juego), sus controles de seguridad, cómo dejar el plugin fuera de los juegos publicados |
-| [cli/README.md](../cli/docs/README.es.md) | Referencia de comandos de `unreal-mcp-cli` y códigos de salida |
+| [cli/docs/commands.md](../cli/docs/commands.md) | Referencia de comandos de `unreal-mcp-cli` y códigos de salida |
 | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | El diseño de referencia (IPC, registro, sidecar, UI, configuración) |
 | [docs/RELEASING.md](RELEASING.md) | Mantenedores: releases, runners de CI, secretos |
 | [docs/EXTENSION-MONOREPO.md](EXTENSION-MONOREPO.md) | Mantenedores: pruebas y releases de las extensiones |

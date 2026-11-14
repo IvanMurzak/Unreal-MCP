@@ -542,4 +542,4 @@ What it does, and why:
 The install is **idempotent** (a re-run at the same version that is already enabled writes nothing) and
 the install-source resolver is **pluggable** — a future **Fab** (Epic marketplace) channel slots in as a
 new source `kind` without changing the command or library API. See
-[`cli/README.md` § Extensions](../cli/README.md#extensions) for the full option list.
+[`cli/docs/commands.md` § Extensions](../cli/docs/commands.md#extensions) for the full option list.

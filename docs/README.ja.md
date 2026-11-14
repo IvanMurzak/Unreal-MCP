@@ -70,8 +70,8 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 ## 必要環境
 
 - **Unreal Engine 5.5 – 5.8**（リリースパイプラインが各バージョンを検証）。
-- **C++ プロジェクト**。プラグインはソースで配布され、Unreal があなたのプラットフォームの C++ ツールチェーンでプロジェクト向けにモジュールをコンパイルするためです。Blueprint のみのプロジェクトは 1 ステップで C++ プロジェクトになります：エディターで **Tools → New C++ Class…** から任意のクラスを作成します。新規プロジェクトは `unreal-mcp-cli create-project ./MyGame` で最小の C++ プロジェクトを生成できます。
-- **.NET のインストールは不要。**MCP ホストは自己完結型の .NET プログラム（`unreal-mcp-bridge`）で、プラットフォームごとにプラグインに同梱され、プラグインが起動・再起動します。（Fab 版には実行ファイルが含まれず、**Get bridge** ボタンで bridge を一度だけインストールします。）.NET 9 SDK が必要なのは bridge をソースからビルドする場合だけです。
+- **C++ プロジェクト**。プラグインはソースで配布され、Unreal があなたのプラットフォームの C++ ツールチェーンでプロジェクト向けにモジュールをコンパイルするためです。Blueprint のみのプロジェクトは 1 ステップで C++ プロジェクトになります：エディターで **Tools → New C++ Class…** から任意のクラスを作成します。新規プロジェクトは `unreal-mcp-cli create-project ./MyGame` で最小の C++ プロジェクトを生成できます。Fab 版は Epic Games Launcher がコンパイル済みの状態でインストールするため、C++ プロジェクトは不要です。
+- **.NET のインストールは不要。**MCP ホストは自己完結型の .NET プログラム（`unreal-mcp-bridge`）で、プラットフォームごとにプラグインに同梱され、プラグインが起動・再起動します。（Fab 版には実行ファイルが含まれません。**Get bridge** ボタンでリリースページを開き、bridge をプラグインの bridge フォルダーに一度だけ展開します。）.NET 9 SDK が必要なのは bridge をソースからビルドする場合だけです。
 - **Node.js 22.14+**。`unreal-mcp-cli` にのみ必要です（npm パッケージで、22.14 が最低 Node バージョン）。
 - **Windows または macOS**（各リリースを両方でテスト）。**Linux x64：**sidecar はビルド・配布されますが、Linux ではリリーステストを実行していません。
 
@@ -89,7 +89,7 @@ npx unreal-mcp-cli open ./MyGame             # build if needed and open the edit
 
 **2. エディターで接続：****Tools → AI Game Developer** を開きます。
 
-- Fab でインストールした場合のみ：**Get bridge** を一度クリックします（Fab 版には実行ファイルがないため、これで `unreal-mcp-bridge` sidecar をインストールします）。
+- Fab でインストールした場合のみ：`unreal-mcp-bridge` sidecar を一度だけインストールします（Fab 版には実行ファイルがありません）。**Get bridge** でリリースページを開き、お使いのプラットフォーム用の zip を **Open bridge folder** が示すフォルダーに展開してから、**Connect** をクリックします。
 - **Cloud**（既定）：**Authorize** をクリックし、ブラウザーでサインインを承認します。**ローカル**：**Custom** に切り替え、**MCP server** の横の **Start** をクリックします。エディターがチェックサム検証済みの `gamedev-mcp-server` をダウンロードします（Fab 版ではこのサーバーを手動でインストールします。ダウンロード先はログに表示されます）。
 - **AI agent** で使うエージェント（Claude Code、Cursor、Codex など）を選び、**Configure** をクリックします。
 
@@ -145,7 +145,7 @@ unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secr
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**クラウドリレーが見るもの。**Cloud モードでは、ツール呼び出しは ai-game.dev の MCP リレーを経由します。リレーはステートレスです。AI クライアントとエディターの間でツール呼び出しを中継しますが、その内容を検査も保存もせず、会話、ソースコード、プロジェクトファイル、アセット、シーンデータも収集しません。記録するのは MCP イベントのメタデータ（イベントの種類、タイミング、ステータス、セッション識別子、対象のツール／プロンプト／リソース名、エラーの詳細）です。リクエストログと MCP イベントは、直近 90 日間のローリング期間内で利用されます。詳細：[プライバシーポリシー](https://ai-game.dev/legal/privacy)。
+<a id="what-the-cloud-relay-sees"></a>**クラウドリレーが見るもの。**Cloud モードでは、ツール呼び出しは ai-game.dev の MCP リレーを経由します。リレーはステートレスです。AI クライアントとエディターの間でツール呼び出しを中継しますが、その内容を検査も保存もせず、会話、ソースコード、プロジェクトファイル、アセット、シーンデータも収集しません。記録するのは、リクエストのメタデータ（クライアントの IP アドレス、タイムスタンプと所要時間、ステータスコードとリクエストパス、ツール名、リクエストとレスポンスのサイズ）と、MCP イベントのメタデータ（イベントの種類、タイミング、ステータス、セッション識別子、対象のツール／プロンプト／リソース名、エラーの詳細）です。リクエストログと MCP イベントは主に直近 90 日間のローリング期間内で利用されます。一定期間後の自動削除はポリシー上保証されていません。詳細：[プライバシーポリシー](https://ai-game.dev/legal/privacy)。
 
 `install-plugin` は CLI のバージョンに一致する、署名済みのプラグインソースリリースをダウンロードします。
 
@@ -233,13 +233,13 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-すべてのコマンドとオプション: [cli/README.md](../cli/docs/README.ja.md) または `unreal-mcp-cli commands`。
+すべてのコマンドとオプション: [cli/docs/commands.md](../cli/docs/commands.md) または `unreal-mcp-cli commands`。
 
 ## セキュリティ
 
 - **プラグイン ↔ sidecar：**プラグインはループバックの TCP ポートで待ち受け、sidecar は stdin 経由で渡される使い捨てトークンで接続します（コマンドラインには出さず、ログにも残しません）。
 - **ローカルサーバー：**`gamedev-mcp-server` は既定でループバックにバインドし、許可されていない `Origin` からのリクエストには `403` を返します（DNS リバインディング対策）。ループバックでは、トークン（`UNREAL_MCP_AUTH_OPTION`、`UNREAL_MCP_TOKEN`）を選ばない限り、プラグインは認証なしで起動します。サーバーのオプション：[ホスティングと認証](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)。
-- **Cloud：**エージェントは OAuth でサインインするか、`setup-mcp --regenerate-key` で差し替えられるプロジェクトごとのキーを使います。リレーはステートレスで、ツール呼び出しの内容を保存しません。記録するのは MCP イベントのメタデータです（[詳細](#what-the-cloud-relay-sees)）。
+- **Cloud：**エージェントは OAuth でサインインするか、`setup-mcp --regenerate-key` で差し替えられるプロジェクトごとのキーを使います。リレーはステートレスで、ツール呼び出しの内容を保存しません。記録するのはリクエストと MCP イベントのメタデータです（[詳細](#what-the-cloud-relay-sees)）。
 - **ツールにできること：**`<Project>/Source/` 内のファイル編集、コンソールコマンドとエディター Python の実行、任意のリフレクションプロパティの変更。
 - **ツールの制御：**
   - **ホワイトリスト**（強い制限）：`UNREAL_MCP_TOOLS` は列挙したツールだけを提供します。それ以外のツールは一覧にも出ず、呼び出すこともできません。
@@ -277,7 +277,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [docs/CONFIGURATION.md](CONFIGURATION.ja.md) | 初回の起動、更新、環境変数、トラブルシューティング |
 | [docs/EXTENSIONS.md](EXTENSIONS.md) | 独自の RQL モジュール、ツール、プロンプト、リソースを書く |
 | [docs/RUNTIME.md](RUNTIME.ja.md) | ランタイム（ゲーム内）モード、そのセキュリティゲート、出荷するゲームからプラグインを除外する方法 |
-| [cli/README.md](../cli/docs/README.ja.md) | `unreal-mcp-cli` のコマンドリファレンスと終了コード |
+| [cli/docs/commands.md](../cli/docs/commands.md) | `unreal-mcp-cli` のコマンドリファレンスと終了コード |
 | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | 正式な設計（IPC、登録、サイドカー、UI、設定） |
 | [docs/RELEASING.md](RELEASING.md) | メンテナー向け: リリース、CI ランナー、シークレット |
 | [docs/EXTENSION-MONOREPO.md](EXTENSION-MONOREPO.md) | メンテナー向け: 拡張機能のテストとリリース |

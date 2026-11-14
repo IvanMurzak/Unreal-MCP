@@ -52,7 +52,7 @@ The plugin reads configuration with the precedence **process env → `<Project>/
 | `UNREAL_MCP_HOST` | Server URL (Custom mode), e.g. `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | Cloud backend URL (defaults to ai-game.dev) |
 | `UNREAL_MCP_TOKEN` | Auth token (sidecar IPC token / server token). **Secret — never commit.** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` or `oauth` (local server auth) |
+| `UNREAL_MCP_AUTH_OPTION` | `none`, `token` or `oauth` (local server auth) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Persist/restore the connected state |
 | `UNREAL_MCP_TOOLS` | Enabled-tools override (whitelist; empty = no filter) |
 | `UNREAL_MCP_START_SERVER` | `true`: the editor starts the local `gamedev-mcp-server` itself once the bridge reports the project's port (Custom mode + http only; persisted as `startServer`) and stops it on exit. `unreal-mcp-cli exec` / `open --headless` set it. |

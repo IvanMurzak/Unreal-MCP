@@ -70,8 +70,8 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 ## 系统要求
 
 - **Unreal Engine 5.5 – 5.8**（发布流水线会逐一验证）。
-- **C++ 项目**，因为插件以源码形式发布，Unreal 会用你平台的 C++ 工具链为你的项目编译它的模块。纯 Blueprint 项目一步即可变成 C++ 项目：在编辑器中选择 **Tools → New C++ Class…** 并创建任意类。新项目可用 `unreal-mcp-cli create-project ./MyGame` 生成一个最小的 C++ 项目。
-- **无需安装 .NET。**MCP 主机是一个自包含的 .NET 程序（`unreal-mcp-bridge`），按你的平台打包在插件内；插件负责启动和重启它。（Fab 版本不含可执行文件；它的 **Get bridge** 按钮会一次性安装 bridge。）只有从源码构建 bridge 才需要 .NET 9 SDK。
+- **C++ 项目**，因为插件以源码形式发布，Unreal 会用你平台的 C++ 工具链为你的项目编译它的模块。纯 Blueprint 项目一步即可变成 C++ 项目：在编辑器中选择 **Tools → New C++ Class…** 并创建任意类。新项目可用 `unreal-mcp-cli create-project ./MyGame` 生成一个最小的 C++ 项目。Fab 版本无需 C++ 项目：Epic Games Launcher 会安装预编译好的版本。
+- **无需安装 .NET。**MCP 主机是一个自包含的 .NET 程序（`unreal-mcp-bridge`），按你的平台打包在插件内；插件负责启动和重启它。（Fab 版本不含可执行文件：它的 **Get bridge** 按钮会打开发布页面，你只需把 bridge 解压到插件的 bridge 文件夹一次。）只有从源码构建 bridge 才需要 .NET 9 SDK。
 - **Node.js 22.14+**，仅 `unreal-mcp-cli` 需要（它是 npm 包，22.14 是其最低 Node 版本）。
 - **Windows 或 macOS**（每个版本都在两者上测试）。**Linux x64：**sidecar 会构建并发布，但没有任何发布测试在 Linux 上运行。
 
@@ -89,7 +89,7 @@ npx unreal-mcp-cli open ./MyGame             # build if needed and open the edit
 
 **2. 在编辑器中连接：**打开 **Tools → AI Game Developer**。
 
-- 仅限 Fab 安装：点击一次 **Get bridge**（Fab 版本不含可执行文件，这一步会安装 `unreal-mcp-bridge` sidecar）。
+- 仅限 Fab 安装：需要安装一次 `unreal-mcp-bridge` sidecar（Fab 版本不含可执行文件）：点击 **Get bridge** 打开发布页面，把对应平台的 zip 解压到 **Open bridge folder** 显示的文件夹，然后点击 **Connect**。
 - **Cloud**（默认）：点击 **Authorize**，并在浏览器中批准登录。**本地**：切换到 **Custom**，点击 **MCP server** 旁的 **Start**；编辑器会下载经过校验和验证的 `gamedev-mcp-server`（Fab 安装需手动安装该服务器：日志会给出下载地址）。
 - 在 **AI agent** 下选择你的智能体（Claude Code、Cursor、Codex……），点击 **Configure**。
 
@@ -145,7 +145,7 @@ unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secr
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**云端中继能看到什么。**在 Cloud 模式下，工具调用经过 ai-game.dev 的 MCP 中继。该中继是无状态的：它在你的 AI 客户端和编辑器之间转发工具调用，不检查也不保存其内容，也不收集你的对话、源代码、项目文件、资源或场景数据。它会记录 MCP 事件元数据（事件类型、时间、状态、会话标识、所涉及的工具/提示词/资源名称以及错误详情）；请求日志和 MCP 事件在滚动的 90 天窗口内使用。详情：[隐私政策](https://ai-game.dev/legal/privacy)。
+<a id="what-the-cloud-relay-sees"></a>**云端中继能看到什么。**在 Cloud 模式下，工具调用经过 ai-game.dev 的 MCP 中继。该中继是无状态的：它在你的 AI 客户端和编辑器之间转发工具调用，不检查也不保存其内容，也不收集你的对话、源代码、项目文件、资源或场景数据。它会记录请求元数据（客户端 IP 地址、时间戳和耗时、状态码和请求路径、工具名称、请求和响应大小）以及 MCP 事件元数据（事件类型、时间、状态、会话标识、所涉及的工具/提示词/资源名称以及错误详情）。请求日志和 MCP 事件主要在滚动的 90 天窗口内使用；隐私政策不保证在固定期限后自动删除。详情：[隐私政策](https://ai-game.dev/legal/privacy)。
 
 `install-plugin` 会下载与 CLI 版本相匹配的已签名插件源码发布包。
 
@@ -233,13 +233,13 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-全部命令和选项：[cli/README.md](../cli/docs/README.zh-CN.md) 或 `unreal-mcp-cli commands`。
+全部命令和选项：[cli/docs/commands.md](../cli/docs/commands.md) 或 `unreal-mcp-cli commands`。
 
 ## 安全
 
 - **插件 ↔ sidecar：**插件监听一个 loopback TCP 端口；sidecar 用通过 stdin 传入的一次性令牌连接它（从不出现在命令行中，也从不写入日志）。
 - **本地服务器：**`gamedev-mcp-server` 默认只绑定 loopback，对 `Origin` 不被允许的请求返回 `403`（防御 DNS 重绑定）。在 loopback 上，除非你选择令牌（`UNREAL_MCP_AUTH_OPTION`、`UNREAL_MCP_TOKEN`），插件会以无认证方式启动它。服务器选项：[托管与认证](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)。
-- **Cloud：**智能体通过 OAuth 登录，或使用按项目的密钥，可用 `setup-mcp --regenerate-key` 更换。中继是无状态的，不保存工具调用内容；它会记录 MCP 事件元数据（[详情](#what-the-cloud-relay-sees)）。
+- **Cloud：**智能体通过 OAuth 登录，或使用按项目的密钥，可用 `setup-mcp --regenerate-key` 更换。中继是无状态的，不保存工具调用内容；它会记录请求和 MCP 事件元数据（[详情](#what-the-cloud-relay-sees)）。
 - **工具能做什么：**编辑 `<Project>/Source/` 下的文件，运行控制台命令和编辑器 Python，修改任何反射属性。
 - **对工具的控制：**
   - **白名单**（硬限制）：`UNREAL_MCP_TOOLS` 只提供列出的工具；其他工具既不会列出，也无法调用。
@@ -277,7 +277,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [docs/CONFIGURATION.md](CONFIGURATION.zh-CN.md) | 首次运行、更新、环境变量、故障排查 |
 | [docs/EXTENSIONS.md](EXTENSIONS.md) | 编写你自己的 RQL 模块、工具、提示词和资源 |
 | [docs/RUNTIME.md](RUNTIME.zh-CN.md) | 运行时（游戏内）模式、它的安全关卡、让插件不进入发布的游戏 |
-| [cli/README.md](../cli/docs/README.zh-CN.md) | `unreal-mcp-cli` 命令参考和退出码 |
+| [cli/docs/commands.md](../cli/docs/commands.md) | `unreal-mcp-cli` 命令参考和退出码 |
 | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | 权威设计文档（IPC、注册、边车进程、UI、配置） |
 | [docs/RELEASING.md](RELEASING.md) | 维护者：发布、CI 运行器、密钥 |
 | [docs/EXTENSION-MONOREPO.md](EXTENSION-MONOREPO.md) | 维护者：测试和发布扩展 |

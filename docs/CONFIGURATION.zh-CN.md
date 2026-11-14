@@ -28,7 +28,7 @@
 
 原地更新必须始终让你运行**新**代码。风险来自 UE 的增量编译器：如果插件源码发生变化（新的 `.cpp` 文件、新的模块），但旧的 `UnrealMCP/Intermediate/` 构建缓存仍然存在，UE 可能会基于过时的模块文件列表进行部分重新编译，悄无声息地让你停留在旧的/不完整的代码上。每种渠道的处理方式不同：
 
-- **Fab / Epic Marketplace→ 自动。** Epic Games Launcher 会原地替换预编译的二进制文件；无需编译，也无需清理缓存。bridge 按插件版本保存，因此更新后请再点击一次 **Get bridge**。
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) / Epic Marketplace→ 自动。** Epic Games Launcher 会原地替换预编译的二进制文件；无需编译，也无需清理缓存。bridge 按插件版本保存，因此更新后请再点击一次 **Get bridge**。
 - **`unreal-mcp-cli update` → 自动干净重建。** `update` 会重新复制插件源码，并且**默认**删除已安装插件过时的 `Intermediate/` 和 C++ `Binaries/`，让 UE 在下次启动编辑器时进行干净编译——无需手动操作。`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` 下捆绑的边车 bridge 会保持不变：发布源码安装会从 `Source/ThirdParty/...` 刷新它，而仓库/开发安装在需要时会保留之前捆绑的副本。开发用的 **junction** 安装永远不会被清理（否则会清空你实时源码树的输出）。传入 `--no-clean` 可跳过缓存清理。
 
   ```bash
@@ -52,7 +52,7 @@
 | `UNREAL_MCP_HOST` | 服务器 URL（Custom 模式），例如 `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | 云后端 URL（默认为 ai-game.dev） |
 | `UNREAL_MCP_TOKEN` | 认证令牌（边车进程 IPC 令牌 / 服务器令牌）。**机密——切勿提交。** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` 或 `oauth`（本地服务器认证） |
+| `UNREAL_MCP_AUTH_OPTION` | `none`、`token` 或 `oauth`（本地服务器认证） |
 | `UNREAL_MCP_KEEP_CONNECTED` | 保存/恢复连接状态 |
 | `UNREAL_MCP_TOOLS` | 启用工具的覆盖设置（白名单；为空 = 不过滤） |
 | `UNREAL_MCP_START_SERVER` | `true`：bridge 报告项目端口后，编辑器自己启动本地 `gamedev-mcp-server`（仅限 Custom 模式 + http；保存为 `startServer`），并在退出时停止它。`unreal-mcp-cli exec` / `open --headless` 会设置它。 |

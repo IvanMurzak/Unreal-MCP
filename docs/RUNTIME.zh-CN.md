@@ -59,7 +59,7 @@ if (UUnrealMcpRuntimeSubsystem* Mcp = UUnrealMcpRuntimeSubsystem::Get(this))
 
 运行时连接只提供**一个**内置工具：**`ping`**（存活探测）。`ping` 是一个[系统工具](TOOLS.zh-CN.md)，因此它在 `POST /api/system-tools/ping` 上应答，不会向 AI 智能体公布——也就是说，一个没有注册任何自有工具的打包游戏会呈现一个**空的**工具列表，这如实反映了它的情况。运行时 AI 智能体能做的一切都需要**自带**：通过上面的扩展总线（`RegisterToolProvider`）注册你自己的工具，它们就会正常出现。
 
-所有引擎开发类别——RQL 数据层（`rql-query` / `rql-mutate` / `rql-schema`，作用于 Actor、组件、资源、关卡、控制台和编辑器状态）、所有截图工具，以及 Blueprint 编写、C++ 源码编辑与编译、`console-run-command`、`unreal-tool-list`、`python-execute` 和 Fab 工具——都**仅限编辑器**（即 [30 个编辑器工具](TOOLS.zh-CN.md)）。它们操控的是编辑器，其中几个属于 RCE 级别（例如 `rql-mutate`、`console-run-command`、`python-execute`），因此默认不会编译进发布的游戏。打包的游戏中没有编辑器，所以运行时的内置能力有意只包括 `ping` + 你的游戏注册的工具。
+所有引擎开发类别——RQL 数据层（`rql-query` / `rql-mutate` / `rql-schema`，作用于 Actor、组件、资源、关卡、控制台和编辑器状态）、所有截图工具，以及 Blueprint 编写、C++ 源码编辑与编译、`console-run-command`、`unreal-tool-list`、`python-execute` 和 Fab 工具——都**仅限编辑器**（即 [编辑器工具](TOOLS.zh-CN.md)）。它们操控的是编辑器，其中几个属于 RCE 级别（例如 `rql-mutate`、`console-run-command`、`python-execute`），因此默认不会编译进发布的游戏。打包的游戏中没有编辑器，所以运行时的内置能力有意只包括 `ping` + 你的游戏注册的工具。
 
 ## <a id="editor-only-exclude-from-packaged-games"></a>仅限编辑器 — 从打包的游戏中排除 Unreal-MCP
 

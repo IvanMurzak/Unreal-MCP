@@ -28,7 +28,7 @@ Los ajustes de conexión se guardan en `<Project>/Saved/Config/UnrealMcp/ai-game
 
 Actualizar en el sitio siempre debe dejarte ejecutando el código **nuevo**. El riesgo es el compilador incremental de UE: si el código fuente del plugin cambia (archivos `.cpp` nuevos, un módulo nuevo) pero sobrevive la antigua caché de compilación `UnrealMCP/Intermediate/`, UE puede hacer una recompilación parcial con una lista de archivos del módulo obsoleta y dejarte en silencio con código antiguo o parcial. Cada canal lo resuelve de forma distinta:
 
-- **Fab / Epic Marketplace → automático.** El Epic Games Launcher sustituye los binarios precompilados en el sitio; no hay nada que compilar ni caché que limpiar. El bridge se guarda por versión del plugin, así que tras una actualización pulsa **Get bridge** una vez más.
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) / Epic Marketplace → automático.** El Epic Games Launcher sustituye los binarios precompilados en el sitio; no hay nada que compilar ni caché que limpiar. El bridge se guarda por versión del plugin, así que tras una actualización pulsa **Get bridge** una vez más.
 - **`unreal-mcp-cli update` → recompilación limpia automática.** `update` vuelve a copiar el código fuente del plugin y, **por defecto**, borra el `Intermediate/` obsoleto y los `Binaries/` de C++ del plugin instalado para que UE haga una compilación limpia en el siguiente arranque del editor, sin pasos manuales. El bridge sidecar incluido en `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` se conserva intacto: las instalaciones desde el código fuente de una release lo renuevan desde `Source/ThirdParty/...`, mientras que las instalaciones de repo/desarrollo conservan la copia incluida anterior cuando hace falta. Las instalaciones de desarrollo con **junction** nunca se limpian (eso borraría los resultados de compilación de tu árbol de código en vivo). Pasa `--no-clean` para no borrar la caché.
 
   ```bash
@@ -52,7 +52,7 @@ El plugin lee la configuración con esta precedencia: **entorno del proceso → 
 | `UNREAL_MCP_HOST` | URL del servidor (modo Custom), por ejemplo `http://localhost:<port>` |
 | `UNREAL_MCP_CLOUD_URL` | URL del backend en la nube (por defecto ai-game.dev) |
 | `UNREAL_MCP_TOKEN` | Token de autenticación (token IPC del sidecar / token del servidor). **Secreto: nunca lo subas al repositorio.** |
-| `UNREAL_MCP_AUTH_OPTION` | `none` u `oauth` (autenticación del servidor local) |
+| `UNREAL_MCP_AUTH_OPTION` | `none`, `token` u `oauth` (autenticación del servidor local) |
 | `UNREAL_MCP_KEEP_CONNECTED` | Guardar/restaurar el estado de conexión |
 | `UNREAL_MCP_TOOLS` | Sobrescritura de las herramientas activadas (lista blanca; vacía = sin filtro) |
 | `UNREAL_MCP_START_SERVER` | `true`: el editor inicia por sí mismo el `gamedev-mcp-server` local en cuanto el bridge informa del puerto del proyecto (solo modo Custom + http; se guarda como `startServer`) y lo detiene al salir. `unreal-mcp-cli exec` / `open --headless` la definen. |

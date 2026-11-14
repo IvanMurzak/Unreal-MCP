@@ -70,8 +70,8 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 ## आवश्यकताएँ
 
 - **Unreal Engine 5.5 – 5.8** (release pipeline हर एक को validate करती है)।
-- **एक C++ project**, क्योंकि plugin source के रूप में आता है और Unreal आपके platform के C++ toolchain से आपके project के लिए उसके modules compile करता है। Blueprint-only project एक कदम में C++ project बन जाता है: editor में **Tools → New C++ Class…** से कोई भी class बनाएँ। नए project के लिए `unreal-mcp-cli create-project ./MyGame` एक minimal C++ project बनाता है।
-- **.NET install की ज़रूरत नहीं।** MCP host एक self-contained .NET program (`unreal-mcp-bridge`) है जो आपके platform के लिए plugin के अंदर bundled है; plugin उसे start और restart करता है। (Fab build में कोई executable नहीं होता; उसका **Get bridge** button bridge को एक बार install करता है।) सिर्फ़ bridge को source से build करने के लिए .NET 9 SDK चाहिए।
+- **एक C++ project**, क्योंकि plugin source के रूप में आता है और Unreal आपके platform के C++ toolchain से आपके project के लिए उसके modules compile करता है। Blueprint-only project एक कदम में C++ project बन जाता है: editor में **Tools → New C++ Class…** से कोई भी class बनाएँ। नए project के लिए `unreal-mcp-cli create-project ./MyGame` एक minimal C++ project बनाता है। Fab build के लिए C++ project ज़रूरी नहीं: Epic Games Launcher उसे precompiled install करता है।
+- **.NET install की ज़रूरत नहीं।** MCP host एक self-contained .NET program (`unreal-mcp-bridge`) है जो आपके platform के लिए plugin के अंदर bundled है; plugin उसे start और restart करता है। (Fab build में कोई executable नहीं होता: उसका **Get bridge** button release page खोलता है, और आप bridge को plugin के bridge folder में एक बार extract करते हैं।) सिर्फ़ bridge को source से build करने के लिए .NET 9 SDK चाहिए।
 - **Node.js 22.14+**, सिर्फ़ `unreal-mcp-cli` के लिए (एक npm package; 22.14 उसका minimum Node version है)।
 - **Windows या macOS** (हर release दोनों पर test होता है)। **Linux x64:** sidecar build और ship होता है, लेकिन Linux पर कोई release test नहीं चलता।
 
@@ -89,7 +89,7 @@ npx unreal-mcp-cli open ./MyGame             # build if needed and open the edit
 
 **2. Editor में connect करें:** **Tools → AI Game Developer** खोलें।
 
-- सिर्फ़ Fab install: एक बार **Get bridge** पर click करें (Fab build में executables नहीं होते, इसलिए यह `unreal-mcp-bridge` sidecar install करता है)।
+- सिर्फ़ Fab install: `unreal-mcp-bridge` sidecar एक बार install करें (Fab build में executables नहीं होते): **Get bridge** पर click करके release page खोलें, अपने platform का zip उस folder में extract करें जो **Open bridge folder** दिखाता है, फिर **Connect** पर click करें।
 - **Cloud** (default): **Authorize** पर click करें और browser में sign-in approve करें। **Local**: **Custom** पर switch करें और **MCP server** के पास **Start** पर click करें; editor checksum-verified `gamedev-mcp-server` download करता है (Fab install में यह server हाथ से install करें: log download का पता बताता है)।
 - **AI agent** के नीचे अपना agent चुनें (Claude Code, Cursor, Codex, …) और **Configure** पर click करें।
 
@@ -145,7 +145,7 @@ Local में default रूप से auth क्यों नहीं: serv
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**Cloud relay क्या देखता है।** Cloud mode में tool calls ai-game.dev के MCP relay से होकर जाते हैं। Relay stateless है: वह tool calls को आपके AI client और editor के बीच route करता है, उनके content को न inspect करता है न store करता है, और आपकी conversations, source code, project files, assets या scene data collect नहीं करता। वह MCP event metadata record करता है (event type, timing, status, session identifiers, tool, prompt या resource का नाम, और error details); request logs और MCP events एक rolling 90-day window के भीतर इस्तेमाल होते हैं। Details: [Privacy Policy](https://ai-game.dev/legal/privacy)।
+<a id="what-the-cloud-relay-sees"></a>**Cloud relay क्या देखता है।** Cloud mode में tool calls ai-game.dev के MCP relay से होकर जाते हैं। Relay stateless है: वह tool calls को आपके AI client और editor के बीच route करता है, उनके content को न inspect करता है न store करता है, और आपकी conversations, source code, project files, assets या scene data collect नहीं करता। वह request metadata (client IP address, timestamp और duration, status code और request path, tool name, request और response size) और MCP event metadata (event type, timing, status, session identifiers, tool, prompt या resource का नाम, और error details) record करता है। Request logs और MCP events मुख्य रूप से एक rolling 90-day window के भीतर इस्तेमाल होते हैं; policy किसी तय उम्र पर automatic deletion की guarantee नहीं देती। Details: [Privacy Policy](https://ai-game.dev/legal/privacy)।
 
 `install-plugin` CLI version से मेल खाने वाला signed plugin source release download करता है।
 
@@ -233,13 +233,13 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-सभी commands और options: [cli/README.md](../cli/docs/README.hi.md) या `unreal-mcp-cli commands`।
+सभी commands और options: [cli/docs/commands.md](../cli/docs/commands.md) या `unreal-mcp-cli commands`।
 
 ## Security
 
 - **Plugin ↔ sidecar:** plugin एक loopback TCP port पर सुनता है; sidecar stdin से भेजे गए one-shot token के साथ उससे जुड़ता है (कभी command line पर नहीं, कभी log में नहीं)।
 - **Local server:** `gamedev-mcp-server` default रूप से loopback पर bind होता है और जिस request का `Origin` allowed नहीं, उसे `403` देता है (DNS-rebinding से बचाव)। Loopback पर plugin उसे बिना authentication start करता है, जब तक आप token न चुनें (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`)। Server options: [hosting और authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)।
-- **Cloud:** agent OAuth से sign in करता है या per-project key इस्तेमाल करता है, जिसे आप `setup-mcp --regenerate-key` से बदल सकते हैं। Relay stateless है और tool calls का content store नहीं करता; वह MCP event metadata record करता है ([details](#what-the-cloud-relay-sees))।
+- **Cloud:** agent OAuth से sign in करता है या per-project key इस्तेमाल करता है, जिसे आप `setup-mcp --regenerate-key` से बदल सकते हैं। Relay stateless है और tool calls का content store नहीं करता; वह request और MCP event metadata record करता है ([details](#what-the-cloud-relay-sees))।
 - **Tools क्या कर सकते हैं:** `<Project>/Source/` के नीचे files edit करना, console commands और editor Python चलाना, कोई भी reflected property बदलना।
 - **उन पर नियंत्रण:**
   - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` सिर्फ़ सूची वाले tools देता है; कोई और tool न list होता है, न call हो सकता है।
@@ -277,7 +277,7 @@ Extensions आपके project में source से compile होते ह
 | [docs/CONFIGURATION.md](CONFIGURATION.hi.md) | पहली बार चलाना, update करना, environment variables, troubleshooting |
 | [docs/EXTENSIONS.md](EXTENSIONS.md) | अपने खुद के RQL modules, tools, prompts और resources लिखें |
 | [docs/RUNTIME.md](RUNTIME.hi.md) | Runtime (game के अंदर) mode, उसके security gates, shipped games से plugin को बाहर रखना |
-| [cli/README.md](../cli/docs/README.hi.md) | `unreal-mcp-cli` command reference और exit codes |
+| [cli/docs/commands.md](../cli/docs/commands.md) | `unreal-mcp-cli` command reference और exit codes |
 | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | आधिकारिक डिज़ाइन (IPC, registration, sidecar, UI, config) |
 | [docs/RELEASING.md](RELEASING.md) | Maintainers के लिए: releases, CI runners, secrets |
 | [docs/EXTENSION-MONOREPO.md](EXTENSION-MONOREPO.md) | Maintainers के लिए: extensions की testing और release |
