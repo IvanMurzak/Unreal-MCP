@@ -33,7 +33,7 @@
 
 Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sidecar** (`unreal-mcp-bridge`) that the plugin starts, watches and restarts for you. Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**Status:** release [v0.31.1](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar and CLI share one version) · Unreal Engine 5.5–5.8 · sidecar builds for Windows x64, macOS (Intel and Apple silicon) and Linux x64 · each release is tested on Windows (UE 5.5–5.8) and macOS (UE 5.7, 5.8) · available on [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) and [GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases).
+**Status:** [latest release](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar and CLI share one version) · Unreal Engine 5.5–5.8 · sidecar builds for Windows x64, macOS (Intel and Apple silicon) and Linux x64 · each release is tested on Windows (UE 5.5–5.8) and macOS (UE 5.7, 5.8) · available on [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) and [GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases).
 
 ## Features
 
@@ -93,7 +93,7 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 
 **3. Ask your agent:** *"Spawn three cubes in a row and a point light above them, then take a screenshot."*
 
-Local or Cloud? Both are fully supported; you can switch later.
+Local or Cloud? Both are fully supported; you can switch later. **Cloud is the default** because it needs no open ports and avoids port conflicts with other programs; the connection is free. **Local** runs without an account or internet access, for offline and air-gapped machines.
 
 | | **Local** | **Cloud** |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Local or Cloud? Both are fully supported; you can switch later.
 | MCP server | `gamedev-mcp-server` on your machine, started by the editor or by your agent | ai-game.dev relay |
 | Traffic | stays on `localhost` | passes through ai-game.dev ([what it logs](#what-the-cloud-relay-sees)) |
 | Auth | none on loopback, or a shared token (one flag) | OAuth or a per-project key |
-| Good for | offline work, CI, private projects | one account across several projects and machines |
+| Good for | offline and air-gapped work, CI, private projects | no open ports or port conflicts; one account across several projects and machines |
 
 <details>
 <summary><b>Everything from the terminal</b> (CLI: Cloud, Local, token auth)</summary>
@@ -143,7 +143,7 @@ Why no auth is the local default: the server binds to loopback only and rejects 
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them without storing their contents. It logs request metadata (tool name, timing, sizes, IP address) and MCP events, used mainly within a rolling 90-day window. It does not collect your source code, project files or assets. Details: [privacy policy](https://ai-game.dev/legal/privacy).
+<a id="what-the-cloud-relay-sees"></a>**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them and does not store what you send: no request or response content, so no source code, project files or assets. It keeps only metadata (tool name, timing, sizes, IP address, MCP events), for 90 days. [Privacy policy](https://ai-game.dev/legal/privacy).
 
 `install-plugin` downloads the signed plugin source release that matches the CLI version.
 
@@ -237,7 +237,7 @@ All commands and options: [cli/README.md](cli/README.md) or `unreal-mcp-cli comm
 
 - **Plugin ↔ sidecar:** the plugin listens on a loopback TCP port; the sidecar dials it with a one-shot token sent over stdin (never on the command line, never logged).
 - **Local server:** `gamedev-mcp-server` binds to loopback by default and answers `403` to a request whose `Origin` is not allowed (DNS-rebinding defense). On loopback the plugin starts it without authentication unless you choose a token (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`). Server options: [hosting and authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
-- **Cloud:** the agent signs in with OAuth or uses a per-project key you can replace with `setup-mcp --regenerate-key`.
+- **Cloud:** the agent signs in with OAuth or uses a per-project key you can replace with `setup-mcp --regenerate-key`. The relay stores no request or response content, only metadata, for 90 days ([details](#what-the-cloud-relay-sees)).
 - **What the tools can do:** edit files under `<Project>/Source/`, run console commands and editor Python, change any reflected property.
 - **Controls over them:**
   - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` serves only the listed tools; any other tool is neither listed nor callable.
@@ -299,4 +299,4 @@ Extensions compile from source in your project (on the next editor open, or now 
 
 ## License
 
-[Apache-2.0](LICENSE) © Ivan Murzak
+**Free for game developers, commercial games included.** Unreal MCP is [Apache-2.0](LICENSE) © Ivan Murzak. Two bundled components, RQL and Code-Exec, use the [PolyForm Shield 1.0.0](https://polyformproject.org/licenses/shield/1.0.0) license, which restricts only companies that build competing AI tools for game development; you can use all of it to build, ship and sell your games. Notices: [`UnrealMCP/ThirdPartyNotices.txt`](UnrealMCP/ThirdPartyNotices.txt).

@@ -13,8 +13,8 @@
 
 1. 从编辑器的 **Tools** 菜单打开 **AI Game Developer** 主窗口（该标签页注册在 Tools 菜单类别下）。
 2. **选择连接模式：**
-   - **Cloud**（默认）— 连接到 [ai-game.dev](https://ai-game.dev)。点击 **Authorize**（授权）开始 OAuth **设备码流程**：窗口会显示一个验证 URL 和一个简短的用户码；打开该 URL，输入用户码并批准，编辑器即完成授权。使用 **Revoke**（撤销）清除已存储的云端令牌。
-   - **Custom** — 连接到你运行的本地 `gamedev-mcp-server`（或任何兼容的服务器）。输入服务器 URL，并让你的 AI 客户端指向它。你可以自己运行服务器，也可以让编辑器启动和停止它（`UNREAL_MCP_START_SERVER`，仅限 Custom 模式 + http；见[环境变量](#环境变量)）。
+   - **Cloud**（默认）— 连接到 [ai-game.dev](https://ai-game.dev)。点击 **Authorize**（授权）开始 OAuth **设备码流程**：窗口会显示一个验证 URL 和一个简短的用户码；打开该 URL，输入用户码并批准，编辑器即完成授权。使用 **Revoke**（撤销）清除已存储的云端令牌。默认使用 Cloud，因为它无需开放端口，也不会与其他程序发生端口冲突；该连接免费。中继不保存任何请求或响应内容，只保留元数据 90 天（[README](README.zh-CN.md#what-the-cloud-relay-sees)）。
+   - **Custom** — 连接到你运行的本地 `gamedev-mcp-server`（或任何兼容的服务器）；无需账号，可离线使用，也适用于物理隔离（air-gapped）的机器。输入服务器 URL，并让你的 AI 客户端指向它。你可以自己运行服务器，也可以让编辑器启动和停止它（`UNREAL_MCP_START_SERVER`，仅限 Custom 模式 + http；见[环境变量](#环境变量)）。
 3. **Connection** 部分显示一个状态圆点、一个状态标签和一个 Connect / Disconnect / Stop 按钮；bridge 状态显示为 `Running (restarts: N)` 或 `Stopped`。用它们确认边车进程正在运行。
 4. 让你的 AI 客户端（Claude Code、Cursor、AI Game Developer 应用……）指向该服务器。**AI agents** 部分列出当前已连接的智能体；要写入 MCP 客户端配置，请使用 `unreal-mcp-cli setup-mcp`。
 
@@ -28,7 +28,7 @@
 
 原地更新必须始终让你运行**新**代码。风险来自 UE 的增量编译器：如果插件源码发生变化（新的 `.cpp` 文件、新的模块），但旧的 `UnrealMCP/Intermediate/` 构建缓存仍然存在，UE 可能会基于过时的模块文件列表进行部分重新编译，悄无声息地让你停留在旧的/不完整的代码上。每种渠道的处理方式不同：
 
-- **Fab / Epic Marketplace→ 自动。** Epic Games Launcher 会原地替换预编译的二进制文件；无需编译，也无需清理缓存。
+- **Fab / Epic Marketplace→ 自动。** Epic Games Launcher 会原地替换预编译的二进制文件；无需编译，也无需清理缓存。bridge 按插件版本保存，因此更新后请再点击一次 **Get bridge**。
 - **`unreal-mcp-cli update` → 自动干净重建。** `update` 会重新复制插件源码，并且**默认**删除已安装插件过时的 `Intermediate/` 和 C++ `Binaries/`，让 UE 在下次启动编辑器时进行干净编译——无需手动操作。`Binaries/ThirdParty/UnrealMcpBridge/<rid>/` 下捆绑的边车 bridge 会保持不变：发布源码安装会从 `Source/ThirdParty/...` 刷新它，而仓库/开发安装在需要时会保留之前捆绑的副本。开发用的 **junction** 安装永远不会被清理（否则会清空你实时源码树的输出）。传入 `--no-clean` 可跳过缓存清理。
 
   ```bash

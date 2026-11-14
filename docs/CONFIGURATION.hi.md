@@ -13,8 +13,8 @@ Editor को कैसे connect करें, plugin को कैसे up t
 
 1. Editor के **Tools** menu से **AI Game Developer** main window खोलें (tab, Tools menu category के तहत registered है)।
 2. **Connection mode चुनें:**
-   - **Cloud** (default) — [ai-game.dev](https://ai-game.dev) से connect होता है। OAuth **device-code flow** शुरू करने के लिए **Authorize** पर click करें: window एक verification URL और एक छोटा user code दिखाती है; URL खोलें, code डालें, approve करें, और editor authorization पूरा कर लेता है। Save किया हुआ cloud token हटाने के लिए **Revoke** इस्तेमाल करें।
-   - **Custom** — आपके द्वारा चलाए गए local `gamedev-mcp-server` (या किसी भी compatible server) से connect होता है। Server URL डालें और अपने AI client को उस पर point करें। Server खुद चलाएँ, या editor को उसे start और stop करने दें (`UNREAL_MCP_START_SERVER`, सिर्फ़ Custom mode + http; देखें [Environment variables](#environment-variables))।
+   - **Cloud** (default) — [ai-game.dev](https://ai-game.dev) से connect होता है। OAuth **device-code flow** शुरू करने के लिए **Authorize** पर click करें: window एक verification URL और एक छोटा user code दिखाती है; URL खोलें, code डालें, approve करें, और editor authorization पूरा कर लेता है। Save किया हुआ cloud token हटाने के लिए **Revoke** इस्तेमाल करें। Cloud default है क्योंकि इसमें कोई port खोलना नहीं पड़ता और दूसरे programs के साथ port conflicts नहीं होते; यह connection free है। Relay कोई request या response content store नहीं करता, सिर्फ़ metadata 90 दिनों तक ([README](README.hi.md#what-the-cloud-relay-sees))।
+   - **Custom** — आपके द्वारा चलाए गए local `gamedev-mcp-server` (या किसी भी compatible server) से connect होता है; कोई account नहीं, offline और air-gapped machines पर भी चलता है। Server URL डालें और अपने AI client को उस पर point करें। Server खुद चलाएँ, या editor को उसे start और stop करने दें (`UNREAL_MCP_START_SERVER`, सिर्फ़ Custom mode + http; देखें [Environment variables](#environment-variables))।
 3. **Connection** section में एक status dot, एक status label और एक Connect / Disconnect / Stop बटन होता है; bridge status `Running (restarts: N)` या `Stopped` दिखाता है। इनसे पक्का करें कि sidecar चल रहा है।
 4. अपने AI client (Claude Code, Cursor, AI Game Developer app, …) को server पर point करें। **AI agents** section अभी जुड़े हुए agents की सूची दिखाता है; MCP client config लिखने के लिए `unreal-mcp-cli setup-mcp` इस्तेमाल करें।
 
@@ -28,7 +28,7 @@ Connection settings `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.j
 
 Update के बाद हमेशा **नया** code ही चलना चाहिए। खतरा UE के incremental compiler से है: अगर plugin source बदल जाए (नई `.cpp` files, नया module) लेकिन पुराना `UnrealMCP/Intermediate/` build cache बचा रहे, तो UE पुरानी module file-list के आधार पर आंशिक recompile कर सकता है और चुपचाप आपको पुराने/अधूरे code पर छोड़ सकता है। हर channel इसे अलग तरह से संभालता है:
 
-- **Fab / Epic Marketplace → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना।
+- **Fab / Epic Marketplace → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना। Bridge हर plugin version के लिए अलग रखा जाता है, इसलिए update के बाद **Get bridge** पर एक बार फिर click करें।
 - **`unreal-mcp-cli update` → अपने-आप clean rebuild।** `update` plugin source दोबारा copy करता है और **default रूप से** installed plugin का पुराना `Intermediate/` और C++ `Binaries/` delete कर देता है, ताकि अगली बार editor launch होने पर UE clean compile करे — कोई manual step नहीं। `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` के तहत bundled sidecar bridge जस का तस रहता है: release-source installs उसे `Source/ThirdParty/...` से refresh करते हैं, जबकि repo/dev installs ज़रूरत पड़ने पर पहले से bundled copy बचाए रखते हैं। Dev **junction** installs कभी साफ़ नहीं किए जाते (इससे आपके live source tree के outputs मिट जाते)। Cache मिटाने से बचने के लिए `--no-clean` दें।
 
   ```bash

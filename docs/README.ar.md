@@ -39,34 +39,94 @@
 
 محرر Unreal مكتوب بـ C++، لذلك يعمل مضيف MCP المبني على .NET بجانبه كعملية مرافقة صغيرة (**sidecar**) باسم `unreal-mcp-bridge`، تشغّلها الإضافة وتراقبها وتعيد تشغيلها نيابة عنك. تفاصيل التصميم: [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 
+‏**الحالة:** [أحدث إصدار](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (الإضافة وsidecar وCLI تتشارك رقم إصدار واحدًا) · Unreal Engine 5.5–5.8 · يُبنى sidecar لـ Windows x64 وmacOS (Intel وApple silicon) وLinux x64 · يُختبر كل إصدار على Windows (UE 5.5–5.8) وmacOS (UE 5.7، 5.8) · متاح على [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) و[GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases).
+
 ## الميزات
 
-‏✅ ‏**طبقة بيانات RQL** — استعلم عن الأكتورات والأصول والمستويات وعدّلها بلغة واحدة ([RQL](rql.md))\
-‏✅ ‏**Blueprints** — إنشاء وتعديل وتجميع، مع أخطاء منظمة يستطيع الوكيل إصلاحها\
-‏✅ ‏**C++** — إنشاء هيكل شيفرة المشروع وتعديلها وتجميعها (Live Coding أو UBT)\
-‏✅ ‏**تغذية راجعة مرئية** — لقطات للعرض (viewport) ونافذة اللعبة والكاميرا وأكتور معزول\
-‏✅ ‏**Python** — تشغيل Python في المحرر مع واجهة `unreal` البرمجية كاملة\
-‏✅ ‏**Fab** — البحث في Fab، وعرض مكتبتك، وإضافة المحتوى الذي تملكه\
+‏✅ ‏**كتابة C++** — إنشاء هياكل الأصناف، وتعديل الشيفرة، والتجميع؛ تعود الأخطاء مع الملف والسطر ودرجة الخطورة\
+‏✅ ‏**Blueprints** — الإنشاء والتعديل والتجميع، مع أخطاء منظَّمة يستطيع الوكيل إصلاحها\
+‏✅ ‏**طبقة بيانات RQL** — استعلم عن الأكتورات والأصول والمستويات وغيّرها بلغة واحدة ([RQL](rql.md))\
+‏✅ ‏**تغذية راجعة مرئية** — لقطات شاشة لنافذة العرض، وعرض اللعبة، والكاميرا، والأكتور المعزول\
+‏✅ ‏**Python** — شغّل Python المحرر مع واجهة `unreal` البرمجية كاملة\
+‏✅ ‏**Fab** — ابحث في Fab، واعرض مكتبتك، وأضف المحتوى الذي تملكه\
 ‏✅ ‏**الامتدادات** — GAS وNiagara وPCG وLandscape وControl Rig وEnhanced Input\
-‏✅ ‏**أدواتك الخاصة** — أضف أدوات وموجّهات وموارد من أي إضافة ([الدليل](EXTENSIONS.md))\
+‏✅ ‏**أدواتك الخاصة** — أضف أدوات ومطالبات وموارد من أي إضافة ([الدليل](EXTENSIONS.md))\
 ‏✅ ‏**وضع Runtime** — فعّله اختياريًا للتحكم في لعبة قيد التشغيل ([docs/RUNTIME.md](RUNTIME.ar.md))\
-‏✅ ‏**سحابي أو محلي** — `ai-game.dev` جاهز مباشرة، أو `gamedev-mcp-server` تستضيفه بنفسك
+‏✅ ‏**سحابي أو محلي** — ‏`ai-game.dev` جاهز للاستخدام، أو `gamedev-mcp-server` مستضاف ذاتيًا
 
 ‏30 أداة مدمجة في 8 عائلات؛ القائمة الكاملة في [docs/TOOLS.md](TOOLS.ar.md).
 
+### ما يمكنك أن تطلبه
+
+| اطلب من وكيلك | الأدوات التي يستخدمها |
+| --- | --- |
+| «أضف صنف أكتور `AHealthPickup` بلغة C++، وجمّعه وأصلح أي أخطاء» | `source-create-class`، `source-update`، `source-compile` |
+| «اصنع Blueprint لباب يُفتح عند التداخل، وجمّعه، وضعه في المستوى» | `blueprint-*` |
+| «عُدّ الأشجار في هذا المستوى وارفع كل الأضواء النقطية مترًا واحدًا» | `rql-query`، `rql-mutate` |
+| «التقط لقطة شاشة من كاميرا اللاعب وتحقق من الإضاءة» | `screenshot-*` |
+| «ابحث عن حزمة صخور مجانية على Fab وأضفها إلى المشروع» | `fab-search`، `fab-add` |
+| «أعد تسمية الأصول المحددة دفعة واحدة بسكربت Python» | `python-execute` |
+
+‏**C++ حلقة عمل من الدرجة الأولى.** يبني `source-compile` باستخدام Live Coding عندما يكون مفعّلًا، وإلا فباستخدام UnrealBuildTool، ويعيد كل رسالة تشخيص مع ملفها وسطرها ودرجة خطورتها، فيصلح الوكيل الأخطاء دون قراءة سجل البناء. ويُعلمك عندما يحتاج تغيير ما إلى بناء كامل وإعادة تشغيل المحرر (أصناف جديدة، أو تغيير تصريحات `UCLASS` / `UPROPERTY` / `UFUNCTION`). تبقى عمليات الملفات داخل `<Project>/Source/`. ومن الطرفية، يطبع `unreal-mcp-cli compile` رسائل تشخيص بصيغة `file:line:col` دون محرر.
+
+‏**تُتعلَّم RQL من المحرر نفسه:** يسرد `rql-schema` كل مصدر ونوع وعضو، وتعلّم مهارة `unreal-rql` الصيغة مع وصفات جاهزة (يكتبها `unreal-mcp-cli setup-skills` لوكيلك).
+
 ## المتطلبات
 
-- ‏**Unreal Engine 5.5 – 5.8** (يتحقق مسار الإصدار من كل منها) و**مشروع C++**: تجمّع الإضافة وحدات المحرر داخل مشروعك.
-- ‏**Node.js 22.14+** من أجل `unreal-mcp-cli`.
-- ‏Windows أو macOS أو Linux. لا حاجة لتثبيت .NET: العملية المرافقة مضمّنة داخل الإضافة. (.NET 9 SDK مطلوب فقط لبناء bridge من المصدر.)
+- ‏**Unreal Engine 5.5 – 5.8** (يتحقق خط الإصدار من كل منها).
+- **مشروع C++**، لأن الإضافة تُوزَّع كشيفرة مصدرية ويجمّع Unreal وحداتها لمشروعك بسلسلة أدوات C++ الخاصة بمنصتك. يتحول مشروع Blueprint فقط إلى مشروع C++ بخطوة واحدة: في المحرر، **Tools → New C++ Class…** وأنشئ أي صنف. لمشروع جديد، ينشئ `unreal-mcp-cli create-project ./MyGame` مشروع C++ بسيطًا.
+- **لا حاجة إلى تثبيت .NET.** مضيف MCP برنامج .NET مستقل (`unreal-mcp-bridge`) مضمَّن داخل الإضافة لمنصتك؛ تشغّله الإضافة وتعيد تشغيله. (إصدار Fab لا يحتوي ملفات تنفيذية؛ يثبّت زر **Get bridge** فيه الـ bridge مرة واحدة.) لا يلزم .NET 9 SDK إلا لبناء الـ bridge من المصدر.
+- ‏**Node.js 22.14+**، لـ `unreal-mcp-cli` فقط (حزمة npm؛ 22.14 هو أدنى إصدار Node لها).
+- ‏**Windows أو macOS** (يُختبر كل إصدار على كليهما). **Linux x64:** يُبنى sidecar ويُنشر، لكن لا يعمل أي اختبار إصدار على Linux.
 
 ## البدء السريع
 
+‏**1. ثبّت الإضافة**، بإحدى الطريقتين:
+
+- ‏**[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)** (دون طرفية): أضف **AI Game Developer** إلى محركك، وفعّله من **Edit → Plugins**، وافتح مشروعك.
+- **أمران** (Node.js 22.14+):
+
 </div>
 
+```bash
+npx unreal-mcp-cli install-plugin ./MyGame   # plugin + bundled bridge into MyGame/Plugins
+npx unreal-mcp-cli open ./MyGame             # build if needed and open the editor
+```
+
+<div dir="rtl">
+
+‏**2. اتصل من المحرر:** افتح **Tools → AI Game Developer**.
+
+- لتثبيت Fab فقط: انقر **Get bridge** مرة واحدة (إصدار Fab لا يحمل ملفات تنفيذية، لذا يثبّت هذا الـ sidecar ‏`unreal-mcp-bridge`).
+- ‏**Cloud** (الافتراضي): انقر **Authorize** ووافق على تسجيل الدخول في متصفحك. **محلي**: انتقل إلى **Custom** وانقر **Start** بجوار **MCP server**؛ ينزّل المحرر `gamedev-mcp-server` بعد التحقق من checksum (مع تثبيت Fab، ثبّت ذلك الخادم يدويًا: يذكر السجل رابط التنزيل).
+- تحت **AI agent**، اختر وكيلك (Claude Code، Cursor، Codex، …) وانقر **Configure**.
+
+‏**3. اطلب من وكيلك:** *«أنشئ ثلاثة مكعبات في صف وضوءًا نقطيًا فوقها، ثم التقط لقطة شاشة.»*
+
+محلي أم Cloud؟ كلاهما مدعوم بالكامل، ويمكنك التبديل لاحقًا. **Cloud هو الافتراضي** لأنه لا يحتاج إلى فتح أي منافذ ويتجنب تعارض المنافذ مع البرامج الأخرى؛ والاتصال مجاني. يعمل **المحلي** دون حساب أو اتصال بالإنترنت، للأجهزة غير المتصلة والمعزولة (air-gapped).
+
+| | **محلي** | **Cloud** |
+| --- | --- | --- |
+| الحساب | لا يلزم | تسجيل الدخول إلى ai-game.dev |
+| خادم MCP | ‏`gamedev-mcp-server` على جهازك، يشغّله المحرر أو وكيلك | مُرحِّل ai-game.dev |
+| حركة البيانات | تبقى على `localhost` | تمر عبر ai-game.dev ([ما الذي يسجّله](#what-the-cloud-relay-sees)) |
+| المصادقة | لا شيء على loopback، أو رمز مشترك (خيار واحد) | ‏OAuth أو مفتاح لكل مشروع |
+| مناسب لـ | العمل دون اتصال وفي البيئات المعزولة، وCI، والمشاريع الخاصة | لا منافذ مفتوحة ولا تعارض منافذ؛ حساب واحد لعدة مشاريع وأجهزة |
+
+</div>
+
+<details>
+<summary><b>كل شيء من الطرفية</b> (CLI: ‏Cloud، محلي، مصادقة بالرمز)</summary>
+
 <p align="center">
-  <img src="img/readme/terminal.svg" alt="الطرفية: npm install -g unreal-mcp-cli، ثم install-plugin، ثم login، ثم setup-mcp claude-code، ثم فتح المحرر" width="100%"/>
+  <img src="img/readme/terminal.svg" alt="الطرفية: npm install -g unreal-mcp-cli، install-plugin، login، setup-mcp claude-code، فتح المحرر" width="100%"/>
 </p>
+
+<div dir="rtl">
+
+‏**Cloud** (الوضع الافتراضي للإضافة):
+
+</div>
 
 ```bash
 npm install -g unreal-mcp-cli                       # or: npx unreal-mcp-cli@latest <command>
@@ -79,16 +139,123 @@ unreal-mcp-cli open ./MyGame                        # build if needed and open t
 
 <div dir="rtl">
 
-‏`install-plugin` ينزّل إصدار المصدر الموقّع للإضافة المطابق لإصدار CLI. في المحرر، افتح **Tools → AI Game Developer** لترى الاتصال وحالة bridge والوكلاء المتصلين. ثم اطلب من وكيلك:
+‏**محلي** (دون حساب):
 
-> *«أنشئ ثلاثة مكعبات في صف واحد ومصباحًا نقطيًا فوقها، ثم التقط لقطة شاشة.»*
+</div>
+
+```bash
+npm install -g unreal-mcp-cli
+unreal-mcp-cli install-plugin ./MyGame
+unreal-mcp-cli configure -p ./MyGame --mode Custom                 # plugin: local server
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --transport stdio # agent starts it
+unreal-mcp-cli open ./MyGame
+```
+
+<div dir="rtl">
+
+‏`setup-mcp --transport stdio` ينزّل إصدار `gamedev-mcp-server` المتحقَّق منه بـ checksum إلى المشروع ويوجّه الوكيل إليه. يستخدم الطرفان المنفذ نفسه الخاص بالمشروع على `localhost`.
+
+‏**تفعيل المصادقة بالرمز (محلي):** أضف الخيارات إلى سطر `configure`، ثم شغّل `setup-mcp` مجددًا؛ بعدها تطلب الإضافة والخادم كلاهما السر.
+
+</div>
+
+```bash
+unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secret>
+```
+
+<div dir="rtl">
+
+لماذا لا توجد مصادقة افتراضيًا في الوضع المحلي: يرتبط الخادم بـ loopback فقط ويرفض الطلبات القادمة من أصول متصفح غير محلية، فلا تصل إليه إلا البرامج الموجودة على جهازك. استخدم رمزًا عندما لا تثق بكل البرامج أو المستخدمين على ذلك الجهاز. يُحفظ السر في ملف `.env` الخاص بالمشروع (الذي يضيفه `configure` إلى gitignore) وفي ملف إعدادات الوكيل، فأبقِ ذلك الملف خارج نظام التحكم بالإصدارات.
+
+</div>
+
+</details>
+
+<div dir="rtl">
+
+<a id="what-the-cloud-relay-sees"></a>**ما الذي يراه المُرحِّل السحابي.** في وضع Cloud، تمر استدعاءات الأدوات عبر ai-game.dev، الذي يوجّهها ولا يخزّن ما ترسله: لا محتوى للطلبات أو الاستجابات، وبالتالي لا شيفرة مصدرية ولا ملفات مشروع ولا أصول. يحتفظ بالبيانات الوصفية فقط (اسم الأداة، والتوقيت، والأحجام، وعنوان IP، وأحداث MCP) لمدة 90 يومًا. [سياسة الخصوصية](https://ai-game.dev/legal/privacy).
+
+‏`install-plugin` ينزّل إصدار الشيفرة المصدرية الموقَّع للإضافة المطابق لإصدار CLI.
 
 طرق أخرى للتثبيت:
 
-- ‏**Fab / Epic Marketplace**: [AI Game Developer على Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33). لا يمكن لنسخة Fab أن تتضمن ملفات تنفيذية، لذلك يرشدك زر **Get bridge** (الحصول على bridge) في النافذة هناك إلى تثبيت العملية المرافقة مرة واحدة.
-- **يدويًا**: انسخ [`UnrealMCP/`](../UnrealMCP/) إلى `<YourProject>/Plugins/UnrealMCP/`. نسخة المصدر (checkout) لا تتضمن عملية مرافقة: شغّل `unreal-mcp-cli bootstrap-local` أو اضبط `UNREAL_MCP_BRIDGE_PATH`.
+- ‏**ملف zip بتنسيق Fab**: إلى جانب [صفحة Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)، يحمل كل إصدار على GitHub بنية بتنسيق Fab (`unreal-mcp-plugin-fab-<version>.zip`) دون ملفات تنفيذية؛ ومع أيٍّ منهما، يرشدك زر **Get bridge** في النافذة إلى تثبيت الـ sidecar مرة واحدة.
+- **يدويًا**: انسخ [`UnrealMCP/`](../UnrealMCP/) إلى `<YourProject>/Plugins/UnrealMCP/`. نسخة الشيفرة المصدرية لا تتضمن sidecar مضمّنًا: شغّل `unreal-mcp-cli bootstrap-local` أو اضبط `UNREAL_MCP_BRIDGE_PATH`.
 
-التحديث (`unreal-mcp-cli update`) وأوضاع الاتصال ومتغيرات البيئة واستكشاف الأخطاء وإصلاحها: [docs/CONFIGURATION.md](CONFIGURATION.ar.md).
+التحديث (`unreal-mcp-cli update`)، وأوضاع الاتصال، ومتغيرات البيئة، واستكشاف الأخطاء: [docs/CONFIGURATION.md](CONFIGURATION.ar.md).
+
+### إعداد الوكيل
+
+‏`unreal-mcp-cli setup-mcp <agent> -p ./MyGame` يكتب الإعدادات نيابةً عنك (`setup-mcp --list` يعرض كل الوكلاء المدعومين). ما الذي يكتبه:
+
+</div>
+
+<details>
+<summary><b>Claude Code</b>: <code>.mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame
+```
+
+```json
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "https://ai-game.dev/mcp/p/<pin>",
+      "headers": { "Authorization": "Bearer agd_pk_…" }
+    }
+  }
+}
+```
+
+<div dir="rtl">
+
+‏`<pin>` يوجّه إلى محرر هذا المشروع. يكون الترويس مفتاح هذا المشروع عندما يكون الجهاز مسجَّل الدخول؛ و`--oauth` يكتب إعدادًا بالرابط فقط ويسجّل الوكيل دخوله بنفسه. ومع `--transport stdio` يشغّل الإدخال الخادم المحلي: `"command"` هو `gamedev-mcp-server` تحت `<project>/Intermediate/UnrealMCP/server/`، و`"args"` تضبط `port=<port>` و`client-transport=stdio` و`authorization=none`.
+
+</div>
+
+</details>
+
+<details>
+<summary><b>Cursor</b>: <code>.cursor/mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp cursor -p ./MyGame
+```
+
+<div dir="rtl">
+
+إدخال `mcpServers` → `unreal-mcp` نفسه كما في Claude Code: ‏`"type": "http"` مع الرابط، أو `"type": "stdio"` مع `command` و`args` للخادم المحلي.
+
+</div>
+
+</details>
+
+<details>
+<summary><b>Codex</b>: <code>.codex/config.toml</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp codex -p ./MyGame
+```
+
+```toml
+[mcp_servers.unreal-mcp]
+enabled = true
+url = "https://ai-game.dev/mcp/p/<pin>"
+tool_timeout_sec = 300
+startup_timeout_sec = 30
+```
+
+<div dir="rtl">
+
+مع مفتاح مشروع، يحمل القسم أيضًا `http_headers` مع ترويسة `Authorization`.
+
+</div>
+
+</details>
+
+<div dir="rtl">
 
 ## الاستخدام
 
@@ -115,6 +282,20 @@ unreal-mcp-cli test ./MyGame
 <div dir="rtl">
 
 جميع الأوامر والخيارات: [cli/README.md](../cli/docs/README.ar.md) أو `unreal-mcp-cli commands`.
+
+## الأمان
+
+- ‏**الإضافة ↔ sidecar:** تستمع الإضافة على منفذ TCP في loopback؛ ويتصل الـ sidecar بها برمز لمرة واحدة يُرسَل عبر stdin (لا يظهر أبدًا في سطر الأوامر ولا يُسجَّل أبدًا).
+- ‏**الخادم المحلي:** يرتبط `gamedev-mcp-server` بـ loopback افتراضيًا ويردّ بـ `403` على أي طلب لا يُسمح بـ `Origin` الخاص به (دفاع ضد DNS rebinding). على loopback تشغّله الإضافة دون مصادقة ما لم تختر رمزًا (`UNREAL_MCP_AUTH_OPTION`، `UNREAL_MCP_TOKEN`). خيارات الخادم: [الاستضافة والمصادقة](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
+- ‏**Cloud:** يسجّل الوكيل دخوله عبر OAuth أو يستخدم مفتاحًا لكل مشروع يمكنك استبداله بـ `setup-mcp --regenerate-key`. لا يخزّن المُرحِّل أي محتوى للطلبات أو الاستجابات، بل البيانات الوصفية فقط لمدة 90 يومًا ([التفاصيل](#what-the-cloud-relay-sees)).
+- **ما تستطيع الأدوات فعله:** تعديل الملفات تحت `<Project>/Source/`، وتشغيل أوامر الكونسول وPython المحرر، وتغيير أي خاصية منعكسة.
+- **وسائل التحكم فيها:**
+  - **القائمة البيضاء** (حد صارم): يقدّم `UNREAL_MCP_TOOLS` الأدوات المدرجة فقط؛ أي أداة أخرى لا تُعرض ولا يمكن استدعاؤها.
+  - **الإخفاء** (حد مرن): مربع الاختيار **Visible** في نافذة **MCP Tools** يزيل الأداة من `tools/list`، لكن العميل الذي يستدعيها باسمها يظل قادرًا على تشغيلها.
+  - **تغييرات محدودة:** تبقى أدوات ملفات C++ داخل `<Project>/Source/`؛ واستدعاء `rql-mutate` يُنفَّذ كله أو لا شيء، وخطوة تراجع واحدة، ويمكن معاينته بـ `dry_run`، ويُرفض فوق 200 هدف ما لم يرفع الاستدعاء `max_targets` (حتى 1000)؛ ويتوقف `python-execute` بعد `timeout` (‏30 ثانية افتراضيًا)؛ ولكل استدعاء أداة حد زمني (`UNREAL_MCP_TOOL_TIMEOUT`، ‏5 دقائق افتراضيًا).
+  - **ليست للذكاء الاصطناعي:** أدوات النظام (`ping`، وتوليد المهارات، و`editor-quit`) غائبة عن `tools/list`، ويرفض `editor-quit` التنفيذ ما لم يتطابق nonce جلسة CLI.
+  - التفاصيل: [docs/TOOLS.md](TOOLS.ar.md).
+- **وضع Runtime معطَّل افتراضيًا:** لا تتصل اللعبة أبدًا من تلقاء نفسها. يحتاج إلى إعداد `bRuntimeMcpEnabled` (معطَّل افتراضيًا) واستدعاء صريح لـ `Connect()`، ولا يقبل إلا مضيف loopback ما لم تسمح بمضيف بعيد، ويُرفض في بنيات Shipping ما لم يُجمَّع ضمنها. أبقِ الإضافة خارج الألعاب المحزَّمة باستخدام `TargetDenyList` ([docs/RUNTIME.md](RUNTIME.ar.md)).
 
 ## الامتدادات
 
@@ -172,6 +353,6 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 ## الترخيص
 
-‏[Apache-2.0](../LICENSE) © Ivan Murzak
+‏**مجاني لمطوري الألعاب، بما في ذلك الألعاب التجارية.** يخضع Unreal MCP لترخيص [Apache-2.0](../LICENSE) © Ivan Murzak. ويستخدم مكوّنان مضمَّنان، RQL وCode-Exec، ترخيص [PolyForm Shield 1.0.0](https://polyformproject.org/licenses/shield/1.0.0)، الذي لا يقيّد إلا الشركات التي تبني أدوات ذكاء اصطناعي منافسة لتطوير الألعاب؛ ويمكنك استخدام كل ذلك لصنع ألعابك وإطلاقها وبيعها. الإشعارات: [`UnrealMCP/ThirdPartyNotices.txt`](../UnrealMCP/ThirdPartyNotices.txt).
 
 </div>

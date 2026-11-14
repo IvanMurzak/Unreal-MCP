@@ -33,32 +33,84 @@
 
 Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**边车进程**（`unreal-mcp-bridge`）在它旁边运行，由插件负责启动、监控和重启。设计细节：[docs/ARCHITECTURE.md](ARCHITECTURE.md)。
 
+**状态：**[最新版本](https://github.com/IvanMurzak/Unreal-MCP/releases/latest)（插件、sidecar 和 CLI 共用同一版本号）· Unreal Engine 5.5–5.8 · sidecar 构建覆盖 Windows x64、macOS（Intel 与 Apple 芯片）和 Linux x64 · 每个版本都在 Windows（UE 5.5–5.8）和 macOS（UE 5.7、5.8）上测试 · 可从 [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) 和 [GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases) 获取。
+
 ## 功能
 
+✅ **编写 C++** — 生成类、编辑源码、编译；错误会带着文件、行号和严重级别返回\
+✅ **Blueprints** — 创建、编辑和编译，返回智能体可以修复的结构化错误\
 ✅ **RQL 数据层** — 用一种语言查询和修改 Actor、资源和关卡（[RQL](rql.md)）\
-✅ **Blueprint** — 创建、编辑和编译，返回智能体能据此修复的结构化错误\
-✅ **C++** — 生成骨架、编辑并编译项目源码（Live Coding 或 UBT）\
-✅ **视觉反馈** — 视口、游戏视图、相机和单独 Actor 的截图\
+✅ **可视化反馈** — 视口、游戏视图、摄像机和单独 Actor 的截图\
 ✅ **Python** — 运行编辑器 Python，可使用完整的 `unreal` API\
-✅ **Fab** — 搜索 Fab、列出你的库、添加已拥有的内容\
+✅ **Fab** — 搜索 Fab、列出你的资源库、添加你拥有的内容\
 ✅ **扩展** — GAS、Niagara、PCG、Landscape、Control Rig、Enhanced Input\
-✅ **自定义工具** — 从任意插件添加工具、提示词和资源（[指南](EXTENSIONS.md)）\
-✅ **运行时模式** — 可选启用，操控正在运行的游戏（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）\
+✅ **你自己的工具** — 从任何插件添加工具、提示词和资源（[指南](EXTENSIONS.md)）\
+✅ **运行时模式** — 可选开启，用于驱动正在运行的游戏（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）\
 ✅ **云端或本地** — 开箱即用的 `ai-game.dev`，或自托管的 `gamedev-mcp-server`
 
-共 8 个类别、30 个内置工具；完整列表见 [docs/TOOLS.md](TOOLS.zh-CN.md)。
+8 个类别共 30 个内置工具；完整列表见 [docs/TOOLS.md](TOOLS.zh-CN.md)。
+
+### 你可以这样问
+
+| 对你的智能体说 | 它使用的工具 |
+| --- | --- |
+| “用 C++ 添加一个 `AHealthPickup` Actor 类，编译并修复所有错误” | `source-create-class`、`source-update`、`source-compile` |
+| “做一个重叠时打开的门 Blueprint，编译后放进关卡” | `blueprint-*` |
+| “数一数这个关卡里的树，并把所有点光源上移 1 米” | `rql-query`、`rql-mutate` |
+| “从玩家摄像机截一张图，检查一下光照” | `screenshot-*` |
+| “在 Fab 上找一个免费的岩石资源包并添加到项目中” | `fab-search`、`fab-add` |
+| “用 Python 脚本批量重命名选中的资源” | `python-execute` |
+
+**C++ 是一等公民的工作循环。**`source-compile` 在 Live Coding 启用时用它编译，否则用 UnrealBuildTool，并返回每条诊断的文件、行号和严重级别，智能体无需读构建日志就能修复错误。当改动需要完整构建并重启编辑器时（新增类、修改了 `UCLASS` / `UPROPERTY` / `UFUNCTION` 声明），它会明确提示。文件操作限定在 `<Project>/Source/` 内。在终端中，`unreal-mcp-cli compile` 无需编辑器即可输出 `file:line:col` 格式的诊断。
+
+**RQL 从编辑器本身学习：**`rql-schema` 列出每个数据源、类型和成员，`unreal-rql` skill 用示例讲解语法（`unreal-mcp-cli setup-skills` 会为你的智能体写入它）。
 
 ## 系统要求
 
-- **Unreal Engine 5.5 – 5.8**（发布流水线会逐一验证）以及一个 **C++ 项目**：插件会在你的项目中编译编辑器模块。
-- `unreal-mcp-cli` 需要 **Node.js 22.14+**。
-- Windows、macOS 或 Linux。无需安装 .NET：边车进程随插件一起提供。（只有从源码构建 bridge 时才需要 .NET 9 SDK。）
+- **Unreal Engine 5.5 – 5.8**（发布流水线会逐一验证）。
+- **C++ 项目**，因为插件以源码形式发布，Unreal 会用你平台的 C++ 工具链为你的项目编译它的模块。纯 Blueprint 项目一步即可变成 C++ 项目：在编辑器中选择 **Tools → New C++ Class…** 并创建任意类。新项目可用 `unreal-mcp-cli create-project ./MyGame` 生成一个最小的 C++ 项目。
+- **无需安装 .NET。**MCP 主机是一个自包含的 .NET 程序（`unreal-mcp-bridge`），按你的平台打包在插件内；插件负责启动和重启它。（Fab 版本不含可执行文件；它的 **Get bridge** 按钮会一次性安装 bridge。）只有从源码构建 bridge 才需要 .NET 9 SDK。
+- **Node.js 22.14+**，仅 `unreal-mcp-cli` 需要（它是 npm 包，22.14 是其最低 Node 版本）。
+- **Windows 或 macOS**（每个版本都在两者上测试）。**Linux x64：**sidecar 会构建并发布，但没有任何发布测试在 Linux 上运行。
 
 ## 快速开始
 
+**1. 安装插件**，任选其一：
+
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)**（无需终端）：把 **AI Game Developer** 添加到你的引擎，在 **Edit → Plugins** 中启用，然后打开项目。
+- **两条命令**（Node.js 22.14+）：
+
+```bash
+npx unreal-mcp-cli install-plugin ./MyGame   # plugin + bundled bridge into MyGame/Plugins
+npx unreal-mcp-cli open ./MyGame             # build if needed and open the editor
+```
+
+**2. 在编辑器中连接：**打开 **Tools → AI Game Developer**。
+
+- 仅限 Fab 安装：点击一次 **Get bridge**（Fab 版本不含可执行文件，这一步会安装 `unreal-mcp-bridge` sidecar）。
+- **Cloud**（默认）：点击 **Authorize**，并在浏览器中批准登录。**本地**：切换到 **Custom**，点击 **MCP server** 旁的 **Start**；编辑器会下载经过校验和验证的 `gamedev-mcp-server`（Fab 安装需手动安装该服务器：日志会给出下载地址）。
+- 在 **AI agent** 下选择你的智能体（Claude Code、Cursor、Codex……），点击 **Configure**。
+
+**3. 向智能体提问：***“在一排放三个立方体，在它们上方放一盏点光源，然后截一张图。”*
+
+本地还是 Cloud？两者都完整支持，之后也可以随时切换。**默认使用 Cloud**，因为它无需开放端口，也不会与其他程序发生端口冲突；该连接免费。**本地**模式无需账号或互联网，适合离线和物理隔离（air-gapped）的机器。
+
+| | **本地** | **Cloud** |
+| --- | --- | --- |
+| 账号 | 不需要 | 登录 ai-game.dev |
+| MCP 服务器 | 你机器上的 `gamedev-mcp-server`，由编辑器或智能体启动 | ai-game.dev 中继 |
+| 流量 | 留在 `localhost` | 经过 ai-game.dev（[它记录什么](#what-the-cloud-relay-sees)） |
+| 认证 | loopback 上无需认证，或一个共享令牌（一个参数） | OAuth 或按项目的密钥 |
+| 适合 | 离线和隔离环境、CI、私有项目 | 无需开放端口、没有端口冲突；一个账号用于多个项目和机器 |
+
+<details>
+<summary><b>全部在终端完成</b>（CLI：Cloud、本地、令牌认证）</summary>
+
 <p align="center">
-  <img src="img/readme/terminal.svg" alt="终端：npm install -g unreal-mcp-cli、install-plugin、login、setup-mcp claude-code，然后打开编辑器" width="100%"/>
+  <img src="img/readme/terminal.svg" alt="终端：npm install -g unreal-mcp-cli、install-plugin、login、setup-mcp claude-code、打开编辑器" width="100%"/>
 </p>
+
+**Cloud**（插件的默认模式）：
 
 ```bash
 npm install -g unreal-mcp-cli                       # or: npx unreal-mcp-cli@latest <command>
@@ -69,16 +121,95 @@ unreal-mcp-cli setup-mcp claude-code -p ./MyGame    # write the agent's MCP conf
 unreal-mcp-cli open ./MyGame                        # build if needed and open the editor
 ```
 
-`install-plugin` 会下载与 CLI 版本对应的已签名插件源码发布包。在编辑器中打开 **Tools → AI Game Developer**，即可查看连接、bridge 状态和已连接的智能体。然后对你的智能体说：
+**本地**（无需账号）：
 
-> *“在一排放三个立方体，在它们上方放一盏点光源，然后截一张图。”*
+```bash
+npm install -g unreal-mcp-cli
+unreal-mcp-cli install-plugin ./MyGame
+unreal-mcp-cli configure -p ./MyGame --mode Custom                 # plugin: local server
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --transport stdio # agent starts it
+unreal-mcp-cli open ./MyGame
+```
+
+`setup-mcp --transport stdio` 会把经过校验和验证的 `gamedev-mcp-server` 版本下载到项目中，并让智能体指向它。双方使用 `localhost` 上同一个按项目分配的端口。
+
+**开启令牌认证（本地）：**在 `configure` 命令后加上这些参数，再运行一次 `setup-mcp`；此后插件和服务器都要求该密钥。
+
+```bash
+unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secret>
+```
+
+为什么本地默认不认证：服务器只绑定 loopback，并拒绝来自非本地浏览器源的请求，所以只有你本机上的程序能访问它。如果你不信任这台机器上的所有程序或用户，就使用令牌。密钥会写入项目的 `.env`（`configure` 会把它加入 gitignore）和智能体的配置文件，请让该文件远离版本控制。
+
+</details>
+
+<a id="what-the-cloud-relay-sees"></a>**云端中继能看到什么。**在 Cloud 模式下，工具调用经过 ai-game.dev，它只负责转发，不保存你发送的内容：不保存任何请求或响应内容，因此也不保存源代码、项目文件或资源。它只保留元数据（工具名称、耗时、大小、IP 地址、MCP 事件），保留 90 天。[隐私政策](https://ai-game.dev/legal/privacy)。
+
+`install-plugin` 会下载与 CLI 版本相匹配的已签名插件源码发布包。
 
 其他安装方式：
 
-- **Fab / Epic Marketplace**：[Fab 上的 AI Game Developer](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)。Fab 版本不能捆绑可执行文件，因此在那里由窗口中的 **Get bridge**（获取 bridge）按钮引导你完成一次边车进程的安装。
-- **手动安装**：把 [`UnrealMCP/`](../UnrealMCP/) 复制到 `<YourProject>/Plugins/UnrealMCP/`。源码检出不包含捆绑的边车进程：运行 `unreal-mcp-cli bootstrap-local` 或设置 `UNREAL_MCP_BRIDGE_PATH`。
+- **Fab 格式 zip**：除了 [Fab 商品页](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)，每个 GitHub 版本还附带一个不含可执行文件的 Fab 格式构建（`unreal-mcp-plugin-fab-<version>.zip`）；无论用哪一个，窗口中的 **Get bridge** 按钮都会引导你一次性安装 sidecar。
+- **手动**：把 [`UnrealMCP/`](../UnrealMCP/) 复制到 `<YourProject>/Plugins/UnrealMCP/`。源码检出不含捆绑的 sidecar：运行 `unreal-mcp-cli bootstrap-local` 或设置 `UNREAL_MCP_BRIDGE_PATH`。
 
 更新（`unreal-mcp-cli update`）、连接模式、环境变量和故障排查：[docs/CONFIGURATION.md](CONFIGURATION.zh-CN.md)。
+
+### 智能体配置
+
+`unreal-mcp-cli setup-mcp <agent> -p ./MyGame` 会替你写入配置（`setup-mcp --list` 列出所有支持的智能体）。它写入的内容：
+
+<details>
+<summary><b>Claude Code</b>：<code>.mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame
+```
+
+```json
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "https://ai-game.dev/mcp/p/<pin>",
+      "headers": { "Authorization": "Bearer agd_pk_…" }
+    }
+  }
+}
+```
+
+`<pin>` 会路由到这个项目的编辑器。机器已登录时，请求头是这个项目的密钥；`--oauth` 只写入 URL，由智能体自行登录。使用 `--transport stdio` 时，该条目改为运行本地服务器：`"command"` 是 `<project>/Intermediate/UnrealMCP/server/` 下的 `gamedev-mcp-server`，`"args"` 设置 `port=<port>`、`client-transport=stdio` 和 `authorization=none`。
+
+</details>
+
+<details>
+<summary><b>Cursor</b>：<code>.cursor/mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp cursor -p ./MyGame
+```
+
+与 Claude Code 相同的 `mcpServers` → `unreal-mcp` 条目：`"type": "http"` 加 URL，或 `"type": "stdio"` 加本地服务器的 `command` 和 `args`。
+
+</details>
+
+<details>
+<summary><b>Codex</b>：<code>.codex/config.toml</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp codex -p ./MyGame
+```
+
+```toml
+[mcp_servers.unreal-mcp]
+enabled = true
+url = "https://ai-game.dev/mcp/p/<pin>"
+tool_timeout_sec = 300
+startup_timeout_sec = 30
+```
+
+使用项目密钥时，该节还会带上含 `Authorization` 请求头的 `http_headers`。
+
+</details>
 
 ## 使用
 
@@ -101,6 +232,20 @@ unreal-mcp-cli test ./MyGame
 ```
 
 全部命令和选项：[cli/README.md](../cli/docs/README.zh-CN.md) 或 `unreal-mcp-cli commands`。
+
+## 安全
+
+- **插件 ↔ sidecar：**插件监听一个 loopback TCP 端口；sidecar 用通过 stdin 传入的一次性令牌连接它（从不出现在命令行中，也从不写入日志）。
+- **本地服务器：**`gamedev-mcp-server` 默认只绑定 loopback，对 `Origin` 不被允许的请求返回 `403`（防御 DNS 重绑定）。在 loopback 上，除非你选择令牌（`UNREAL_MCP_AUTH_OPTION`、`UNREAL_MCP_TOKEN`），插件会以无认证方式启动它。服务器选项：[托管与认证](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)。
+- **Cloud：**智能体通过 OAuth 登录，或使用按项目的密钥，可用 `setup-mcp --regenerate-key` 更换。中继不保存任何请求或响应内容，只保留元数据 90 天（[详情](#what-the-cloud-relay-sees)）。
+- **工具能做什么：**编辑 `<Project>/Source/` 下的文件，运行控制台命令和编辑器 Python，修改任何反射属性。
+- **对工具的控制：**
+  - **白名单**（硬限制）：`UNREAL_MCP_TOOLS` 只提供列出的工具；其他工具既不会列出，也无法调用。
+  - **隐藏**（软限制）：**MCP Tools** 窗口中的 **Visible** 复选框会把工具从 `tools/list` 中移除，但按名称调用它的客户端仍能运行它。
+  - **有边界的修改：**C++ 文件工具限定在 `<Project>/Source/` 内；一次 `rql-mutate` 调用要么全部成功要么全部不生效，只占一个撤销步骤，可用 `dry_run` 预览，目标超过 200 个时会被拒绝，除非调用调高 `max_targets`（最多 1000）；`python-execute` 在 `timeout` 后停止（默认 30 秒）；每次工具调用都有时间上限（`UNREAL_MCP_TOOL_TIMEOUT`，默认 5 分钟）。
+  - **不开放给 AI：**系统工具（`ping`、skill 生成、`editor-quit`）不出现在 `tools/list` 中，且 `editor-quit` 只有在 CLI 会话的 nonce 匹配时才会执行。
+  - 详情：[docs/TOOLS.md](TOOLS.zh-CN.md)。
+- **运行时模式默认关闭：**游戏永远不会自行连接。它需要 `bRuntimeMcpEnabled` 设置（默认关闭）和一次显式的 `Connect()` 调用，除非你允许远程主机，否则只接受 loopback 主机，并且在 Shipping 构建中会被拒绝，除非编译时包含它。用 `TargetDenyList` 把插件排除在打包的游戏之外（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）。
 
 ## 扩展
 
@@ -154,4 +299,4 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 ## 许可证
 
-[Apache-2.0](../LICENSE) © Ivan Murzak
+**游戏开发者可免费使用，包括商业游戏。**Unreal MCP 采用 [Apache-2.0](../LICENSE) © Ivan Murzak。两个捆绑组件 RQL 和 Code-Exec 采用 [PolyForm Shield 1.0.0](https://polyformproject.org/licenses/shield/1.0.0) 许可证，它只限制开发与之竞争的游戏开发 AI 工具的公司；你可以用它们全部来制作、发布和销售你的游戏。声明：[`UnrealMCP/ThirdPartyNotices.txt`](../UnrealMCP/ThirdPartyNotices.txt)。

@@ -33,32 +33,84 @@
 
 Unreal का editor C++ में है, इसलिए .NET MCP host उसके साथ एक छोटे **sidecar** (`unreal-mcp-bridge`) के रूप में चलता है, जिसे plugin आपके लिए शुरू करता है, उस पर नज़र रखता है और ज़रूरत पर restart करता है। डिज़ाइन का विवरण: [docs/ARCHITECTURE.md](ARCHITECTURE.md)।
 
+**स्थिति:** [latest release](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar और CLI का version एक ही होता है) · Unreal Engine 5.5–5.8 · sidecar Windows x64, macOS (Intel और Apple silicon) और Linux x64 के लिए build होता है · हर release Windows (UE 5.5–5.8) और macOS (UE 5.7, 5.8) पर test होता है · [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) और [GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases) पर उपलब्ध।
+
 ## विशेषताएँ
 
-✅ **RQL data layer** — एक ही भाषा में actors, assets और levels को query करें और बदलें ([RQL](rql.md))\
-✅ **Blueprints** — बनाएँ, edit करें और compile करें, ऐसी structured errors के साथ जिन्हें agent ठीक कर सके\
-✅ **C++** — project source का ढाँचा बनाएँ, edit और compile करें (Live Coding या UBT)\
-✅ **Visual feedback** — viewport, game-view, camera और अलग किए गए actor के screenshots\
+✅ **C++ लिखना** — classes बनाएँ, source edit करें, compile करें; errors file, line और severity के साथ लौटते हैं\
+✅ **Blueprints** — बनाएँ, edit करें और compile करें, ऐसे structured errors के साथ जिन्हें agent ठीक कर सके\
+✅ **RQL data layer** — actors, assets और levels को एक ही भाषा में query करें और बदलें ([RQL](rql.md))\
+✅ **Visual feedback** — viewport, game-view, camera और isolated-actor screenshots\
 ✅ **Python** — पूरे `unreal` API के साथ editor Python चलाएँ\
 ✅ **Fab** — Fab में खोजें, अपनी library देखें, अपना खरीदा content जोड़ें\
 ✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input\
-✅ **आपके अपने tools** — किसी भी plugin से tools, prompts और resources जोड़ें ([गाइड](EXTENSIONS.md))\
-✅ **Runtime mode** — चलते हुए game को चलाने के लिए opt in करें ([docs/RUNTIME.md](RUNTIME.hi.md))\
-✅ **Cloud या local** — `ai-game.dev` तुरंत तैयार, या self-hosted `gamedev-mcp-server`
+✅ **आपके अपने tools** — किसी भी plugin से tools, prompts और resources जोड़ें ([guide](EXTENSIONS.md))\
+✅ **Runtime mode** — चाहें तो चलते हुए game को control करें ([docs/RUNTIME.md](RUNTIME.hi.md))\
+✅ **Cloud या local** — तैयार `ai-game.dev`, या self-hosted `gamedev-mcp-server`
 
 8 families में 30 built-in tools; पूरी सूची [docs/TOOLS.md](TOOLS.hi.md) में है।
 
+### आप क्या कह सकते हैं
+
+| अपने agent से कहें | वह कौन-से tools इस्तेमाल करता है |
+| --- | --- |
+| "C++ में एक `AHealthPickup` actor class जोड़ो, compile करो और errors ठीक करो" | `source-create-class`, `source-update`, `source-compile` |
+| "Overlap पर खुलने वाला door Blueprint बनाओ, compile करो, level में रखो" | `blueprint-*` |
+| "इस level में पेड़ गिनो और हर point light को 1 m ऊपर करो" | `rql-query`, `rql-mutate` |
+| "Player camera से screenshot लो और lighting जाँचो" | `screenshot-*` |
+| "Fab पर एक free rock pack ढूँढो और project में जोड़ो" | `fab-search`, `fab-add` |
+| "चुने हुए assets को Python script से एक साथ rename करो" | `python-execute` |
+
+**C++ एक first-class loop है।** `source-compile` Live Coding चालू होने पर उससे, वरना UnrealBuildTool से build करता है, और हर diagnostic उसकी file, line और severity के साथ लौटाता है, इसलिए agent build log पढ़े बिना errors ठीक कर लेता है। जब किसी बदलाव के लिए full build और editor restart चाहिए (नई classes, बदली हुई `UCLASS` / `UPROPERTY` / `UFUNCTION` declarations), तो वह यह बताता है। File operations `<Project>/Source/` के अंदर ही रहते हैं। Terminal से `unreal-mcp-cli compile` बिना editor के `file:line:col` diagnostics print करता है।
+
+**RQL editor से ही सीखा जाता है:** `rql-schema` हर source, type और member की सूची देता है, और `unreal-rql` skill recipes के साथ syntax सिखाती है (`unreal-mcp-cli setup-skills` उसे आपके agent के लिए लिखता है)।
+
 ## आवश्यकताएँ
 
-- **Unreal Engine 5.5 – 5.8** (release pipeline इनमें से हर एक को validate करती है) और एक **C++ project**: plugin आपके project में editor modules compile करता है।
-- `unreal-mcp-cli` के लिए **Node.js 22.14+**।
-- Windows, macOS या Linux। .NET install करने की ज़रूरत नहीं: sidecar plugin के अंदर ही आता है। (.NET 9 SDK सिर्फ़ bridge को source से build करने के लिए चाहिए।)
+- **Unreal Engine 5.5 – 5.8** (release pipeline हर एक को validate करती है)।
+- **एक C++ project**, क्योंकि plugin source के रूप में आता है और Unreal आपके platform के C++ toolchain से आपके project के लिए उसके modules compile करता है। Blueprint-only project एक कदम में C++ project बन जाता है: editor में **Tools → New C++ Class…** से कोई भी class बनाएँ। नए project के लिए `unreal-mcp-cli create-project ./MyGame` एक minimal C++ project बनाता है।
+- **.NET install की ज़रूरत नहीं।** MCP host एक self-contained .NET program (`unreal-mcp-bridge`) है जो आपके platform के लिए plugin के अंदर bundled है; plugin उसे start और restart करता है। (Fab build में कोई executable नहीं होता; उसका **Get bridge** button bridge को एक बार install करता है।) सिर्फ़ bridge को source से build करने के लिए .NET 9 SDK चाहिए।
+- **Node.js 22.14+**, सिर्फ़ `unreal-mcp-cli` के लिए (एक npm package; 22.14 उसका minimum Node version है)।
+- **Windows या macOS** (हर release दोनों पर test होता है)। **Linux x64:** sidecar build और ship होता है, लेकिन Linux पर कोई release test नहीं चलता।
 
 ## जल्दी शुरू करें
+
+**1. Plugin install करें**, इनमें से एक तरीके से:
+
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)** (terminal की ज़रूरत नहीं): **AI Game Developer** को अपने engine में जोड़ें, **Edit → Plugins** में enable करें, अपना project खोलें।
+- **दो commands** (Node.js 22.14+):
+
+```bash
+npx unreal-mcp-cli install-plugin ./MyGame   # plugin + bundled bridge into MyGame/Plugins
+npx unreal-mcp-cli open ./MyGame             # build if needed and open the editor
+```
+
+**2. Editor में connect करें:** **Tools → AI Game Developer** खोलें।
+
+- सिर्फ़ Fab install: एक बार **Get bridge** पर click करें (Fab build में executables नहीं होते, इसलिए यह `unreal-mcp-bridge` sidecar install करता है)।
+- **Cloud** (default): **Authorize** पर click करें और browser में sign-in approve करें। **Local**: **Custom** पर switch करें और **MCP server** के पास **Start** पर click करें; editor checksum-verified `gamedev-mcp-server` download करता है (Fab install में यह server हाथ से install करें: log download का पता बताता है)।
+- **AI agent** के नीचे अपना agent चुनें (Claude Code, Cursor, Codex, …) और **Configure** पर click करें।
+
+**3. अपने agent से कहें:** *"एक पंक्ति में तीन cubes और उनके ऊपर एक point light बनाओ, फिर एक screenshot लो।"*
+
+Local या Cloud? दोनों पूरी तरह supported हैं; बाद में बदल सकते हैं। **Cloud default है** क्योंकि इसमें कोई port खोलना नहीं पड़ता और दूसरे programs के साथ port conflicts नहीं होते; यह connection free है। **Local** बिना account या internet के चलता है, offline और air-gapped machines के लिए।
+
+| | **Local** | **Cloud** |
+| --- | --- | --- |
+| Account | कोई नहीं | ai-game.dev sign-in |
+| MCP server | आपकी machine पर `gamedev-mcp-server`, editor या agent द्वारा started | ai-game.dev relay |
+| Traffic | `localhost` पर ही रहता है | ai-game.dev से होकर जाता है ([वह क्या log करता है](#what-the-cloud-relay-sees)) |
+| Auth | loopback पर कोई नहीं, या एक shared token (एक flag) | OAuth या per-project key |
+| किसके लिए अच्छा | offline और air-gapped काम, CI, private projects | कोई खुला port या port conflict नहीं; कई projects और machines के लिए एक account |
+
+<details>
+<summary><b>सब कुछ terminal से</b> (CLI: Cloud, Local, token auth)</summary>
 
 <p align="center">
   <img src="img/readme/terminal.svg" alt="Terminal: npm install -g unreal-mcp-cli, install-plugin, login, setup-mcp claude-code, editor खोलें" width="100%"/>
 </p>
+
+**Cloud** (plugin का default mode):
 
 ```bash
 npm install -g unreal-mcp-cli                       # or: npx unreal-mcp-cli@latest <command>
@@ -69,16 +121,95 @@ unreal-mcp-cli setup-mcp claude-code -p ./MyGame    # write the agent's MCP conf
 unreal-mcp-cli open ./MyGame                        # build if needed and open the editor
 ```
 
-`install-plugin` CLI version से मेल खाने वाली signed plugin source release download करता है। Editor में **Tools → AI Game Developer** खोलें, वहाँ connection, bridge का status और जुड़े हुए agents दिखते हैं। फिर अपने agent से कहें:
+**Local** (बिना account):
 
-> *"एक कतार में तीन cubes spawn करो और उनके ऊपर एक point light लगाओ, फिर screenshot लो।"*
+```bash
+npm install -g unreal-mcp-cli
+unreal-mcp-cli install-plugin ./MyGame
+unreal-mcp-cli configure -p ./MyGame --mode Custom                 # plugin: local server
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --transport stdio # agent starts it
+unreal-mcp-cli open ./MyGame
+```
+
+`setup-mcp --transport stdio` checksum-verified `gamedev-mcp-server` release को project में download करता है और agent को उस पर point करता है। दोनों तरफ़ `localhost` पर एक ही per-project port इस्तेमाल होता है।
+
+**Token auth चालू करें (local):** `configure` line में flags जोड़ें, फिर `setup-mcp` दोबारा चलाएँ; इसके बाद plugin और server दोनों secret माँगते हैं।
+
+```bash
+unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secret>
+```
+
+Local में default रूप से auth क्यों नहीं: server सिर्फ़ loopback पर bind होता है और non-local browser origins से आई requests ठुकरा देता है, इसलिए सिर्फ़ आपकी अपनी machine के programs उस तक पहुँच सकते हैं। जब आप उस machine के हर program या user पर भरोसा न करें, तब token इस्तेमाल करें। Secret project की `.env` (जिसे `configure` gitignore में जोड़ता है) और agent की config file में जाता है, इसलिए उस file को version control से बाहर रखें।
+
+</details>
+
+<a id="what-the-cloud-relay-sees"></a>**Cloud relay क्या देखता है।** Cloud mode में tool calls ai-game.dev से होकर जाते हैं, जो उन्हें आगे भेजता है और आपका भेजा हुआ कुछ भी store नहीं करता: न request content, न response content, इसलिए न source code, न project files, न assets। वह सिर्फ़ metadata (tool name, timing, sizes, IP address, MCP events) 90 दिनों तक रखता है। [Privacy policy](https://ai-game.dev/legal/privacy)।
+
+`install-plugin` CLI version से मेल खाने वाला signed plugin source release download करता है।
 
 Install करने के दूसरे तरीके:
 
-- **Fab / Epic Marketplace**: [Fab पर AI Game Developer](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33)। Fab build में executables शामिल नहीं हो सकते, इसलिए वहाँ window का **Get bridge** button आपको एक बार sidecar install करने के चरण बताता है।
-- **Manual**: [`UnrealMCP/`](../UnrealMCP/) को `<YourProject>/Plugins/UnrealMCP/` में copy करें। Source checkout में sidecar साथ नहीं आता: `unreal-mcp-cli bootstrap-local` चलाएँ या `UNREAL_MCP_BRIDGE_PATH` set करें।
+- **Fab-format zip**: [Fab listing](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) के अलावा, हर GitHub release में executables के बिना एक Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) भी होता है; दोनों में से किसी के साथ, window का **Get bridge** button sidecar को एक बार install करने में मदद करता है।
+- **Manual**: [`UnrealMCP/`](../UnrealMCP/) को `<YourProject>/Plugins/UnrealMCP/` में copy करें। Source checkout में bundled sidecar नहीं होता: `unreal-mcp-cli bootstrap-local` चलाएँ या `UNREAL_MCP_BRIDGE_PATH` set करें।
 
 Update करना (`unreal-mcp-cli update`), connection modes, environment variables और troubleshooting: [docs/CONFIGURATION.md](CONFIGURATION.hi.md)।
+
+### Agent setup
+
+`unreal-mcp-cli setup-mcp <agent> -p ./MyGame` आपके लिए config लिखता है (`setup-mcp --list` सभी supported agents दिखाता है)। वह क्या लिखता है:
+
+<details>
+<summary><b>Claude Code</b>: <code>.mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame
+```
+
+```json
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "https://ai-game.dev/mcp/p/<pin>",
+      "headers": { "Authorization": "Bearer agd_pk_…" }
+    }
+  }
+}
+```
+
+`<pin>` इस project के editor तक route करता है। Machine signed in हो तो header इस project की key होता है; `--oauth` सिर्फ़ URL वाला config लिखता है और agent खुद sign in करता है। `--transport stdio` के साथ entry local server चलाती है: `"command"` `<project>/Intermediate/UnrealMCP/server/` के नीचे `gamedev-mcp-server` है, `"args"` `port=<port>`, `client-transport=stdio` और `authorization=none` set करते हैं।
+
+</details>
+
+<details>
+<summary><b>Cursor</b>: <code>.cursor/mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp cursor -p ./MyGame
+```
+
+Claude Code जैसी ही `mcpServers` → `unreal-mcp` entry: URL के साथ `"type": "http"`, या local server के लिए `command` और `args` के साथ `"type": "stdio"`।
+
+</details>
+
+<details>
+<summary><b>Codex</b>: <code>.codex/config.toml</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp codex -p ./MyGame
+```
+
+```toml
+[mcp_servers.unreal-mcp]
+enabled = true
+url = "https://ai-game.dev/mcp/p/<pin>"
+tool_timeout_sec = 300
+startup_timeout_sec = 30
+```
+
+Project key होने पर section में `Authorization` header वाला `http_headers` भी होता है।
+
+</details>
 
 ## उपयोग
 
@@ -101,6 +232,20 @@ unreal-mcp-cli test ./MyGame
 ```
 
 सभी commands और options: [cli/README.md](../cli/docs/README.hi.md) या `unreal-mcp-cli commands`।
+
+## Security
+
+- **Plugin ↔ sidecar:** plugin एक loopback TCP port पर सुनता है; sidecar stdin से भेजे गए one-shot token के साथ उससे जुड़ता है (कभी command line पर नहीं, कभी log में नहीं)।
+- **Local server:** `gamedev-mcp-server` default रूप से loopback पर bind होता है और जिस request का `Origin` allowed नहीं, उसे `403` देता है (DNS-rebinding से बचाव)। Loopback पर plugin उसे बिना authentication start करता है, जब तक आप token न चुनें (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`)। Server options: [hosting और authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)।
+- **Cloud:** agent OAuth से sign in करता है या per-project key इस्तेमाल करता है, जिसे आप `setup-mcp --regenerate-key` से बदल सकते हैं। Relay कोई request या response content store नहीं करता, सिर्फ़ metadata 90 दिनों तक ([details](#what-the-cloud-relay-sees))।
+- **Tools क्या कर सकते हैं:** `<Project>/Source/` के नीचे files edit करना, console commands और editor Python चलाना, कोई भी reflected property बदलना।
+- **उन पर नियंत्रण:**
+  - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` सिर्फ़ सूची वाले tools देता है; कोई और tool न list होता है, न call हो सकता है।
+  - **Hide** (soft): **MCP Tools** window का **Visible** checkbox tool को `tools/list` से हटाता है, लेकिन नाम से call करने वाला client उसे फिर भी चला सकता है।
+  - **सीमित बदलाव:** C++ file tools `<Project>/Source/` के अंदर रहते हैं; एक `rql-mutate` call all-or-nothing है, एक undo step, `dry_run` से preview हो सकता है, और 200 से ज़्यादा targets पर मना कर दिया जाता है जब तक call `max_targets` न बढ़ाए (1000 तक); `python-execute` `timeout` के बाद रुक जाता है (default 30 s); हर tool call की time limit है (`UNREAL_MCP_TOOL_TIMEOUT`, default 5 min)।
+  - **AI के लिए नहीं:** system tools (`ping`, skill generation, `editor-quit`) `tools/list` में नहीं होते, और `editor-quit` तब तक मना करता है जब तक CLI session का nonce match न करे।
+  - Details: [docs/TOOLS.md](TOOLS.hi.md)।
+- **Runtime mode default रूप से बंद है:** game कभी अपने-आप connect नहीं होता। इसके लिए `bRuntimeMcpEnabled` setting (default बंद) और एक explicit `Connect()` call चाहिए, यह सिर्फ़ loopback host स्वीकार करता है जब तक आप remote host की अनुमति न दें, और Shipping builds में मना हो जाता है जब तक compile में शामिल न किया जाए। `TargetDenyList` से plugin को packaged games से बाहर रखें ([docs/RUNTIME.md](RUNTIME.hi.md))।
 
 ## Extensions
 
@@ -154,4 +299,4 @@ Extensions आपके project में source से compile होते ह
 
 ## License
 
-[Apache-2.0](../LICENSE) © Ivan Murzak
+**Game developers के लिए free, commercial games समेत।** Unreal MCP [Apache-2.0](../LICENSE) © Ivan Murzak है। दो bundled components, RQL और Code-Exec, [PolyForm Shield 1.0.0](https://polyformproject.org/licenses/shield/1.0.0) license इस्तेमाल करते हैं, जो सिर्फ़ उन companies को रोकता है जो game development के लिए competing AI tools बनाती हैं; आप अपने games बनाने, ship करने और बेचने के लिए यह सब इस्तेमाल कर सकते हैं। Notices: [`UnrealMCP/ThirdPartyNotices.txt`](../UnrealMCP/ThirdPartyNotices.txt)।
