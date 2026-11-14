@@ -100,15 +100,26 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-Añade una extensión de motor (cada una amplía RQL, así que no aparecen herramientas nuevas en `tools/list`):
+Todos los comandos y opciones: [cli/README.md](../cli/docs/README.es.md) o `unreal-mcp-cli commands`.
+
+## Extensiones
+
+Las extensiones son plugins opcionales que amplían RQL; no añaden herramientas propias.
 
 ```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 ```
 
-Extensiones: [AI GAS](../extensions/UnrealAIGAS/README.md), [AI Niagara](../extensions/UnrealAINiagara/README.md), [AI PCG](../extensions/UnrealAIPCG/README.md), [AI Landscape](../extensions/UnrealAILandscape/README.md), [AI ControlRig](../extensions/UnrealAIControlRig/README.md), [AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md). Requieren Unreal Engine 5.7+ y se compilan desde el código fuente en tu proyecto.
+| Extensión | Añade | Requiere |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | Rigs de animación procedural y su conexión a Anim Blueprints | `ControlRig`, `RigVM`, UE 5.7+ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | Acciones de entrada, contextos de mapeo, triggers y modificadores | `EnhancedInput`, UE 5.7+ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects, Blueprints de habilidades y conjuntos de atributos | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | Paisajes, océanos, lagos y ríos | `Water`, UE 5.7+ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Sistemas, emisores, módulos y colisión de Niagara | `Niagara`, `ChaosNiagara`, UE 5.7+ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | Grafos PCG, volúmenes y dispersiones generadas | `PCG`, UE 5.7+ |
 
-Todos los comandos y opciones: [cli/README.md](../cli/docs/README.es.md) o `unreal-mcp-cli commands`.
+Las extensiones se compilan desde el código fuente en tu proyecto (la próxima vez que abras el editor, o al momento con `--build`); el instalador activa los plugins del motor que necesitan.
 
 ## Documentación
 

@@ -100,15 +100,26 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-エンジン拡張機能を追加します（どれも RQL を拡張するので、`tools/list` に新しいツールは現れません）:
+すべてのコマンドとオプション: [cli/README.md](../cli/docs/README.ja.md) または `unreal-mcp-cli commands`。
+
+## 拡張機能
+
+拡張機能は RQL を拡張するオプションのプラグインで、独自のツールは追加しません。
 
 ```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 ```
 
-拡張機能: [AI GAS](../extensions/UnrealAIGAS/README.md)、[AI Niagara](../extensions/UnrealAINiagara/README.md)、[AI PCG](../extensions/UnrealAIPCG/README.md)、[AI Landscape](../extensions/UnrealAILandscape/README.md)、[AI ControlRig](../extensions/UnrealAIControlRig/README.md)、[AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md)。Unreal Engine 5.7+ が必要で、あなたのプロジェクト内でソースからコンパイルされます。
+| 拡張機能 | 追加されるもの | 必要なもの |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | プロシージャルアニメーションリグと Anim Blueprint への接続 | `ControlRig`, `RigVM`, UE 5.7+ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | 入力アクション、マッピングコンテキスト、トリガー、モディファイア | `EnhancedInput`, UE 5.7+ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effect、アビリティ Blueprint、アトリビュートセット | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | ランドスケープ、海、湖、川 | `Water`, UE 5.7+ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara システム、エミッター、モジュール、コリジョン | `Niagara`, `ChaosNiagara`, UE 5.7+ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG グラフ、ボリューム、生成された配置 | `PCG`, UE 5.7+ |
 
-すべてのコマンドとオプション: [cli/README.md](../cli/docs/README.ja.md) または `unreal-mcp-cli commands`。
+拡張機能はあなたのプロジェクト内でソースからコンパイルされます（次にエディターを開いたとき、または `--build` ですぐに）。インストーラーが必要なエンジンプラグインを有効にします。
 
 ## ドキュメント
 

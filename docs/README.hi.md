@@ -100,15 +100,26 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-एक engine extension जोड़ें (हर extension RQL को बढ़ाता है, इसलिए `tools/list` में कोई नया tool नहीं आता):
+सभी commands और options: [cli/README.md](../cli/docs/README.hi.md) या `unreal-mcp-cli commands`।
+
+## Extensions
+
+Extensions optional plugins हैं जो RQL को बढ़ाते हैं; ये अपना कोई tool नहीं जोड़ते।
 
 ```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 ```
 
-Extensions: [AI GAS](../extensions/UnrealAIGAS/README.md), [AI Niagara](../extensions/UnrealAINiagara/README.md), [AI PCG](../extensions/UnrealAIPCG/README.md), [AI Landscape](../extensions/UnrealAILandscape/README.md), [AI ControlRig](../extensions/UnrealAIControlRig/README.md), [AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md)। इनके लिए Unreal Engine 5.7+ चाहिए और ये आपके project में source से compile होते हैं।
+| Extension | क्या जोड़ता है | ज़रूरतें |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | Procedural animation rigs और उनकी Anim Blueprint wiring | `ControlRig`, `RigVM`, UE 5.7+ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | Input actions, mapping contexts, triggers और modifiers | `EnhancedInput`, UE 5.7+ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects, ability Blueprints और attribute sets | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | Landscapes, oceans, lakes और rivers | `Water`, UE 5.7+ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara systems, emitters, modules और collision | `Niagara`, `ChaosNiagara`, UE 5.7+ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG graphs, volumes और generated scatters | `PCG`, UE 5.7+ |
 
-सभी commands और options: [cli/README.md](../cli/docs/README.hi.md) या `unreal-mcp-cli commands`।
+Extensions आपके project में source से compile होते हैं (अगली बार editor खोलने पर, या `--build` के साथ तुरंत); installer उनके लिए ज़रूरी engine plugins enable कर देता है।
 
 ## Documentation
 

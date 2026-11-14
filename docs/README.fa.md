@@ -114,7 +114,11 @@ unreal-mcp-cli test ./MyGame
 
 <div dir="rtl">
 
-یک افزونه موتور اضافه کنید (هر افزونه RQL را گسترش می‌دهد، بنابراین ابزار جدیدی در `tools/list` ظاهر نمی‌شود):
+همه دستورها و گزینه‌ها: [cli/README.md](../cli/docs/README.fa.md) یا `unreal-mcp-cli commands`.
+
+## افزونه‌ها
+
+‏افزونه‌ها پلاگین‌های اختیاری‌ای هستند که RQL را گسترش می‌دهند؛ ابزار جداگانه‌ای اضافه نمی‌کنند.
 
 </div>
 
@@ -124,9 +128,16 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 <div dir="rtl">
 
-افزونه‌ها: [AI GAS](../extensions/UnrealAIGAS/README.md)، [AI Niagara](../extensions/UnrealAINiagara/README.md)، [AI PCG](../extensions/UnrealAIPCG/README.md)، [AI Landscape](../extensions/UnrealAILandscape/README.md)، [AI ControlRig](../extensions/UnrealAIControlRig/README.md)، [AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md). این افزونه‌ها به Unreal Engine 5.7+ نیاز دارند و از سورس در پروژه شما کامپایل می‌شوند.
+| افزونه | چه اضافه می‌کند | پیش‌نیازها |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | ریگ‌های انیمیشن رویه‌ای و اتصال آن‌ها به Anim Blueprint | `ControlRig`, `RigVM`, UE 5.7+‎ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | اکشن‌های ورودی، کانتکست‌های نگاشت، تریگرها و مادیفایرها | `EnhancedInput`, UE 5.7+‎ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effectها، Blueprintهای توانایی و مجموعه‌های اتریبیوت | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+‎ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | لنداسکیپ‌ها، اقیانوس‌ها، دریاچه‌ها و رودخانه‌ها | `Water`, UE 5.7+‎ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | سیستم‌ها، امیترها، ماژول‌ها و برخورد Niagara | `Niagara`, `ChaosNiagara`, UE 5.7+‎ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | گراف‌های PCG، حجم‌ها و پراکنش‌های تولیدشده | `PCG`, UE 5.7+‎ |
 
-همه دستورها و گزینه‌ها: [cli/README.md](../cli/docs/README.fa.md) یا `unreal-mcp-cli commands`.
+‏افزونه‌ها از سورس در پروژه شما کامپایل می‌شوند (دفعه بعد که ویرایشگر را باز می‌کنید، یا همان لحظه با `--build`)؛ نصب‌کننده پلاگین‌های موتوری را که لازم دارند فعال می‌کند.
 
 ## مستندات
 

@@ -114,7 +114,11 @@ unreal-mcp-cli test ./MyGame
 
 <div dir="rtl">
 
-أضف امتدادًا للمحرك (كل امتداد يوسّع RQL، لذلك لا تظهر أدوات جديدة في `tools/list`):
+جميع الأوامر والخيارات: [cli/README.md](../cli/docs/README.ar.md) أو `unreal-mcp-cli commands`.
+
+## الامتدادات
+
+‏الامتدادات إضافات اختيارية توسّع RQL؛ ولا تضيف أدوات خاصة بها.
 
 </div>
 
@@ -124,9 +128,16 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 <div dir="rtl">
 
-الامتدادات: [AI GAS](../extensions/UnrealAIGAS/README.md)، [AI Niagara](../extensions/UnrealAINiagara/README.md)، [AI PCG](../extensions/UnrealAIPCG/README.md)، [AI Landscape](../extensions/UnrealAILandscape/README.md)، [AI ControlRig](../extensions/UnrealAIControlRig/README.md)، [AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md). تحتاج إلى Unreal Engine 5.7+ وتُجمَّع من المصدر داخل مشروعك.
+| الامتداد | ما يضيفه | المتطلبات |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | منصات تحريك إجرائية (rigs) وربطها بـ Anim Blueprint | `ControlRig`, `RigVM`, UE 5.7+‎ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | إجراءات الإدخال وسياقات التعيين والمشغّلات والمعدِّلات | `EnhancedInput`, UE 5.7+‎ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects وBlueprints القدرات ومجموعات السمات | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+‎ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | التضاريس والمحيطات والبحيرات والأنهار | `Water`, UE 5.7+‎ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | أنظمة Niagara وبواعثها ووحداتها والتصادم | `Niagara`, `ChaosNiagara`, UE 5.7+‎ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | رسوم PCG البيانية والأحجام والتوزيعات المولَّدة | `PCG`, UE 5.7+‎ |
 
-جميع الأوامر والخيارات: [cli/README.md](../cli/docs/README.ar.md) أو `unreal-mcp-cli commands`.
+‏تُجمَّع الامتدادات من المصدر داخل مشروعك (عند فتح المحرر في المرة التالية، أو فورًا مع `--build`)؛ ويفعّل المثبّت إضافات المحرك التي تحتاجها.
 
 ## التوثيق
 

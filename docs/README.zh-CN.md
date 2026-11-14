@@ -100,15 +100,26 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-添加引擎扩展（每个扩展都扩展 RQL，因此 `tools/list` 中不会出现新工具）：
+全部命令和选项：[cli/README.md](../cli/docs/README.zh-CN.md) 或 `unreal-mcp-cli commands`。
+
+## 扩展
+
+扩展是可选插件，用于扩展 RQL；它们本身不添加任何工具。
 
 ```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 ```
 
-扩展：[AI GAS](../extensions/UnrealAIGAS/README.md)、[AI Niagara](../extensions/UnrealAINiagara/README.md)、[AI PCG](../extensions/UnrealAIPCG/README.md)、[AI Landscape](../extensions/UnrealAILandscape/README.md)、[AI ControlRig](../extensions/UnrealAIControlRig/README.md)、[AI EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md)。它们需要 Unreal Engine 5.7+，并在你的项目中从源码编译。
+| 扩展 | 新增 | 依赖 |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](../extensions/UnrealAIControlRig/README.md) | 程序化动画绑定及其 Anim Blueprint 连接 | `ControlRig`, `RigVM`, UE 5.7+ |
+| [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | 输入操作、映射上下文、触发器和修饰器 | `EnhancedInput`, UE 5.7+ |
+| [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effect、能力 Blueprint 和属性集 | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
+| [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | 地形、海洋、湖泊和河流 | `Water`, UE 5.7+ |
+| [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara 系统、发射器、模块和碰撞 | `Niagara`, `ChaosNiagara`, UE 5.7+ |
+| [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG 图、体积和生成的散布 | `PCG`, UE 5.7+ |
 
-全部命令和选项：[cli/README.md](../cli/docs/README.zh-CN.md) 或 `unreal-mcp-cli commands`。
+扩展在你的项目中从源码编译（下次打开编辑器时，或使用 `--build` 立即编译）；安装程序会启用它们需要的引擎插件。
 
 ## 文档
 

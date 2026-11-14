@@ -100,15 +100,26 @@ unreal-mcp-cli compile ./MyGame
 unreal-mcp-cli test ./MyGame
 ```
 
-Add an engine extension (each one extends RQL, so no new tools appear in `tools/list`):
+All commands and options: [cli/README.md](cli/README.md) or `unreal-mcp-cli commands`.
+
+## Extensions
+
+Extensions are optional plugins that extend RQL; they add no tools of their own.
 
 ```bash
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 ```
 
-Extensions: [AI GAS](extensions/UnrealAIGAS/README.md), [AI Niagara](extensions/UnrealAINiagara/README.md), [AI PCG](extensions/UnrealAIPCG/README.md), [AI Landscape](extensions/UnrealAILandscape/README.md), [AI ControlRig](extensions/UnrealAIControlRig/README.md), [AI EnhancedInput](extensions/UnrealAIEnhancedInput/README.md). They need Unreal Engine 5.7+ and compile from source in your project.
+| Extension | Adds | Requires |
+| --- | --- | --- |
+| [AI&nbsp;ControlRig](extensions/UnrealAIControlRig/README.md) | Procedural animation rigs and their Anim Blueprint wiring | `ControlRig`, `RigVM`, UE 5.7+ |
+| [AI&nbsp;EnhancedInput](extensions/UnrealAIEnhancedInput/README.md) | Input actions, mapping contexts, triggers and modifiers | `EnhancedInput`, UE 5.7+ |
+| [AI&nbsp;GAS](extensions/UnrealAIGAS/README.md) | Gameplay Effects, ability Blueprints and attribute sets | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
+| [AI&nbsp;Landscape](extensions/UnrealAILandscape/README.md) | Landscapes, oceans, lakes and rivers | `Water`, UE 5.7+ |
+| [AI&nbsp;Niagara](extensions/UnrealAINiagara/README.md) | Niagara systems, emitters, modules and collision | `Niagara`, `ChaosNiagara`, UE 5.7+ |
+| [AI&nbsp;PCG](extensions/UnrealAIPCG/README.md) | PCG graphs, volumes and generated scatters | `PCG`, UE 5.7+ |
 
-All commands and options: [cli/README.md](cli/README.md) or `unreal-mcp-cli commands`.
+Extensions compile from source in your project (on the next editor open, or now with `--build`); the installer enables the engine plugins they need.
 
 ## Documentation
 
