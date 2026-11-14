@@ -28,7 +28,7 @@ Connection settings persist to `<Project>/Saved/Config/UnrealMcp/ai-game-develop
 
 Updating in place must always leave you running the **new** code. The risk is UE's incremental compiler: if the plugin source changes (new `.cpp` files, a new module) but the old `UnrealMCP/Intermediate/` build cache survives, UE can do a partial recompile against a stale module file-list and silently leave you on old/partial code. Each channel handles this differently:
 
-- **Fab / Epic Marketplace (once the listing is live) → automatic.** The Epic Games Launcher replaces the precompiled binaries in place; nothing to compile, no cache to clear.
+- **[Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) / Epic Marketplace → automatic.** The Epic Games Launcher replaces the precompiled binaries in place; nothing to compile, no cache to clear. The bridge is kept per plugin version, so after an update click **Get bridge** once more.
 - **`unreal-mcp-cli update` → automatic clean rebuild.** `update` re-copies the plugin source and, by **default**, deletes the installed plugin's stale `Intermediate/` and the C++ `Binaries/` so UE performs a clean compile on the next editor launch — no manual steps. The bundled sidecar bridge under `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` is kept intact: release-source installs refresh it from `Source/ThirdParty/...`, while repo/dev installs preserve the previously bundled copy when needed. Dev **junction** installs are never cleaned (that would wipe your live source tree's outputs). Pass `--no-clean` to opt out of the cache wipe.
 
   ```bash

@@ -4,7 +4,7 @@
 
 <br/>
 
-[![Release](https://img.shields.io/github/v/release/IvanMurzak/Unreal-MCP?label=release&color=2F6F9F&logo=github&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/releases) [![CLI](https://img.shields.io/npm/v/unreal-mcp-cli?label=CLI&color=BE185D&logo=npm&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.npmjs.com/package/unreal-mcp-cli) [![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%E2%80%935.8-0E7490?logo=unrealengine&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.unrealengine.com/) [![Release build](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Unreal-MCP/release.yml?label=release%20build&logo=github&color=15803D&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml)<br/>[![Docs](https://img.shields.io/badge/docs-ai--game.dev-2F6F9F?style=for-the-badge&labelColor=0F172A&logoColor=white)](https://ai-game.dev) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://discord.gg/cfbdMZX99G) [![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=license&color=047857&style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE) [![Stand with Ukraine](https://raw.githubusercontent.com/IvanMurzak/IvanMurzak/main/images/ukraine/flag-badge.svg)](https://stand-with-ukraine.pp.ua)
+[![Release](https://img.shields.io/github/v/release/IvanMurzak/Unreal-MCP?label=release&color=2F6F9F&logo=github&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/releases) [![Fab](https://img.shields.io/badge/Fab-AI%20Game%20Developer-2F6F9F?style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) [![CLI](https://img.shields.io/npm/v/unreal-mcp-cli?label=CLI&color=BE185D&logo=npm&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.npmjs.com/package/unreal-mcp-cli) [![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%E2%80%935.8-0E7490?logo=unrealengine&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://www.unrealengine.com/)<br/>[![Release build](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Unreal-MCP/release.yml?label=release%20build&logo=github&color=15803D&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://github.com/IvanMurzak/Unreal-MCP/actions/workflows/release.yml) [![Docs](https://img.shields.io/badge/docs-ai--game.dev-2F6F9F?style=for-the-badge&labelColor=0F172A&logoColor=white)](https://ai-game.dev) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&style=for-the-badge&labelColor=0F172A&logoColor=white)](https://discord.gg/cfbdMZX99G) [![License](https://img.shields.io/github/license/IvanMurzak/Unreal-MCP?label=license&color=047857&style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE) [![Stand with Ukraine](https://raw.githubusercontent.com/IvanMurzak/IvanMurzak/main/images/ukraine/flag-badge.svg)](https://stand-with-ukraine.pp.ua)
 
   <p>
     <a href="https://claude.ai/download"><img src="docs/img/mcp-clients/claude-64.png" alt="Claude" title="Claude" height="36"></a>&nbsp;&nbsp;
@@ -33,7 +33,7 @@
 
 Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sidecar** (`unreal-mcp-bridge`) that the plugin starts, watches and restarts for you. Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**Status:** release [v0.31.1](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar and CLI share one version) · Unreal Engine 5.5–5.8 · sidecar builds for Windows x64, macOS (Intel and Apple silicon) and Linux x64 · each release is tested on Windows (UE 5.5–5.8) and macOS (UE 5.7, 5.8) · not on Fab: install with the CLI or by hand.
+**Status:** release [v0.31.1](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar and CLI share one version) · Unreal Engine 5.5–5.8 · sidecar builds for Windows x64, macOS (Intel and Apple silicon) and Linux x64 · each release is tested on Windows (UE 5.5–5.8) and macOS (UE 5.7, 5.8) · available on [Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33) and [GitHub Releases](https://github.com/IvanMurzak/Unreal-MCP/releases).
 
 ## Features
 
@@ -69,11 +69,13 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 
 - **Unreal Engine 5.5 – 5.8** (the release pipeline validates each of them).
 - **A C++ project**, because the plugin ships as source and Unreal compiles its modules for your project with your platform's C++ toolchain. A Blueprint-only project becomes a C++ project in one step: in the editor, **Tools → New C++ Class…** and create any class. A new project: `unreal-mcp-cli create-project ./MyGame` scaffolds a minimal C++ one.
-- **No .NET install.** The MCP host is a self-contained .NET program (`unreal-mcp-bridge`) bundled inside the plugin for your platform; the plugin starts and restarts it. (The Fab-format build has no executables; its **Get bridge** button installs the bridge once.) Only building the bridge from source needs the .NET 9 SDK.
+- **No .NET install.** The MCP host is a self-contained .NET program (`unreal-mcp-bridge`) bundled inside the plugin for your platform; the plugin starts and restarts it. (The Fab build has no executables; its **Get bridge** button installs the bridge once.) Only building the bridge from source needs the .NET 9 SDK.
 - **Node.js 22.14+**, only for `unreal-mcp-cli` (an npm package; 22.14 is its minimum Node version).
 - Windows, macOS or Linux.
 
 ## Quick start
+
+**Easiest install: [AI Game Developer on Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33).** Add it to your engine from Fab / the Epic Games Launcher, enable it under **Edit → Plugins**, open your project, and in **Tools → AI Game Developer** click **Get bridge** once: the Fab build carries no executables, so this installs the `unreal-mcp-bridge` sidecar. Then connect your agent with one of the two options below and skip their `install-plugin` line (that line installs the plugin into the project instead, from GitHub).
 
 Pick how your agent reaches the editor. Both are fully supported; you can switch later.
 
@@ -128,7 +130,7 @@ Why no auth is the local default: the server binds to loopback only and rejects 
 
 Other ways to install:
 
-- **Fab / Epic Marketplace**: not listed. Each GitHub release also carries a Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) without executables; with it, the window's **Get bridge** button walks you through installing the sidecar once.
+- **Fab**: [AI Game Developer on Fab](https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33), see above. Each GitHub release also carries a Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) without executables; with either, the window's **Get bridge** button walks you through installing the sidecar once.
 - **Manual**: copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/`. A source checkout has no bundled sidecar: run `unreal-mcp-cli bootstrap-local` or set `UNREAL_MCP_BRIDGE_PATH`.
 
 Updating (`unreal-mcp-cli update`), connection modes, environment variables and troubleshooting: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).

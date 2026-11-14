@@ -28,7 +28,7 @@ Los ajustes de conexión se guardan en `<Project>/Saved/Config/UnrealMcp/ai-game
 
 Actualizar en el sitio siempre debe dejarte ejecutando el código **nuevo**. El riesgo es el compilador incremental de UE: si el código fuente del plugin cambia (archivos `.cpp` nuevos, un módulo nuevo) pero sobrevive la antigua caché de compilación `UnrealMCP/Intermediate/`, UE puede hacer una recompilación parcial con una lista de archivos del módulo obsoleta y dejarte en silencio con código antiguo o parcial. Cada canal lo resuelve de forma distinta:
 
-- **Fab / Epic Marketplace (cuando el listing esté publicado) → automático.** El Epic Games Launcher sustituye los binarios precompilados en el sitio; no hay nada que compilar ni caché que limpiar.
+- **Fab / Epic Marketplace → automático.** El Epic Games Launcher sustituye los binarios precompilados en el sitio; no hay nada que compilar ni caché que limpiar.
 - **`unreal-mcp-cli update` → recompilación limpia automática.** `update` vuelve a copiar el código fuente del plugin y, **por defecto**, borra el `Intermediate/` obsoleto y los `Binaries/` de C++ del plugin instalado para que UE haga una compilación limpia en el siguiente arranque del editor, sin pasos manuales. El bridge sidecar incluido en `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` se conserva intacto: las instalaciones desde el código fuente de una release lo renuevan desde `Source/ThirdParty/...`, mientras que las instalaciones de repo/desarrollo conservan la copia incluida anterior cuando hace falta. Las instalaciones de desarrollo con **junction** nunca se limpian (eso borraría los resultados de compilación de tu árbol de código en vivo). Pasa `--no-clean` para no borrar la caché.
 
   ```bash

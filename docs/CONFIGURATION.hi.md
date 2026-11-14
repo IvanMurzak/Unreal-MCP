@@ -28,7 +28,7 @@ Connection settings `<Project>/Saved/Config/UnrealMcp/ai-game-developer-config.j
 
 Update के बाद हमेशा **नया** code ही चलना चाहिए। खतरा UE के incremental compiler से है: अगर plugin source बदल जाए (नई `.cpp` files, नया module) लेकिन पुराना `UnrealMCP/Intermediate/` build cache बचा रहे, तो UE पुरानी module file-list के आधार पर आंशिक recompile कर सकता है और चुपचाप आपको पुराने/अधूरे code पर छोड़ सकता है। हर channel इसे अलग तरह से संभालता है:
 
-- **Fab / Epic Marketplace (listing live होने के बाद) → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना।
+- **Fab / Epic Marketplace → अपने-आप।** Epic Games Launcher precompiled binaries को उसी जगह बदल देता है; न कुछ compile करना, न कोई cache साफ़ करना।
 - **`unreal-mcp-cli update` → अपने-आप clean rebuild।** `update` plugin source दोबारा copy करता है और **default रूप से** installed plugin का पुराना `Intermediate/` और C++ `Binaries/` delete कर देता है, ताकि अगली बार editor launch होने पर UE clean compile करे — कोई manual step नहीं। `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` के तहत bundled sidecar bridge जस का तस रहता है: release-source installs उसे `Source/ThirdParty/...` से refresh करते हैं, जबकि repo/dev installs ज़रूरत पड़ने पर पहले से bundled copy बचाए रखते हैं। Dev **junction** installs कभी साफ़ नहीं किए जाते (इससे आपके live source tree के outputs मिट जाते)। Cache मिटाने से बचने के लिए `--no-clean` दें।
 
   ```bash
