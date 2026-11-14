@@ -31,8 +31,8 @@
 
 | شناسه ابزار | کار آن |
 | --- | --- |
-| `rql-query` | کوئری فقط‌خواندنی RQL روی ویرایشگر زنده (`actors | where $ is PointLight | select $ref Label Intensity`)؛ نتایج جدولی فشرده |
-| `rql-mutate` | کوئری RQL که با `set` / `call` تمام می‌شود (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): همه یا هیچ، یک مرحله undo، پیش‌نمایش با `dry_run` |
+| `rql-query` | کوئری فقط‌خواندنی RQL روی ویرایشگر زنده (`actors | where $ is PointLight | select $ref Label Intensity`)؛ نتایج جدولی فشرده؛ چند کوئری جداشده با `;` در یک فراخوانی |
+| `rql-mutate` | کوئری RQL که با `set` / `call` تمام می‌شود (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): همه یا هیچ، یک مرحله undo، پیش‌نمایش با `dry_run`؛ هر کوئری از چند کوئری جداشده با `;` یک تغییر جداگانه است |
 | `rql-schema` | منابع، توابع و کلاس‌های موجود در دنیای ویرایشگر؛ `type` اعضا و متدهای یک نوع را فهرست می‌کند |
 
 فراتر از propertyهای reflect‌شده، RQL به ردیف‌های DataTable (`dataTables`، `Rows["Sword"].Damage`)، gameplay tag ها به صورت متن (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، Project Settings ذخیره‌شده در ini خودشان (`unreal.settings("Maps & Modes")`)، گراف‌های Blueprint (`EventGraph | call AddCallFunction("PrintString")`، اتصال پین‌ها، `call Compile()`)، درخت‌های Widget Blueprint (`call AddWidget("Button", "Ok", parent)`) و Level Sequence ها (binding ها، track ها، `call AddKey("Location.X", 30, 100)`) دسترسی دارد.

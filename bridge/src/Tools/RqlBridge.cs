@@ -14,6 +14,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin.Common;
 using com.IvanMurzak.McpPlugin.Common.Model;
 using Rql;
@@ -43,20 +44,96 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
         /// <summary>
         /// Parse <c>arguments.query</c> and store its plan as <c>arguments.plan</c>. Returns null on success, or the error
-        /// response for the agent (rendered like any failing query) when the text does not parse.
+        /// response for the agent (rendered like any failing query) when the text does not parse. Text of several statements
+        /// separated by <c>;</c> (RQL spec §14) gets no plan here: <paramref name="statements"/> holds them, and
+        /// <see cref="RunStatementsAsync"/> parses and sends each one as a call of its own. One statement (the usual case) is
+        /// handled exactly as before and leaves <paramref name="statements"/> null.
         /// </summary>
-        public static ResponseCallTool? AddPlan(JsonObject arguments)
+        public static ResponseCallTool? AddPlan(JsonObject arguments, out IReadOnlyList<RqlStatement>? statements)
         {
+            statements = null;
             var node = arguments[QueryArgument];
             var text = node is JsonValue value && value.TryGetValue<string>(out var s) ? s : null;
             if (node != null && text == null)
                 return Failure(Diagnostic.Error("invalid-plan", $"'query' must be a string (got {JsonKindName(node)}): an RQL query such as actors | first 5"));
             if (string.IsNullOrWhiteSpace(text))
                 return Failure(Diagnostic.Error("invalid-plan", "'query' is required: an RQL query such as actors | first 5"));
+            var split = RqlParser.SplitStatements(text);
+            if (split.Count > 1)
+            {
+                statements = split;
+                return null;
+            }
+            // One statement between blank ones (";query;"), as RqlEngine.Execute does it: drop what follows the statement and
+            // blank the separators before it, so diagnostic positions stay the request's. Text without a ';' is unchanged.
+            var span = split[0].Span;
+            if (span.Start > 0 || span.End < text.Length)
+            {
+                text = text.Substring(0, span.Start).Replace(';', ' ') + text.Substring(span.Start, span.End - span.Start);
+                arguments[QueryArgument] = split[0].Text; // the plugin's undo step is named after the query
+            }
             if (!RqlParser.TryParse(text, out var plan, out var error))
                 return Failure(error ?? Diagnostic.Error("syntax-error", "the query does not parse"));
             arguments[PlanArgument] = PlanCodec.Serialize(plan!);
             return null;
+        }
+
+        /// <summary>
+        /// Runs a request of several statements (RQL spec §14) with <see cref="RqlScript.Run"/>: each statement that runs is one
+        /// call to the plugin through <paramref name="call"/> (the request's arguments with that statement's <c>query</c> and
+        /// <c>plan</c>; <c>dry_run</c> and <c>max_targets</c> apply to each), so it gets its own session, budgets, target limit
+        /// and, for rql-mutate, its own all-or-nothing change and undo step. RqlScript decides what runs: a read runs every
+        /// statement that parses; a mutation runs nothing unless every statement parses and ends with set / call, and stops at
+        /// the first statement that fails. The answer is one <c>[i/n]</c> block per statement, followed by the text blocks the
+        /// plugin added after each answer (its "Editor diagnostics" notes), in order.
+        /// An exception of the first call ends the request (the caller answers it as for a single statement: nothing else
+        /// ran). One of a later call (a link drop, an IPC timeout) fails only its own statement, so the blocks still show what
+        /// the earlier statements did; cancellation always ends the request.
+        /// </summary>
+        public static async Task<ResponseCallTool> RunStatementsAsync(string role, JsonObject arguments, IReadOnlyList<RqlStatement> statements,
+            Func<JsonObject, Task<ResponseCallTool>> call)
+        {
+            var notes = new List<ContentBlock>();
+            // Each statement's plan, to find the statement of a plan RqlScript runs: its text is the call's query (the undo step's title).
+            var plans = statements.Select(st => RqlParser.TryParse(st.Text, out var p, out _) ? PlanCodec.Serialize(p!) : null).ToList();
+            int next = 0, calls = 0;
+
+            QueryResult Execute(QueryPlan plan)
+            {
+                var serialized = PlanCodec.Serialize(plan);
+                var index = plans.FindIndex(next, p => p == serialized);
+                if (index >= 0) next = index + 1;
+                var statementArguments = (JsonObject)arguments.DeepClone();
+                if (index >= 0) statementArguments[QueryArgument] = statements[index].Text;
+                statementArguments[PlanArgument] = serialized;
+
+                ResponseCallTool response;
+                try { response = call(statementArguments).GetAwaiter().GetResult(); }
+                catch (IpcDisconnectedException ex) when (calls > 0 && ex.NotSent)
+                {
+                    return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message) });
+                }
+                catch (Exception ex) when (calls > 0 && !(ex is OperationCanceledException))
+                {
+                    return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", ex.Message,
+                        "the editor may have run this statement: check it before running it again") });
+                }
+                finally { calls++; }
+
+                var first = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text);
+                if (response.Content != null)
+                    notes.AddRange(response.Content.Where(c => !ReferenceEquals(c, first)));
+                var json = ParseObject(first?.Text);
+                if (json == null || !json.ContainsKey("ok"))
+                    return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", string.IsNullOrEmpty(first?.Text) ? "the editor sent no RQL result" : first!.Text!) });
+                return ToResult(role, json);
+            }
+
+            // RqlScript runs the statements synchronously, one after another: off the caller's thread, each IPC call awaited in turn.
+            var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = role == MutateRole }, Execute)).ConfigureAwait(false);
+            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result) } };
+            content.AddRange(notes);
+            return new ResponseCallTool { Status = result.Ok ? ResponseStatus.Success : ResponseStatus.Error, Content = content };
         }
 
         /// <summary>
@@ -66,12 +143,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public static ResponseCallTool Render(string role, ResponseCallTool response)
         {
             var first = response.Content?.FirstOrDefault(c => c.Type == Consts.ContentType.Text);
-            var text = first?.Text;
-            if (string.IsNullOrEmpty(text))
-                return response;
-            JsonObject? json;
-            try { json = JsonNode.Parse(text!) as JsonObject; }
-            catch (JsonException) { return response; }
+            var json = ParseObject(first?.Text);
             if (json == null)
                 return response;
 
@@ -79,14 +151,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             if (role == SchemaRole)
                 rendered = RenderSchema(json);
             else if (json.ContainsKey("ok"))
-            {
-                var result = ParseResult(json);
-                // rql-mutate answers with a set / call receipt: the table format compacts it (one method: line, no $ref
-                // column for created objects, the first 50 rows and a count). The flag is not part of the JSON. The rql tools
-                // have no json format, so the count carries no "(the json format lists every row)" pointer.
-                result.Receipt = role == MutateRole && result.Ok;
-                rendered = AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, moreRowsNote: "");
-            }
+                rendered = RenderResult(ToResult(role, json));
             else
                 return response;
 
@@ -97,6 +162,29 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             response.StructuredContent = null;
             return response;
         }
+
+        private static JsonObject? ParseObject(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return null;
+            try { return JsonNode.Parse(text) as JsonObject; }
+            catch (JsonException) { return null; }
+        }
+
+        /// <summary>
+        /// A query / mutate answer as RQL's result. rql-mutate answers with a set / call receipt: the table format compacts it
+        /// (one method: line, no $ref column for created objects, the first 50 rows and a count). The flag is not part of the JSON.
+        /// </summary>
+        private static QueryResult ToResult(string role, JsonObject json)
+        {
+            var result = ParseResult(json);
+            result.Receipt = role == MutateRole && result.Ok;
+            return result;
+        }
+
+        // The rql tools have no json format, so a receipt's count carries no "(the json format lists every row)" pointer.
+        private static string RenderResult(QueryResult result) =>
+            AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, moreRowsNote: "");
 
         private static string JsonKindName(JsonNode node) =>
             node.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? "boolean" : node.GetValueKind().ToString().ToLowerInvariant();

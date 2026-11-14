@@ -29,8 +29,8 @@ One query language for the whole editor instead of one tool per operation ([`doc
 
 | Tool id | What it does |
 | --- | --- |
-| `rql-query` | Read-only RQL query over the live editor (`actors | where $ is PointLight | select $ref Label Intensity`); compact table results |
-| `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews |
+| `rql-query` | Read-only RQL query over the live editor (`actors | where $ is PointLight | select $ref Label Intensity`); compact table results; several queries separated by `;` in one call |
+| `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews; several separated by `;` are one change each |
 | `rql-schema` | Sources, functions and the classes in the editor world; `type` lists one type's members and methods |
 
 Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`) Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`).

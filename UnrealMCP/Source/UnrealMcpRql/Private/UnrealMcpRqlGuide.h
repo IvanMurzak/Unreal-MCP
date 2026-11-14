@@ -177,13 +177,16 @@ Widgets and sequences:
 	inline const char* QueryIntro()
 	{
 		return "Run a read-only RQL query against the live Unreal Editor world and return compact rows. One precise query beats many "
-			"exploratory calls. Changes need rql-mutate." UNREAL_MCP_RQL_DOCS_LINE;
+			"exploratory calls; several queries separated by ; run in one call, each with its own [i/n] result block. Changes need "
+			"rql-mutate." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	inline const char* MutateIntro()
 	{
 		return "Change the live Unreal Editor with an RQL query whose last stage is set or call. All-or-nothing: every target and "
-			"value is checked before anything is written; a failure changes nothing. One undo step in the editor (Ctrl+Z). Changes "
+			"value is checked before anything is written; a failure changes nothing. One undo step in the editor (Ctrl+Z). Several "
+			"queries separated by ; each end with set or call and are each one all-or-nothing change and undo step, run in order; "
+			"the first that fails stops the rest (the earlier changes stay). Changes "
 			"are not saved to disk: when the user wants them saved, run editor | call SaveAsset(\"/Game/Path\") (one asset), SaveLevel() or SaveAll(). dry_run=true returns the "
 			"receipt ($ref, member, old, new) without changing anything. The receipt lists the assignments that change a value; those that keep "
 			"the old value are only counted (N unchanged). Do exactly the change requested; a read-only member fails "
@@ -197,8 +200,8 @@ Widgets and sequences:
 			"object written to. Actors, components and assets are never built from literals: reference them (unreal.find(\"Label\"), "
 			"ref(\"Type#id\"), an asset path) and create them with editor | call SpawnActor / AddComponent / CreateAsset. "
 			"Destructive cleanup (Destroy, DeleteAsset, removing many items): first list what would go (rql-query, or dry_run=true) "
-			"and show it to the user; delete only in a second call after that. At most 200 targets per call by default: pass max_targets "
-			"(up to 1000) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A misspelt "
+			"and show it to the user; delete only in a second call after that. At most 200 targets per statement by default: pass max_targets "
+			"(up to 1000, the limit of each statement) for a bigger edit, it stays one all-or-nothing undo step; beyond 1000 split it with first N / skip N. A misspelt "
 			"member in where / get that leaves set / call nothing to change is an error (nothing changed); a real member no remaining "
 			"item has is a no-match (0 changes, warning). Filter before setting a member only some classes have: where $ is "
 			"LightComponentBase (or has(Intensity)) | set Intensity = ... When you use a different member than the user named (a "

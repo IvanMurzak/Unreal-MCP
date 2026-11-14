@@ -3,8 +3,20 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-
-export { RQL_MUTATE_TOOL, RQL_QUERY_TOOL, RQL_SCHEMA_TOOL, decodeQueryFile, isRqlMutation, rqlStages, stripToolName } from '@baizor/gamedev-cli-core';
+export {
+  RQL_MUTATE_TOOL,
+  RQL_QUERY_TOOL,
+  RQL_SCHEMA_TOOL,
+  decodeQueryFile,
+  isRqlMutation,
+  rqlStages,
+  rqlToolCall,
+  rqlToolFor,
+  splitRqlStatements,
+  stripRqlToolNames,
+  stripToolName,
+} from '@baizor/gamedev-cli-core';
+export type { RqlToolCall } from '@baizor/gamedev-cli-core';
 
 /** Operators agents bring from other languages, with RQL's spelling. */
 const OPERATOR_HINTS: ReadonlyArray<readonly [RegExp, string]> = [

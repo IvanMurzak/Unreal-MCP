@@ -29,8 +29,8 @@
 
 | ツール id | 内容 |
 | --- | --- |
-| `rql-query` | 動作中のエディターに対する読み取り専用の RQL クエリ（`actors | where $ is PointLight | select $ref Label Intensity`）。結果はコンパクトな表 |
-| `rql-mutate` | `set` / `call` で終わる RQL クエリ（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）。すべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ。`dry_run` でプレビュー |
+| `rql-query` | 動作中のエディターに対する読み取り専用の RQL クエリ（`actors | where $ is PointLight | select $ref Label Intensity`）。結果はコンパクトな表。`;` で区切った複数のクエリを 1 回の呼び出しで実行 |
+| `rql-mutate` | `set` / `call` で終わる RQL クエリ（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）。すべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ。`dry_run` でプレビュー。`;` で区切った複数のクエリはそれぞれ 1 つの変更 |
 | `rql-schema` | ソース、関数、エディターのワールドにあるクラス。`type` でひとつの型のメンバーとメソッドを一覧表示 |
 
 リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。

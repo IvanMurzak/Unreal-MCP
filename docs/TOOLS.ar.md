@@ -31,8 +31,8 @@
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
-| `rql-query` | استعلام RQL للقراءة فقط على المحرر الحي (`actors | where $ is PointLight | select $ref Label Intensity`)؛ نتائج جدولية مختصرة |
-| `rql-mutate` | استعلام RQL ينتهي بـ `set` / `call` (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): كل شيء أو لا شيء، خطوة تراجع واحدة، ومعاينة عبر `dry_run` |
+| `rql-query` | استعلام RQL للقراءة فقط على المحرر الحي (`actors | where $ is PointLight | select $ref Label Intensity`)؛ نتائج جدولية مختصرة؛ عدة استعلامات مفصولة بـ `;` في استدعاء واحد |
+| `rql-mutate` | استعلام RQL ينتهي بـ `set` / `call` (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): كل شيء أو لا شيء، خطوة تراجع واحدة، ومعاينة عبر `dry_run`؛ كل استعلام من عدة استعلامات مفصولة بـ `;` تغيير مستقل |
 | `rql-schema` | المصادر والدوال والأصناف الموجودة في عالم المحرر؛ ويعرض `type` أعضاء نوع واحد ودواله |
 
 إلى جانب الخصائص المنعكسة، يصل RQL إلى صفوف DataTable (`dataTables`، `Rows["Sword"].Damage`)، ووسوم gameplay كنص (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، وإعدادات Project Settings المحفوظة في ملف ini الخاص بها (`unreal.settings("Maps & Modes")`)، ومخططات Blueprint (`EventGraph | call AddCallFunction("PrintString")`، وتوصيلات المنافذ، و`call Compile()`)، وأشجار Widget Blueprint (`call AddWidget("Button", "Ok", parent)`)، وLevel Sequences (الارتباطات، والمسارات، و`call AddKey("Location.X", 30, 100)`).

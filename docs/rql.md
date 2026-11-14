@@ -27,6 +27,18 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
   schema JSON the sidecar renders in RQL's compact schema lines.
+- **Several statements** (RQL spec §14): a `query` of several statements separated by `;` (outside strings,
+  quoted identifiers and brackets; at most 10) is split by the sidecar (`RqlParser.SplitStatements`) and run by
+  `RqlScript.Run`, which sends each statement that runs as an IPC call of its own (`query` = that statement, `plan` =
+  its plan; `dry_run` and `max_targets` apply to each). Each statement therefore has its own session, budgets and target
+  limit, and in `rql-mutate` is its own all-or-nothing change and undo step (`RQL: <statement>`). A read runs every
+  statement; a mutation runs nothing unless every statement parses and ends with `set` / `call`, and the first statement
+  that fails stops the rest (the earlier changes stay, the later ones report `not run`). The answer is one `[i/n]
+  <statement>` block per statement (`AgentFormat`), followed by the plugin's "Editor diagnostics" notes of each call; it
+  is an error when any statement failed or did not run. The tool timeout (`UNREAL_MCP_TOOL_TIMEOUT`) applies to each
+  statement's call; a later statement whose call times out or loses the link fails on its own (the earlier blocks stay,
+  its hint says the editor may have run it). A query without `;` is one plan, one call, as before. The C++ runtime is
+  unchanged: it still executes one plan per call.
 - **Plugin** (module `UnrealMcpRql`, `UnrealMCP/Source/UnrealMcpRql/`): the vendored RQL C++ runtime
   (`Source/ThirdParty/RQL/`, unmodified) plus the **Unreal provider** the RQL roadmap describes ("`UClass`/`FProperty`,
   `TArray`/`TMap` adapters, `IsValid` liveness"), built on the runtime's provider seam (`TypeDescriptor` /
@@ -118,8 +130,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `budgets.*` (the tools take no budgets), a `ref("Name")` hint names `unreal.find("…")`, a hint that sends the
   caller to the type list names `rql-schema` (`Engine::schema_hint`), and a `set` / `call` sent to `rql-query` is
   `permission-denied` with a hint naming `rql-mutate` (`Engine::mutate_hint`).
-- **Target limit**: `rql-mutate` changes at most 200 targets per call by default (a mutation is one undo step whatever its
-  size, RQL spec §8); its `max_targets` argument raises the limit for one call up to the ceiling of 1000
+- **Target limit**: `rql-mutate` changes at most 200 targets per statement by default (a mutation is one undo step whatever its
+  size, RQL spec §8); its `max_targets` argument raises the limit of each statement of one call up to the ceiling of 1000
   (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`; passed only when the caller gives it, and
   a value outside 1 … 1000, 0 included, is refused with `invalid-value` before anything runs). Over the limit nothing changes and
   `mutation-limit` names the match count (or "more than 1000") and, while the limit is below 1000, `max_targets`;

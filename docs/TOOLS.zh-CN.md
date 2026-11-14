@@ -29,8 +29,8 @@
 
 | 工具 id | 作用 |
 | --- | --- |
-| `rql-query` | 对实时编辑器执行只读 RQL 查询（`actors | where $ is PointLight | select $ref Label Intensity`）；返回紧凑的表格结果 |
-| `rql-mutate` | 以 `set` / `call` 结尾的 RQL 查询（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）：全部成功或全部不执行，一个撤销步骤，`dry_run` 可预览 |
+| `rql-query` | 对实时编辑器执行只读 RQL 查询（`actors | where $ is PointLight | select $ref Label Intensity`）；返回紧凑的表格结果；一次调用可执行以 `;` 分隔的多条查询 |
+| `rql-mutate` | 以 `set` / `call` 结尾的 RQL 查询（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）：全部成功或全部不执行，一个撤销步骤，`dry_run` 可预览；以 `;` 分隔的多条查询各自是一次更改 |
 | `rql-schema` | 数据源、函数以及编辑器世界中的类；`type` 列出某个类型的成员和方法 |
 
 除了反射属性，RQL 还能访问 DataTable 行（`dataTables`、`Rows["Sword"].Damage`）、文本形式的 gameplay tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、保存到 ini 的 Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint 图表（`EventGraph | call AddCallFunction("PrintString")`、引脚连接、`call Compile()`）、Widget Blueprint 树（`call AddWidget("Button", "Ok", parent)`）以及 Level Sequence（绑定、轨道、`call AddKey("Location.X", 30, 100)`）。

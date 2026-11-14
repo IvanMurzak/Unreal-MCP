@@ -29,8 +29,8 @@
 
 | Tool id | यह क्या करता है |
 | --- | --- |
-| `rql-query` | Live editor पर read-only RQL query (`actors | where $ is PointLight | select $ref Label Intensity`); compact table में results |
-| `rql-mutate` | `set` / `call` पर खत्म होने वाली RQL query (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): या तो सब या कुछ नहीं, एक undo step, `dry_run` से preview |
+| `rql-query` | Live editor पर read-only RQL query (`actors | where $ is PointLight | select $ref Label Intensity`); compact table में results; `;` से अलग की गई कई queries एक ही call में |
+| `rql-mutate` | `set` / `call` पर खत्म होने वाली RQL query (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): या तो सब या कुछ नहीं, एक undo step, `dry_run` से preview; `;` से अलग की गई हर query एक अलग बदलाव है |
 | `rql-schema` | Sources, functions और editor world की classes; `type` किसी एक type के members और methods दिखाता है |
 
 Reflected properties के अलावा RQL इन तक भी पहुँचता है: DataTable rows (`dataTables`, `Rows["Sword"].Damage`), text के रूप में gameplay tags (`gameplayTags`, `set Tags = ["Ability.Fire"]`), अपनी ini में save होने वाली Project Settings (`unreal.settings("Maps & Modes")`), Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) और Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`)।
