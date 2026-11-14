@@ -8,10 +8,10 @@
   "CreatedBy": "Ivan Murzak",
   "CreatedByURL": "https://github.com/IvanMurzak",
   "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP",
-  "MarketplaceURL": "",
+  "MarketplaceURL": "https://www.fab.com/listings/d1d5cbef-0aaa-4516-a309-92f39dee0c33",
   "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
   "CanContainContent": true,
-  "IsBetaVersion": true,
+  "IsBetaVersion": false,
   "IsExperimentalVersion": false,
   "Installed": false,
   "Modules": [

@@ -10,7 +10,7 @@
   "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/EXTENSIONS.md",
   "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
   "CanContainContent": false,
-  "IsBetaVersion": true,
+  "IsBetaVersion": false,
   "IsExperimentalVersion": false,
   "Installed": false,
   "Modules": [

@@ -22,12 +22,12 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
                       AgentFormat: QueryResult → compact rows ◀──IPC tool-response: QueryResult JSON── over live UObjects
 ```
 
-- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql` 0.4.0): for `rql-query` / `rql-mutate` it
+- **Sidecar** (`bridge/src/Tools/RqlBridge.cs`, NuGet `com.IvanMurzak.Rql`, version pinned in the bridge csproj): for `rql-query` / `rql-mutate` it
   parses `query` with `RqlParser` and adds `PlanCodec.Serialize(plan)` as the `plan` argument (a syntax error is
   answered without a round trip). The plugin answers with the QueryResult JSON; the sidecar renders it with
   `AgentFormat.Render(…, Table)` — byte-for-byte the agent output of Unity-MCP's rql tools. `rql-schema` answers with
   schema JSON the sidecar renders in RQL's compact schema lines.
-- **Several statements** (RQL 0.4.0, spec §14): a `query` of several statements separated by `;` (outside strings,
+- **Several statements** (RQL spec §14): a `query` of several statements separated by `;` (outside strings,
   quoted identifiers and brackets; at most 10) is split by the sidecar (`RqlParser.SplitStatements`) and run by
   `RqlScript.Run`, which sends each statement that runs as an IPC call of its own (`query` = that statement, `plan` =
   its plan; `dry_run` and `max_targets` apply to each). Each statement therefore has its own session, budgets and target
