@@ -33,11 +33,13 @@
 
 Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sidecar** (`unreal-mcp-bridge`) that the plugin starts, watches and restarts for you. Design details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+**Status:** release [v0.31.1](https://github.com/IvanMurzak/Unreal-MCP/releases/latest) (plugin, sidecar and CLI share one version) · Unreal Engine 5.5–5.8 · sidecar builds for Windows x64, macOS (Intel and Apple silicon) and Linux x64 · each release is tested on Windows (UE 5.5–5.8) and macOS (UE 5.7, 5.8) · not on Fab: install with the CLI or by hand.
+
 ## Features
 
-✅ **RQL data layer** — query and change actors, assets and levels in one language ([RQL](docs/rql.md))\
+✅ **C++ authoring** — scaffold classes, edit source, compile; errors come back as file, line, severity\
 ✅ **Blueprints** — create, edit and compile, with structured errors the agent can fix\
-✅ **C++** — scaffold, edit and compile project source (Live Coding or UBT)\
+✅ **RQL data layer** — query and change actors, assets and levels in one language ([RQL](docs/rql.md))\
 ✅ **Visual feedback** — viewport, game-view, camera and isolated-actor screenshots\
 ✅ **Python** — run editor Python with the full `unreal` API\
 ✅ **Fab** — search Fab, list your library, add owned content\
@@ -48,6 +50,21 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 
 30 built-in tools in 8 families; the full list is in [docs/TOOLS.md](docs/TOOLS.md).
 
+### What you can ask
+
+| Ask your agent | Tools it uses |
+| --- | --- |
+| "Add an `AHealthPickup` actor class in C++, compile it and fix any errors" | `source-create-class`, `source-update`, `source-compile` |
+| "Make a door Blueprint that opens on overlap, compile it, place it in the level" | `blueprint-*` |
+| "Count the trees in this level and move every point light 1 m up" | `rql-query`, `rql-mutate` |
+| "Take a screenshot from the player camera and check the lighting" | `screenshot-*` |
+| "Find a free rock pack on Fab and add it to the project" | `fab-search`, `fab-add` |
+| "Batch-rename the selected assets with a Python script" | `python-execute` |
+
+**C++ is a first-class loop.** `source-compile` builds with Live Coding when it is active, else UnrealBuildTool, and returns every diagnostic with its file, line and severity, so the agent fixes errors without reading the build log. It says when a change needs a full build and an editor restart (new classes, changed `UCLASS` / `UPROPERTY` / `UFUNCTION` declarations). File operations stay inside `<Project>/Source/`. From a terminal, `unreal-mcp-cli compile` prints `file:line:col` diagnostics without an editor.
+
+**RQL is learned from the editor itself:** `rql-schema` lists every source, type and member, and the `unreal-rql` skill teaches the syntax with recipes (`unreal-mcp-cli setup-skills` writes it for your agent).
+
 ## Requirements
 
 - **Unreal Engine 5.5 – 5.8** (the release pipeline validates each of them) and a **C++ project**: the plugin compiles editor modules in your project.
@@ -56,9 +73,13 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 
 ## Quick start
 
+Two ways to connect. **Cloud** (default) routes MCP traffic through [ai-game.dev](https://ai-game.dev) and needs a sign-in. **Local** needs no account: the agent, a local `gamedev-mcp-server` and the editor all run on your machine.
+
 <p align="center">
   <img src="docs/img/readme/terminal.svg" alt="Terminal: npm install -g unreal-mcp-cli, install-plugin, login, setup-mcp claude-code, open the editor" width="100%"/>
 </p>
+
+**Cloud:**
 
 ```bash
 npm install -g unreal-mcp-cli                       # or: npx unreal-mcp-cli@latest <command>
@@ -69,16 +90,87 @@ unreal-mcp-cli setup-mcp claude-code -p ./MyGame    # write the agent's MCP conf
 unreal-mcp-cli open ./MyGame                        # build if needed and open the editor
 ```
 
+**Local, no account:**
+
+```bash
+npm install -g unreal-mcp-cli
+unreal-mcp-cli install-plugin ./MyGame
+unreal-mcp-cli configure -p ./MyGame --mode Custom                 # plugin: local server
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame --transport stdio # agent starts it
+unreal-mcp-cli open ./MyGame
+```
+
+`setup-mcp --transport stdio` downloads the checksum-verified `gamedev-mcp-server` release into the project and points the agent at it. Both sides use the same per-project port on `localhost`, with no authentication on loopback.
+
+**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them without storing their contents. It logs request metadata (tool name, timing, sizes, IP address) and MCP events, used mainly within a rolling 90-day window. It does not collect your source code, project files or assets. Details: [privacy policy](https://ai-game.dev/legal/privacy).
+
 `install-plugin` downloads the signed plugin source release that matches the CLI version. In the editor, open **Tools → AI Game Developer** to see the connection, the bridge status and the connected agents. Then ask your agent:
 
 > *"Spawn three cubes in a row and a point light above them, then take a screenshot."*
 
 Other ways to install:
 
-- **Fab / Epic Marketplace**: coming soon. The Fab build cannot bundle executables, so there the window's **Get bridge** button walks you through installing the sidecar once.
+- **Fab / Epic Marketplace**: not listed. Each GitHub release also carries a Fab-format build (`unreal-mcp-plugin-fab-<version>.zip`) without executables; with it, the window's **Get bridge** button walks you through installing the sidecar once.
 - **Manual**: copy [`UnrealMCP/`](UnrealMCP/) into `<YourProject>/Plugins/UnrealMCP/`. A source checkout has no bundled sidecar: run `unreal-mcp-cli bootstrap-local` or set `UNREAL_MCP_BRIDGE_PATH`.
 
 Updating (`unreal-mcp-cli update`), connection modes, environment variables and troubleshooting: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+### Agent setup
+
+`unreal-mcp-cli setup-mcp <agent> -p ./MyGame` writes the config for you (`setup-mcp --list` shows all supported agents). What it writes:
+
+<details>
+<summary><b>Claude Code</b>: <code>.mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp claude-code -p ./MyGame
+```
+
+```json
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "https://ai-game.dev/mcp/p/<pin>",
+      "headers": { "Authorization": "Bearer agd_pk_…" }
+    }
+  }
+}
+```
+
+The `<pin>` routes to this project's editor. The header is this project's key when the machine is signed in; `--oauth` writes a URL-only config and the agent signs in itself. With `--transport stdio` the entry runs the local server instead: `"command"` is `gamedev-mcp-server` under `<project>/Intermediate/UnrealMCP/server/`, `"args"` set `port=<port>`, `client-transport=stdio` and `authorization=none`.
+
+</details>
+
+<details>
+<summary><b>Cursor</b>: <code>.cursor/mcp.json</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp cursor -p ./MyGame
+```
+
+The same `mcpServers` → `unreal-mcp` entry as Claude Code: `"type": "http"` with the URL, or `"type": "stdio"` with `command` and `args` for the local server.
+
+</details>
+
+<details>
+<summary><b>Codex</b>: <code>.codex/config.toml</code></summary>
+
+```bash
+unreal-mcp-cli setup-mcp codex -p ./MyGame
+```
+
+```toml
+[mcp_servers.unreal-mcp]
+enabled = true
+url = "https://ai-game.dev/mcp/p/<pin>"
+tool_timeout_sec = 300
+startup_timeout_sec = 30
+```
+
+With a project key the section also carries `http_headers` with the `Authorization` header.
+
+</details>
 
 ## Usage
 
@@ -101,6 +193,14 @@ unreal-mcp-cli test ./MyGame
 ```
 
 All commands and options: [cli/README.md](cli/README.md) or `unreal-mcp-cli commands`.
+
+## Security
+
+- **Plugin ↔ sidecar:** the plugin listens on a loopback TCP port; the sidecar dials it with a one-shot token sent over stdin (never on the command line, never logged).
+- **Local server:** `gamedev-mcp-server` binds to loopback by default and answers `403` to a request whose `Origin` is not allowed (DNS-rebinding defense). On loopback the plugin starts it without authentication unless you choose a token (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`). Server options: [hosting and authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
+- **Cloud:** the agent signs in with OAuth or uses a per-project key you can replace with `setup-mcp --regenerate-key`.
+- **What the tools can do:** edit files under `<Project>/Source/`, run console commands and editor Python, change any reflected property. Hide tools from the agent in the **MCP Tools** window, or serve only a whitelist with `UNREAL_MCP_TOOLS` ([docs/TOOLS.md](docs/TOOLS.md)).
+- **Runtime mode is off by default:** a game never connects on its own. It needs the `bRuntimeMcpEnabled` setting (default off) and an explicit `Connect()` call, accepts only a loopback host unless you allow a remote one, and is refused in Shipping builds unless compiled in. Keep the plugin out of packaged games with a `TargetDenyList` ([docs/RUNTIME.md](docs/RUNTIME.md)).
 
 ## Extensions
 
