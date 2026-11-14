@@ -4,28 +4,28 @@
 
 # أدوات Unreal-MCP
 
-القائمة المرجعية للأدوات التي تسجّلها إضافة المحرر **UnrealMCP**. يأتي Unreal-MCP مع **30 أداة مدمجة في 8 عائلات** يستطيع وكيل الذكاء الاصطناعي استدعاءها، إضافة إلى **4 أدوات نظام** لا يستطيع استدعاءها (بنية تحتية للمضيف تخدم CLI وتطبيق سطح المكتب). معرّفات الأدوات بصيغة kebab-case (`rql-query`، `blueprint-compile`)، وهو الاصطلاح نفسه في Unity-MCP وGodot-MCP. تضيف [الامتدادات](#الامتدادات) و[إضافاتك الخاصة](EXTENSIONS.md) المزيد.
+القائمة المرجعية للأدوات التي تسجّلها إضافة المحرر **UnrealMCP**. يأتي Unreal-MCP مع **أدوات مدمجة مقسّمة إلى عائلات** يستطيع وكيل الذكاء الاصطناعي استدعاءها، إضافة إلى **أدوات نظام** لا يستطيع استدعاءها (بنية تحتية للمضيف تخدم CLI وتطبيق سطح المكتب). معرّفات الأدوات بصيغة kebab-case (`rql-query`، `blueprint-compile`)، وهو الاصطلاح نفسه في Unity-MCP وGodot-MCP. تضيف [الامتدادات](#الامتدادات) و[إضافاتك الخاصة](EXTENSIONS.md) المزيد.
 
-| العائلة | الأدوات | العدد |
-| --- | --- | ---: |
-| طبقة بيانات RQL | `rql-query`، `rql-mutate`، `rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
-| المصدر / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
-| لقطات الشاشة | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
-| Fab | `fab-search`، `fab-library`، `fab-add` | 3 |
-| وحدة التحكم | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| قائمة الأدوات | `unreal-tool-list` | 1 |
-| **النظام** (لا تُعرض على الذكاء الاصطناعي) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` | 4 |
+| العائلة | الأدوات |
+| --- | --- |
+| طبقة بيانات RQL | `rql-query`، `rql-mutate`، `rql-schema` |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
+| المصدر / C++ | `source-*`: read, create-class, update, delete, list, compile |
+| لقطات الشاشة | `screenshot-*`: viewport, game-view, camera, isolated |
+| Fab | `fab-search`، `fab-library`، `fab-add` |
+| وحدة التحكم | `console-run-command` |
+| Python | `python-execute` |
+| قائمة الأدوات | `unreal-tool-list` |
+| **النظام** (لا تُعرض على الذكاء الاصطناعي) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` |
 
 > **مصدر الحقيقة.** الأدوات القياسية: `UnrealMcp*Tools.cpp` في `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` (باستثناء `UnrealMcpSkillTools.cpp`) و`UnrealMcpRqlTools.cpp` في `UnrealMcpRql`. أدوات النظام: `UnrealMcpPingTool.cpp` و`UnrealMcpSkillTools.cpp` و`UnrealMcpEditorSession.cpp` و`SkillGenerateTool.cs` في العملية المرافقة (sidecar). حدّث هذه الصفحة عند تغيّر تسجيل أي أداة.
 
-جميع الأدوات القياسية الثلاثين **خاصة بالمحرر فقط**. اتصال Runtime (داخل اللعبة) لا يقدّم إلا `ping` إضافة إلى الأدوات التي تسجّلها لعبتك: راجع [RUNTIME.md](RUNTIME.ar.md).
+جميع الأدوات القياسية **خاصة بالمحرر فقط**. اتصال Runtime (داخل اللعبة) لا يقدّم إلا `ping` إضافة إلى الأدوات التي تسجّلها لعبتك: راجع [RUNTIME.md](RUNTIME.ar.md).
 
 ## العائلات بالتفصيل
 
 <details>
-  <summary><b>RQL — طبقة البيانات (3)</b></summary>
+  <summary><b>RQL — طبقة البيانات</b></summary>
 
 لغة استعلام واحدة للمحرر كله بدلًا من أداة لكل عملية ([`docs/rql.md`](rql.md)): ابحث عن الأكتورات والمكوّنات والأصول، واقرأ الأعضاء، وصفِّ النتائج واجمعها، وعدّلها في استدعاء واحد. تحل محل أدوات الأكتور والكائن والأصل والمستوى وحالة المحرر والتحديد وسجل وحدة التحكم والانعكاس (reflection) السابقة.
 
@@ -42,7 +42,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة Blueprint (11) — الواجهة الرئيسية في Unreal</b></summary>
+  <summary><b>عائلة Blueprint — الواجهة الرئيسية في Unreal</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -61,7 +61,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة وحدة التحكم (1)</b></summary>
+  <summary><b>عائلة وحدة التحكم</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -72,7 +72,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة قائمة الأدوات (1)</b></summary>
+  <summary><b>عائلة قائمة الأدوات</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -81,7 +81,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة Python (1)</b></summary>
+  <summary><b>عائلة Python</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -92,7 +92,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة Fab (3) — البحث عن محتوى Fab وإضافته</b></summary>
+  <summary><b>عائلة Fab — البحث عن محتوى Fab وإضافته</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -105,7 +105,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة المصدر / C++ (6)</b></summary>
+  <summary><b>عائلة المصدر / C++</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -121,7 +121,7 @@
 </details>
 
 <details>
-  <summary><b>عائلة لقطات الشاشة / التقاط العرض (4)</b></summary>
+  <summary><b>عائلة لقطات الشاشة / التقاط العرض</b></summary>
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
@@ -135,7 +135,7 @@
 </details>
 
 <details>
-  <summary><b>أدوات النظام (4) — غير متاحة للذكاء الاصطناعي</b></summary>
+  <summary><b>أدوات النظام — غير متاحة للذكاء الاصطناعي</b></summary>
 
 هذه **أدوات نظام**: بنية تحتية للمضيف تستدعيها `unreal-mcp-cli` وتطبيق سطح المكتب مباشرة عبر `POST /api/system-tools/<name>`. وهي غائبة عمدًا عن `tools/list` في MCP، لذلك لا تظهر أبدًا في جلسة ذكاء اصطناعي (ولا تستهلك رموزًا فيها) — وهو التقسيم نفسه الذي تعتمده Unity وGodot لأدوات النظام الخاصة بهما.
 

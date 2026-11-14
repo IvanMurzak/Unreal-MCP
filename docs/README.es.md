@@ -48,7 +48,9 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 ✅ **Modo runtime** — actívalo para controlar un juego en ejecución ([docs/RUNTIME.md](RUNTIME.es.md))\
 ✅ **Nube o local** — `ai-game.dev` listo para usar, o un `gamedev-mcp-server` autoalojado
 
-30 herramientas integradas en 8 familias; la lista completa está en [docs/TOOLS.md](TOOLS.es.md).
+**Cobertura:** el agente puede hacer prácticamente todo lo que tú haces en el Editor de Unreal. Grupos de herramientas: la capa de datos RQL, Blueprints, código C++, capturas de pantalla, Fab, la consola, Python del editor y la lista de herramientas, más las extensiones. Todas las herramientas: [docs/TOOLS.md](TOOLS.es.md).
+
+**Eficiencia:** las herramientas son compactas por diseño, así que el agente necesita menos llamadas y menos tokens por tarea, y trabaja más rápido y más barato. Para la capa de datos RQL esto está medido en la evaluación propia de RQL (un mundo de juego de prueba, mismas tareas, modelo y evaluador): RQL necesitó unas 9–18× menos llamadas a herramientas y 17–19× menos tokens por tarea que las herramientas de reflexión convencionales de buscar / volcar a JSON / asignar ([resultados](https://github.com/IvanMurzak/RQL/blob/main/RESULTS.md#33-rql-vs-conventional-reflection-tools)).
 
 ### Qué puedes pedir
 
@@ -143,7 +145,7 @@ Por qué en local no hay autenticación por defecto: el servidor solo escucha en
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**Qué ve el relay en la nube.** En modo Cloud, las llamadas a herramientas pasan por ai-game.dev, que las enruta y no guarda lo que envías: ningún contenido de peticiones ni respuestas, así que tampoco código fuente, archivos del proyecto ni assets. Solo conserva metadatos (nombre de la herramienta, tiempos, tamaños, dirección IP, eventos MCP) durante 90 días. [Política de privacidad](https://ai-game.dev/legal/privacy).
+<a id="what-the-cloud-relay-sees"></a>**Qué ve el relay en la nube.** En modo Cloud, las llamadas a herramientas pasan por el relay MCP de ai-game.dev. El relay no guarda estado: enruta las llamadas entre tu cliente de IA y el editor sin inspeccionar ni almacenar su contenido, y no recoge tus conversaciones, código fuente, archivos del proyecto, assets ni datos de escena. Registra metadatos de eventos MCP (tipo de evento, tiempos, estado, identificadores de sesión, el nombre de la herramienta, prompt o recurso, y los detalles de errores); los logs de peticiones y los eventos MCP se usan dentro de una ventana móvil de 90 días. Detalles: [Política de privacidad](https://ai-game.dev/legal/privacy).
 
 `install-plugin` descarga la release firmada del código fuente del plugin que coincide con la versión de la CLI.
 
@@ -237,7 +239,7 @@ Todos los comandos y opciones: [cli/README.md](../cli/docs/README.es.md) o `unre
 
 - **Plugin ↔ sidecar:** el plugin escucha en un puerto TCP de loopback; el sidecar se conecta con un token de un solo uso enviado por stdin (nunca en la línea de comandos, nunca en los logs).
 - **Servidor local:** `gamedev-mcp-server` escucha en loopback por defecto y responde `403` a una petición cuyo `Origin` no está permitido (defensa contra DNS rebinding). En loopback el plugin lo inicia sin autenticación salvo que elijas un token (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`). Opciones del servidor: [hosting y autenticación](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md).
-- **Cloud:** el agente inicia sesión con OAuth o usa una clave por proyecto que puedes reemplazar con `setup-mcp --regenerate-key`. El relay no guarda contenido de peticiones ni respuestas, solo metadatos, durante 90 días ([detalles](#what-the-cloud-relay-sees)).
+- **Cloud:** el agente inicia sesión con OAuth o usa una clave por proyecto que puedes reemplazar con `setup-mcp --regenerate-key`. El relay no guarda estado ni almacena el contenido de las llamadas; registra metadatos de eventos MCP ([detalles](#what-the-cloud-relay-sees)).
 - **Qué pueden hacer las herramientas:** editar archivos en `<Project>/Source/`, ejecutar comandos de consola y Python del editor, cambiar cualquier propiedad reflejada.
 - **Controles sobre ellas:**
   - **Lista blanca** (límite estricto): `UNREAL_MCP_TOOLS` sirve solo las herramientas indicadas; cualquier otra no se lista ni se puede llamar.

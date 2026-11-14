@@ -2,28 +2,28 @@
 
 # Unreal-MCP のツール
 
-**UnrealMCP** エディタープラグインが登録するツールの正式な一覧です。Unreal-MCP には、AI エージェントが呼び出せる **8 つのファミリーに 30 個の組み込みツール**と、エージェントからは呼び出せない **4 個のシステムツール**（CLI とデスクトップアプリ用のホスト側の仕組み）があります。ツール id は kebab-case（`rql-query`、`blueprint-compile`）で、Unity-MCP や Godot-MCP と同じ規則です。[拡張機能](#拡張機能)や[独自のプラグイン](EXTENSIONS.md)でツールを追加できます。
+**UnrealMCP** エディタープラグインが登録するツールの正式な一覧です。Unreal-MCP には、AI エージェントが呼び出せる **ファミリーごとに分かれた組み込みツール**と、エージェントからは呼び出せない **システムツール**（CLI とデスクトップアプリ用のホスト側の仕組み）があります。ツール id は kebab-case（`rql-query`、`blueprint-compile`）で、Unity-MCP や Godot-MCP と同じ規則です。[拡張機能](#拡張機能)や[独自のプラグイン](EXTENSIONS.md)でツールを追加できます。
 
-| ファミリー | ツール | 数 |
-| --- | --- | ---: |
-| RQL データレイヤー | `rql-query`、`rql-mutate`、`rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create、get、add-component、remove-component、add-variable、modify-variable、set-default、add-function、add-event、compile、spawn | 11 |
-| ソース / C++ | `source-*`: read、create-class、update、delete、list、compile | 6 |
-| スクリーンショット | `screenshot-*`: viewport、game-view、camera、isolated | 4 |
-| Fab | `fab-search`、`fab-library`、`fab-add` | 3 |
-| コンソール | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| ツール一覧 | `unreal-tool-list` | 1 |
-| **システム**（AI には表示されない） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` | 4 |
+| ファミリー | ツール |
+| --- | --- |
+| RQL データレイヤー | `rql-query`、`rql-mutate`、`rql-schema` |
+| Blueprint | `blueprint-*`: create、get、add-component、remove-component、add-variable、modify-variable、set-default、add-function、add-event、compile、spawn |
+| ソース / C++ | `source-*`: read、create-class、update、delete、list、compile |
+| スクリーンショット | `screenshot-*`: viewport、game-view、camera、isolated |
+| Fab | `fab-search`、`fab-library`、`fab-add` |
+| コンソール | `console-run-command` |
+| Python | `python-execute` |
+| ツール一覧 | `unreal-tool-list` |
+| **システム**（AI には表示されない） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` |
 
 > **正式なソース。** 標準ツール: `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` の `UnrealMcp*Tools.cpp`（`UnrealMcpSkillTools.cpp` を除く）と、`UnrealMcpRql` の `UnrealMcpRqlTools.cpp`。システムツール: `UnrealMcpPingTool.cpp`、`UnrealMcpSkillTools.cpp`、`UnrealMcpEditorSession.cpp` と、サイドカーの `SkillGenerateTool.cs`。登録が変わったらこのページを更新してください。
 
-30 個の標準ツールはすべて**エディター専用**です。ランタイム（ゲーム内）接続で使えるのは `ping` と、ゲームが登録したツールだけです: [RUNTIME.md](RUNTIME.ja.md) を参照してください。
+標準ツールはすべて**エディター専用**です。ランタイム（ゲーム内）接続で使えるのは `ping` と、ゲームが登録したツールだけです: [RUNTIME.md](RUNTIME.ja.md) を参照してください。
 
 ## ファミリーの詳細
 
 <details>
-  <summary><b>RQL — データレイヤー（3）</b></summary>
+  <summary><b>RQL — データレイヤー</b></summary>
 
 操作ごとにツールを用意する代わりに、ひとつのクエリ言語でエディター全体を扱います（[`docs/rql.md`](rql.md)）。アクター、コンポーネント、アセットを探し、メンバーを読み、絞り込み、集計し、1 回の呼び出しで変更します。以前の actor、object、asset、level、editor-state、selection、console-log、reflection の各ツールを置き換えます。
 
@@ -40,7 +40,7 @@
 </details>
 
 <details>
-  <summary><b>Blueprint ファミリー（11）— Unreal の中心となる機能</b></summary>
+  <summary><b>Blueprint ファミリー— Unreal の中心となる機能</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -59,7 +59,7 @@
 </details>
 
 <details>
-  <summary><b>コンソールファミリー（1）</b></summary>
+  <summary><b>コンソールファミリー</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -70,7 +70,7 @@
 </details>
 
 <details>
-  <summary><b>ツール一覧ファミリー（1）</b></summary>
+  <summary><b>ツール一覧ファミリー</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -79,7 +79,7 @@
 </details>
 
 <details>
-  <summary><b>Python ファミリー（1）</b></summary>
+  <summary><b>Python ファミリー</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -90,7 +90,7 @@
 </details>
 
 <details>
-  <summary><b>Fab ファミリー（3）— Fab コンテンツの検索と追加</b></summary>
+  <summary><b>Fab ファミリー— Fab コンテンツの検索と追加</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -103,7 +103,7 @@
 </details>
 
 <details>
-  <summary><b>ソース / C++ ファミリー（6）</b></summary>
+  <summary><b>ソース / C++ ファミリー</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -119,7 +119,7 @@
 </details>
 
 <details>
-  <summary><b>スクリーンショット / ビューポートキャプチャファミリー（4）</b></summary>
+  <summary><b>スクリーンショット / ビューポートキャプチャファミリー</b></summary>
 
 | ツール id | 内容 |
 | --- | --- |
@@ -133,7 +133,7 @@
 </details>
 
 <details>
-  <summary><b>システムツール（4）— AI には公開されない</b></summary>
+  <summary><b>システムツール— AI には公開されない</b></summary>
 
 これらは**システムツール**です。`unreal-mcp-cli` とデスクトップアプリが `POST /api/system-tools/<name>` で直接呼び出す、ホスト側の仕組みです。意図的に MCP の `tools/list` から外してあるので、AI セッションに現れることも（トークンを消費することも）ありません。Unity と Godot もシステムツールを同じように分けています。
 

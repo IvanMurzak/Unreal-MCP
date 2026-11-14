@@ -48,7 +48,9 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 ✅ **运行时模式** — 可选开启，用于驱动正在运行的游戏（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）\
 ✅ **云端或本地** — 开箱即用的 `ai-game.dev`，或自托管的 `gamedev-mcp-server`
 
-8 个类别共 30 个内置工具；完整列表见 [docs/TOOLS.md](TOOLS.zh-CN.md)。
+**覆盖面：**你在 Unreal 编辑器中能做的事，智能体几乎都能做。工具分组：RQL 数据层、Blueprints、C++ 源码、截图、Fab、控制台、编辑器 Python 和工具列表，以及各扩展。全部工具：[docs/TOOLS.md](TOOLS.zh-CN.md)。
+
+**效率：**这些工具按紧凑原则设计，智能体完成每个任务所需的调用和 token 更少，因此更快、更省钱。对 RQL 数据层，这一点在 RQL 自己的评测中做过测量（一个沙盒游戏世界，相同的任务、模型和评分器）：与传统的查找 / 导出为 JSON / 赋值式反射工具相比，RQL 每个任务的工具调用约少 9–18 倍，token 约少 17–19 倍（[结果](https://github.com/IvanMurzak/RQL/blob/main/RESULTS.md#33-rql-vs-conventional-reflection-tools)）。
 
 ### 你可以这样问
 
@@ -143,7 +145,7 @@ unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secr
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**云端中继能看到什么。**在 Cloud 模式下，工具调用经过 ai-game.dev，它只负责转发，不保存你发送的内容：不保存任何请求或响应内容，因此也不保存源代码、项目文件或资源。它只保留元数据（工具名称、耗时、大小、IP 地址、MCP 事件），保留 90 天。[隐私政策](https://ai-game.dev/legal/privacy)。
+<a id="what-the-cloud-relay-sees"></a>**云端中继能看到什么。**在 Cloud 模式下，工具调用经过 ai-game.dev 的 MCP 中继。该中继是无状态的：它在你的 AI 客户端和编辑器之间转发工具调用，不检查也不保存其内容，也不收集你的对话、源代码、项目文件、资源或场景数据。它会记录 MCP 事件元数据（事件类型、时间、状态、会话标识、所涉及的工具/提示词/资源名称以及错误详情）；请求日志和 MCP 事件在滚动的 90 天窗口内使用。详情：[隐私政策](https://ai-game.dev/legal/privacy)。
 
 `install-plugin` 会下载与 CLI 版本相匹配的已签名插件源码发布包。
 
@@ -237,7 +239,7 @@ unreal-mcp-cli test ./MyGame
 
 - **插件 ↔ sidecar：**插件监听一个 loopback TCP 端口；sidecar 用通过 stdin 传入的一次性令牌连接它（从不出现在命令行中，也从不写入日志）。
 - **本地服务器：**`gamedev-mcp-server` 默认只绑定 loopback，对 `Origin` 不被允许的请求返回 `403`（防御 DNS 重绑定）。在 loopback 上，除非你选择令牌（`UNREAL_MCP_AUTH_OPTION`、`UNREAL_MCP_TOKEN`），插件会以无认证方式启动它。服务器选项：[托管与认证](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)。
-- **Cloud：**智能体通过 OAuth 登录，或使用按项目的密钥，可用 `setup-mcp --regenerate-key` 更换。中继不保存任何请求或响应内容，只保留元数据 90 天（[详情](#what-the-cloud-relay-sees)）。
+- **Cloud：**智能体通过 OAuth 登录，或使用按项目的密钥，可用 `setup-mcp --regenerate-key` 更换。中继是无状态的，不保存工具调用内容；它会记录 MCP 事件元数据（[详情](#what-the-cloud-relay-sees)）。
 - **工具能做什么：**编辑 `<Project>/Source/` 下的文件，运行控制台命令和编辑器 Python，修改任何反射属性。
 - **对工具的控制：**
   - **白名单**（硬限制）：`UNREAL_MCP_TOOLS` 只提供列出的工具；其他工具既不会列出，也无法调用。

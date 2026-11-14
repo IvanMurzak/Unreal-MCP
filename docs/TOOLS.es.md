@@ -2,28 +2,28 @@
 
 # Herramientas de Unreal-MCP
 
-El inventario canónico de las herramientas que registra el plugin de editor **UnrealMCP**. Unreal-MCP incluye **30 herramientas integradas en 8 familias** que tu agente de IA puede llamar, más **4 herramientas de sistema** que no puede llamar (infraestructura del host para la CLI y la app de escritorio). Los ids de herramienta usan kebab-case (`rql-query`, `blueprint-compile`), la misma convención que Unity-MCP y Godot-MCP. Las [extensiones](#extensiones) y [tus propios plugins](EXTENSIONS.md) añaden más.
+El inventario canónico de las herramientas que registra el plugin de editor **UnrealMCP**. Unreal-MCP incluye **herramientas integradas, agrupadas en familias,** que tu agente de IA puede llamar, más **herramientas de sistema** que no puede llamar (infraestructura del host para la CLI y la app de escritorio). Los ids de herramienta usan kebab-case (`rql-query`, `blueprint-compile`), la misma convención que Unity-MCP y Godot-MCP. Las [extensiones](#extensiones) y [tus propios plugins](EXTENSIONS.md) añaden más.
 
-| Familia | Herramientas | Cantidad |
-| --- | --- | ---: |
-| Capa de datos RQL | `rql-query`, `rql-mutate`, `rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
-| Código fuente / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
-| Captura de pantalla | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
-| Fab | `fab-search`, `fab-library`, `fab-add` | 3 |
-| Consola | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| Lista de herramientas | `unreal-tool-list` | 1 |
-| **Sistema** (no se muestran a la IA) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` | 4 |
+| Familia | Herramientas |
+| --- | --- |
+| Capa de datos RQL | `rql-query`, `rql-mutate`, `rql-schema` |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
+| Código fuente / C++ | `source-*`: read, create-class, update, delete, list, compile |
+| Captura de pantalla | `screenshot-*`: viewport, game-view, camera, isolated |
+| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Consola | `console-run-command` |
+| Python | `python-execute` |
+| Lista de herramientas | `unreal-tool-list` |
+| **Sistema** (no se muestran a la IA) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
 > **Fuente de verdad.** Herramientas estándar: `UnrealMcp*Tools.cpp` en `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` (excepto `UnrealMcpSkillTools.cpp`) y `UnrealMcpRqlTools.cpp` en `UnrealMcpRql`. Herramientas de sistema: `UnrealMcpPingTool.cpp`, `UnrealMcpSkillTools.cpp`, `UnrealMcpEditorSession.cpp` y `SkillGenerateTool.cs` del sidecar. Actualiza esta página cuando cambie un registro.
 
-Las 30 herramientas estándar son **solo de editor**. Una conexión en runtime (dentro del juego) solo ofrece `ping` más las herramientas que registre tu juego: consulta [RUNTIME.md](RUNTIME.es.md).
+Todas las herramientas estándar son **solo de editor**. Una conexión en runtime (dentro del juego) solo ofrece `ping` más las herramientas que registre tu juego: consulta [RUNTIME.md](RUNTIME.es.md).
 
 ## Familias en detalle
 
 <details>
-  <summary><b>RQL — la capa de datos (3)</b></summary>
+  <summary><b>RQL — la capa de datos</b></summary>
 
 Un solo lenguaje de consultas para todo el editor en lugar de una herramienta por operación ([`docs/rql.md`](rql.md)): busca actores, componentes y assets, lee miembros, filtra, agrega y cámbialos en una sola llamada. Sustituye a las antiguas herramientas de actores, objetos, assets, niveles, estado del editor, selección, log de consola y reflexión.
 
@@ -40,7 +40,7 @@ La skill `unreal-rql` (escrita por `unreal-skill-generate`) enseña el lenguaje 
 </details>
 
 <details>
-  <summary><b>Familia Blueprint (11) — la superficie estrella de Unreal</b></summary>
+  <summary><b>Familia Blueprint — la superficie estrella de Unreal</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -59,7 +59,7 @@ La skill `unreal-rql` (escrita por `unreal-skill-generate`) enseña el lenguaje 
 </details>
 
 <details>
-  <summary><b>Familia Consola (1)</b></summary>
+  <summary><b>Familia Consola</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -70,7 +70,7 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 </details>
 
 <details>
-  <summary><b>Familia Lista de herramientas (1)</b></summary>
+  <summary><b>Familia Lista de herramientas</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -79,7 +79,7 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 </details>
 
 <details>
-  <summary><b>Familia Python (1)</b></summary>
+  <summary><b>Familia Python</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -90,7 +90,7 @@ Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca
 </details>
 
 <details>
-  <summary><b>Familia Fab (3) — busca y añade contenido de Fab</b></summary>
+  <summary><b>Familia Fab — busca y añade contenido de Fab</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -103,7 +103,7 @@ Controlan el propio plugin Fab del motor (activado por defecto desde UE 5.5): su
 </details>
 
 <details>
-  <summary><b>Familia Código fuente / C++ (6)</b></summary>
+  <summary><b>Familia Código fuente / C++</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -119,7 +119,7 @@ Todas las operaciones de archivo están confinadas a `<Project>/Source/`.
 </details>
 
 <details>
-  <summary><b>Familia Captura de pantalla / captura del viewport (4)</b></summary>
+  <summary><b>Familia Captura de pantalla / captura del viewport</b></summary>
 
 | Id de herramienta | Qué hace |
 | --- | --- |
@@ -133,7 +133,7 @@ Las capturas devuelven un **PNG en base64 como contenido de imagen MCP** para qu
 </details>
 
 <details>
-  <summary><b>Herramientas de sistema (4) — NO expuestas a tu IA</b></summary>
+  <summary><b>Herramientas de sistema — NO expuestas a tu IA</b></summary>
 
 Son **herramientas de sistema**: infraestructura del host que `unreal-mcp-cli` y la app de escritorio llaman directamente por `POST /api/system-tools/<name>`. No aparecen a propósito en el `tools/list` de MCP, así que nunca se muestran en una sesión de IA (ni gastan tokens en ella), la misma separación que usan Unity y Godot para sus herramientas de sistema.
 

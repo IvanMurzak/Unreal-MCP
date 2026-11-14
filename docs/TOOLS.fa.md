@@ -4,28 +4,28 @@
 
 # ابزارهای Unreal-MCP
 
-فهرست مرجع ابزارهایی که پلاگین ویرایشگر **UnrealMCP** ثبت می‌کند. Unreal-MCP با **30 ابزار داخلی در 8 خانواده** ارائه می‌شود که عامل هوش مصنوعی شما می‌تواند فراخوانی کند، به‌علاوه **4 ابزار سیستمی** که عامل نمی‌تواند فراخوانی کند (زیرساخت میزبان برای CLI و اپلیکیشن دسکتاپ). شناسه ابزارها به شکل kebab-case است (`rql-query`، `blueprint-compile`)، همان قراردادی که Unity-MCP و Godot-MCP دارند. [افزونه‌ها](#extensions) و [پلاگین‌های خودتان](EXTENSIONS.md) ابزارهای بیشتری اضافه می‌کنند.
+فهرست مرجع ابزارهایی که پلاگین ویرایشگر **UnrealMCP** ثبت می‌کند. Unreal-MCP با **ابزارهای داخلی، دسته‌بندی‌شده در خانواده‌ها،** ارائه می‌شود که عامل هوش مصنوعی شما می‌تواند فراخوانی کند، به‌علاوه **ابزارهای سیستمی** که عامل نمی‌تواند فراخوانی کند (زیرساخت میزبان برای CLI و اپلیکیشن دسکتاپ). شناسه ابزارها به شکل kebab-case است (`rql-query`، `blueprint-compile`)، همان قراردادی که Unity-MCP و Godot-MCP دارند. [افزونه‌ها](#extensions) و [پلاگین‌های خودتان](EXTENSIONS.md) ابزارهای بیشتری اضافه می‌کنند.
 
-| خانواده | ابزارها | تعداد |
-| --- | --- | ---: |
-| لایه داده RQL | `rql-query`، `rql-mutate`، `rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
-| سورس / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
-| اسکرین‌شات | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
-| Fab | `fab-search`، `fab-library`، `fab-add` | 3 |
-| کنسول | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| فهرست ابزارها | `unreal-tool-list` | 1 |
-| **سیستمی** (به هوش مصنوعی نشان داده نمی‌شود) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` | 4 |
+| خانواده | ابزارها |
+| --- | --- |
+| لایه داده RQL | `rql-query`، `rql-mutate`، `rql-schema` |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
+| سورس / C++ | `source-*`: read, create-class, update, delete, list, compile |
+| اسکرین‌شات | `screenshot-*`: viewport, game-view, camera, isolated |
+| Fab | `fab-search`، `fab-library`، `fab-add` |
+| کنسول | `console-run-command` |
+| Python | `python-execute` |
+| فهرست ابزارها | `unreal-tool-list` |
+| **سیستمی** (به هوش مصنوعی نشان داده نمی‌شود) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` |
 
 > **منبع حقیقت.** ابزارهای استاندارد: `UnrealMcp*Tools.cpp` در `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` (به جز `UnrealMcpSkillTools.cpp`) و `UnrealMcpRqlTools.cpp` در `UnrealMcpRql`. ابزارهای سیستمی: `UnrealMcpPingTool.cpp`، `UnrealMcpSkillTools.cpp`، `UnrealMcpEditorSession.cpp` و `SkillGenerateTool.cs` در sidecar. هر وقت ثبت یک ابزار تغییر کرد، این صفحه را به‌روز کنید.
 
-هر 30 ابزار استاندارد **فقط در ویرایشگر** کار می‌کنند. یک اتصال Runtime (درون بازی) فقط `ping` و ابزارهایی را که بازی شما ثبت می‌کند ارائه می‌دهد: [RUNTIME.md](RUNTIME.fa.md) را ببینید.
+همه ابزارهای استاندارد **فقط در ویرایشگر** کار می‌کنند. یک اتصال Runtime (درون بازی) فقط `ping` و ابزارهایی را که بازی شما ثبت می‌کند ارائه می‌دهد: [RUNTIME.md](RUNTIME.fa.md) را ببینید.
 
 ## خانواده‌ها با جزئیات
 
 <details>
-  <summary><b>RQL — لایه داده (3)</b></summary>
+  <summary><b>RQL — لایه داده</b></summary>
 
 یک زبان کوئری برای کل ویرایشگر به جای یک ابزار برای هر عملیات ([`docs/rql.md`](rql.md)): اکتورها، کامپوننت‌ها و دارایی‌ها را پیدا کنید، اعضا را بخوانید، فیلتر و تجمیع کنید و در یک فراخوانی تغییرشان دهید. این زبان جایگزین ابزارهای قبلی اکتور، شیء، دارایی، لول، وضعیت ویرایشگر، انتخاب، لاگ کنسول و reflection شده است.
 
@@ -42,7 +42,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده Blueprint (11) — مهم‌ترین بخش Unreal</b></summary>
+  <summary><b>خانواده Blueprint — مهم‌ترین بخش Unreal</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -61,7 +61,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده کنسول (1)</b></summary>
+  <summary><b>خانواده کنسول</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -72,7 +72,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده فهرست ابزارها (1)</b></summary>
+  <summary><b>خانواده فهرست ابزارها</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -81,7 +81,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده Python (1)</b></summary>
+  <summary><b>خانواده Python</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -92,7 +92,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده Fab (3) — جستجو و افزودن محتوای Fab</b></summary>
+  <summary><b>خانواده Fab — جستجو و افزودن محتوای Fab</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -105,7 +105,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده سورس / C++ (6)</b></summary>
+  <summary><b>خانواده سورس / C++</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -121,7 +121,7 @@
 </details>
 
 <details>
-  <summary><b>خانواده اسکرین‌شات / گرفتن تصویر ویوپورت (4)</b></summary>
+  <summary><b>خانواده اسکرین‌شات / گرفتن تصویر ویوپورت</b></summary>
 
 | شناسه ابزار | کار آن |
 | --- | --- |
@@ -135,7 +135,7 @@
 </details>
 
 <details>
-  <summary><b>ابزارهای سیستمی (4) — در اختیار هوش مصنوعی شما قرار نمی‌گیرند</b></summary>
+  <summary><b>ابزارهای سیستمی — در اختیار هوش مصنوعی شما قرار نمی‌گیرند</b></summary>
 
 این‌ها **ابزارهای سیستمی** هستند: زیرساخت میزبان که `unreal-mcp-cli` و اپلیکیشن دسکتاپ مستقیماً از طریق `POST /api/system-tools/<name>` به کار می‌گیرند. این ابزارها عمداً در `tools/list` پروتکل MCP نیستند، بنابراین هرگز در یک جلسه هوش مصنوعی ظاهر نمی‌شوند (و توکنی مصرف نمی‌کنند) — همان تقسیمی که Unity و Godot برای ابزارهای سیستمی خود دارند.
 

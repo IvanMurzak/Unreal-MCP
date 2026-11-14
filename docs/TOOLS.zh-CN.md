@@ -2,28 +2,28 @@
 
 # Unreal-MCP 工具
 
-这是 **UnrealMCP** 编辑器插件所注册工具的权威清单。Unreal-MCP 提供 **8 个类别、30 个内置工具**供你的 AI 智能体调用，另有 **4 个系统工具**是它不能调用的（供 CLI 和桌面应用使用的宿主底层设施）。工具 id 使用 kebab-case（`rql-query`、`blueprint-compile`），与 Unity-MCP 和 Godot-MCP 的约定相同。[扩展](#扩展)和[你自己的插件](EXTENSIONS.md)可以添加更多工具。
+这是 **UnrealMCP** 编辑器插件所注册工具的权威清单。Unreal-MCP 提供 **按类别分组的内置工具**供你的 AI 智能体调用，另有 **系统工具**是它不能调用的（供 CLI 和桌面应用使用的宿主底层设施）。工具 id 使用 kebab-case（`rql-query`、`blueprint-compile`），与 Unity-MCP 和 Godot-MCP 的约定相同。[扩展](#扩展)和[你自己的插件](EXTENSIONS.md)可以添加更多工具。
 
-| 类别 | 工具 | 数量 |
-| --- | --- | ---: |
-| RQL 数据层 | `rql-query`、`rql-mutate`、`rql-schema` | 3 |
-| Blueprint | `blueprint-*`：create、get、add-component、remove-component、add-variable、modify-variable、set-default、add-function、add-event、compile、spawn | 11 |
-| 源码 / C++ | `source-*`：read、create-class、update、delete、list、compile | 6 |
-| 截图 | `screenshot-*`：viewport、game-view、camera、isolated | 4 |
-| Fab | `fab-search`、`fab-library`、`fab-add` | 3 |
-| 控制台 | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| 工具列表 | `unreal-tool-list` | 1 |
-| **系统**（不向 AI 展示） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` | 4 |
+| 类别 | 工具 |
+| --- | --- |
+| RQL 数据层 | `rql-query`、`rql-mutate`、`rql-schema` |
+| Blueprint | `blueprint-*`：create、get、add-component、remove-component、add-variable、modify-variable、set-default、add-function、add-event、compile、spawn |
+| 源码 / C++ | `source-*`：read、create-class、update、delete、list、compile |
+| 截图 | `screenshot-*`：viewport、game-view、camera、isolated |
+| Fab | `fab-search`、`fab-library`、`fab-add` |
+| 控制台 | `console-run-command` |
+| Python | `python-execute` |
+| 工具列表 | `unreal-tool-list` |
+| **系统**（不向 AI 展示） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` |
 
 > **权威来源。** 标准工具：`UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` 中的 `UnrealMcp*Tools.cpp`（`UnrealMcpSkillTools.cpp` 除外）以及 `UnrealMcpRql` 中的 `UnrealMcpRqlTools.cpp`。系统工具：`UnrealMcpPingTool.cpp`、`UnrealMcpSkillTools.cpp`、`UnrealMcpEditorSession.cpp` 以及边车进程的 `SkillGenerateTool.cs`。注册发生变化时请更新本页。
 
-全部 30 个标准工具都**仅限编辑器**。运行时（游戏内）连接只提供 `ping` 以及你的游戏自己注册的工具：见 [RUNTIME.md](RUNTIME.zh-CN.md)。
+全部标准工具都**仅限编辑器**。运行时（游戏内）连接只提供 `ping` 以及你的游戏自己注册的工具：见 [RUNTIME.md](RUNTIME.zh-CN.md)。
 
 ## 各类别详情
 
 <details>
-  <summary><b>RQL — 数据层（3）</b></summary>
+  <summary><b>RQL — 数据层</b></summary>
 
 用一种查询语言覆盖整个编辑器，而不是每个操作一个工具（[`docs/rql.md`](rql.md)）：在一次调用中查找 Actor、组件和资源，读取成员，过滤、聚合并修改它们。它取代了以前的 actor、object、asset、level、editor-state、selection、console-log 和 reflection 工具。
 
@@ -40,7 +40,7 @@
 </details>
 
 <details>
-  <summary><b>Blueprint 类别（11）— Unreal 的核心能力</b></summary>
+  <summary><b>Blueprint 类别— Unreal 的核心能力</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -59,7 +59,7 @@
 </details>
 
 <details>
-  <summary><b>控制台类别（1）</b></summary>
+  <summary><b>控制台类别</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -70,7 +70,7 @@
 </details>
 
 <details>
-  <summary><b>工具列表类别（1）</b></summary>
+  <summary><b>工具列表类别</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -79,7 +79,7 @@
 </details>
 
 <details>
-  <summary><b>Python 类别（1）</b></summary>
+  <summary><b>Python 类别</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -90,7 +90,7 @@
 </details>
 
 <details>
-  <summary><b>Fab 类别（3）— 搜索并添加 Fab 内容</b></summary>
+  <summary><b>Fab 类别— 搜索并添加 Fab 内容</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -103,7 +103,7 @@
 </details>
 
 <details>
-  <summary><b>源码 / C++ 类别（6）</b></summary>
+  <summary><b>源码 / C++ 类别</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -119,7 +119,7 @@
 </details>
 
 <details>
-  <summary><b>截图 / 视口捕获类别（4）</b></summary>
+  <summary><b>截图 / 视口捕获类别</b></summary>
 
 | 工具 id | 作用 |
 | --- | --- |
@@ -133,7 +133,7 @@
 </details>
 
 <details>
-  <summary><b>系统工具（4）— 不向你的 AI 开放</b></summary>
+  <summary><b>系统工具— 不向你的 AI 开放</b></summary>
 
 这些是**系统工具**：`unreal-mcp-cli` 和桌面应用通过 `POST /api/system-tools/<name>` 直接调用的宿主底层设施。它们被有意排除在 MCP `tools/list` 之外，因此永远不会出现在 AI 会话中（也不会消耗其 token）——Unity 和 Godot 对其系统工具也采用同样的划分。
 

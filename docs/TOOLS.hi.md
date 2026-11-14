@@ -2,28 +2,28 @@
 
 # Unreal-MCP tools
 
-**UnrealMCP** editor plugin जिन tools को register करता है, उनकी आधिकारिक सूची। Unreal-MCP में **8 families में 30 built-in tools** हैं जिन्हें आपका AI agent call कर सकता है, साथ ही **4 system tools** हैं जिन्हें वह call नहीं कर सकता (CLI और desktop app के लिए host की अंदरूनी व्यवस्था)। Tool ids kebab-case में होते हैं (`rql-query`, `blueprint-compile`), वही convention जो Unity-MCP और Godot-MCP में है। [Extensions](#extensions) और [आपके अपने plugins](EXTENSIONS.md) और tools जोड़ते हैं।
+**UnrealMCP** editor plugin जिन tools को register करता है, उनकी आधिकारिक सूची। Unreal-MCP में **families में बँटे built-in tools** हैं जिन्हें आपका AI agent call कर सकता है, साथ ही **system tools** हैं जिन्हें वह call नहीं कर सकता (CLI और desktop app के लिए host की अंदरूनी व्यवस्था)। Tool ids kebab-case में होते हैं (`rql-query`, `blueprint-compile`), वही convention जो Unity-MCP और Godot-MCP में है। [Extensions](#extensions) और [आपके अपने plugins](EXTENSIONS.md) और tools जोड़ते हैं।
 
-| Family | Tools | संख्या |
-| --- | --- | ---: |
-| RQL data layer | `rql-query`, `rql-mutate`, `rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
-| Source / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
-| Screenshot | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
-| Fab | `fab-search`, `fab-library`, `fab-add` | 3 |
-| Console | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| Tool list | `unreal-tool-list` | 1 |
-| **System** (AI को नहीं दिखते) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` | 4 |
+| Family | Tools |
+| --- | --- |
+| RQL data layer | `rql-query`, `rql-mutate`, `rql-schema` |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
+| Source / C++ | `source-*`: read, create-class, update, delete, list, compile |
+| Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
+| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Console | `console-run-command` |
+| Python | `python-execute` |
+| Tool list | `unreal-tool-list` |
+| **System** (AI को नहीं दिखते) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
 > **सच्चाई का स्रोत।** Standard tools: `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` में `UnrealMcp*Tools.cpp` (`UnrealMcpSkillTools.cpp` को छोड़कर) और `UnrealMcpRql` में `UnrealMcpRqlTools.cpp`। System tools: `UnrealMcpPingTool.cpp`, `UnrealMcpSkillTools.cpp`, `UnrealMcpEditorSession.cpp` और sidecar का `SkillGenerateTool.cs`। कोई registration बदले तो यह पेज update करें।
 
-सभी 30 standard tools **सिर्फ़ editor के लिए** हैं। Runtime (in-game) connection केवल `ping` और आपके game द्वारा register किए गए tools देता है: देखें [RUNTIME.md](RUNTIME.hi.md)।
+सभी standard tools **सिर्फ़ editor के लिए** हैं। Runtime (in-game) connection केवल `ping` और आपके game द्वारा register किए गए tools देता है: देखें [RUNTIME.md](RUNTIME.hi.md)।
 
 ## Families का विवरण
 
 <details>
-  <summary><b>RQL — data layer (3)</b></summary>
+  <summary><b>RQL — data layer</b></summary>
 
 हर operation के लिए अलग tool की जगह पूरे editor के लिए एक query language ([`docs/rql.md`](rql.md)): actors, components और assets खोजें, members पढ़ें, filter और aggregate करें, और एक ही call में उन्हें बदलें। यह पुराने actor, object, asset, level, editor-state, selection, console-log और reflection tools की जगह लेता है।
 
@@ -40,7 +40,7 @@ Reflected properties के अलावा RQL इन तक भी पहु�
 </details>
 
 <details>
-  <summary><b>Blueprint family (11) — Unreal की सबसे अहम surface</b></summary>
+  <summary><b>Blueprint family — Unreal की सबसे अहम surface</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -59,7 +59,7 @@ Reflected properties के अलावा RQL इन तक भी पहु�
 </details>
 
 <details>
-  <summary><b>Console family (1)</b></summary>
+  <summary><b>Console family</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -70,7 +70,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 </details>
 
 <details>
-  <summary><b>Tool list family (1)</b></summary>
+  <summary><b>Tool list family</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -79,7 +79,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 </details>
 
 <details>
-  <summary><b>Python family (1)</b></summary>
+  <summary><b>Python family</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -90,7 +90,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 </details>
 
 <details>
-  <summary><b>Fab family (3) — Fab content खोजें और जोड़ें</b></summary>
+  <summary><b>Fab family — Fab content खोजें और जोड़ें</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -103,7 +103,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 </details>
 
 <details>
-  <summary><b>Source / C++ family (6)</b></summary>
+  <summary><b>Source / C++ family</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -119,7 +119,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 </details>
 
 <details>
-  <summary><b>Screenshot / viewport-capture family (4)</b></summary>
+  <summary><b>Screenshot / viewport-capture family</b></summary>
 
 | Tool id | यह क्या करता है |
 | --- | --- |
@@ -133,7 +133,7 @@ Captures base64 **PNG को MCP image content के रूप में** ल�
 </details>
 
 <details>
-  <summary><b>System tools (4) — आपके AI को नहीं दिखते</b></summary>
+  <summary><b>System tools — आपके AI को नहीं दिखते</b></summary>
 
 ये **system tools** हैं: host की अंदरूनी व्यवस्था, जिसे `unreal-mcp-cli` और desktop app सीधे `POST /api/system-tools/<name>` पर चलाते हैं। ये जान-बूझकर MCP `tools/list` से बाहर रखे गए हैं, ताकि AI session में ये कभी न दिखें (और tokens खर्च न करें) — वही बँटवारा जो Unity और Godot अपने system tools के लिए करते हैं।
 

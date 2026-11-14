@@ -13,7 +13,7 @@
 
 1. 从编辑器的 **Tools** 菜单打开 **AI Game Developer** 主窗口（该标签页注册在 Tools 菜单类别下）。
 2. **选择连接模式：**
-   - **Cloud**（默认）— 连接到 [ai-game.dev](https://ai-game.dev)。点击 **Authorize**（授权）开始 OAuth **设备码流程**：窗口会显示一个验证 URL 和一个简短的用户码；打开该 URL，输入用户码并批准，编辑器即完成授权。使用 **Revoke**（撤销）清除已存储的云端令牌。默认使用 Cloud，因为它无需开放端口，也不会与其他程序发生端口冲突；该连接免费。中继不保存任何请求或响应内容，只保留元数据 90 天（[README](README.zh-CN.md#what-the-cloud-relay-sees)）。
+   - **Cloud**（默认）— 连接到 [ai-game.dev](https://ai-game.dev)。点击 **Authorize**（授权）开始 OAuth **设备码流程**：窗口会显示一个验证 URL 和一个简短的用户码；打开该 URL，输入用户码并批准，编辑器即完成授权。使用 **Revoke**（撤销）清除已存储的云端令牌。默认使用 Cloud，因为它无需开放端口，也不会与其他程序发生端口冲突；该连接免费。中继是无状态的：它转发工具调用，不检查也不保存其内容（[它记录什么](README.zh-CN.md#what-the-cloud-relay-sees)）。
    - **Custom** — 连接到你运行的本地 `gamedev-mcp-server`（或任何兼容的服务器）；无需账号，可离线使用，也适用于物理隔离（air-gapped）的机器。输入服务器 URL，并让你的 AI 客户端指向它。你可以自己运行服务器，也可以让编辑器启动和停止它（`UNREAL_MCP_START_SERVER`，仅限 Custom 模式 + http；见[环境变量](#环境变量)）。
 3. **Connection** 部分显示一个状态圆点、一个状态标签和一个 Connect / Disconnect / Stop 按钮；bridge 状态显示为 `Running (restarts: N)` 或 `Stopped`。用它们确认边车进程正在运行。
 4. 让你的 AI 客户端（Claude Code、Cursor、AI Game Developer 应用……）指向该服务器。**AI agents** 部分列出当前已连接的智能体；要写入 MCP 客户端配置，请使用 `unreal-mcp-cli setup-mcp`。

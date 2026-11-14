@@ -48,7 +48,9 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 ✅ **Runtime mode** — चाहें तो चलते हुए game को control करें ([docs/RUNTIME.md](RUNTIME.hi.md))\
 ✅ **Cloud या local** — तैयार `ai-game.dev`, या self-hosted `gamedev-mcp-server`
 
-8 families में 30 built-in tools; पूरी सूची [docs/TOOLS.md](TOOLS.hi.md) में है।
+**Coverage:** Unreal Editor में आप जो कुछ कर सकते हैं, लगभग वह सब agent भी कर सकता है। Tool groups: RQL data layer, Blueprints, C++ source, screenshots, Fab, console, editor Python और tool list, साथ में extensions। सभी tools: [docs/TOOLS.md](TOOLS.hi.md)।
+
+**Efficiency:** tools design से ही compact हैं, इसलिए agent को हर task के लिए कम calls और कम tokens चाहिए, और वह तेज़ और सस्ते में काम करता है। RQL data layer के लिए यह RQL के अपने evaluation में मापा गया है (एक sandbox game world, वही tasks, model और grader): पारंपरिक find / dump-as-JSON / set reflection tools की तुलना में RQL को हर task में लगभग 9–18× कम tool calls और 17–19× कम tokens लगे ([results](https://github.com/IvanMurzak/RQL/blob/main/RESULTS.md#33-rql-vs-conventional-reflection-tools))।
 
 ### आप क्या कह सकते हैं
 
@@ -143,7 +145,7 @@ Local में default रूप से auth क्यों नहीं: serv
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**Cloud relay क्या देखता है।** Cloud mode में tool calls ai-game.dev से होकर जाते हैं, जो उन्हें आगे भेजता है और आपका भेजा हुआ कुछ भी store नहीं करता: न request content, न response content, इसलिए न source code, न project files, न assets। वह सिर्फ़ metadata (tool name, timing, sizes, IP address, MCP events) 90 दिनों तक रखता है। [Privacy policy](https://ai-game.dev/legal/privacy)।
+<a id="what-the-cloud-relay-sees"></a>**Cloud relay क्या देखता है।** Cloud mode में tool calls ai-game.dev के MCP relay से होकर जाते हैं। Relay stateless है: वह tool calls को आपके AI client और editor के बीच route करता है, उनके content को न inspect करता है न store करता है, और आपकी conversations, source code, project files, assets या scene data collect नहीं करता। वह MCP event metadata record करता है (event type, timing, status, session identifiers, tool, prompt या resource का नाम, और error details); request logs और MCP events एक rolling 90-day window के भीतर इस्तेमाल होते हैं। Details: [Privacy Policy](https://ai-game.dev/legal/privacy)।
 
 `install-plugin` CLI version से मेल खाने वाला signed plugin source release download करता है।
 
@@ -237,7 +239,7 @@ unreal-mcp-cli test ./MyGame
 
 - **Plugin ↔ sidecar:** plugin एक loopback TCP port पर सुनता है; sidecar stdin से भेजे गए one-shot token के साथ उससे जुड़ता है (कभी command line पर नहीं, कभी log में नहीं)।
 - **Local server:** `gamedev-mcp-server` default रूप से loopback पर bind होता है और जिस request का `Origin` allowed नहीं, उसे `403` देता है (DNS-rebinding से बचाव)। Loopback पर plugin उसे बिना authentication start करता है, जब तक आप token न चुनें (`UNREAL_MCP_AUTH_OPTION`, `UNREAL_MCP_TOKEN`)। Server options: [hosting और authentication](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)।
-- **Cloud:** agent OAuth से sign in करता है या per-project key इस्तेमाल करता है, जिसे आप `setup-mcp --regenerate-key` से बदल सकते हैं। Relay कोई request या response content store नहीं करता, सिर्फ़ metadata 90 दिनों तक ([details](#what-the-cloud-relay-sees))।
+- **Cloud:** agent OAuth से sign in करता है या per-project key इस्तेमाल करता है, जिसे आप `setup-mcp --regenerate-key` से बदल सकते हैं। Relay stateless है और tool calls का content store नहीं करता; वह MCP event metadata record करता है ([details](#what-the-cloud-relay-sees))।
 - **Tools क्या कर सकते हैं:** `<Project>/Source/` के नीचे files edit करना, console commands और editor Python चलाना, कोई भी reflected property बदलना।
 - **उन पर नियंत्रण:**
   - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` सिर्फ़ सूची वाले tools देता है; कोई और tool न list होता है, न call हो सकता है।

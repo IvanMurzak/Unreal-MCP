@@ -48,7 +48,9 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 ✅ **ランタイムモード** — オプトインで実行中のゲームを操作（[docs/RUNTIME.md](RUNTIME.ja.md)）\
 ✅ **クラウドまたはローカル** — すぐ使える `ai-game.dev`、またはセルフホストの `gamedev-mcp-server`
 
-8 ファミリー、30 個の組み込みツール。全一覧は [docs/TOOLS.md](TOOLS.ja.md) にあります。
+**カバー範囲：**Unreal エディターでできることは、ほぼすべてエージェントにもできます。ツールのグループ：RQL データレイヤー、Blueprints、C++ ソース、スクリーンショット、Fab、コンソール、エディター Python、ツール一覧、そして拡張機能。全ツール：[docs/TOOLS.md](TOOLS.ja.md)。
+
+**効率：**ツールはコンパクトに設計されているため、エージェントはタスクごとの呼び出し回数もトークンも少なく済み、速く安く作業できます。RQL データレイヤーについては RQL 自身の評価（サンドボックスのゲーム世界で、同じタスク、モデル、採点器）で測定済みです：従来の検索／JSON ダンプ／値設定型のリフレクションツールと比べ、RQL はタスクあたりのツール呼び出しが約 9–18 分の 1、トークンが約 17–19 分の 1 でした（[結果](https://github.com/IvanMurzak/RQL/blob/main/RESULTS.md#33-rql-vs-conventional-reflection-tools)）。
 
 ### 頼めること
 
@@ -143,7 +145,7 @@ unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secr
 
 </details>
 
-<a id="what-the-cloud-relay-sees"></a>**クラウドリレーが見るもの。**Cloud モードではツール呼び出しが ai-game.dev を経由します。ai-game.dev はそれを中継するだけで、送信内容は保存しません。リクエストやレスポンスの内容は一切保存しないため、ソースコード、プロジェクトファイル、アセットも保存されません。保持するのはメタデータ（ツール名、所要時間、サイズ、IP アドレス、MCP イベント）だけで、期間は 90 日です。[プライバシーポリシー](https://ai-game.dev/legal/privacy)。
+<a id="what-the-cloud-relay-sees"></a>**クラウドリレーが見るもの。**Cloud モードでは、ツール呼び出しは ai-game.dev の MCP リレーを経由します。リレーはステートレスです。AI クライアントとエディターの間でツール呼び出しを中継しますが、その内容を検査も保存もせず、会話、ソースコード、プロジェクトファイル、アセット、シーンデータも収集しません。記録するのは MCP イベントのメタデータ（イベントの種類、タイミング、ステータス、セッション識別子、対象のツール／プロンプト／リソース名、エラーの詳細）です。リクエストログと MCP イベントは、直近 90 日間のローリング期間内で利用されます。詳細：[プライバシーポリシー](https://ai-game.dev/legal/privacy)。
 
 `install-plugin` は CLI のバージョンに一致する、署名済みのプラグインソースリリースをダウンロードします。
 
@@ -237,7 +239,7 @@ unreal-mcp-cli test ./MyGame
 
 - **プラグイン ↔ sidecar：**プラグインはループバックの TCP ポートで待ち受け、sidecar は stdin 経由で渡される使い捨てトークンで接続します（コマンドラインには出さず、ログにも残しません）。
 - **ローカルサーバー：**`gamedev-mcp-server` は既定でループバックにバインドし、許可されていない `Origin` からのリクエストには `403` を返します（DNS リバインディング対策）。ループバックでは、トークン（`UNREAL_MCP_AUTH_OPTION`、`UNREAL_MCP_TOKEN`）を選ばない限り、プラグインは認証なしで起動します。サーバーのオプション：[ホスティングと認証](https://github.com/IvanMurzak/GameDev-MCP-Server/blob/main/docs/hosting.md)。
-- **Cloud：**エージェントは OAuth でサインインするか、`setup-mcp --regenerate-key` で差し替えられるプロジェクトごとのキーを使います。リレーはリクエストやレスポンスの内容を保存せず、メタデータのみを 90 日間保持します（[詳細](#what-the-cloud-relay-sees)）。
+- **Cloud：**エージェントは OAuth でサインインするか、`setup-mcp --regenerate-key` で差し替えられるプロジェクトごとのキーを使います。リレーはステートレスで、ツール呼び出しの内容を保存しません。記録するのは MCP イベントのメタデータです（[詳細](#what-the-cloud-relay-sees)）。
 - **ツールにできること：**`<Project>/Source/` 内のファイル編集、コンソールコマンドとエディター Python の実行、任意のリフレクションプロパティの変更。
 - **ツールの制御：**
   - **ホワイトリスト**（強い制限）：`UNREAL_MCP_TOOLS` は列挙したツールだけを提供します。それ以外のツールは一覧にも出ず、呼び出すこともできません。

@@ -2,28 +2,28 @@
 
 # Unreal-MCP tools
 
-The canonical inventory of the tools the **UnrealMCP** editor plugin registers. Unreal-MCP ships **30 built-in tools in 8 families** that your AI agent can call, plus **4 system tools** it cannot (host plumbing for the CLI and the desktop app). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), the same convention as Unity-MCP and Godot-MCP. [Extensions](#extensions) and [your own plugins](EXTENSIONS.md) add more.
+The canonical inventory of the tools the **UnrealMCP** editor plugin registers. Unreal-MCP ships **built-in tools, grouped in families,** that your AI agent can call, plus **system tools** it cannot (host plumbing for the CLI and the desktop app). Tool ids are kebab-case (`rql-query`, `blueprint-compile`), the same convention as Unity-MCP and Godot-MCP. [Extensions](#extensions) and [your own plugins](EXTENSIONS.md) add more.
 
-| Family | Tools | Count |
-| --- | --- | ---: |
-| RQL data layer | `rql-query`, `rql-mutate`, `rql-schema` | 3 |
-| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn | 11 |
-| Source / C++ | `source-*`: read, create-class, update, delete, list, compile | 6 |
-| Screenshot | `screenshot-*`: viewport, game-view, camera, isolated | 4 |
-| Fab | `fab-search`, `fab-library`, `fab-add` | 3 |
-| Console | `console-run-command` | 1 |
-| Python | `python-execute` | 1 |
-| Tool list | `unreal-tool-list` | 1 |
-| **System** (not shown to the AI) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` | 4 |
+| Family | Tools |
+| --- | --- |
+| RQL data layer | `rql-query`, `rql-mutate`, `rql-schema` |
+| Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
+| Source / C++ | `source-*`: read, create-class, update, delete, list, compile |
+| Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
+| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Console | `console-run-command` |
+| Python | `python-execute` |
+| Tool list | `unreal-tool-list` |
+| **System** (not shown to the AI) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
 > **Source of truth.** Standard tools: `UnrealMcp*Tools.cpp` in `UnrealMCP/Source/UnrealMcpEditor/Private/Tools/` (except `UnrealMcpSkillTools.cpp`) and `UnrealMcpRqlTools.cpp` in `UnrealMcpRql`. System tools: `UnrealMcpPingTool.cpp`, `UnrealMcpSkillTools.cpp`, `UnrealMcpEditorSession.cpp` and the sidecar's `SkillGenerateTool.cs`. Update this page when a registration changes.
 
-All 30 standard tools are **editor-only**. A runtime (in-game) connection serves only `ping` plus the tools your game registers: see [RUNTIME.md](RUNTIME.md).
+All standard tools are **editor-only**. A runtime (in-game) connection serves only `ping` plus the tools your game registers: see [RUNTIME.md](RUNTIME.md).
 
 ## Families in detail
 
 <details>
-  <summary><b>RQL — the data layer (3)</b></summary>
+  <summary><b>RQL — the data layer</b></summary>
 
 One query language for the whole editor instead of one tool per operation ([`docs/rql.md`](rql.md)): find actors, components and assets, read members, filter, aggregate, and change them in one call. It replaces the former actor, object, asset, level, editor-state, selection, console-log and reflection tools.
 
@@ -40,7 +40,7 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 </details>
 
 <details>
-  <summary><b>Blueprint family (11) — Unreal's flagship surface</b></summary>
+  <summary><b>Blueprint family — Unreal's flagship surface</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -59,7 +59,7 @@ The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language
 </details>
 
 <details>
-  <summary><b>Console family (1)</b></summary>
+  <summary><b>Console family</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -70,7 +70,7 @@ Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"
 </details>
 
 <details>
-  <summary><b>Tool list family (1)</b></summary>
+  <summary><b>Tool list family</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -79,7 +79,7 @@ Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"
 </details>
 
 <details>
-  <summary><b>Python family (1)</b></summary>
+  <summary><b>Python family</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -90,7 +90,7 @@ Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never 
 </details>
 
 <details>
-  <summary><b>Fab family (3) — search and add Fab content</b></summary>
+  <summary><b>Fab family — search and add Fab content</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -103,7 +103,7 @@ They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic si
 </details>
 
 <details>
-  <summary><b>Source / C++ family (6)</b></summary>
+  <summary><b>Source / C++ family</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -119,7 +119,7 @@ All file operations are jailed to `<Project>/Source/`.
 </details>
 
 <details>
-  <summary><b>Screenshot / viewport-capture family (4)</b></summary>
+  <summary><b>Screenshot / viewport-capture family</b></summary>
 
 | Tool id | What it does |
 | --- | --- |
@@ -133,7 +133,7 @@ Captures return a base64 **PNG as MCP image content** so the LLM can inspect the
 </details>
 
 <details>
-  <summary><b>System tools (4) — NOT exposed to your AI</b></summary>
+  <summary><b>System tools — NOT exposed to your AI</b></summary>
 
 These are **system tools**: host plumbing the `unreal-mcp-cli` and the desktop app drive directly over `POST /api/system-tools/<name>`. They are deliberately absent from MCP `tools/list`, so they never appear to (or spend tokens in) an AI session — the same split Unity and Godot use for their system tools.
 
