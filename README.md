@@ -67,19 +67,29 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 
 ## Requirements
 
-- **Unreal Engine 5.5 – 5.8** (the release pipeline validates each of them) and a **C++ project**: the plugin compiles editor modules in your project.
-- **Node.js 22.14+** for `unreal-mcp-cli`.
-- Windows, macOS or Linux. No .NET install is needed: the sidecar ships inside the plugin. (.NET 9 SDK only to build the bridge from source.)
+- **Unreal Engine 5.5 – 5.8** (the release pipeline validates each of them).
+- **A C++ project**, because the plugin ships as source and Unreal compiles its modules for your project with your platform's C++ toolchain. A Blueprint-only project becomes a C++ project in one step: in the editor, **Tools → New C++ Class…** and create any class. A new project: `unreal-mcp-cli create-project ./MyGame` scaffolds a minimal C++ one.
+- **No .NET install.** The MCP host is a self-contained .NET program (`unreal-mcp-bridge`) bundled inside the plugin for your platform; the plugin starts and restarts it. (The Fab-format build has no executables; its **Get bridge** button installs the bridge once.) Only building the bridge from source needs the .NET 9 SDK.
+- **Node.js 22.14+**, only for `unreal-mcp-cli` (an npm package; 22.14 is its minimum Node version).
+- Windows, macOS or Linux.
 
 ## Quick start
 
-Two ways to connect. **Cloud** (default) routes MCP traffic through [ai-game.dev](https://ai-game.dev) and needs a sign-in. **Local** needs no account: the agent, a local `gamedev-mcp-server` and the editor all run on your machine.
+Pick how your agent reaches the editor. Both are fully supported; you can switch later.
+
+| | **Local** | **Cloud** |
+| --- | --- | --- |
+| Account | none | ai-game.dev sign-in |
+| MCP server | `gamedev-mcp-server` on your machine, started by the agent | ai-game.dev relay |
+| Traffic | stays on `localhost` | passes through ai-game.dev ([what it logs](#what-the-cloud-relay-sees)) |
+| Auth | none on loopback, or a shared token (one flag) | OAuth or a per-project key |
+| Good for | offline work, CI, private projects | one account across several projects and machines |
 
 <p align="center">
   <img src="docs/img/readme/terminal.svg" alt="Terminal: npm install -g unreal-mcp-cli, install-plugin, login, setup-mcp claude-code, open the editor" width="100%"/>
 </p>
 
-**Cloud:**
+**Cloud** (the plugin's default mode):
 
 ```bash
 npm install -g unreal-mcp-cli                       # or: npx unreal-mcp-cli@latest <command>
@@ -90,7 +100,7 @@ unreal-mcp-cli setup-mcp claude-code -p ./MyGame    # write the agent's MCP conf
 unreal-mcp-cli open ./MyGame                        # build if needed and open the editor
 ```
 
-**Local, no account:**
+**Local** (no account):
 
 ```bash
 npm install -g unreal-mcp-cli
@@ -100,9 +110,17 @@ unreal-mcp-cli setup-mcp claude-code -p ./MyGame --transport stdio # agent start
 unreal-mcp-cli open ./MyGame
 ```
 
-`setup-mcp --transport stdio` downloads the checksum-verified `gamedev-mcp-server` release into the project and points the agent at it. Both sides use the same per-project port on `localhost`, with no authentication on loopback.
+`setup-mcp --transport stdio` downloads the checksum-verified `gamedev-mcp-server` release into the project and points the agent at it. Both sides use the same per-project port on `localhost`.
 
-**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them without storing their contents. It logs request metadata (tool name, timing, sizes, IP address) and MCP events, used mainly within a rolling 90-day window. It does not collect your source code, project files or assets. Details: [privacy policy](https://ai-game.dev/legal/privacy).
+**Turn on token auth (local):** add the flags to the `configure` line, then run `setup-mcp` again; the plugin and the server then both require the secret.
+
+```bash
+unreal-mcp-cli configure -p ./MyGame --mode Custom --auth required --token <secret>
+```
+
+Why no auth is the local default: the server binds to loopback only and rejects requests from non-local browser origins, so only programs on your own machine can reach it. Use a token when you do not trust every program or user on that machine. The secret lands in the project's `.env` (gitignored by `configure`) and in the agent's config file, so keep that file out of version control.
+
+<a id="what-the-cloud-relay-sees"></a>**What the cloud relay sees.** In Cloud mode, tool calls pass through ai-game.dev, which routes them without storing their contents. It logs request metadata (tool name, timing, sizes, IP address) and MCP events, used mainly within a rolling 90-day window. It does not collect your source code, project files or assets. Details: [privacy policy](https://ai-game.dev/legal/privacy).
 
 `install-plugin` downloads the signed plugin source release that matches the CLI version. In the editor, open **Tools → AI Game Developer** to see the connection, the bridge status and the connected agents. Then ask your agent:
 
