@@ -116,8 +116,9 @@ public:
 
 	/**
 	 * The gates a local install source declares in its `extension.json` (@p ExtensionJson; null = no such file) into
-	 * @p OutEntry, replacing the catalog's: `minEngineVersion` (absent = none) and `experimental`. The same rule as the
-	 * CLI's `install-extension --source` (readSourceGates). False on a malformed value.
+	 * @p OutEntry, replacing the catalog's: `minEngineVersion` (absent = none) and `experimental`. The CLI's
+	 * `install-extension --source` engine gate (readSourceGates; it also reads the .uplugin's IsExperimentalVersion, which
+	 * only feeds its warning). False on a malformed value.
 	 */
 	static UNREALMCPEDITOR_API bool ReadSourceGates(const TSharedPtr<FJsonObject>& ExtensionJson, FUnrealMcpCatalogEntry& OutEntry);
 

@@ -237,8 +237,7 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 			ExpectRefused(TEXT("a malformed source gate"), TEXT("extension.json"));
 			IFileManager::Get().Delete(*(SourceDir / TEXT("extension.json")));
 			const FUnrealMcpInstallResult Ungated = FUnrealMcpExtensionInstaller::Install(Opts);
-			TestFalse(*FString::Printf(TEXT("a source without a gate is not refused for the catalog's (%s)"), *Ungated.Error),
-				Ungated.Error.Contains(TEXT("requires Unreal Engine")));
+			TestTrue(*FString::Printf(TEXT("a source without a gate installs despite the catalog's (%s)"), *Ungated.Error), Ungated.bSuccess);
 		});
 	});
 
