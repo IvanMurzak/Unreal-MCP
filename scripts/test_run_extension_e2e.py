@@ -523,8 +523,9 @@ class CheckFileTests(unittest.TestCase):
                     self.assertFalse(matches(check, NO_COUNT))
 
     def test_a_type_filter_count_accepts_rqls_no_match_warning_for_its_type_only(self):
-        # RQL 0.3.0: an empty level answers `where $ is <Type> | count` with its no-match warning, the count on the last
-        # line. The extension spec proves a placed component matches; the e2e only needs the answer's shape.
+        # An empty level answers `actors | ... | where $ is <Type> | count` with its no-match warning and then the core's
+        # open-level-only warning, the count on the last line. The extension spec proves a placed component matches; the
+        # e2e only needs the answer's shape.
         filtered = {key: check for key, check in all_checks().items() if '| where $ is ' in check['input'].get('query', '')}
         self.assertEqual(sorted(plugin for plugin, _ in filtered), ['UnrealAIControlRig', 'UnrealAIPCG'])
         for (plugin, name), check in filtered.items():
@@ -540,6 +541,13 @@ class CheckFileTests(unittest.TestCase):
                                  'a longer type name')
                 self.assertFalse(matches(check, text_result(warning + '\nwarning getter-threw: x\n0')),
                                  'the warning covers one line only')
+                open_level = ('warning open-level-only: nothing found in the level open in the editor, "/Temp/Untitled_1": '
+                              'actors covers only that level — hint: if you mean another level, open it first')
+                self.assertTrue(matches(check, text_result(f'{warning}\n{open_level}\n0')), 'no-match, then open-level-only')
+                self.assertTrue(matches(check, text_result(f'{open_level}\n0')), 'open-level-only alone')
+                self.assertFalse(matches(check, text_result(f'{open_level}\n{warning}\n0')), 'the warnings out of order')
+                self.assertFalse(matches(check, text_result('warning extension-missing: install it\n0')),
+                                 'a missing extension is not an empty level')
 
     def test_schema_rejects_malformed_checks(self):
         bad = [

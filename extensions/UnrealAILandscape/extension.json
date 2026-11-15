@@ -4,7 +4,7 @@
   "description": "RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; create oceans, lakes and rivers; query landscapes (sections, paint layers), water bodies and water zones.",
   "pluginName": "UnrealAILandscape",
   "repo": "IvanMurzak/Unreal-MCP",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minCoreVersion": "0.26.0",
   "minEngineVersion": "5.7",
   "enginePlugins": [

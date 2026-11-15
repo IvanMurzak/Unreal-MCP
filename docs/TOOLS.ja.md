@@ -154,7 +154,7 @@
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-拡張機能には Unreal Engine 5.7+（Mesh Terrain は 5.8+）、同じプロジェクト内の Unreal MCP 0.26.0+、C++ ツールチェーンが必要です。リリースはソースで配布され、あなたのプロジェクト向けにコンパイルされます（次にエディターを開いたとき、または `--build` で今すぐ）。インストール id は `com.ivanmurzak.unreal-ai-<id>` で、id は下の表のものです。インストールオプション（`--version`、`--build`、オフラインの `--source`）: [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
+拡張機能には Unreal Engine 5.7+（Mesh Terrain は 5.8+）、同じプロジェクト内の Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+）、C++ ツールチェーンが必要です。リリースはソースで配布され、あなたのプロジェクト向けにコンパイルされます（次にエディターを開いたとき、または `--build` で今すぐ）。インストール id は `com.ivanmurzak.unreal-ai-<id>` で、id は下の表のものです。インストールオプション（`--version`、`--build`、オフラインの `--source`）: [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
 
 | 拡張機能（id） | 説明 |
 | --- | --- |

@@ -154,7 +154,7 @@
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-扩展需要 Unreal Engine 5.7+（Mesh Terrain 需 5.8+）、同一项目中的 Unreal MCP 0.26.0+ 以及 C++ 工具链：发布包以源码形式提供，并为你的项目编译（在下次打开编辑器时，或使用 `--build` 立即编译）。安装 id 为 `com.ivanmurzak.unreal-ai-<id>`，其中 id 取自下表。安装选项（`--version`、`--build`、离线 `--source`）：[Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
+扩展需要 Unreal Engine 5.7+（Mesh Terrain 需 5.8+）、同一项目中的 Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+） 以及 C++ 工具链：发布包以源码形式提供，并为你的项目编译（在下次打开编辑器时，或使用 `--build` 立即编译）。安装 id 为 `com.ivanmurzak.unreal-ai-<id>`，其中 id 取自下表。安装选项（`--version`、`--build`、离线 `--source`）：[Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
 
 | 扩展（id） | 说明 |
 | --- | --- |
