@@ -4,7 +4,9 @@
 #include "UnrealAIMeshTerrainCommon.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlPlay.h"
 
+#include "Algo/AnyOf.h"
 #include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
@@ -12,7 +14,6 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Interfaces/IPluginManager.h"
-#include "Misc/App.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDesc.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -32,7 +33,6 @@
 #include "MeshPartitionDefinition.h"
 #include "MeshPartitionTransformerPipeline.h"
 #include "MeshPartitionRectangleGenerator.h"
-#include "Modifiers/MeshPartitionMeshProvider.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIMeshTerrain, Log, All);
 
@@ -54,7 +54,7 @@ namespace UnrealAIMeshTerrain
 			return TEXT("Mesh Terrain is not enabled in this project: enable the MeshTerrainMode plugin (Edit > Plugins, it enables MeshPartition) and restart the editor, or call meshTerrain | call EnableMeshTerrain()");
 		if (!GEditor || !UE::MeshPartition::UMeshPartitionEditorSubsystem::Get())
 			return TEXT("the Mesh Partition editor subsystem is not running (Mesh Terrain needs the Unreal Editor)");
-		if (GEditor->PlayWorld)
+		if (UnrealMcpRql::PlayWorld())
 			return TEXT("a Play In Editor session is running: stop it first (Mesh Terrain edits the editor world)");
 		if (!UnrealMcpRql::EditorWorld())
 			return TEXT("no editor world is open");
@@ -165,16 +165,6 @@ namespace UnrealAIMeshTerrain
 		return Unloaded.Num();
 	}
 
-	void CountTerrainActors(const AMeshPartition* Terrain, int32& OutTotal, int32& OutLoaded)
-	{
-		OutTotal = OutLoaded = 0;
-		ForEachTerrainActorDesc(Terrain, [&OutTotal, &OutLoaded](const FWorldPartitionActorDescInstance& Instance)
-		{
-			++OutTotal;
-			OutLoaded += Instance.IsLoaded() ? 1 : 0;
-		});
-	}
-
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain)
 	{
 		return Terrain ? Cast<UMeshPartitionEditorComponent>(Terrain->GetMeshPartitionComponent()) : nullptr;
@@ -229,13 +219,22 @@ namespace UnrealAIMeshTerrain
 		return Out;
 	}
 
+	namespace
+	{
+		/** Whether @p Section still shows its intermediate full-resolution preview mesh (its final static mesh is not made yet). */
+		bool IsPreviewShown(const APreviewSection* Section)
+		{
+			const TSharedPtr<const UE::MeshPartition::FMeshData> Preview = Section->GetPreviewMesh();
+			return Preview.IsValid() && Preview->TriangleCount() > 0;
+		}
+	}
+
 	int32 RenderedTriangles(const APreviewSection* Section)
 	{
 		if (!Section)
 			return 0;
-		const TSharedPtr<const UE::MeshPartition::FMeshData> Preview = Section->GetPreviewMesh();
-		if (Preview.IsValid() && Preview->TriangleCount() > 0)
-			return Preview->TriangleCount();
+		if (IsPreviewShown(Section))
+			return Section->GetPreviewMesh()->TriangleCount();
 		int32 Triangles = 0;
 		for (const UStaticMeshComponent* Mesh : Section->GetMeshComponents())
 		{
@@ -266,7 +265,7 @@ namespace UnrealAIMeshTerrain
 			Parts.Add(FString::Printf(TEXT("%d loaded modifier(s) not registered with the terrain yet"), Unregistered));
 		if (bNoBase)
 			return Parts.IsEmpty() ? FString(TEXT("built (the terrain has no base mesh)")) : FString::Join(Parts, TEXT(", "));
-		if (ActiveBuilds > 0)
+		if (bBuilding)
 			Parts.Add(TEXT("sections are being built"));
 		else if (Sections == 0)
 			Parts.Add(TEXT("no section is built yet"));
@@ -312,27 +311,28 @@ namespace UnrealAIMeshTerrain
 		const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
 		if (!Component)
 			return State;
-		const TArray<UModifierComponent*> Current = Modifiers(Terrain, /*bBases*/ true);
-		State.bNoBase = !Current.ContainsByPredicate([](const UModifierComponent* Modifier) { return Modifier->IsBase(); });
+		const TSet<UModifierComponent*> Current(Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier); }));
+		State.bNoBase = !Algo::AnyOf(Current, [](const UModifierComponent* Modifier) { return Modifier->IsBase(); });
 		// A modifier that loaded (World Partition) or was spawned joins the build when the editor component lists it.
 		ForEachTerrainActorDesc(Terrain, [&State, &Current](const FWorldPartitionActorDescInstance& Instance)
 		{
+			++State.Actors;
 			if (const AActor* Actor = Instance.IsLoaded() ? Instance.GetActor(/*bEvenIfPendingKill*/ false) : nullptr; IsValid(Actor))
 			{
+				++State.LoadedActors;
 				TArray<UModifierComponent*> Components;
 				Actor->GetComponents(Components);
 				for (UModifierComponent* Modifier : Components)
 					State.Unregistered += IsValid(Modifier) && !Current.Contains(Modifier) ? 1 : 0;
 			}
 		});
-		State.ActiveBuilds = Component->IsAnyPreviewSectionBuildActive() ? 1 : 0;
+		State.bBuilding = Component->IsAnyPreviewSectionBuildActive();
 		const bool bStaticMeshes = MakesStaticMeshes(Terrain);
 		for (const APreviewSection* Section : PreviewSections(Terrain))
 		{
 			++State.Sections;
 			State.Triangles += RenderedTriangles(Section);
-			const TSharedPtr<const UE::MeshPartition::FMeshData> Preview = Section->GetPreviewMesh();
-			const bool bPreviewShown = Preview.IsValid() && Preview->TriangleCount() > 0;
+			const bool bPreviewShown = IsPreviewShown(Section);
 			bool bStaticMesh = false;
 			for (const UStaticMeshComponent* Mesh : Section->GetMeshComponents())
 			{
@@ -465,15 +465,18 @@ namespace UnrealAIMeshTerrain
 		const FVector Start(X, Y, Bounds.Max.Z + 1000.0);
 		const FVector End(X, Y, Bounds.Min.Z - 1000.0);
 		// The rendered sections' collision: exactly what physics, line traces and placed actors meet.
+		const FCollisionQueryParams Params(SCENE_QUERY_STAT(MeshTerrainSurface), /*bTraceComplex*/ true);
+		TArray<UPrimitiveComponent*> Components;
 		for (const APreviewSection* Section : PreviewSections(Terrain))
 		{
-			TArray<UPrimitiveComponent*> Components;
 			Section->GetComponents(Components);
 			for (UPrimitiveComponent* Component : Components)
 			{
+				const FBox Box = Component->Bounds.GetBox();
 				FHitResult Hit;
 				if (Component->IsVisible() && Component->GetCollisionEnabled() != ECollisionEnabled::NoCollision
-					&& Component->LineTraceComponent(Hit, Start, End, FCollisionQueryParams(SCENE_QUERY_STAT(MeshTerrainSurface), /*bTraceComplex*/ true))
+					&& X >= Box.Min.X && X <= Box.Max.X && Y >= Box.Min.Y && Y <= Box.Max.Y
+					&& Component->LineTraceComponent(Hit, Start, End, Params)
 					&& (!Out.bInside || Hit.ImpactPoint.Z > Out.Height))
 				{
 					Out.bInside = true;
@@ -485,9 +488,13 @@ namespace UnrealAIMeshTerrain
 		if (!Out.bInside || !bChannels)
 			return Out;
 		// The paint channels are not in the collision: evaluate the modifier stack around the point (cached per region).
-		const TArray<FRegionMesh> Around = Evaluated ? TArray<FRegionMesh>()
-			: BuildRegion(Terrain, FBox(FVector(X - 250.0, Y - 250.0, Bounds.Min.Z - 1000.0), FVector(X + 250.0, Y + 250.0, Bounds.Max.Z + 1000.0)));
-		for (const FRegionMesh& Part : Evaluated ? *Evaluated : Around)
+		TArray<FRegionMesh> Around;
+		if (!Evaluated)
+		{
+			Around = BuildRegion(Terrain, FBox(FVector(X - 250.0, Y - 250.0, Bounds.Min.Z - 1000.0), FVector(X + 250.0, Y + 250.0, Bounds.Max.Z + 1000.0)));
+			Evaluated = &Around;
+		}
+		for (const FRegionMesh& Part : *Evaluated)
 		{
 			if (!Part.Spatial.IsValid())
 				continue;

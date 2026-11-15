@@ -27,33 +27,26 @@ namespace UnrealAIMeshTerrainRqlApiLocal
 		return Out;
 	}
 
-	bool CheckTimeout(double TimeoutSeconds)
+	/** The guards, then @p Build (UnrealAIMeshTerrain::Rebuild or WaitForBuild) timed, as the operations' result. */
+	FUnrealAIMeshTerrainBuild RunBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds, bool (*Build)(UE::MeshPartition::AMeshPartition*, double))
 	{
-		return TimeoutSeconds >= 1.0 && TimeoutSeconds <= 600.0
-			|| UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("TimeoutSeconds %g is outside 1 .. 600"), TimeoutSeconds));
+		if (TimeoutSeconds < 1.0 || TimeoutSeconds > 600.0)
+			return UnrealMcpRql::Failed<FUnrealAIMeshTerrainBuild>(FString::Printf(TEXT("TimeoutSeconds %g is outside 1 .. 600"), TimeoutSeconds));
+		if (!UnrealAIMeshTerrain::CheckAvailable() || !UnrealAIMeshTerrain::CheckTerrain(Terrain))
+			return FUnrealAIMeshTerrainBuild();
+		const double Start = FPlatformTime::Seconds();
+		return Build(Terrain, TimeoutSeconds) ? BuildResult(Terrain, FPlatformTime::Seconds() - Start) : FUnrealAIMeshTerrainBuild();
 	}
 }
 
 FUnrealAIMeshTerrainBuild UUnrealAIMeshTerrainRqlApi::Rebuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds)
 {
-	using namespace UnrealAIMeshTerrainRqlApiLocal;
-	if (!UnrealAIMeshTerrain::CheckAvailable() || !UnrealAIMeshTerrain::CheckTerrain(Terrain) || !CheckTimeout(TimeoutSeconds))
-		return FUnrealAIMeshTerrainBuild();
-	const double Start = FPlatformTime::Seconds();
-	if (!UnrealAIMeshTerrain::Rebuild(Terrain, TimeoutSeconds))
-		return FUnrealAIMeshTerrainBuild();
-	return BuildResult(Terrain, FPlatformTime::Seconds() - Start);
+	return UnrealAIMeshTerrainRqlApiLocal::RunBuild(Terrain, TimeoutSeconds, &UnrealAIMeshTerrain::Rebuild);
 }
 
 FUnrealAIMeshTerrainBuild UUnrealAIMeshTerrainRqlApi::WaitForBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds)
 {
-	using namespace UnrealAIMeshTerrainRqlApiLocal;
-	if (!UnrealAIMeshTerrain::CheckAvailable() || !UnrealAIMeshTerrain::CheckTerrain(Terrain) || !CheckTimeout(TimeoutSeconds))
-		return FUnrealAIMeshTerrainBuild();
-	const double Start = FPlatformTime::Seconds();
-	if (!UnrealAIMeshTerrain::WaitForBuild(Terrain, TimeoutSeconds))
-		return FUnrealAIMeshTerrainBuild();
-	return BuildResult(Terrain, FPlatformTime::Seconds() - Start);
+	return UnrealAIMeshTerrainRqlApiLocal::RunBuild(Terrain, TimeoutSeconds, &UnrealAIMeshTerrain::WaitForBuild);
 }
 
 FUnrealAIMeshTerrainSurface UUnrealAIMeshTerrainRqlApi::Surface(UE::MeshPartition::AMeshPartition* Terrain, FVector Point)

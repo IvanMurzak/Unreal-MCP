@@ -7,12 +7,8 @@
 #include "ScopedTransaction.h"
 #include "MeshPartitionMeshData.h" // FMeshABBTree3
 
-class AActor;
-class UWorld;
-
 namespace UE::MeshPartition
 {
-	class FMeshData;
 	class AMeshPartition;
 	class APreviewSection;
 	class UMeshPartitionDefinition;
@@ -70,9 +66,6 @@ namespace UnrealAIMeshTerrain
 	 */
 	int32 LoadTerrainActors(const AMeshPartition* Terrain);
 
-	/** The terrain's base / modifier actors on disk (World Partition actor descriptors) and how many of them are loaded. */
-	void CountTerrainActors(const AMeshPartition* Terrain, int32& OutTotal, int32& OutLoaded);
-
 	/** The editor component that builds @p Terrain (null outside the editor or before the actor registered). */
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain);
 
@@ -98,7 +91,7 @@ namespace UnrealAIMeshTerrain
 
 	/**
 	 * Where the asynchronous build of a terrain stands. A section is built in three steps: the modifier stack is evaluated on
-	 * worker threads (ActiveBuilds), the result shows at once on the section's preview mesh component (full resolution, with
+	 * worker threads (bBuilding), the result shows at once on the section's preview mesh component (full resolution, with
 	 * collision once cooked: Cooking), then the definition's preview transformer pipeline turns it into a (Nanite) static mesh
 	 * that replaces it, with that mesh's collision (Finishing until it exists, CompilingMeshes while it compiles).
 	 */
@@ -106,13 +99,15 @@ namespace UnrealAIMeshTerrain
 	{
 		int32 Sections = 0;            // preview sections
 		int32 Triangles = 0;           // rendered by the sections now
-		int32 ActiveBuilds = 0;        // modifier stack evaluations in flight (this terrain)
+		bool bBuilding = false;        // modifier stack evaluations in flight (this terrain)
 		int32 Cooking = 0;             // sections whose rendered mesh has no collision yet
 		int32 Finishing = 0;           // sections still showing the intermediate preview mesh (static mesh not made yet)
 		int32 CompilingMeshes = 0;     // the sections' static meshes still compiling
 		int32 Unregistered = 0;        // loaded modifiers of the terrain its editor component does not list yet (just loaded / spawned)
+		int32 Actors = 0;              // the terrain's base / modifier actors on disk (World Partition actor descriptors)
+		int32 LoadedActors = 0;        // ... and how many of them are loaded
 		bool bNoBase = false;          // the terrain has no base mesh: nothing to build
-		bool IsReady() const { return Unregistered == 0 && (bNoBase || (ActiveBuilds == 0 && Cooking == 0 && Finishing == 0 && CompilingMeshes == 0 && Sections > 0)); }
+		bool IsReady() const { return Unregistered == 0 && (bNoBase || (!bBuilding && Cooking == 0 && Finishing == 0 && CompilingMeshes == 0 && Sections > 0)); }
 		FString Describe() const;
 	};
 

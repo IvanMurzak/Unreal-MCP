@@ -318,8 +318,7 @@ def main() -> int:
                 project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
                 build(engine, project)
         if args.mode != "isolated":
-            compatible = [n for n in extensions() if supports_engine(n, version)]
-            profile = "all" if selected == compatible else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
+            profile = "all" if args.extensions is None else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
             project = prepare(engine, profile, selected, output, core_tests=True)
             if args.mode != "prepare":
                 build(engine, project)

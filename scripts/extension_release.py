@@ -48,7 +48,7 @@ def min_engine(plugin: str) -> tuple[int, int] | None:
 
 
 def supports_engine(plugin: str, engine: tuple[int, int]) -> bool:
-    """Whether @plugin builds on Unreal Engine @engine (major, minor): every suite, release and build loop asks this."""
+    """Whether @plugin builds on Unreal Engine @engine (major, minor) (extension_suite.for_engine asks this)."""
     minimum = min_engine(plugin)
     return minimum is None or tuple(engine[:2]) >= minimum
 

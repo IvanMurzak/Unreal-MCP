@@ -10,13 +10,11 @@
 #include "UnrealAIMeshTerrainRqlApi.h"
 
 #include "Engine/World.h"
-#include "EngineUtils.h"
-#include "Materials/MaterialInterface.h"
+#include "UObject/UObjectIterator.h"
 
 #include "MeshPartition.h"
 #include "MeshPartitionDefinition.h"
 #include "MeshPartitionEditorComponent.h"
-#include "MeshPartitionMeshData.h"
 #include "MeshPartitionModifierComponent.h"
 #include "MeshPartitionPreviewSection.h"
 
@@ -62,18 +60,11 @@ namespace UnrealAIMeshTerrainModuleLocal
 	TArray<UObject*> WorldModifiers(bool bBases)
 	{
 		TArray<UObject*> Out;
-		UWorld* World = UnrealMcpRql::EditorWorld();
-		if (!World)
-			return Out;
-		for (TActorIterator<AActor> It(World); It; ++It)
+		const UWorld* World = UnrealMcpRql::EditorWorld();
+		for (TObjectIterator<UModifierComponent> It; It && World; ++It)
 		{
-			TArray<UModifierComponent*> Components;
-			It->GetComponents(Components);
-			for (UModifierComponent* Modifier : Components)
-			{
-				if (IsValid(Modifier) && (bBases || !Modifier->IsBase()))
-					Out.Add(Modifier);
-			}
+			if (IsValid(*It) && It->GetWorld() == World && (bBases || !It->IsBase()))
+				Out.Add(*It);
 		}
 		return Out;
 	}
@@ -86,16 +77,15 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetBoolField(TEXT("Ready"), State.IsReady());
 		Out->SetNumberField(TEXT("Sections"), State.Sections);
 		Out->SetNumberField(TEXT("Triangles"), State.Triangles);
-		Out->SetNumberField(TEXT("ActiveBuilds"), State.ActiveBuilds);
+		Out->SetBoolField(TEXT("Building"), State.bBuilding);
 		Out->SetNumberField(TEXT("Cooking"), State.Cooking);
 		Out->SetNumberField(TEXT("Finishing"), State.Finishing);
 		Out->SetNumberField(TEXT("CompilingMeshes"), State.CompilingMeshes);
-		int32 Total = 0, Loaded = 0;
-		CountTerrainActors(Terrain, Total, Loaded);
-		Out->SetNumberField(TEXT("Actors"), Total);
-		Out->SetNumberField(TEXT("LoadedActors"), Loaded);
-		Out->SetStringField(TEXT("State"), Total > Loaded
-			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition): any meshTerrain call loads them"), *State.Describe(), Total - Loaded, Total)
+		Out->SetNumberField(TEXT("Actors"), State.Actors);
+		Out->SetNumberField(TEXT("LoadedActors"), State.LoadedActors);
+		Out->SetStringField(TEXT("State"), State.Actors > State.LoadedActors
+			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition): any meshTerrain call loads them"),
+				*State.Describe(), State.Actors - State.LoadedActors, State.Actors)
 			: State.Describe());
 		return MakeShared<FJsonValueObject>(Out);
 	}
@@ -181,7 +171,7 @@ public:
 			TEXT("the built terrain's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BoxJson(BuiltBounds(Cast<AMeshPartition>(Object))); });
 		Context.AddJsonMember(TerrainClass, TEXT("Build"),
-			TEXT("the asynchronous build: Ready (mesh, collision and rendering match the modifiers), Sections, Triangles (rendered now), ActiveBuilds, Cooking (collision), Finishing (final mesh not made), CompilingMeshes, Actors / LoadedActors (World Partition), State"),
+			TEXT("the asynchronous build: Ready (mesh, collision and rendering match the modifiers), Sections, Triangles (rendered now), Building, Cooking (collision), Finishing (final mesh not made), CompilingMeshes, Actors / LoadedActors (World Partition), State"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BuildJson(Object); });
 		Context.AddJsonMember(TerrainClass, TEXT("Sections"),
 			TEXT("the built (preview) sections: Name, Triangles (rendered now), Bounds {Min, Max, SizeMeters}"),
