@@ -279,6 +279,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 	FUnrealAIMeshTerrainStroke Run(AMeshPartition* Terrain, const FStroke& Stroke, const FText& Description)
 	{
 		const double Start = FPlatformTime::Seconds();
+		const auto Elapsed = [Start]() { return FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0; };
 		if (!FMath::IsFinite(Stroke.Point.X) || !FMath::IsFinite(Stroke.Point.Y) || !FMath::IsFinite(Stroke.Amount))
 			return Failed(TEXT("Point and the amounts must be finite numbers"));
 		if (!(Stroke.Radius >= 1.0 && Stroke.Radius <= MaxRadius))
@@ -454,7 +455,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 				Out.Brush = Owner ? Owner->GetActorLabel() : FString();
 			}
 			Out.Ready = true;
-			Out.Seconds = FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0;
+			Out.Seconds = Elapsed();
 			return Out;
 		}
 		// The moved vertices become offsets of the active sculpt layer (what the Sculpt tool does at the end of a stroke).
@@ -464,12 +465,14 @@ namespace UnrealAIMeshTerrainSculptLocal
 
 		Out.Brush = Owner ? Owner->GetActorLabel() : FString();
 		Out.NewBrush = bNew;
-		const double Round = Stroke.Kind == EStroke::Paint ? 1000.0 : 100.0;
-		Out.Before = FMath::RoundToDouble(Out.Before * Round) / Round;
-		Out.After = FMath::RoundToDouble(Out.After * Round) / Round;
-		Out.Ready = WaitForBuild(Terrain);
-		Out.Seconds = FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0;
-		return Out.Ready ? Out : FUnrealAIMeshTerrainStroke();
+		const double Digits = Stroke.Kind == EStroke::Paint ? 1000.0 : 100.0;
+		Out.Before = FMath::RoundToDouble(Out.Before * Digits) / Digits;
+		Out.After = FMath::RoundToDouble(Out.After * Digits) / Digits;
+		if (!WaitForBuild(Terrain))
+			return FUnrealAIMeshTerrainStroke();
+		Out.Ready = true;
+		Out.Seconds = Elapsed();
+		return Out;
 	}
 }
 
