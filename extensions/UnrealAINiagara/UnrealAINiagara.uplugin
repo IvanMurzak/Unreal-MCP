@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 3,
-  "VersionName": "0.2.0",
+  "Version": 4,
+  "VersionName": "0.3.0",
   "FriendlyName": "Unreal AI Niagara",
   "Description": "RQL module for Unreal's Niagara VFX system: create systems from templates (Niagara Fluids included), set emitters, modules and inputs, add scene collision, compile and place effects. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",

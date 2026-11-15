@@ -154,7 +154,7 @@ Captures base64 **PNG को MCP image content के रूप में** ल�
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Extensions को Unreal Engine 5.7+, उसी project में Unreal MCP 0.26.0+ और C++ toolchain चाहिए: releases source के रूप में आती हैं और आपके project के लिए compile होती हैं (अगली बार editor खोलने पर, या `--build` से तुरंत)। Install id `com.ivanmurzak.unreal-ai-<id>` है, जिसमें id नीचे की table से है। Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)।
+Extensions को Unreal Engine 5.7+, उसी project में Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+) और C++ toolchain चाहिए: releases source के रूप में आती हैं और आपके project के लिए compile होती हैं (अगली बार editor खोलने पर, या `--build` से तुरंत)। Install id `com.ivanmurzak.unreal-ai-<id>` है, जिसमें id नीचे की table से है। Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)।
 
 | Extension (id) | विवरण |
 | --- | --- |

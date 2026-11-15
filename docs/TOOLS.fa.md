@@ -160,7 +160,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 
 <div dir="rtl">
 
-افزونه‌ها به Unreal Engine 5.7+، Unreal MCP 0.26.0+ در همان پروژه و یک toolchain برای C++ نیاز دارند: نسخه‌ها به صورت سورس منتشر می‌شوند و برای پروژه شما کامپایل می‌شوند (در باز شدن بعدی ویرایشگر، یا همین حالا با `--build`). شناسه نصب `com.ivanmurzak.unreal-ai-<id>` است که `<id>` آن از جدول زیر می‌آید. گزینه‌های نصب (`--version`، `--build`، `--source` آفلاین): [نصب یک افزونه در پروژه](EXTENSIONS.md#installing-an-extension-into-a-project).
+افزونه‌ها به Unreal Engine 5.7+، Unreal MCP 0.26.0+ (ControlRig 0.28.0+، EnhancedInput 0.29.0+) در همان پروژه و یک toolchain برای C++ نیاز دارند: نسخه‌ها به صورت سورس منتشر می‌شوند و برای پروژه شما کامپایل می‌شوند (در باز شدن بعدی ویرایشگر، یا همین حالا با `--build`). شناسه نصب `com.ivanmurzak.unreal-ai-<id>` است که `<id>` آن از جدول زیر می‌آید. گزینه‌های نصب (`--version`، `--build`، `--source` آفلاین): [نصب یک افزونه در پروژه](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | افزونه (شناسه) | توضیح |
 | --- | --- |
