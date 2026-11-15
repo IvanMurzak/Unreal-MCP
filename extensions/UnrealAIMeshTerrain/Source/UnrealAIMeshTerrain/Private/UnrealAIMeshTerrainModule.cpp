@@ -61,21 +61,36 @@ namespace UnrealAIMeshTerrainModuleLocal
 	}
 
 	/**
-	 * Load @p Terrain's World Partition base / modifier actors before listing them: after a level is reopened they are
+	 * Load the World Partition base / modifier actors of @p ToLoad before listing them: after a level is reopened they are
 	 * unloaded, and an agent would find no modifier to name (unreal.find) until some operation loaded them. Not while
 	 * Mesh Terrain cannot be edited (Play In Editor running, plugins off).
 	 */
-	void LoadForListing(const AMeshPartition* Terrain)
+	void LoadForListing(TConstArrayView<AMeshPartition*> ToLoad)
 	{
-		if (UnavailableReason().IsEmpty())
+		if (!UnavailableReason().IsEmpty())
+			return;
+		for (const AMeshPartition* Terrain : ToLoad)
 			LoadTerrainActors(Terrain);
+	}
+
+	/** The modifiers of a terrain (@p Object) in build order, loaded first; with @p bBases only its base meshes. */
+	TArray<UObject*> ListedModifiers(UObject* Object, bool bBases)
+	{
+		AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
+		LoadForListing({ Terrain });
+		TArray<UObject*> Out;
+		for (UModifierComponent* Modifier : Modifiers(Terrain, bBases))
+		{
+			if (!bBases || Modifier->IsBase())
+				Out.Add(Modifier);
+		}
+		return Out;
 	}
 
 	/** Every modifier component of the editor world (base meshes left out unless @p bBases), bound to a terrain or not. */
 	TArray<UObject*> WorldModifiers(bool bBases)
 	{
-		for (const AMeshPartition* Terrain : Terrains())
-			LoadForListing(Terrain);
+		LoadForListing(Terrains());
 		TArray<UObject*> Out;
 		const UWorld* World = UnrealMcpRql::EditorWorld();
 		for (TObjectIterator<UModifierComponent> It; It && World; ++It)
@@ -216,29 +231,10 @@ public:
 			});
 		Context.AddObjectListMember(TerrainClass, TEXT("Modifiers"),
 			TEXT("the modifiers that shape the terrain, in build order (priority layer, then sub-priority); base meshes left out"),
-			ModifierClass, [](UObject* Object)
-			{
-				const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
-				LoadForListing(Terrain);
-				TArray<UObject*> Out;
-				for (UModifierComponent* Modifier : Modifiers(Terrain))
-					Out.Add(Modifier);
-				return Out;
-			});
+			ModifierClass, [](UObject* Object) { return ListedModifiers(Object, /*bBases*/ false); });
 		Context.AddObjectListMember(TerrainClass, TEXT("BaseMeshes"),
 			TEXT("the terrain's base meshes (MeshProvider modifiers: the sections Create or a heightmap import made)"),
-			ModifierClass, [](UObject* Object)
-			{
-				const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
-				LoadForListing(Terrain);
-				TArray<UObject*> Out;
-				for (UModifierComponent* Modifier : Modifiers(Terrain, /*bBases*/ true))
-				{
-					if (Modifier->IsBase())
-						Out.Add(Modifier);
-				}
-				return Out;
-			});
+			ModifierClass, [](UObject* Object) { return ListedModifiers(Object, /*bBases*/ true); });
 
 		Context.AddObjectMember(ModifierClass, TEXT("Terrain"), TEXT("the Mesh Terrain the modifier shapes (null when none)"),
 			TerrainClass, [](UObject* Object) -> UObject* { return TerrainOf(Cast<UModifierComponent>(Object)); });
