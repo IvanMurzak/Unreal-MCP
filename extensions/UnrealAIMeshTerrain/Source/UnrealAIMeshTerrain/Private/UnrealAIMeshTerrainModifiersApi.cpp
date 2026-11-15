@@ -6,13 +6,11 @@
 
 #include "IUnrealMcpRqlModule.h"
 
-#include "ActorFactories/ActorFactory.h"
 #include "Components/DynamicMeshComponent.h"
 #include "Components/SplineComponent.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "GeometryScript/MeshPrimitiveFunctions.h"
 #include "UDynamicMesh.h"
 
@@ -92,19 +90,6 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			return nullptr;
 		UClass* Class = FindObject<UClass>(nullptr, *FString::Printf(TEXT("/Script/MeshPartitionEditor.%sModifier"), **Found));
 		return Class && Class->IsChildOf(UModifierComponent::StaticClass()) && !Class->HasAnyClassFlags(CLASS_Abstract) ? Class : nullptr;
-	}
-
-	/** The channel names of @p Terrain's definition, for messages. */
-	FString ChannelList(const AMeshPartition* Terrain)
-	{
-		const UMeshPartitionDefinition* Definition = Terrain ? Terrain->GetMeshPartitionDefinition() : nullptr;
-		TArray<FString> Names;
-		if (Definition)
-		{
-			for (const FName& Name : Definition->GetChannelNames())
-				Names.Add(Name.ToString());
-		}
-		return Names.IsEmpty() ? FString(TEXT("none")) : FString::Join(Names, TEXT(", "));
 	}
 
 	/** Fail unless @p Channel is one of @p Terrain's paint channels (empty passes when @p bAllowEmpty). */
@@ -211,44 +196,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	/** Whether @p Modifier is a @p Kind modifier or a subclass of one (a Blueprint of it, InstancedPatch for Patch). */
 	bool IsKind(const UModifierComponent* Modifier, const TCHAR* Kind);
 
-	/**
-	 * Place a modifier of @p Class the way the Modifiers palette does (UModifierActorFactory: an AModifierActor named after
-	 * the class, with a billboard) at @p Location, then bind it to @p Terrain: the factory binds the nearest terrain by its
-	 * own rule, not always the one under it. @p OutPrevious is the terrain it bound first (to rebuild it too).
-	 */
-	UModifierComponent* SpawnModifier(AMeshPartition* Terrain, UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label, AMeshPartition*& OutPrevious)
-	{
-		OutPrevious = nullptr;
-		if (!Class)
-			return UnrealMcpRql::Failed<UModifierComponent*>(TEXT("this engine's MeshPartitionEditor has no such modifier class"));
-		UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryByClass(UE::MeshPartition::UModifierActorFactory::StaticClass()) : nullptr;
-		UWorld* World = Terrain->GetWorld();
-		ULevel* Level = World ? World->GetCurrentLevel() : nullptr;
-		if (!Factory || !Level)
-			return UnrealMcpRql::Failed<UModifierComponent*>(TEXT("the Mesh Partition modifier actor factory is not registered (is the MeshPartition plugin loaded?)"));
-		AActor* Actor = Factory->CreateActor(Class, Level, FTransform(Rotation, Location));
-		UModifierComponent* Modifier = Actor ? Cast<UModifierComponent>(Actor->FindComponentByClass(Class)) : nullptr;
-		if (!Modifier)
-		{
-			if (Actor)
-				World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
-			return UnrealMcpRql::Failed<UModifierComponent*>(FString::Printf(TEXT("could not place a %s"), *Class->GetName()));
-		}
-		if (!Label.IsEmpty())
-			Actor->SetActorLabel(Label);
-		AMeshPartition* Bound = TerrainOf(Modifier);
-		if (Bound != Terrain)
-		{
-			OutPrevious = Bound;
-			Modifier->Modify();
-			// The Blueprint setter also tells the terrains, so they gather the modifier (the plain setter does not).
-			Modifier->BP_SetAffectedMegaMesh(Terrain);
-		}
-		return Modifier;
-	}
-
 	/** The modifier's summary plus where @p Terrain's build stands. */
-	FModifierOpResult Describe(UModifierComponent* Modifier, const AMeshPartition* Terrain, double Seconds)
+	FModifierOpResult Describe(UModifierComponent* Modifier, const AMeshPartition* Terrain, double Start)
 	{
 		FModifierOpResult Out;
 		Out.Modifier = Modifier;
@@ -261,7 +210,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Out.Disabled = Modifier->IsDisabled();
 		}
 		Out.Terrain = Terrain ? Terrain->GetActorNameOrLabel() : FString();
-		Out.Seconds = FMath::RoundToDouble(Seconds * 100.0) / 100.0;
+		Out.Seconds = SecondsSince(Start);
 		if (Terrain)
 		{
 			const FBuildState State = BuildState(Terrain);
@@ -290,12 +239,10 @@ namespace UnrealAIMeshTerrainModifiersLocal
 				continue;
 			Main = Main ? Main : Terrain;
 			Done.Add(Terrain);
-			if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
-				Component->UpdateModifierList();
-			if (!WaitForBuild(Terrain))
+			if (!WaitForBuild(Terrain)) // its first round updates the terrain's modifier list
 				return FModifierOpResult();
 		}
-		return Describe(Modifier, Main, FPlatformTime::Seconds() - Start);
+		return Describe(Modifier, Main, Start);
 	}
 
 	/**
@@ -334,18 +281,6 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		}
 	};
 
-	/** @p Base, or @p Base2, @p Base3, ...: the first actor label the editor world does not use yet. */
-	FString UniqueLabel(UWorld* World, const FString& Base)
-	{
-		TSet<FString> Used;
-		for (TActorIterator<AActor> It(World); It; ++It)
-			Used.Add(It->GetActorLabel());
-		FString Label = Base;
-		for (int32 Index = 2; Used.Contains(Label); ++Index)
-			Label = FString::Printf(TEXT("%s%d"), *Base, Index);
-		return Label;
-	}
-
 	/**
 	 * A weight utility modifier's build cache key leaves out its InnerValue / OuterValue (UE 5.8): after changing them the
 	 * terrain rebuilds from the cached old weights. Its position is part of the key, so lift the actor by a hundredth of a
@@ -362,7 +297,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
 	bool CheckAdd(const AMeshPartition* Terrain, const FVector& Location)
 	{
-		if (!CheckAvailable() || !CheckTerrain(Terrain))
+		if (!CheckTerrain(Terrain))
 			return false;
 		return IsPoint(Location) || UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	}
@@ -681,7 +616,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(U
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double Falloff, bool Closed, const FString& Channel, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain) || !CheckPoints(Points, Closed) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ true))
+	if (!CheckTerrain(Terrain) || !CheckPoints(Points, Closed) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ true))
 		return FModifierOpResult();
 	if (!IsLength(Width, /*bAllowZero*/ true) || !IsLength(Falloff) || Falloff < 0.1)
 		return Fail(FString::Printf(TEXT("Width %g must be at least 0 and Falloff %g at least 0.1, both at most 10000000 cm"), Width, Falloff));
@@ -700,7 +635,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(U
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size, const FString& Operation, FRotator Rotation, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckTerrain(Terrain))
 		return FModifierOpResult();
 	const FString* ShapeName = ShapeNames().FindByPredicate([&Shape](const FString& Name) { return Name.Equals(Shape.TrimStartAndEnd(), ESearchCase::IgnoreCase); });
 	if (!ShapeName)

@@ -14,7 +14,6 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
-#include "ScopedTransaction.h"
 
 #include "MeshPartition.h"
 #include "MeshPartitionDefinition.h"
@@ -52,8 +51,8 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 
 	bool CheckCommon(const FString& Label, const FVector& Location, double SizeMeters, double TimeoutSeconds)
 	{
-		if (!(TimeoutSeconds >= 1.0 && TimeoutSeconds <= 600.0))
-			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("TimeoutSeconds %g is outside 1 .. 600"), TimeoutSeconds));
+		if (!CheckTimeout(TimeoutSeconds))
+			return false;
 		if (!(SizeMeters >= MinSizeMeters && SizeMeters <= MaxSizeMeters))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("SizeMeters %g is outside %g .. %g"), SizeMeters, MinSizeMeters, MaxSizeMeters));
 		if (Location.ContainsNaN() || Location.GetAbsMax() > MaxLocation)
@@ -318,7 +317,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 FString UUnrealAIMeshTerrainCreateApi::Delete(UE::MeshPartition::AMeshPartition* Terrain)
 {
 	using namespace UnrealAIMeshTerrainCreateApiLocal;
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckTerrain(Terrain))
 		return FString();
 	// Right after an undo / redo the editor component may not list the restored modifiers yet: refresh before counting and
 	// before DestroyTerrain collects the actors from that list.

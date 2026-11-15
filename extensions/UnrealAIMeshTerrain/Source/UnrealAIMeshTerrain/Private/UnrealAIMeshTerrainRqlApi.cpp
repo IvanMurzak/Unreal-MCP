@@ -14,7 +14,7 @@
 
 namespace UnrealAIMeshTerrainRqlApiLocal
 {
-	FUnrealAIMeshTerrainBuild BuildResult(const UE::MeshPartition::AMeshPartition* Terrain, double Seconds)
+	FUnrealAIMeshTerrainBuild BuildResult(const UE::MeshPartition::AMeshPartition* Terrain, double Start)
 	{
 		const UnrealAIMeshTerrain::FBuildState State = UnrealAIMeshTerrain::BuildState(Terrain);
 		FUnrealAIMeshTerrainBuild Out;
@@ -22,7 +22,7 @@ namespace UnrealAIMeshTerrainRqlApiLocal
 		Out.Sections = State.Sections;
 		Out.Triangles = State.Triangles;
 		Out.Modifiers = UnrealAIMeshTerrain::Modifiers(Terrain).Num();
-		Out.Seconds = FMath::RoundToDouble(Seconds * 100.0) / 100.0;
+		Out.Seconds = UnrealAIMeshTerrain::SecondsSince(Start);
 		Out.State = State.Describe();
 		return Out;
 	}
@@ -30,12 +30,10 @@ namespace UnrealAIMeshTerrainRqlApiLocal
 	/** The guards, then @p Build (UnrealAIMeshTerrain::Rebuild or WaitForBuild) timed, as the operations' result. */
 	FUnrealAIMeshTerrainBuild RunBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds, bool (*Build)(UE::MeshPartition::AMeshPartition*, double))
 	{
-		if (TimeoutSeconds < 1.0 || TimeoutSeconds > 600.0)
-			return UnrealMcpRql::Failed<FUnrealAIMeshTerrainBuild>(FString::Printf(TEXT("TimeoutSeconds %g is outside 1 .. 600"), TimeoutSeconds));
-		if (!UnrealAIMeshTerrain::CheckAvailable() || !UnrealAIMeshTerrain::CheckTerrain(Terrain))
+		if (!UnrealAIMeshTerrain::CheckTimeout(TimeoutSeconds) || !UnrealAIMeshTerrain::CheckTerrain(Terrain))
 			return FUnrealAIMeshTerrainBuild();
 		const double Start = FPlatformTime::Seconds();
-		return Build(Terrain, TimeoutSeconds) ? BuildResult(Terrain, FPlatformTime::Seconds() - Start) : FUnrealAIMeshTerrainBuild();
+		return Build(Terrain, TimeoutSeconds) ? BuildResult(Terrain, Start) : FUnrealAIMeshTerrainBuild();
 	}
 }
 
@@ -60,8 +58,7 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 	TArray<FUnrealAIMeshTerrainSurface> Out;
 	if (Points.Num() > 10000)
 		return UnrealMcpRql::Failed<TArray<FUnrealAIMeshTerrainSurface>>(FString::Printf(TEXT("%d points: at most 10000 per call"), Points.Num()));
-	if (!UnrealAIMeshTerrain::CheckAvailable() || !UnrealAIMeshTerrain::CheckTerrain(Terrain)
-		|| !UnrealAIMeshTerrain::WaitForBuild(Terrain, UnrealAIMeshTerrain::DefaultBuildTimeoutSeconds))
+	if (!UnrealAIMeshTerrain::CheckTerrain(Terrain) || !UnrealAIMeshTerrain::WaitForBuild(Terrain))
 		return Out;
 	// The paint channels come from evaluating the modifier stack: once over all the points (cached by the builder).
 	const FBox Built = UnrealAIMeshTerrain::BuiltBounds(Terrain);

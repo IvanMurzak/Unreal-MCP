@@ -6,22 +6,19 @@
 
 #include "IUnrealMcpRqlModule.h"
 
-#include "ActorFactories/ActorFactory.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
-#include "Editor.h"
 #include "Engine/World.h"
 #include "ScopedTransaction.h"
 
 #include "MeshPartition.h"
 #include "MeshPartitionDefinition.h"
-#include "MeshPartitionModifierActor.h"
 #include "MeshPartitionModifierToolTarget.h"
 #include "Modifiers/MeshPartitionMeshProvider.h"
 #include "Modifiers/MeshPartitionProjectSculptLayersModifier.h"
 
 /*
- * How a stroke is stored (verified in a UE 5.8 editor, see RESEARCH.md "sculpt"): Mesh Terrain Mode's Sculpt and Paint tools
+ * How a stroke is stored (verified in a UE 5.8 editor): Mesh Terrain Mode's Sculpt and Paint tools
  * edit a brush modifier (UProjectMeshLayersModifier, "BrushModifier") through UEditableModifierToolTarget: GetDynamicMesh()
  * is the terrain inside the brush's edit box (EditExtents = HALF size around the component, in its local space) as the
  * modifiers before it left it, with the brush's sculpt layers enabled (layer 0 the base, the active layer the one edited)
@@ -148,22 +145,6 @@ namespace UnrealAIMeshTerrainSculptLocal
 		return Density;
 	}
 
-	/** A unique label for a new brush modifier of @p Terrain: "<terrain>_Brush", "<terrain>_Brush2", ... */
-	FString BrushLabel(const AMeshPartition* Terrain)
-	{
-		TSet<FString> Taken;
-		for (UModifierComponent* Modifier : Modifiers(Terrain))
-		{
-			if (Modifier->GetOwner())
-				Taken.Add(Modifier->GetOwner()->GetActorLabel());
-		}
-		const FString Base = Terrain->GetActorLabel() + TEXT("_Brush");
-		FString Label = Base;
-		for (int32 Index = 2; Taken.Contains(Label); ++Index)
-			Label = FString::Printf(TEXT("%s%d"), *Base, Index);
-		return Label;
-	}
-
 	/**
 	 * Move the vertices of @p Mesh (in the brush's local space, @p Transform to world) that the stroke covers (or their
 	 * channel weights); returns how many changed, NoVertex when no vertex is under the brush, NoWeightLayer when the mesh has
@@ -284,7 +265,6 @@ namespace UnrealAIMeshTerrainSculptLocal
 	FUnrealAIMeshTerrainStroke Run(AMeshPartition* Terrain, const FStroke& Stroke, const FText& Description)
 	{
 		const double Start = FPlatformTime::Seconds();
-		const auto Elapsed = [Start]() { return FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0; };
 		if (!FMath::IsFinite(Stroke.Point.X) || !FMath::IsFinite(Stroke.Point.Y) || !FMath::IsFinite(Stroke.Amount))
 			return Failed(TEXT("Point and the amounts must be finite numbers"));
 		if (!(Stroke.Radius >= 1.0 && Stroke.Radius <= MaxRadius))
@@ -293,19 +273,15 @@ namespace UnrealAIMeshTerrainSculptLocal
 			return Failed(FString::Printf(TEXT("Falloff %g is outside 0 .. 1"), Stroke.Falloff));
 		if (!(Stroke.Strength > 0.0 && Stroke.Strength <= 1.0))
 			return Failed(FString::Printf(TEXT("Strength %g is outside 0 (exclusive) .. 1"), Stroke.Strength));
-		if (!CheckAvailable() || !CheckTerrain(Terrain))
+		if (!CheckTerrain(Terrain))
 			return FUnrealAIMeshTerrainStroke();
 		if (Stroke.Kind == EStroke::Paint)
 		{
 			const UMeshPartitionDefinition* Definition = Terrain->GetMeshPartitionDefinition();
-			const TArray<FName> Channels = Definition ? Definition->GetChannelNames() : TArray<FName>();
-			if (!Channels.Contains(Stroke.Channel))
+			if (!Definition || !Definition->GetChannelNames().Contains(Stroke.Channel)) // FName: case-insensitive
 			{
-				TArray<FString> Names;
-				for (const FName& Name : Channels)
-					Names.Add(Name.ToString());
 				return Failed(FString::Printf(TEXT("'%s' is not a paint channel of %s: its definition has %s"), *Stroke.Channel.ToString(), *Terrain->GetActorNameOrLabel(),
-					Names.IsEmpty() ? TEXT("none") : *FString::Join(Names, TEXT(", "))));
+					*ChannelList(Terrain)));
 			}
 		}
 		// Start from a built terrain: the surface height under the point places a new brush, the build bounds its depth.
@@ -397,17 +373,15 @@ namespace UnrealAIMeshTerrainSculptLocal
 			// Placed the way Mesh Terrain Mode's modifier palette places one, on the ground under the point.
 			const FSurfaceSample Ground = SampleSurface(Terrain, Stroke.Point.X, Stroke.Point.Y, /*bChannels*/ false);
 			const FVector Location(Stroke.Point, Ground.bInside ? Ground.Height : Terrain->GetActorLocation().Z);
-			UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryByClass(UE::MeshPartition::UModifierActorFactory::StaticClass()) : nullptr;
-			AActor* Actor = Factory ? Factory->CreateActor(UProjectMeshLayersModifier::StaticClass(), World->GetCurrentLevel(), FTransform(Location)) : nullptr;
-			Brush = Actor ? Actor->FindComponentByClass<UProjectMeshLayersModifier>() : nullptr;
+			AMeshPartition* Previous = nullptr;
+			Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
+				UniqueLabel(World, Terrain->GetActorLabel() + TEXT("_Brush")), Previous));
 			if (!Brush)
 			{
 				Transaction.Cancel();
-				return Failed(TEXT("could not place a brush modifier (UModifierActorFactory)"));
+				return FUnrealAIMeshTerrainStroke(); // SpawnModifier failed with the reason
 			}
-			Actor->SetActorLabel(BrushLabel(Terrain));
-			// The factory binds the nearest terrain by its own rule: bind this one. Applied after every modifier there is.
-			Brush->SetAffectedMeshPartition(Terrain);
+			// Applied after every modifier there is.
 			double Last = 0.0;
 			for (const UModifierComponent* Modifier : Modifiers(Terrain))
 			{
@@ -498,7 +472,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			if (!WaitForBuild(Terrain))
 				return FUnrealAIMeshTerrainStroke();
 			Out.Ready = true;
-			Out.Seconds = Elapsed();
+			Out.Seconds = SecondsSince(Start);
 			return Out;
 		}
 		// The moved vertices become offsets of the active sculpt layer (what the Sculpt tool does at the end of a stroke).
@@ -514,7 +488,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 		if (!WaitForBuild(Terrain))
 			return FUnrealAIMeshTerrainStroke();
 		Out.Ready = true;
-		Out.Seconds = Elapsed();
+		Out.Seconds = SecondsSince(Start);
 		return Out;
 	}
 }

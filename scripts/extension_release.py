@@ -123,8 +123,8 @@ def package(plugin: str, output: Path) -> Path:
 GATES = ("minEngineVersion", "experimental")
 
 
-def _without_unset_gates(record: dict) -> dict:
-    return {k: v for k, v in record.items() if k not in GATES or v not in (None, False)}
+def _without_gates(record: dict) -> dict:
+    return {k: v for k, v in record.items() if k not in GATES}
 
 
 def update_index(index: dict, metadata: dict, tag: str, checksum: str) -> dict:
@@ -145,8 +145,9 @@ def update_index(index: dict, metadata: dict, tag: str, checksum: str) -> dict:
     existing = entry["releases"].get(version)
     # A release published before a gate existed lacks it (or stores it unset: null / false): the same archive may gain
     # it, nothing else may change.
-    if existing and existing["repo"] == REPO and _without_unset_gates(existing) != {
-            k: v for k, v in release.items() if k not in GATES or k in _without_unset_gates(existing)}:
+    if existing and existing["repo"] == REPO and (
+            _without_gates(existing) != _without_gates(release)
+            or any(existing.get(k) not in (None, False, release.get(k)) for k in GATES)):
         raise ValueError("A published component version is immutable; bump its version")
     entry["releases"][version] = release
     if tuple(map(int, version.split('.'))) >= tuple(map(int, entry["version"].split('.'))):

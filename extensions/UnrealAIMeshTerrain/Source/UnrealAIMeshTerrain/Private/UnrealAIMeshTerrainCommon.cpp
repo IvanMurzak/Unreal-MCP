@@ -6,6 +6,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlPlay.h"
 
+#include "ActorFactories/ActorFactory.h"
 #include "Algo/AnyOf.h"
 #include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
@@ -27,6 +28,7 @@
 #include "MeshPartitionEditorSubsystem.h"
 #include "MeshPartitionMeshData.h"
 #include "MeshPartitionModifierComponent.h"
+#include "MeshPartitionModifierActor.h"
 #include "MeshPartitionModifierComponentDesc.h"
 #include "MeshPartitionPreviewComponents.h"
 #include "MeshPartitionPreviewSection.h"
@@ -70,6 +72,17 @@ namespace UnrealAIMeshTerrain
 		return false;
 	}
 
+	bool CheckTimeout(double TimeoutSeconds)
+	{
+		return (TimeoutSeconds >= MinTimeoutSeconds && TimeoutSeconds <= MaxTimeoutSeconds)
+			|| UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("TimeoutSeconds %g is outside %g .. %g"), TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+	}
+
+	double SecondsSince(double Start)
+	{
+		return FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0;
+	}
+
 	TArray<AMeshPartition*> Terrains()
 	{
 		TArray<AMeshPartition*> Out;
@@ -101,6 +114,8 @@ namespace UnrealAIMeshTerrain
 
 	bool CheckTerrain(const AMeshPartition* Terrain)
 	{
+		if (!CheckAvailable())
+			return false;
 		if (!Terrain)
 			return UnrealMcpRql::Failed<bool>(TEXT("Terrain is null: pass unreal.find(\"<label>\") of a Mesh Terrain (meshTerrains | select Label)"));
 		if (!IsValid(Terrain) || Terrain->GetWorld() != UnrealMcpRql::EditorWorld())
@@ -188,6 +203,64 @@ namespace UnrealAIMeshTerrain
 			});
 		}
 		return Out;
+	}
+
+	FString ChannelList(const AMeshPartition* Terrain)
+	{
+		const UMeshPartitionDefinition* Definition = Terrain ? Terrain->GetMeshPartitionDefinition() : nullptr;
+		TArray<FString> Names;
+		if (Definition)
+		{
+			for (const FName& Name : Definition->GetChannelNames())
+				Names.Add(Name.ToString());
+		}
+		return Names.IsEmpty() ? FString(TEXT("none")) : FString::Join(Names, TEXT(", "));
+	}
+
+	FString UniqueLabel(UWorld* World, const FString& Base)
+	{
+		TSet<FString> Used;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel().StartsWith(Base))
+				Used.Add(It->GetActorLabel());
+		}
+		FString Label = Base;
+		for (int32 Index = 2; Used.Contains(Label); ++Index)
+			Label = FString::Printf(TEXT("%s%d"), *Base, Index);
+		return Label;
+	}
+
+	UModifierComponent* SpawnModifier(AMeshPartition* Terrain, UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label,
+		AMeshPartition*& OutPrevious)
+	{
+		OutPrevious = nullptr;
+		if (!Class)
+			return UnrealMcpRql::Failed<UModifierComponent*>(TEXT("this engine's MeshPartitionEditor has no such modifier class"));
+		UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryByClass(UE::MeshPartition::UModifierActorFactory::StaticClass()) : nullptr;
+		UWorld* World = Terrain->GetWorld();
+		ULevel* Level = World ? World->GetCurrentLevel() : nullptr;
+		if (!Factory || !Level)
+			return UnrealMcpRql::Failed<UModifierComponent*>(TEXT("the Mesh Partition modifier actor factory is not registered (is the MeshPartition plugin loaded?)"));
+		AActor* Actor = Factory->CreateActor(Class, Level, FTransform(Rotation, Location));
+		UModifierComponent* Modifier = Actor ? Cast<UModifierComponent>(Actor->FindComponentByClass(Class)) : nullptr;
+		if (!Modifier)
+		{
+			if (Actor)
+				World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
+			return UnrealMcpRql::Failed<UModifierComponent*>(FString::Printf(TEXT("could not place a %s"), *Class->GetName()));
+		}
+		if (!Label.IsEmpty())
+			Actor->SetActorLabel(Label);
+		AMeshPartition* Bound = TerrainOf(Modifier);
+		if (Bound != Terrain)
+		{
+			OutPrevious = Bound;
+			Modifier->Modify();
+			// The Blueprint setter also tells the terrains, so they gather the modifier (the plain setter does not).
+			Modifier->BP_SetAffectedMegaMesh(Terrain);
+		}
+		return Modifier;
 	}
 
 	AMeshPartition* TerrainOf(const UModifierComponent* Modifier)
@@ -364,7 +437,7 @@ namespace UnrealAIMeshTerrain
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component"), *TerrainName(Terrain)));
 		const double Start = FPlatformTime::Seconds();
-		const double Deadline = Start + FMath::Clamp(TimeoutSeconds, 1.0, 600.0);
+		const double Deadline = Start + FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
 		FBuildState State;
 		int32 Rounds = 0;
 		while (true)

@@ -7,6 +7,9 @@
 #include "ScopedTransaction.h"
 #include "MeshPartitionMeshData.h" // FMeshABBTree3
 
+class UClass;
+class UWorld;
+
 namespace UE::MeshPartition
 {
 	class AMeshPartition;
@@ -20,7 +23,7 @@ namespace UE::MeshPartition
  * The helpers every Mesh Terrain operation shares (UnrealAIMeshTerrain*Api.cpp, the module's members, the specs). A Mesh
  * Terrain is a UE::MeshPartition::AMeshPartition actor ("MeshPartition" to RQL and Python); its shape is the stack of
  * modifier components (UModifierComponent) that target it, built asynchronously into preview sections (APreviewSection,
- * editor-only actors with the rendered mesh and its collision). See C:/wt/meshterrain-batch/RESEARCH.md.
+ * editor-only actors with the rendered mesh and its collision).
  *
  * Functions that can fail report it with UnrealMcpRql::Fail (the RQL call fails with that message) and return false /
  * nullptr: callers return at once.
@@ -35,6 +38,15 @@ namespace UnrealAIMeshTerrain
 
 	/** The default time an operation waits for the terrain to build before it fails (seconds). */
 	constexpr double DefaultBuildTimeoutSeconds = 120.0;
+	/** The TimeoutSeconds range the operations accept. */
+	constexpr double MinTimeoutSeconds = 1.0;
+	constexpr double MaxTimeoutSeconds = 600.0;
+
+	/** Fail ("TimeoutSeconds .. is outside 1 .. 600") and return false unless @p TimeoutSeconds is in that range. */
+	bool CheckTimeout(double TimeoutSeconds);
+
+	/** The seconds since @p Start (an FPlatformTime::Seconds()), rounded to 0.01: the operations' Seconds fields. */
+	double SecondsSince(double Start);
 
 	// ---- Guard -------------------------------------------------------------------------------------------------------
 
@@ -53,7 +65,7 @@ namespace UnrealAIMeshTerrain
 	AMeshPartition* FindTerrain(const FString& LabelOrName);
 
 	/**
-	 * Fail and return false when @p Terrain is null (with the "pass unreal.find(...)" hint) or not in the editor world; else
+	 * Fail and return false when Mesh Terrain cannot be edited (CheckAvailable), or @p Terrain is null (with the "pass unreal.find(...)" hint) or not in the editor world; else
 	 * load its base / modifier actors (LoadTerrainActors) so the operation sees the whole terrain.
 	 */
 	bool CheckTerrain(const AMeshPartition* Terrain);
@@ -71,6 +83,21 @@ namespace UnrealAIMeshTerrain
 
 	/** The modifiers that shape @p Terrain, in build order (priority layer, then sub-priority); @p bBases adds the base meshes. */
 	TArray<UModifierComponent*> Modifiers(const AMeshPartition* Terrain, bool bBases = false);
+
+	/** The paint channel names of @p Terrain's definition, joined for messages ("none" when it has none). */
+	FString ChannelList(const AMeshPartition* Terrain);
+
+	/** @p Base, or @p Base2, @p Base3, ...: the first actor label @p World does not use yet. */
+	FString UniqueLabel(UWorld* World, const FString& Base);
+
+	/**
+	 * Place a modifier of @p Class the way the Modifiers palette does (UModifierActorFactory: an AModifierActor named after
+	 * the class, with a billboard) at @p Location, labelled @p Label when set, then bind it to @p Terrain: the factory binds
+	 * the nearest terrain by its own rule, not always the one under it. @p OutPrevious is the terrain it bound first (to
+	 * rebuild it too). nullptr after Fail (a half-made actor is deleted).
+	 */
+	UModifierComponent* SpawnModifier(AMeshPartition* Terrain, UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label,
+		AMeshPartition*& OutPrevious);
 
 	/** The terrain @p Modifier shapes (null when it targets none). */
 	AMeshPartition* TerrainOf(const UModifierComponent* Modifier);
