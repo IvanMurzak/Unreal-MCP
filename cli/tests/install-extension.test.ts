@@ -904,10 +904,11 @@ describe('engine version helpers and listing labels', () => {
     expect(unknownExtensionMessage('x', [gated])).toContain(`${base.extensionId} (experimental, UE 5.8+)`);
   });
 
-  it('a catalog descriptor with an engine floor refuses an older project', async () => {
+  it('a --source extension.json engine floor refuses an older project', async () => {
     const project = makeProject(); // UE 5.7
     const catalog: ExtensionDescriptor[] = [{ ...EXTENSIONS_CATALOG[0], pluginName: 'FooNiagara', repo: null, minEngineVersion: '5.8' }];
     const source = makeExtensionSource('FooNiagara');
+    fs.writeFileSync(path.join(source, 'extension.json'), JSON.stringify({ minEngineVersion: '5.8' }));
     const r = await installExtension({ projectDir: project, extensionId: catalog[0].extensionId, catalog, source });
     expect(r.kind === 'failure' && r.error.message).toContain('requires Unreal Engine 5.8 or newer');
     expect(fs.existsSync(path.join(project, 'Plugins', 'FooNiagara'))).toBe(false);

@@ -264,6 +264,15 @@ class MonorepoTests(unittest.TestCase):
             release.update_index(index, meta, tag, 'b' * 64)
         with self.assertRaisesRegex(ValueError, 'immutable'):
             release.update_index(republished, {**meta, 'minEngineVersion': '5.8'}, tag, 'a' * 64)
+        # A record storing a gate unset (null / false) is the same as one without it.
+        legacy.update(minEngineVersion=None, experimental=False)
+        republished = release.update_index(index, meta, tag, 'a' * 64)
+        record = next(e for e in republished['extensions'] if e['pluginName'] == 'UnrealAINiagara')['releases'][meta['version']]
+        self.assertEqual(record['minEngineVersion'], '5.7')
+        self.assertNotIn('experimental', record)
+        # Dropping a gate from an already gated version is a change.
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(republished, {k: v for k, v in meta.items() if k != 'minEngineVersion'}, tag, 'a' * 64)
 
     def test_experimental_must_match_the_uplugin(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -43,6 +43,7 @@ import { readUProject } from '../utils/project.js';
 import { discoverEngine } from './engine.js';
 import { readEngineAssociationFromBuildVersion } from '../utils/engine-discovery.js';
 import {
+  ENGINE_VERSION,
   EXTENSIONS_CATALOG,
   engineMeetsMinimum,
   findExtension,
@@ -180,6 +181,30 @@ export async function installExtension(
       }
     }
 
+    // The project's engine, read once and only when a gate needs it.
+    let engineRead: { engine: [number, number] | null } | undefined;
+    const projectEngine = (): [number, number] | null =>
+      (engineRead ??= { engine: projectEngineVersion(uproject.engineAssociation, opts) }).engine;
+
+    // The latest release needs a newer engine: take the newest release this engine can build, if any (else the
+    // gate below refuses with the reason). An explicit --version is never replaced.
+    if (versionSource === 'index' && indexed && toVersion !== null) {
+      const latestGate = releaseGates(indexed, toVersion).minEngineVersion;
+      const engine = latestGate ? projectEngine() : null;
+      if (latestGate && engine && !engineMeetsMinimum(engine, latestGate)) {
+        const fallback = Object.keys(indexed.releases)
+          .filter((v) => engineMeetsMinimum(engine, releaseGates(indexed, v).minEngineVersion))
+          .sort((a, b) => compareSemver(b, a))[0];
+        if (fallback !== undefined) {
+          warnings.push(
+            `The latest ${pluginName} ${toVersion} requires Unreal Engine ${latestGate} or newer; installing ${fallback}, ` +
+              `the newest release for Unreal Engine ${engine[0]}.${engine[1]}.`,
+          );
+          toVersion = fallback;
+        }
+      }
+    }
+
     // Never downgrade an installed newer copy implicitly — only --version may.
     let keepInstalled = false;
     if (
@@ -202,25 +227,21 @@ export async function installExtension(
     if (indexed && !indexedRelease && !keepInstalled) {
       throw new Error(`No published ${pluginName} release ${toVersion} in the extensions index.`);
     }
-    if (indexedRelease) {
-      // A release record without a gate was published before gates existed: no restriction, unless it is the
-      // latest version, which the entry itself describes.
-      const latest = indexed !== undefined && stripLeadingV(toVersion ?? '') === indexed.version;
+    if (indexed && indexedRelease) {
       descriptor = { ...descriptor,
         minCoreVersion: indexedRelease.minCoreVersion === undefined ? descriptor.minCoreVersion : indexedRelease.minCoreVersion,
         enginePlugins: indexedRelease.enginePlugins ?? descriptor.enginePlugins,
-        minEngineVersion: indexedRelease.minEngineVersion !== undefined ? indexedRelease.minEngineVersion
-          : latest ? descriptor.minEngineVersion : null,
-        experimental: indexedRelease.experimental ?? (latest ? descriptor.experimental : undefined),
+        ...releaseGates(indexed, toVersion as string),
       };
     }
-    // A local source states its own gates (extension.json, .uplugin IsExperimentalVersion): they describe what is installed.
+    // A local source alone states the gates of what is installed (extension.json, .uplugin IsExperimentalVersion).
     if (sourceArg !== '') descriptor = { ...descriptor, ...readSourceGates(sourceArg) };
 
-    // Refuse an engine the extension cannot compile on, before anything is written.
+    // Refuse an engine the extension cannot compile on, before anything is written. A kept newer install is not
+    // installed by this run, so it is left alone.
     const minEngine = descriptor.minEngineVersion;
-    if (minEngine) {
-      const engine = projectEngineVersion(uproject.engineAssociation, opts);
+    if (minEngine && !keepInstalled) {
+      const engine = projectEngine();
       if (engine === null) {
         warnings.push(
           `${pluginName} requires Unreal Engine ${minEngine} or newer; could not determine this project's engine ` +
@@ -538,11 +559,30 @@ function extractZip(zipBytes: Uint8Array, destDir: string, warnings: string[]): 
  * resolves to (a source build's GUID). `null` when unknown.
  */
 function projectEngineVersion(engineAssociation: string, opts: InstallExtensionOptions): [number, number] | null {
+  // --engine-root is the engine that builds the project (runUbtBuild uses it first), so it is asked first too.
+  const explicitRoot = (opts.engineRoot ?? '').trim();
+  if (explicitRoot) {
+    const built = parseEngineVersion(readEngineAssociationFromBuildVersion(explicitRoot, process.platform));
+    if (built !== null) return built;
+  }
   const direct = parseEngineVersion(engineAssociation);
   if (direct !== null) return direct;
-  const engineRoot = (opts.engineRoot ?? '').trim()
-    || (engineAssociation.trim() === '' ? null : resolveEngineRoot(engineAssociation, opts));
+  const engineRoot = engineAssociation.trim() === '' ? null : resolveEngineRoot(engineAssociation, opts);
   return engineRoot ? parseEngineVersion(readEngineAssociationFromBuildVersion(engineRoot, process.platform)) : null;
+}
+
+/**
+ * The gates of indexed release @p version: its own record's, else (a record published before the gates
+ * existed) the entry's when it is the latest version, which the entry describes, else none.
+ */
+function releaseGates(indexed: IndexedExtension, version: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
+  const release = indexed.releases[stripLeadingV(version)];
+  const latest = stripLeadingV(version) === indexed.version;
+  return {
+    minEngineVersion: release?.minEngineVersion !== undefined ? release.minEngineVersion
+      : latest ? indexed.minEngineVersion ?? null : null,
+    experimental: release?.experimental ?? (latest ? indexed.experimental === true : false),
+  };
 }
 
 /**
@@ -551,14 +591,18 @@ function projectEngineVersion(engineAssociation: string, opts: InstallExtensionO
  */
 function readSourceGates(sourceArg: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
   const pluginRoot = resolveLocalPluginRoot(sourceArg);
-  const gates: { minEngineVersion?: string | null; experimental?: boolean } = {};
   const metadataFile = path.join(pluginRoot, 'extension.json');
   const metadata = fs.existsSync(metadataFile) ? (safeReadJson(metadataFile) as Record<string, unknown>) : {};
-  if (typeof metadata.minEngineVersion === 'string') gates.minEngineVersion = metadata.minEngineVersion;
+  const minEngineVersion = metadata.minEngineVersion ?? null;
+  if (minEngineVersion !== null && (typeof minEngineVersion !== 'string' || !ENGINE_VERSION.test(minEngineVersion))) {
+    throw new Error(`${metadataFile}: minEngineVersion must be "<major>.<minor>" (e.g. "5.8"), got ${JSON.stringify(minEngineVersion)}.`);
+  }
+  if (metadata.experimental !== undefined && typeof metadata.experimental !== 'boolean') {
+    throw new Error(`${metadataFile}: experimental must be true or false.`);
+  }
   const upluginFile = findUPluginFile(pluginRoot);
   const uplugin = upluginFile ? (safeReadJson(upluginFile) as Record<string, unknown>) : {};
-  if (metadata.experimental === true || uplugin.IsExperimentalVersion === true) gates.experimental = true;
-  return gates;
+  return { minEngineVersion, experimental: metadata.experimental === true || uplugin.IsExperimentalVersion === true };
 }
 
 /** Warn (never fail) when the installed core Unreal-MCP plugin is below `minCoreVersion`. */

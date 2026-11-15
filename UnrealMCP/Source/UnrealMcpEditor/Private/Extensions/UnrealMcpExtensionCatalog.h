@@ -91,7 +91,8 @@ public:
 	/**
 	 * Parse the shared catalog JSON `{ schemaVersion, extensions[] }` into typed entries. Returns false +
 	 * a human-readable reason on malformed JSON, a missing/!array `extensions`, or an entry missing the
-	 * required `extensionId` / `pluginName`. A schemaVersion newer than @ref SupportedSchemaVersion is a
+	 * required `extensionId` / `pluginName`, or a malformed `minEngineVersion` / `experimental` (as strict as the CLI's
+	 * parseExtensionsIndex, so both channels accept the same index). A schemaVersion newer than @ref SupportedSchemaVersion is a
 	 * WARNING returned via @p OutWarning (still parsed best-effort), not a hard failure — a newer catalog
 	 * should degrade gracefully rather than block installs of the entries this client understands.
 	 */

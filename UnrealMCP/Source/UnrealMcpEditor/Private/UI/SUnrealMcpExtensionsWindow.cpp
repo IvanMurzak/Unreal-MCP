@@ -217,13 +217,17 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 	// engine cannot build offers neither: it says why instead.
 	if (Row.bInCatalog && !Row.Incompatibility.IsEmpty())
 	{
-		ActionRow->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("ExtIncompatible", "Not available for this engine"))
-			.ToolTipText(FText::FromString(Row.Incompatibility))
-			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-		];
+		// An installed copy keeps working (the reason line says why it is not updated); only a new install is refused.
+		if (!Row.bInstalled)
+		{
+			ActionRow->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ExtIncompatible", "Not available for this engine"))
+				.ToolTipText(FText::FromString(Row.Incompatibility))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			];
+		}
 	}
 	else if (Row.bInCatalog && OnInstall)
 	{
@@ -285,7 +289,10 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 		TextCol->AddSlot().AutoHeight().Padding(0, 2, 0, 0)
 		[
 			SNew(STextBlock)
-			.Text(FText::Format(LOCTEXT("ExtIncompatibleReason", "Not available: {0}."), FText::FromString(Row.Incompatibility)))
+			.Text(FText::Format(Row.bInstalled
+				? LOCTEXT("ExtIncompatibleUpdate", "Catalog version {1} not available: {0}.")
+				: LOCTEXT("ExtIncompatibleReason", "Not available: {0}."),
+				FText::FromString(Row.Incompatibility), FText::FromString(Row.CatalogVersion)))
 			.AutoWrapText(true)
 			.ColorAndOpacity(FLinearColor(0.95f, 0.65f, 0.2f))
 		];

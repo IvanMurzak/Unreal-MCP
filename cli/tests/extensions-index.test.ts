@@ -159,6 +159,12 @@ describe('engine gate and experimental flag', () => {
     Object.assign(index.extensions[0].releases['1.2.0'], { minEngineVersion: '5.8', experimental: true });
     return index;
   }
+  /** Every release needs UE 5.8: nothing to fall back to. */
+  function gatedAll(): Index {
+    const index = gated();
+    index.extensions[0].releases['1.1.0'].minEngineVersion = '5.8';
+    return index;
+  }
   const install = (project: string, index: object, extra: Partial<Parameters<typeof installExtension>[0]> = {}) =>
     installExtension({ projectDir: project, extensionId: 'UnrealAINew', fetchImpl: online(index).fetchImpl,
       indexCachePath: path.join(temp(), 'index.json'), ...extra });
@@ -166,7 +172,7 @@ describe('engine gate and experimental flag', () => {
   it.each(['5.5', '5.7', '4.27'])('refuses a UE %s project before downloading or writing anything', async (engine) => {
     const project = temp(); writeUProject(project, 'Game', engine);
     const before = fs.readFileSync(path.join(project, 'Game.uproject'), 'utf8');
-    const github = online(gated());
+    const github = online(gatedAll());
     const result = await installExtension({ projectDir: project, extensionId: 'UnrealAINew',
       fetchImpl: github.fetchImpl, indexCachePath: path.join(temp(), 'index.json') });
     expect(result.kind).toBe('failure');
@@ -193,6 +199,43 @@ describe('engine gate and experimental flag', () => {
     expect(result.warnings.join('\n')).not.toContain('experimental');
   });
 
+  it('falls back to the newest release an older engine can build when the latest needs a newer one', async () => {
+    const project = temp(); writeUProject(project, 'Game', '5.7');
+    const index = gated();
+    index.extensions[0].releases['1.0.0'] = { repo: 'IvanMurzak/Unreal-MCP', tag: 'new-v1.0.0', minEngineVersion: '5.7' };
+    const github = online(index);
+    const result = await installExtension({ projectDir: project, extensionId: 'UnrealAINew',
+      fetchImpl: github.fetchImpl, indexCachePath: path.join(temp(), 'index.json') });
+    expect(result.kind).toBe('success');
+    if (result.kind !== 'success') throw result.error;
+    expect(result.toVersion).toBe('1.1.0');
+    expect(result.warnings.join('\n')).toContain('The latest UnrealAINew 1.2.0 requires Unreal Engine 5.8 or newer; installing 1.1.0');
+    expect(github.requests[1]).toContain('/new-v1.1.0/');
+  });
+
+  it('an explicit --version is never replaced by the fallback', async () => {
+    const project = temp(); writeUProject(project, 'Game', '5.7');
+    const result = await install(project, gated(), { version: '1.2.0' });
+    expect(result.kind === 'failure' && result.error.message).toContain('requires Unreal Engine 5.8');
+  });
+
+  it('leaves a kept newer install alone instead of refusing it', async () => {
+    const project = temp(); writeUProject(project, 'Game', '5.7');
+    const installed = path.join(project, 'Plugins/UnrealAINew'); fs.mkdirSync(installed, { recursive: true });
+    fs.writeFileSync(path.join(installed, 'UnrealAINew.uplugin'), JSON.stringify({ VersionName: '2.0.0' }));
+    const result = await install(project, gatedAll());
+    expect(result.kind === 'success' && result.versionSource).toBe('installed');
+  });
+
+  it('asks --engine-root first: it is the engine that builds the project', async () => {
+    const engineRoot = temp();
+    fs.mkdirSync(path.join(engineRoot, 'Engine/Build'), { recursive: true });
+    fs.writeFileSync(path.join(engineRoot, 'Engine/Build/Build.version'), JSON.stringify({ MajorVersion: 5, MinorVersion: 8 }));
+    const project = temp(); writeUProject(project, 'Game', '5.7');
+    const result = await install(project, gatedAll(), { engineRoot });
+    expect(result.kind).toBe('success');
+  });
+
   it('an index without gates (published before them) restricts nothing', async () => {
     const project = temp(); writeUProject(project, 'Game', '5.5');
     expect((await install(project, fixture())).kind).toBe('success');
@@ -203,7 +246,7 @@ describe('engine gate and experimental flag', () => {
     fs.mkdirSync(path.join(engineRoot, 'Engine/Build'), { recursive: true });
     fs.writeFileSync(path.join(engineRoot, 'Engine/Build/Build.version'), JSON.stringify({ MajorVersion: 5, MinorVersion: 7, PatchVersion: 1 }));
     const project = temp(); writeUProject(project, 'Game', '{0A1B2C3D-0000-0000-0000-000000000000}');
-    const result = await install(project, gated(), { resolveEngineRootImpl: () => engineRoot });
+    const result = await install(project, gatedAll(), { resolveEngineRootImpl: () => engineRoot });
     expect(result.kind === 'failure' && result.error.message).toContain('this project uses Unreal Engine 5.7');
   });
 
@@ -226,6 +269,22 @@ describe('engine gate and experimental flag', () => {
     const current = temp(); writeUProject(current, 'Game', '5.8');
     const installed = await installExtension({ projectDir: current, extensionId: 'UnrealAINew', source });
     expect(installed.kind === 'success' && installed.warnings.join('\n')).toContain('experimental');
+  });
+
+  it('a --source folder alone decides: no extension.json means no restriction, a malformed one is an error', async () => {
+    const source = path.join(temp(), 'UnrealAINew');
+    fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(source, 'UnrealAINew.uplugin'), JSON.stringify({ VersionName: '1.0.0' }));
+    const project = temp(); writeUProject(project, 'Game', '5.7');
+    const catalog = [{ extensionId: 'com.test.new-extension', name: 'New', description: 'x', pluginName: 'UnrealAINew',
+      repo: null, version: '1.0.0', minCoreVersion: null, enginePlugins: [], tools: [], minEngineVersion: '5.8' }];
+    const installed = await installExtension({ projectDir: project, extensionId: 'UnrealAINew', source, catalog });
+    expect(installed.kind).toBe('success');
+    for (const bad of [{ minEngineVersion: '5.8.0' }, { minEngineVersion: 58 }, { experimental: 'yes' }]) {
+      fs.writeFileSync(path.join(source, 'extension.json'), JSON.stringify(bad));
+      const refused = await installExtension({ projectDir: temp(), extensionId: 'UnrealAINew', source });
+      expect(refused.kind).toBe('failure');
+    }
   });
 
   it.each([

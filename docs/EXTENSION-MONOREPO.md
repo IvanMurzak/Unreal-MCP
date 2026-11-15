@@ -116,10 +116,14 @@ checksums, with the legacy catalog URL as its migration fallback.
 resolves extension ID/name/pluginName from that index, so new extensions do not require a CLI release.
 Each historical release can carry its own minimum core version and engine-plugin dependencies, and its
 `minEngineVersion` / `experimental` from `extension.json` (written by `extension_release.py` when set; a
-record without them, published before they existed, means no restriction). `install-extension` refuses a
-project whose engine (its EngineAssociation, or the `Build.version` of the engine a source-build GUID
-resolves to) is older than the selected version's `minEngineVersion`, before downloading or writing
-anything, and warns that an experimental extension is experimental. The Editor's Extensions panel shows
+record without them, published before they existed, means no restriction; such a record gains them only
+when that same version is published again, so older versions are never backfilled, while the latest version
+is judged by the entry, which always carries them). `install-extension` resolves the project's engine
+(`--engine-root`'s `Build.version`, else a version EngineAssociation, else the `Build.version` of the
+engine a source-build GUID resolves to); without `--version` it falls back from a latest release that
+engine cannot build to the newest one it can (with a warning), and it refuses a selected version whose
+`minEngineVersion` is newer, before downloading or writing anything. A `--source` folder's own
+`extension.json` / `.uplugin` alone decide its gates. It warns that an experimental extension is experimental. The Editor's Extensions panel shows
 such a row with the reason and no Install button, marks experimental ones, and does not offer them to agents.
 The index's `version` is stable latest for that extension; `releases` maps exact versions to repo/tag
 and optional SHA-256. `--version` selects history; the default never downgrades an installed newer

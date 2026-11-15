@@ -17,7 +17,7 @@ const int32 FUnrealMcpExtensionCatalog::SupportedSchemaVersion = 1;
 namespace
 {
 	/** `"5.8"` (extension.json minEngineVersion: major.minor, no leading zero) into its numbers. */
-	bool ParseMinEngineVersion(const FString& Value, int32& OutMajor, int32& OutMinor)
+	bool ExtCatParseMinEngineVersion(const FString& Value, int32& OutMajor, int32& OutMinor)
 	{
 		const FRegexPattern Pattern(TEXT("^([1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
 		FRegexMatcher Matcher(Pattern, Value);
@@ -33,14 +33,14 @@ namespace
 	 * null for none) and `experimental` (a boolean). A field that is absent leaves @p OutEntry as it is. False on a
 	 * malformed value.
 	 */
-	bool ReadGates(const FJsonObject& Obj, FUnrealMcpCatalogEntry& OutEntry)
+	bool ExtCatReadGates(const FJsonObject& Obj, FUnrealMcpCatalogEntry& OutEntry)
 	{
 		if (const TSharedPtr<FJsonValue> MinEngine = Obj.TryGetField(TEXT("minEngineVersion")))
 		{
 			int32 Major = 0, Minor = 0;
 			if (MinEngine->IsNull())
 				OutEntry.MinEngineVersion.Reset();
-			else if (MinEngine->Type != EJson::String || !ParseMinEngineVersion(MinEngine->AsString(), Major, Minor))
+			else if (MinEngine->Type != EJson::String || !ExtCatParseMinEngineVersion(MinEngine->AsString(), Major, Minor))
 				return false;
 			else
 				OutEntry.MinEngineVersion = MinEngine->AsString();
@@ -58,7 +58,7 @@ namespace
 FString FUnrealMcpCatalogEntry::EngineIncompatibility(int32 EngineMajor, int32 EngineMinor) const
 {
 	int32 Major = 0, Minor = 0;
-	if (!ParseMinEngineVersion(MinEngineVersion, Major, Minor)
+	if (!ExtCatParseMinEngineVersion(MinEngineVersion, Major, Minor)
 		|| EngineMajor > Major || (EngineMajor == Major && EngineMinor >= Minor))
 		return FString();
 	return FString::Printf(TEXT("requires Unreal Engine %s or newer; this editor is %d.%d"), *MinEngineVersion, EngineMajor, EngineMinor);
@@ -107,7 +107,7 @@ bool FUnrealMcpExtensionCatalog::ParseEntry(
 	Obj->TryGetStringField(TEXT("repo"), OutEntry.Repo);
 	Obj->TryGetStringField(TEXT("version"), OutEntry.Version);
 	Obj->TryGetStringField(TEXT("minCoreVersion"), OutEntry.MinCoreVersion);
-	if (!ReadGates(*Obj, OutEntry))
+	if (!ExtCatReadGates(*Obj, OutEntry))
 	{
 		OutError = FString::Printf(TEXT("catalog entry '%s' has a malformed minEngineVersion or experimental field"), *OutEntry.ExtensionId);
 		return false;
@@ -133,7 +133,7 @@ bool FUnrealMcpExtensionCatalog::ParseEntry(
 		}
 		// The selected release's own gates win; a record without them (published before they existed) keeps the entry's,
 		// which describe this same latest version.
-		if (!ReadGates(**Latest, OutEntry))
+		if (!ExtCatReadGates(**Latest, OutEntry))
 		{
 			OutError = TEXT("the selected extension release has a malformed minEngineVersion or experimental field");
 			return false;
