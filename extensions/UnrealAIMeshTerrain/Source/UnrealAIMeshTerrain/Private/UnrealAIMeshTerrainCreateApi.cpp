@@ -57,7 +57,7 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		if (!(SizeMeters >= MinSizeMeters && SizeMeters <= MaxSizeMeters))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("SizeMeters %g is outside %g .. %g"), SizeMeters, MinSizeMeters, MaxSizeMeters));
 		if (Location.ContainsNaN() || Location.GetAbsMax() > MaxLocation)
-			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Location %s is not within %g cm of the origin"), *Location.ToString(), MaxLocation));
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Location %s is not within 200 km (%g cm) of the origin"), *Location.ToString(), MaxLocation));
 		return CheckAvailable() && CheckLabel(Label);
 	}
 
@@ -94,6 +94,16 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		return FPaths::ConvertRelativePathToFull(Path);
 	}
 
+	bool CheckPixels(const FString& Path, int64 Width, int64 Height)
+	{
+		if (Width < 2 || Height < 2 || Width > MaxHeightmapPixels || Height > MaxHeightmapPixels)
+		{
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %lld x %lld pixels: a heightmap is 2 .. %d pixels per side"),
+				*Path, static_cast<long long>(Width), static_cast<long long>(Height), MaxHeightmapPixels));
+		}
+		return true;
+	}
+
 	/** Read @p Path (.png of any bit depth / colour, or .r16 / .raw: little-endian 16-bit, square) as a 16-bit gray image. */
 	bool LoadHeightmap(const FString& Path, FImage& Out)
 	{
@@ -118,6 +128,8 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %lld bytes: a .r16 / .raw heightmap is a square of 16-bit little-endian values (side x side x 2 bytes)"),
 					*Path, static_cast<long long>(Bytes.Num())));
 			}
+			if (!CheckPixels(Path, Side, Side))
+				return false;
 			static_assert(PLATFORM_LITTLE_ENDIAN, "a .r16 / .raw file is little-endian");
 			Out.Init(Side, Side, ERawImageFormat::G16, EGammaSpace::Linear);
 			FMemory::Memcpy(Out.RawData.GetData(), Bytes.GetData(), Bytes.Num());
@@ -125,19 +137,60 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		else
 		{
 			IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-			if (Images.DetectImageFormat(Bytes.GetData(), Bytes.Num()) != EImageFormat::PNG || !Images.DecompressImage(Bytes.GetData(), Bytes.Num(), Out))
+			const TSharedPtr<IImageWrapper> Png = Images.DetectImageFormat(Bytes.GetData(), Bytes.Num()) == EImageFormat::PNG
+				? Images.CreateImageWrapper(EImageFormat::PNG) : nullptr;
+			if (!Png.IsValid() || !Png->SetCompressed(Bytes.GetData(), Bytes.Num()))
+				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is not a readable PNG image"), *Path));
+			// The header first: a small, well-compressed PNG can claim dimensions that would not fit in memory decoded.
+			if (!CheckPixels(Path, Png->GetWidth(), Png->GetHeight()))
+				return false;
+			if (!Images.DecompressImage(Bytes.GetData(), Bytes.Num(), Out))
 				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is not a readable PNG image"), *Path));
 			// Heights are linear: an 8-bit PNG's sRGB flag must not bend them.
 			if (ERawImageFormat::GetFormatNeedsGammaSpace(Out.Format))
 				Out.GammaSpace = EGammaSpace::Linear;
 			Out.ChangeFormat(ERawImageFormat::G16, EGammaSpace::Linear);
 		}
-		if (Out.SizeX < 2 || Out.SizeY < 2 || Out.SizeX > MaxHeightmapPixels || Out.SizeY > MaxHeightmapPixels)
+		return CheckPixels(Path, Out.SizeX, Out.SizeY);
+	}
+
+	/**
+	 * The image to hand Mesh Partition's importer so that vertex (i, j) of a @p Quads mesh gets exactly @p Heightmap's value at
+	 * pixel position (i * (Width - 1) / Quads.X, j * (Height - 1) / Quads.Y) (bilinear between pixels; pixel i itself when
+	 * Quads = Width - 1). The importer samples its image bilinearly at texel-centre coordinates, p = i / Quads * ImageWidth - 0.5,
+	 * clamped at the borders (verified: a 5-pixel image on 4 quads gives vertex 1 a 0.75 / 0.25 blend of pixels 1 and 2). An
+	 * image of 2 * Quads pixels per side whose pixels 2k - 1 and 2k both hold vertex k's value (pixel 0 vertex 0, the last
+	 * pixel vertex Quads) puts every sample exactly between two equal pixels, so the mesh gets the values unblended.
+	 */
+	FImage ImporterImage(const FImage& Heightmap, const FInt32Point& Quads)
+	{
+		const TArrayView64<const uint16> Source = Heightmap.AsG16();
+		const auto Sample = [&Heightmap, &Source](double X, double Y)
 		{
-			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %d x %d pixels: a heightmap is 2 .. %d pixels per side"),
-				*Path, Out.SizeX, Out.SizeY, MaxHeightmapPixels));
+			const int32 X0 = FMath::Min(FMath::FloorToInt(X), Heightmap.SizeX - 2);
+			const int32 Y0 = FMath::Min(FMath::FloorToInt(Y), Heightmap.SizeY - 2);
+			const double FX = X - X0;
+			const double FY = Y - Y0;
+			const auto At = [&Heightmap, &Source](int32 PX, int32 PY) { return double(Source[int64(PY) * Heightmap.SizeX + PX]); };
+			const double Top = FMath::Lerp(At(X0, Y0), At(X0 + 1, Y0), FX);
+			const double Bottom = FMath::Lerp(At(X0, Y0 + 1), At(X0 + 1, Y0 + 1), FX);
+			return static_cast<uint16>(FMath::Clamp(FMath::RoundToInt(FMath::Lerp(Top, Bottom, FY)), 0, 65535));
+		};
+		TArray<uint16> Vertices;
+		Vertices.SetNumUninitialized((Quads.X + 1) * (Quads.Y + 1));
+		for (int32 J = 0; J <= Quads.Y; ++J)
+		{
+			for (int32 I = 0; I <= Quads.X; ++I)
+				Vertices[J * (Quads.X + 1) + I] = Sample(double(I) * (Heightmap.SizeX - 1) / Quads.X, double(J) * (Heightmap.SizeY - 1) / Quads.Y);
 		}
-		return true;
+		FImage Out(2 * Quads.X, 2 * Quads.Y, ERawImageFormat::G16, EGammaSpace::Linear);
+		const TArrayView64<uint16> Pixels = Out.AsG16();
+		for (int32 Y = 0; Y < Out.SizeY; ++Y)
+		{
+			for (int32 X = 0; X < Out.SizeX; ++X)
+				Pixels[int64(Y) * Out.SizeX + X] = Vertices[((Y + 1) / 2) * (Quads.X + 1) + (X + 1) / 2];
+		}
+		return Out;
 	}
 
 	/** Write @p Heightmap as the 16-bit gray PNG Mesh Partition's importer reads (only .png; written once, read once: uncompressed). */
@@ -211,17 +264,21 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 
 	// Quads along X (one per pixel step by default, at most MaxHeightmapQuads); Y keeps the image's aspect (square quads).
 	const double Aspect = double(Heightmap.SizeY - 1) / double(Heightmap.SizeX - 1);
-	const int32 QuadsX = Resolution > 0 ? Resolution : FMath::Min(Heightmap.SizeX - 1, MaxHeightmapQuads);
+	const int32 QuadsX = Resolution > 0 ? Resolution
+		: FMath::Max(1, FMath::Min3<int32>(Heightmap.SizeX - 1, MaxHeightmapQuads, FMath::FloorToInt(MaxHeightmapQuads / Aspect)));
 	const int32 QuadsY = FMath::Max(1, FMath::RoundToInt(QuadsX * Aspect));
 	if (QuadsY > MaxHeightmapQuads)
-		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("%d x %d quads: at most %d per side, lower Resolution"), QuadsX, QuadsY, MaxHeightmapQuads));
+	{
+		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("%d x %d quads (the image is %d x %d pixels): at most %d per side, lower Resolution"),
+			QuadsX, QuadsY, Heightmap.SizeX, Heightmap.SizeY, MaxHeightmapQuads));
+	}
 	const double SizeYMeters = SizeMeters * Aspect;
 	if (SizeYMeters < 1.0 || SizeYMeters > MaxSizeMeters)
 		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("the heightmap's aspect makes the terrain %g m on Y: keep it within 1 .. %g"), SizeYMeters, MaxSizeMeters));
 
 	UE::MeshPartition::FHeightmapImportParams Params;
 	Params.World = UnrealMcpRql::EditorWorld();
-	// QUADS on X and Y, although the importer's comment says vertices (verified: 4 quads over a 5-pixel image hit every pixel).
+	// QUADS on X and Y, although the importer's comment says vertices (verified on a 5-pixel image).
 	Params.MeshResolution = FInt32Point(QuadsX, QuadsY);
 	// The importer maps value v to Z = v / 65535 * MeshSize.Z: with Z = 65535 / 128 * HeightScale one step is HeightScale / 128 cm,
 	// exactly a Landscape's (LANDSCAPE_ZSCALE); the terrain is then lowered so value 32768 lands on Location Z (see Import).
@@ -232,12 +289,13 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 	if (!Sections(FInt32Point(QuadsX, QuadsY), 512 * 512 * 2, Params.SectionsResolution))
 		return nullptr;
 
-	// Mesh Partition's importer reads only 16-bit gray .png files: hand it the decoded heights as one.
+	// Mesh Partition's importer reads only 16-bit gray .png files: hand it the heights as one, laid out so its sampling
+	// lands exactly on them (ImporterImage).
 	const FString ImporterFile = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAIMeshTerrain"),
 		FString::Printf(TEXT("Heightmap_%s.png"), *FGuid::NewGuid().ToString(EGuidFormats::Short))));
-	if (!WriteImporterPng(Heightmap, ImporterFile))
-		return nullptr;
 	ON_SCOPE_EXIT { IFileManager::Get().Delete(*ImporterFile, /*RequireExists*/ false, /*EvenReadOnly*/ true, /*Quiet*/ true); };
+	if (!WriteImporterPng(ImporterImage(Heightmap, Params.MeshResolution), ImporterFile))
+		return nullptr;
 	Params.HeightmapFilename = ImporterFile;
 
 	AMeshPartition* Terrain = nullptr;
@@ -245,7 +303,10 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 		FTerrainTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "ImportHeightmap", "Import Mesh Terrain Heightmap"));
 		UE::MeshPartition::FHeightmapImporter Importer(Params);
 		if (!Importer.Import(nullptr) || !Importer.GetMegaMesh())
+		{
+			DestroyTerrain(Importer.GetMegaMesh()); // whatever a failed import spawned (null-safe)
 			return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("heightmap import failed: %s"), *Importer.GetErrorText().ToString()));
+		}
 		Terrain = Importer.GetMegaMesh();
 		Finish(Transaction, Terrain, Label, Definition);
 		// The importer centres the terrain on the origin with value 0 at Z 0: move it onto Location, value 32768 at its Z.

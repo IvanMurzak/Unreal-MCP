@@ -67,7 +67,7 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
 - `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
 - `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 120)`:
-  a flat terrain centred on `location` (its ground at `location` Z), 10 .. 20000 m per side, `resolution` quads along X
+  a flat terrain centred on `location` (within 200 km of the origin; its ground at `location` Z), 10 .. 20000 m per side, `resolution` quads along X
   (0: about one per metre, at most 1000; explicit at most 2000 per side, square quads), split into sections of at most
   500 x 500 quads like the Create tool's automatic mode (at most 16). The material, priority layers and paint channels come
   from the `MeshPartitionDefinition` (default `/MeshPartition/DataAssets/MPD_Default`; the definition, not the terrain, holds
@@ -76,11 +76,13 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
   a 16-bit grayscale `.png` (8-bit and colour PNGs are read as gray) or a `.r16` / `.raw` (little-endian 16-bit, square),
   path absolute or relative to the project, at most 8193 pixels per side. **Units are Landscape's**: value 32768 lands on
   `location` Z and one step is `heightScale / 128` cm, so `heightScale` is the Z scale a Landscape would use for the same
-  file (100: -256 .. +256 m) and a heightmap exported from a Landscape imports at the same heights. The terrain is centred
+  file (0.01 .. 10000; 100: -256 .. +256 m) and a heightmap exported from a Landscape imports at the same heights. The terrain is centred
   on `location`, `sizeMeters` wide on X, Y from the image's aspect (pixels are square), image row 0 at the -Y edge (as
-  Landscape). `resolution` is quads along X (0: one per pixel step, at most 2048; the importer samples the image
-  bilinearly), sections of at most 512 x 512 quads like the Import tool. Mesh Partition's importer reads only `.png`: other
-  files are converted to a temporary 16-bit PNG under `Saved/UnrealAIMeshTerrain` (deleted after the import).
+  Landscape). `resolution` is quads along X (0: one per pixel step, so every vertex takes exactly one pixel's value; at
+  most 2048; another resolution samples the image bilinearly), sections of at most 512 x 512 quads like the Import tool.
+  Mesh Partition's importer reads only 16-bit `.png` files and samples them at texel centres, which would blend neighbouring
+  pixels: every heightmap is re-encoded to a temporary 16-bit PNG laid out so the importer's samples land exactly on the
+  vertex values, under `Saved/UnrealAIMeshTerrain` (deleted after the import).
 - `Delete(terrain)`: the terrain, its base meshes, the modifiers that target it and its built sections (it loads its World
   Partition actors first), one undo step.
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog

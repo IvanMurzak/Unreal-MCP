@@ -101,6 +101,12 @@ BEGIN_DEFINE_SPEC(FUnrealAIMeshTerrainCreateSpec, "UnrealAIMeshTerrain.Create",
 		return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAIMeshTerrainSpec"), Name));
 	}
 
+	/** Remove the spec's scratch folder (each heightmap test calls it on exit). */
+	static void CreateSpecCleanFiles()
+	{
+		IFileManager::Get().DeleteDirectory(*FPaths::GetPath(CreateSpecFile(TEXT("x"))), /*RequireExists*/ false, /*Tree*/ true);
+	}
+
 	/** A @p Width x @p Height heightmap: value 32768 everywhere, @p Peak at pixel (PeakX, PeakY). */
 	static TArray<uint16> CreateSpecTent(int32 Width, int32 Height, int32 PeakX, int32 PeakY, uint16 Peak)
 	{
@@ -248,8 +254,9 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 			AMeshPartition* Redone = CreateSpecTerrain(Label);
 			if (!TestNotNull(TEXT("the terrain is back after Redo"), Redone))
 				return;
-			TestEqual(TEXT("with its base mesh"), UnrealAIMeshTerrain::Modifiers(Redone, /*bBases*/ true).Num(), 1);
+			// The redone components join the terrain's modifier list when it next updates (WaitForBuild drives that).
 			TestTrue(TEXT("it builds again"), UnrealAIMeshTerrain::WaitForBuild(Redone, 60.0));
+			TestEqual(TEXT("with its base mesh"), UnrealAIMeshTerrain::Modifiers(Redone, /*bBases*/ true).Num(), 1);
 			const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Redone, 900500.0, 300.0);
 			TestTrue(TEXT("same ground"), Sample.bInside && FMath::IsNearlyEqual(Sample.Height, 100.0, 0.5));
 		});
@@ -285,8 +292,9 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 
 	Describe("ImportHeightmap", [this]()
 	{
-		It("maps 16-bit values in Landscape units (32768 = Location Z, HeightScale / 128 cm per step), one quad per pixel, centred on Location; .png and .r16 alike", [this]()
+		It("maps 16-bit values in Landscape units (32768 = Location Z, HeightScale / 128 cm per step), one quad per pixel, centred on Location; PNG and R16 alike", [this]()
 		{
+			ON_SCOPE_EXIT { CreateSpecCleanFiles(); };
 			// A 5 x 5 heightmap, 32768 everywhere but 32768 + 12800 at the centre: 12800 / 128 * 50 = 5000 cm with HeightScale 50.
 			const TArray<uint16> Tent = CreateSpecTent(5, 5, 2, 2, 32768 + 12800);
 			const FString Png = CreateSpecFile(TEXT("Tent5.png"));
@@ -308,6 +316,9 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 				if (!TestNotNull(TEXT("terrain"), Terrain))
 					continue;
 				TestTrue(TEXT("built when it returns"), UnrealAIMeshTerrain::BuildState(Terrain).IsReady());
+				TArray<FString> Left;
+				IFileManager::Get().FindFiles(Left, *FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAIMeshTerrain"), TEXT("*.png")), /*Files*/ true, /*Directories*/ false);
+				TestEqual(TEXT("no importer file is left behind"), Left.Num(), 0);
 				const FBox Bounds = UnrealAIMeshTerrain::BuiltBounds(Terrain);
 				TestTrue(*FString::Printf(TEXT("40 x 40 m centred on Location (%s)"), *Bounds.ToString()), Bounds.IsValid
 					&& FMath::IsNearlyEqual(Bounds.Min.X, Location.X - 2000.0, 1.0) && FMath::IsNearlyEqual(Bounds.Max.X, Location.X + 2000.0, 1.0)
@@ -319,8 +330,32 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 			}
 		});
 
+		It("puts image column 0 on the -X edge and row 0 on the -Y edge (as Landscape)", [this]()
+		{
+			ON_SCOPE_EXIT { CreateSpecCleanFiles(); };
+			// A 5 x 5 heightmap with one raised pixel at column 1, row 1: 10 m quads on a 40 m terrain (edges are avoided: the sample there is not exact).
+			const FString Png = CreateSpecFile(TEXT("Corner5.png"));
+			const FString Label = CreateSpecLabel(TEXT("SpecImportAxes"));
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(CreateSpecTerrain(Label)); };
+			if (!TestTrue(TEXT("write"), CreateSpecWritePng(Png, CreateSpecTent(5, 5, 1, 1, 32768 + 1280), 5, 5)))
+				return;
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("import"), UnrealMcpRqlTools::RunPlan(CreateSpecCall(TEXT("ImportHeightmap"), FString::Printf(
+				TEXT(R"({"lit":"%s"},{"lit":"%s"},{"list":[{"lit":1250000},{"lit":0},{"lit":0}]},{"lit":40})"), *Label, *Png.Replace(TEXT("\\"), TEXT("/")))), true, &Result));
+			const AMeshPartition* Terrain = CreateSpecTerrain(Label);
+			if (!TestNotNull(TEXT("imported"), Terrain))
+				return;
+			// 1280 / 128 * 100 = 1000 cm at (centre X - 1000, centre Y - 1000); the mirrored spots stay flat.
+			const double Raised = CreateSpecModelHeight(Terrain, 1250000.0 - 1000.0, -1000.0);
+			const double MirrorY = CreateSpecModelHeight(Terrain, 1250000.0 - 1000.0, 1000.0);
+			const double MirrorX = CreateSpecModelHeight(Terrain, 1250000.0 + 1000.0, -1000.0);
+			TestTrue(*FString::Printf(TEXT("raised at -X / -Y (%.2f), flat at +Y (%.2f) and +X (%.2f)"), Raised, MirrorY, MirrorX),
+				FMath::IsNearlyEqual(Raised, 1000.0, 1.0) && FMath::IsNearlyEqual(MirrorY, 0.0, 1.0) && FMath::IsNearlyEqual(MirrorX, 0.0, 1.0));
+		});
+
 		It("is one undo step", [this]()
 		{
+			ON_SCOPE_EXIT { CreateSpecCleanFiles(); };
 			const TArray<uint16> Tent = CreateSpecTent(9, 9, 4, 4, 40000);
 			const FString Png = CreateSpecFile(TEXT("Tent9.png"));
 			const FString Label = CreateSpecLabel(TEXT("SpecImportUndo"));
@@ -340,6 +375,7 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 
 		It("refuses missing, unsupported and malformed files and bad parameters", [this]()
 		{
+			ON_SCOPE_EXIT { CreateSpecCleanFiles(); };
 			const FString Bad = CreateSpecFile(TEXT("Bad.r16"));
 			const FString Text = CreateSpecFile(TEXT("NotAPng.png"));
 			const FString Good = CreateSpecFile(TEXT("Good.png"));
@@ -367,9 +403,6 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 				TestTrue(*FString::Printf(TEXT("says '%s' (%s)"), *Case.Value, *CreateSpecJson(Result)), CreateSpecJson(Result).Contains(Case.Value));
 			}
 			TestEqual(TEXT("no terrain was created"), UnrealAIMeshTerrain::Terrains().Num(), Before);
-			TArray<FString> Left;
-			IFileManager::Get().FindFiles(Left, *FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealAIMeshTerrain"), TEXT("*.png")), /*Files*/ true, /*Directories*/ false);
-			TestEqual(TEXT("no importer file is left behind"), Left.Num(), 0);
 		});
 	});
 
