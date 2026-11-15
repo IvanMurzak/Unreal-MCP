@@ -8,6 +8,8 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIMeshTerrainCommon.h"
 #include "UnrealAIMeshTerrainRqlApi.h"
+#include "UnrealAIMeshTerrainCreateApi.h"
+#include "UnrealAIMeshTerrainSculptApi.h"
 
 #include "Engine/World.h"
 #include "UObject/UObjectIterator.h"
@@ -145,6 +147,12 @@ public:
 		Context.AddApiSource(TEXT("meshTerrain"),
 			TEXT("Mesh Terrain operations: call Rebuild(terrain, timeoutSeconds) / WaitForBuild(terrain, timeoutSeconds) / Surface(terrain, point) / SurfacePoints(terrain, points) / EnableMeshTerrain()"),
 			UUnrealAIMeshTerrainRqlApi::StaticClass(), TEXT("MeshTerrainOperations"));
+		Context.AddApiSource(TEXT("meshTerrainCreate"),
+			TEXT("make and delete Mesh Terrains: call Create(label, location, sizeMeters, ...) / ImportHeightmap(label, file, location, sizeMeters, heightScale, ...) / Delete(terrain)"),
+			UUnrealAIMeshTerrainCreateApi::StaticClass(), TEXT("MeshTerrainCreateOperations"));
+		Context.AddApiSource(TEXT("meshTerrainBrush"),
+			TEXT("Mesh Terrain brush strokes, stored like Mesh Terrain Mode's Sculpt / Paint tools store them: call Sculpt(terrain, mode, point, radius, height, strength, falloff) / Paint(terrain, channel, point, radius, weight, falloff) / Erase(terrain, channel, point, radius, falloff)"),
+			UUnrealAIMeshTerrainSculptApi::StaticClass(), TEXT("MeshTerrainBrushOperations"));
 
 		Context.AddObjectMember(TerrainClass, TEXT("Definition"), TEXT("the terrain's Mesh Partition definition (material, priority layers, paint channels)"),
 			UMeshPartitionDefinition::StaticClass(), [](UObject* Object) -> UObject*
@@ -251,9 +259,48 @@ meshTerrain | call EnableMeshTerrain()                                     MeshT
 ```
 
 `Height` is the world Z (cm) collision and traces hit, `Slope` degrees (0 flat), `Location` a spawn point on the ground,
-`Channels` the paint weights there; off the terrain `Inside` is false. The operations load a terrain's base and modifier
+`Channels` the paint weights there; off the terrain `Inside` is false.
+
+Brush strokes (`meshTerrainBrush`) shape and paint by hand, like Mesh Terrain Mode's Sculpt and Paint tools: around a
+world X, Y within `Radius` cm (at most 25000) with a soft edge (`Falloff` 0..1, 0 = hard). Sculpt modes: `Raise` / `Lower`
+(by `Height` cm at the centre), `Flatten` (to world Z `Height`), `Smooth`; `Strength` (0, 1] scales a stroke. `Paint` moves a
+channel (one of the terrain's `Channels`, e.g. "Red") towards `Weight` 0..1; `Erase` takes it to 0. A stroke is stored in a
+brush modifier (`Kind` ProjectMeshLayers, "<terrain>_Brush"): strokes near one go into it, so they accumulate and stay
+editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (a stroke that times out
+waiting for the build is already applied: `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
+modifiers before it, so edit noise / shapes first and sculpt last.
+
+```
+meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Raise", [1200, -800, 0], 1500, 400)      a 4 m hill, 15 m radius
+meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Flatten", [0, 0, 0], 2000, 150, 1, 0.3)  a building pad at Z 150
+meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Smooth", [0, 0, 0], 2500)
+meshTerrainBrush | call Paint(unreal.find("Terrain"), "Red", [0, 0, 0], 2000, 1)                {Brush, NewBrush, Vertices, Before, After, Ready, Seconds}
+meshTerrainBrush | call Erase(unreal.find("Terrain"), "Red", [0, 0, 0], 500)
+```
+
+`Before` / `After` are the full-resolution ground height (or channel weight) at the vertex nearest the point; `Surface`
+reads the rendered collision, which on rough ground can differ by some cm. The operations load a terrain's base and modifier
 actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. Mesh Terrain needs Unreal
 Engine 5.8+, the MeshTerrainMode plugin and a World Partition level.)MD"));
+
+		Context.AddGuide(TEXT("Mesh Terrain: create, import a heightmap, delete"), TEXT(R"MD(`meshTerrainCreate` makes Mesh Terrains the way
+Mesh Terrain Mode's Create palette does; each call is one undo step and returns when the terrain is built.
+
+```
+meshTerrainCreate | call Create("Island", [0, 0, 0], 500)                       flat, 500 x 500 m, ground at Z 0, ~1 quad per metre
+meshTerrainCreate | call Create("Valley", [0, 0, 200], 2000, 1000, 1000)        2 x 1 km, 1000 x 500 quads
+meshTerrainCreate | call ImportHeightmap("Alps", "Heightmaps/alps.png", [0, 0, 0], 2000, 100)
+meshTerrainCreate | call Delete(unreal.find("Island"))                         with its base meshes and modifiers
+```
+
+`Create(label, location, sizeMeters, sizeYMeters = square, resolution = quads along X, definition, timeoutSeconds)`:
+10 .. 20000 m, at most 2000 x 2000 quads (sections of at most 500 x 500). The material, priority layers and paint channels
+come from the definition (default `/MeshPartition/DataAssets/MPD_Default`): pass another `MeshPartitionDefinition` asset path
+for another material. `ImportHeightmap(label, file, location, sizeMeters, heightScale = 100, resolution, definition,
+timeoutSeconds)` reads a 16-bit grayscale `.png` or a `.r16` / `.raw` (little-endian, square) in Landscape units: value 32768
+is `location` Z and one step is `heightScale / 128` cm (a Landscape's Z scale; 100 gives -256 .. +256 m); one quad per pixel
+step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Save the level before Play In Editor:
+the engine asks about unsaved Mesh Terrain base meshes otherwise.)MD"));
 	}
 };
 

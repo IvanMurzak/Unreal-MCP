@@ -1,0 +1,11 @@
+{
+  "description": "a brush stroke on a terrain that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainBrush | call Sculpt(unreal.find(\"NoSuchMeshTerrainE2E\"), \"Raise\", [0, 0, 0], 500, 100)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Terrain'.*not-found"
+  }
+}

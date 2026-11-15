@@ -184,8 +184,8 @@ namespace UnrealAIMeshTerrain
 	 * A flat rectangular Mesh Terrain the way Mesh Terrain Mode's Create tool makes one (FMegaMeshRectangleGenerator): an
 	 * AMeshPartition with the project's default definition (MeshPartition Settings: /MeshPartition/DataAssets/MPD_Default)
 	 * and one MeshProvider base modifier actor ("Section_X0-Y0_0", attached to it) per section of at most 500 x 500 quads,
-	 * centred on @p Center, @p SizeX x @p SizeY cm with @p QuadsX x @p QuadsY quads, labelled @p Label. Undo is untested (the
-	 * generator spawns its actors itself). Not built yet: WaitForBuild. nullptr after Fail.
+	 * centred on @p Center, @p SizeX x @p SizeY cm with @p QuadsX x @p QuadsY quads, labelled @p Label. Called inside a transaction
+	 * (meshTerrainCreate Create does) it is one undo step with its base meshes. Not built yet: WaitForBuild. nullptr after Fail.
 	 */
 	AMeshPartition* SpawnFlatTerrain(const FString& Label, const FVector& Center, double SizeX, double SizeY, int32 QuadsX, int32 QuadsY);
 

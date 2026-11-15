@@ -1,0 +1,10 @@
+{
+  "description": "meshTerrainCreate lists Create, ImportHeightmap and Delete with their parameters",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshTerrainCreateOperations"
+  },
+  "assert": {
+    "pattern": "Create[(]string Label, Vector Location, double SizeMeters.*Delete[(]MeshPartition Terrain[)].*ImportHeightmap[(]string Label, string File, Vector Location, double SizeMeters, double HeightScale"
+  }
+}

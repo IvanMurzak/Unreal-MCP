@@ -1,0 +1,10 @@
+{
+  "description": "the brush stroke operations Sculpt, Paint and Erase",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshTerrainBrushOperations"
+  },
+  "assert": {
+    "pattern": "Erase"
+  }
+}
