@@ -8,6 +8,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIMeshTerrainCommon.h"
 #include "UnrealAIMeshTerrainRqlApi.h"
+#include "UnrealAIMeshTerrainCreateApi.h"
 
 #include "Engine/World.h"
 #include "UObject/UObjectIterator.h"
@@ -145,6 +146,9 @@ public:
 		Context.AddApiSource(TEXT("meshTerrain"),
 			TEXT("Mesh Terrain operations: call Rebuild(terrain, timeoutSeconds) / WaitForBuild(terrain, timeoutSeconds) / Surface(terrain, point) / SurfacePoints(terrain, points) / EnableMeshTerrain()"),
 			UUnrealAIMeshTerrainRqlApi::StaticClass(), TEXT("MeshTerrainOperations"));
+		Context.AddApiSource(TEXT("meshTerrainCreate"),
+			TEXT("make and delete Mesh Terrains: call Create(label, location, sizeMeters, ...) / ImportHeightmap(label, file, location, sizeMeters, heightScale, ...) / Delete(terrain)"),
+			UUnrealAIMeshTerrainCreateApi::StaticClass(), TEXT("MeshTerrainCreateOperations"));
 
 		Context.AddObjectMember(TerrainClass, TEXT("Definition"), TEXT("the terrain's Mesh Partition definition (material, priority layers, paint channels)"),
 			UMeshPartitionDefinition::StaticClass(), [](UObject* Object) -> UObject*
@@ -254,6 +258,25 @@ meshTerrain | call EnableMeshTerrain()                                     MeshT
 `Channels` the paint weights there; off the terrain `Inside` is false. The operations load a terrain's base and modifier
 actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. Mesh Terrain needs Unreal
 Engine 5.8+, the MeshTerrainMode plugin and a World Partition level.)MD"));
+
+		Context.AddGuide(TEXT("Mesh Terrain: create, import a heightmap, delete"), TEXT(R"MD(`meshTerrainCreate` makes Mesh Terrains the way
+Mesh Terrain Mode's Create palette does; each call is one undo step and returns when the terrain is built.
+
+```
+meshTerrainCreate | call Create("Island", [0, 0, 0], 500)                       flat, 500 x 500 m, ground at Z 0, ~1 quad per metre
+meshTerrainCreate | call Create("Valley", [0, 0, 200], 2000, 1000, 1000)        2 x 1 km, 1000 x 500 quads
+meshTerrainCreate | call ImportHeightmap("Alps", "Heightmaps/alps.png", [0, 0, 0], 2000, 100)
+meshTerrainCreate | call Delete(unreal.find("Island"))                         with its base meshes and modifiers
+```
+
+`Create(label, location, sizeMeters, sizeYMeters = square, resolution = quads along X, definition, timeoutSeconds)`:
+10 .. 20000 m, at most 2000 x 2000 quads (sections of at most 500 x 500). The material, priority layers and paint channels
+come from the definition (default `/MeshPartition/DataAssets/MPD_Default`): pass another `MeshPartitionDefinition` asset path
+for another material. `ImportHeightmap(label, file, location, sizeMeters, heightScale = 100, resolution, definition,
+timeoutSeconds)` reads a 16-bit grayscale `.png` or a `.r16` / `.raw` (little-endian, square) in Landscape units: value 32768
+is `location` Z and one step is `heightScale / 128` cm (a Landscape's Z scale; 100 gives -256 .. +256 m); one quad per pixel
+step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Save the level before Play In Editor:
+the engine asks about unsaved Mesh Terrain base meshes otherwise.)MD"));
 	}
 };
 

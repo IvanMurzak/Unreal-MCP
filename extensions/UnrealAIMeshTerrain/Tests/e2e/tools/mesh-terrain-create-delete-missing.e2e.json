@@ -1,0 +1,11 @@
+{
+  "description": "Delete of a terrain that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainCreate | call Delete(unreal.find(\"NoSuchMeshTerrainE2E\"))"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Terrain'.*not-found"
+  }
+}

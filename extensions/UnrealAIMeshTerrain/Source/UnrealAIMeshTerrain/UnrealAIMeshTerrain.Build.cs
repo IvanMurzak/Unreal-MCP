@@ -38,6 +38,9 @@ public class UnrealAIMeshTerrain : ModuleRules
 			"UnrealEd",
 			// IPluginManager / IProjectManager: the plugin guard and EnableMeshTerrain.
 			"Projects",
+			// ImportHeightmap: decode .png heightmaps (any bit depth) and hand Mesh Partition's importer a 16-bit gray .png.
+			"ImageWrapper",
+			"ImageCore",
 		});
 	}
 }

@@ -39,8 +39,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain` |
-| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain` |
+| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain`, `meshTerrainCreate` |
+| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete` |
 | Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
 
 ```
@@ -51,6 +51,9 @@ meshTerrain | call WaitForBuild(unreal.find("Terrain"))
 meshTerrain | call Surface(unreal.find("Terrain"), [1200, -800, 0])
 meshTerrain | call SurfacePoints(unreal.find("Terrain"), [[0, 0, 0], [500, 0, 0], [1000, 0, 0]])
 meshTerrain | call Rebuild(unreal.find("Terrain"))
+meshTerrainCreate | call Create("Terrain", [0, 0, 0], 500)
+meshTerrainCreate | call ImportHeightmap("Alps", "Heightmaps/alps.png", [0, 0, 0], 2000, 100)
+meshTerrainCreate | call Delete(unreal.find("Alps"))
 ```
 
 A Mesh Terrain is a `MeshPartition` actor (no other actor class: Mesh Terrain Mode's Create tool makes one) shaped by
@@ -63,15 +66,35 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
   `Location`, `Normal`, `Channels` (the paint weights there, from the evaluated modifier stack).
 - `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
-- Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a build that does not finish in time
+- `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 120)`:
+  a flat terrain centred on `location` (its ground at `location` Z), 10 .. 20000 m per side, `resolution` quads along X
+  (0: about one per metre, at most 1000; explicit at most 2000 per side, square quads), split into sections of at most
+  500 x 500 quads like the Create tool's automatic mode (at most 16). The material, priority layers and paint channels come
+  from the `MeshPartitionDefinition` (default `/MeshPartition/DataAssets/MPD_Default`; the definition, not the terrain, holds
+  the material). One undo step; built when it returns. Labels must be unique among the level's Mesh Terrains.
+- `ImportHeightmap(label, file, location, sizeMeters = 1000, heightScale = 100, resolution = 0, definition, timeoutSeconds = 120)`:
+  a 16-bit grayscale `.png` (8-bit and colour PNGs are read as gray) or a `.r16` / `.raw` (little-endian 16-bit, square),
+  path absolute or relative to the project, at most 8193 pixels per side. **Units are Landscape's**: value 32768 lands on
+  `location` Z and one step is `heightScale / 128` cm, so `heightScale` is the Z scale a Landscape would use for the same
+  file (100: -256 .. +256 m) and a heightmap exported from a Landscape imports at the same heights. The terrain is centred
+  on `location`, `sizeMeters` wide on X, Y from the image's aspect (pixels are square), image row 0 at the -Y edge (as
+  Landscape). `resolution` is quads along X (0: one per pixel step, at most 2048; the importer samples the image
+  bilinearly), sections of at most 512 x 512 quads like the Import tool. Mesh Partition's importer reads only `.png`: other
+  files are converted to a temporary 16-bit PNG under `Saved/UnrealAIMeshTerrain` (deleted after the import).
+- `Delete(terrain)`: the terrain, its base meshes, the modifiers that target it and its built sections (it loads its World
+  Partition actors first), one undo step.
+- Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
+  ("Unsaved Mesh Partition Modifiers").
+- Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a size / resolution / section count
+  over the limits, a missing or malformed heightmap, a build that does not finish in time
   (with what is still pending), Mesh Terrain plugins not enabled (with what to enable).
 
 ## Development
 
 The shared helpers every operation uses (find a terrain, wait for its build, transactions, load its actors, sample the
 surface, evaluate the modifier stack of a region, spawn a flat terrain the way the Create tool does) are in
-`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation spec is `UnrealAIMeshTerrain`
-(`Automation RunTests UnrealAIMeshTerrain`); live checks are in `Tests/e2e/tools/`.
+`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation specs are `UnrealAIMeshTerrain` and
+`UnrealAIMeshTerrain.Create` (`Automation RunTests UnrealAIMeshTerrain`); live checks are in `Tests/e2e/tools/`.
 
 ## License
 
