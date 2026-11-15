@@ -9,6 +9,7 @@
 #include "Misc/Guid.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/EngineVersion.h"
 #include "HAL/FileManager.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h"
 #include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord
@@ -167,6 +168,63 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 			const TArray<FUnrealMcpExtensionRow> Rows = { Available, Current, Outdated, Local };
 			TestEqual(TEXT("install"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, false), TArray<FString>{ TEXT("com.x.available") });
 			TestEqual(TEXT("update"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+		});
+	});
+
+	Describe("engine compatibility", [this]()
+	{
+		It("marks a catalog version this engine cannot build, and bulk actions skip it", [this]()
+		{
+			FUnrealMcpCatalogEntry Terrain = InstallerSpecCatalogEntry(TEXT("com.x.terrain"), TEXT("Terrain"), TEXT("1.0.0"));
+			Terrain.MinEngineVersion = TEXT("5.8");
+			Terrain.bExperimental = true;
+			FUnrealMcpCatalogEntry Outdated = Terrain;
+			Outdated.ExtensionId = TEXT("com.x.outdated");
+			Outdated.PluginName = TEXT("Outdated");
+			const FUnrealMcpCatalogEntry Plain = InstallerSpecCatalogEntry(TEXT("com.x.plain"), TEXT("Plain"), TEXT("1.0.0"));
+			FUnrealMcpInstalledOnDisk Old;
+			Old.PluginName = TEXT("Outdated");
+			Old.Version = TEXT("0.1.0");
+
+			const TArray<FUnrealMcpExtensionRow> On57 = FUnrealMcpExtensionInstaller::BuildRows({ Terrain, Outdated, Plain }, {}, { Old }, 5, 7);
+			TestEqual(TEXT("the reason names both engines"), On57[0].Incompatibility,
+				FString(TEXT("requires Unreal Engine 5.8 or newer; this editor is 5.7")));
+			TestTrue(TEXT("experimental is carried to the row"), On57[0].bExperimental);
+			TestTrue(TEXT("no restriction without a minimum"), On57[2].Incompatibility.IsEmpty() && !On57[2].bExperimental);
+			TestEqual(TEXT("install all skips it"), FUnrealMcpExtensionInstaller::SelectBulkIds(On57, false), TArray<FString>{ TEXT("com.x.plain") });
+			TestEqual(TEXT("update all skips it"), FUnrealMcpExtensionInstaller::SelectBulkIds(On57, true), TArray<FString>());
+
+			for (const TPair<int32, int32>& Engine : { TPair<int32, int32>(5, 8), TPair<int32, int32>(5, 10), TPair<int32, int32>(6, 0) })
+			{
+				const TArray<FUnrealMcpExtensionRow> Rows = FUnrealMcpExtensionInstaller::BuildRows({ Terrain, Outdated }, {}, { Old }, Engine.Key, Engine.Value);
+				TestTrue(*FString::Printf(TEXT("UE %d.%d builds it"), Engine.Key, Engine.Value), Rows[0].Incompatibility.IsEmpty());
+				TestEqual(TEXT("and bulk update offers it"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+			}
+		});
+
+		It("refuses to install a version this engine cannot build, writing nothing", [this]()
+		{
+			const FString Root = InstallerSpecScratchRoot();
+			const FString ProjectDir = Root / TEXT("Project");
+			const FString SourceDir = Root / TEXT("Source") / TEXT("FutureExt");
+			ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, /*RequireExists*/ false, /*Tree*/ true); };
+			const FString Uproject = TEXT("{\n\t\"FileVersion\": 3,\n\t\"Plugins\": []\n}\n");
+			InstallerSpecWrite(ProjectDir / TEXT("MyProj.uproject"), Uproject);
+			InstallerSpecWrite(SourceDir / TEXT("FutureExt.uplugin"), TEXT("{ \"VersionName\": \"1.0.0\" }"));
+
+			FUnrealMcpInstallOptions Opts;
+			Opts.ProjectDir = ProjectDir;
+			Opts.SourceDir = SourceDir;
+			Opts.Descriptor = InstallerSpecCatalogEntry(TEXT("com.x.future"), TEXT("FutureExt"), TEXT("1.0.0"));
+			Opts.Descriptor.MinEngineVersion = FString::Printf(TEXT("%d.0"), FEngineVersion::Current().GetMajor() + 1);
+
+			const FUnrealMcpInstallResult Result = FUnrealMcpExtensionInstaller::Install(Opts);
+			TestFalse(TEXT("install fails"), Result.bSuccess);
+			TestTrue(*FString::Printf(TEXT("the error says why (%s)"), *Result.Error), Result.Error.Contains(TEXT("requires Unreal Engine")));
+			TestFalse(TEXT("nothing placed"), FPaths::DirectoryExists(ProjectDir / TEXT("Plugins")));
+			FString After;
+			FFileHelper::LoadFileToString(After, *(ProjectDir / TEXT("MyProj.uproject")));
+			TestEqual(TEXT(".uproject untouched"), After, Uproject);
 		});
 	});
 

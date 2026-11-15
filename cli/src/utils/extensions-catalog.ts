@@ -85,6 +85,14 @@ export interface ExtensionDescriptor {
    */
   readonly enginePlugins: readonly string[];
   readonly tools: readonly ExtensionTool[];
+  /**
+   * The oldest Unreal Engine the extension builds on (`"5.8"`, major.minor), from its
+   * `extension.json`. Absent / `null` = no restriction (legacy entries). `install-extension`
+   * refuses a project on an older engine: the extension's C++ cannot compile there.
+   */
+  readonly minEngineVersion?: string | null;
+  /** An experimental extension (its operations may change between versions). Absent = stable. */
+  readonly experimental?: boolean;
 }
 
 /**
@@ -312,6 +320,32 @@ export const EXTENSIONS_CATALOG: readonly ExtensionDescriptor[] = [
   },
 ] as const;
 
+/** An Unreal Engine `major.minor` version as written in `extension.json` `minEngineVersion` (`"5.8"`). */
+export const ENGINE_VERSION = /^([1-9]\d*)\.(0|[1-9]\d*)$/;
+
+/**
+ * `[major, minor]` of an engine version: `"5.8"`, or a longer `"5.8.1"` (a project EngineAssociation or
+ * Build.version), or `null` when @p value is not one (a source-build GUID, empty).
+ */
+export function parseEngineVersion(value: string | null | undefined): [number, number] | null {
+  const match = /^(\d+)\.(\d+)(?:\.\d+)*$/.exec((value ?? '').trim());
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+/** True when an engine (`[major, minor]`) is at least @p minEngineVersion; no (or an unreadable) minimum allows any. */
+export function engineMeetsMinimum(engine: readonly [number, number], minEngineVersion: string | null | undefined): boolean {
+  const minimum = parseEngineVersion(minEngineVersion);
+  return minimum === null || engine[0] > minimum[0] || (engine[0] === minimum[0] && engine[1] >= minimum[1]);
+}
+
+/** The labels a listing shows beside an extension: `experimental`, `UE 5.8+`. */
+export function extensionLabels(descriptor: ExtensionDescriptor): string[] {
+  const labels: string[] = [];
+  if (descriptor.experimental === true) labels.push('experimental');
+  if (descriptor.minEngineVersion) labels.push(`UE ${descriptor.minEngineVersion}+`);
+  return labels;
+}
+
 /** True when a descriptor carries a concrete (fallback) version. */
 export function hasVersion(descriptor: ExtensionDescriptor): boolean {
   return descriptor.version !== null && descriptor.version.trim() !== '';
@@ -351,6 +385,11 @@ export function unknownExtensionMessage(
       'Pass --source <dir> to install an extension plugin from a local directory.'
     );
   }
-  const available = catalog.map((d) => d.extensionId).join(', ');
+  const available = catalog
+    .map((d) => {
+      const labels = extensionLabels(d);
+      return labels.length > 0 ? `${d.extensionId} (${labels.join(', ')})` : d.extensionId;
+    })
+    .join(', ');
   return `Unknown extension "${id}". Available extensions: ${available}. (Or pass --source <dir> for a local install.)`;
 }

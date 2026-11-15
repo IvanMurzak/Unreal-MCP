@@ -41,9 +41,12 @@ import { loadExtensionsIndex, type IndexedExtension } from '../utils/extensions-
 import { asError } from '../utils/error.js';
 import { readUProject } from '../utils/project.js';
 import { discoverEngine } from './engine.js';
+import { readEngineAssociationFromBuildVersion } from '../utils/engine-discovery.js';
 import {
   EXTENSIONS_CATALOG,
+  engineMeetsMinimum,
   findExtension,
+  parseEngineVersion,
   hasVersion,
   unknownExtensionMessage,
   type ExtensionDescriptor,
@@ -200,10 +203,39 @@ export async function installExtension(
       throw new Error(`No published ${pluginName} release ${toVersion} in the extensions index.`);
     }
     if (indexedRelease) {
+      // A release record without a gate was published before gates existed: no restriction, unless it is the
+      // latest version, which the entry itself describes.
+      const latest = indexed !== undefined && stripLeadingV(toVersion ?? '') === indexed.version;
       descriptor = { ...descriptor,
         minCoreVersion: indexedRelease.minCoreVersion === undefined ? descriptor.minCoreVersion : indexedRelease.minCoreVersion,
         enginePlugins: indexedRelease.enginePlugins ?? descriptor.enginePlugins,
+        minEngineVersion: indexedRelease.minEngineVersion !== undefined ? indexedRelease.minEngineVersion
+          : latest ? descriptor.minEngineVersion : null,
+        experimental: indexedRelease.experimental ?? (latest ? descriptor.experimental : undefined),
       };
+    }
+    // A local source states its own gates (extension.json, .uplugin IsExperimentalVersion): they describe what is installed.
+    if (sourceArg !== '') descriptor = { ...descriptor, ...readSourceGates(sourceArg) };
+
+    // Refuse an engine the extension cannot compile on, before anything is written.
+    const minEngine = descriptor.minEngineVersion ?? null;
+    if (minEngine) {
+      const engine = projectEngineVersion(uproject.engineAssociation, opts);
+      if (engine === null) {
+        warnings.push(
+          `${pluginName} requires Unreal Engine ${minEngine} or newer; could not determine this project's engine ` +
+            `(EngineAssociation "${uproject.engineAssociation}"), so it was not checked.`,
+        );
+      } else if (!engineMeetsMinimum(engine, minEngine)) {
+        throw new Error(
+          `${pluginName} requires Unreal Engine ${minEngine} or newer, but this project uses Unreal Engine ` +
+            `${engine[0]}.${engine[1]}: it cannot compile there. Nothing was installed. Upgrade the project to ` +
+            `Unreal Engine ${minEngine}+ to use it.`,
+        );
+      }
+    }
+    if (descriptor.experimental === true) {
+      warnings.push(`${pluginName} is experimental: its operations and behaviour may change between versions.`);
     }
     const source = resolveInstallSource({
       source: sourceArg,
@@ -497,8 +529,37 @@ function extractZip(zipBytes: Uint8Array, destDir: string, warnings: string[]): 
 }
 
 // ---------------------------------------------------------------------------
-// minCoreVersion + UBT build
+// Engine gate, minCoreVersion + UBT build
 // ---------------------------------------------------------------------------
+
+/**
+ * The project's engine `[major, minor]`: its EngineAssociation when that is a version (a launcher
+ * install, `"5.8"`), else the `Build.version` of `--engine-root` or of the engine the association
+ * resolves to (a source build's GUID). `null` when unknown.
+ */
+function projectEngineVersion(engineAssociation: string, opts: InstallExtensionOptions): [number, number] | null {
+  const direct = parseEngineVersion(engineAssociation);
+  if (direct !== null) return direct;
+  const engineRoot = (opts.engineRoot ?? '').trim()
+    || (engineAssociation.trim() === '' ? null : resolveEngineRoot(engineAssociation, opts));
+  return engineRoot ? parseEngineVersion(readEngineAssociationFromBuildVersion(engineRoot, process.platform)) : null;
+}
+
+/**
+ * The gates a local `--source` declares: its `extension.json` `minEngineVersion` / `experimental` (a
+ * first-party extension folder) and its `.uplugin` `IsExperimentalVersion`. Only what it states.
+ */
+function readSourceGates(sourceArg: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
+  const pluginRoot = resolveLocalPluginRoot(sourceArg);
+  const gates: { minEngineVersion?: string | null; experimental?: boolean } = {};
+  const metadataFile = path.join(pluginRoot, 'extension.json');
+  const metadata = fs.existsSync(metadataFile) ? (safeReadJson(metadataFile) as Record<string, unknown>) : {};
+  if (typeof metadata.minEngineVersion === 'string') gates.minEngineVersion = metadata.minEngineVersion;
+  const uplugin = findUPluginFile(pluginRoot);
+  const descriptor = uplugin ? (safeReadJson(uplugin) as Record<string, unknown>) : {};
+  if (metadata.experimental === true || descriptor.IsExperimentalVersion === true) gates.experimental = true;
+  return gates;
+}
 
 /** Warn (never fail) when the installed core Unreal-MCP plugin is below `minCoreVersion`. */
 function warnOnCoreVersionFloor(

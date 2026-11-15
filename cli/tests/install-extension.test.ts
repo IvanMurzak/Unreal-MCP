@@ -5,8 +5,11 @@ import { zipSync } from 'fflate';
 import { installExtension } from '../src/lib/install-extension.js';
 import {
   EXTENSIONS_CATALOG,
+  engineMeetsMinimum,
+  extensionLabels,
   findExtension,
   hasVersion,
+  parseEngineVersion,
   unknownExtensionMessage,
   type ExtensionDescriptor,
 } from '../src/utils/extensions-catalog.js';
@@ -874,5 +877,39 @@ describe('installExtension keepDisabled', () => {
     expect(r.kind).toBe('success');
     const plugin = JSON.parse(fs.readFileSync(uprojectPath, 'utf-8')).Plugins.find((p: { Name: string }) => p.Name === 'FooNiagara');
     expect(plugin.Enabled).toBe(false);
+  });
+});
+
+describe('engine version helpers and listing labels', () => {
+  it('parseEngineVersion reads major.minor of a version, not a GUID', () => {
+    expect(parseEngineVersion('5.8')).toEqual([5, 8]);
+    expect(parseEngineVersion(' 5.7.1 ')).toEqual([5, 7]);
+    expect(parseEngineVersion('{0A1B2C3D-0000-0000-0000-000000000000}')).toBeNull();
+    expect(parseEngineVersion('')).toBeNull();
+  });
+
+  it('engineMeetsMinimum compares major.minor numerically; no minimum allows any engine', () => {
+    expect(engineMeetsMinimum([5, 7], '5.8')).toBe(false);
+    expect(engineMeetsMinimum([5, 8], '5.8')).toBe(true);
+    expect(engineMeetsMinimum([5, 10], '5.8')).toBe(true);
+    expect(engineMeetsMinimum([6, 0], '5.8')).toBe(true);
+    expect(engineMeetsMinimum([4, 27], null)).toBe(true);
+  });
+
+  it('a listing labels experimental and engine-gated extensions', () => {
+    const base = EXTENSIONS_CATALOG[0];
+    expect(extensionLabels(base)).toEqual([]);
+    const gated = { ...base, minEngineVersion: '5.8', experimental: true };
+    expect(extensionLabels(gated)).toEqual(['experimental', 'UE 5.8+']);
+    expect(unknownExtensionMessage('x', [gated])).toContain(`${base.extensionId} (experimental, UE 5.8+)`);
+  });
+
+  it('a catalog descriptor with an engine floor refuses an older project', async () => {
+    const project = makeProject(); // UE 5.7
+    const catalog: ExtensionDescriptor[] = [{ ...EXTENSIONS_CATALOG[0], pluginName: 'FooNiagara', repo: null, minEngineVersion: '5.8' }];
+    const source = makeExtensionSource('FooNiagara');
+    const r = await installExtension({ projectDir: project, extensionId: catalog[0].extensionId, catalog, source });
+    expect(r.kind === 'failure' && r.error.message).toContain('requires Unreal Engine 5.8 or newer');
+    expect(fs.existsSync(path.join(project, 'Plugins', 'FooNiagara'))).toBe(false);
   });
 });

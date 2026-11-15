@@ -114,7 +114,13 @@ checksums, with the legacy catalog URL as its migration fallback.
 
 `install-extension` loads the validated online index from the fixed public GitHub Releases URL. It
 resolves extension ID/name/pluginName from that index, so new extensions do not require a CLI release.
-Each historical release can carry its own minimum core version and engine-plugin dependencies.
+Each historical release can carry its own minimum core version and engine-plugin dependencies, and its
+`minEngineVersion` / `experimental` from `extension.json` (written by `extension_release.py` when set; a
+record without them, published before they existed, means no restriction). `install-extension` refuses a
+project whose engine (its EngineAssociation, or the `Build.version` of the engine a source-build GUID
+resolves to) is older than the selected version's `minEngineVersion`, before downloading or writing
+anything, and warns that an experimental extension is experimental. The Editor's Extensions panel shows
+such a row with the reason and no Install button, marks experimental ones, and does not offer them to agents.
 The index's `version` is stable latest for that extension; `releases` maps exact versions to repo/tag
 and optional SHA-256. `--version` selects history; the default never downgrades an installed newer
 version. Component archives are hash-checked when hashes exist, before modifying the installation.

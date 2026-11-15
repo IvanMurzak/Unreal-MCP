@@ -152,6 +152,28 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
 	});
 
+	It("never tells agents about an online extension this engine cannot build", [this]()
+	{
+		TArray<FUnrealMcpKnownExtension> Fetched = UnrealMcpAvailableExtensions::Known(); // restored at the end
+		Fetched.RemoveAt(0, UE_VERSION_OLDER_THAN(5, 8, 0) ? 6 : 7);
+		TArray<FUnrealMcpCatalogEntry> Catalog;
+		FUnrealMcpCatalogEntry& Future = Catalog.AddDefaulted_GetRef();
+		Future.ExtensionId = TEXT("com.example.unreal-mcp-spec-future");
+		Future.PluginName = TEXT("UnrealMcpSpecFuturePluginThatIsNotInstalled");
+		Future.MinEngineVersion = FString::Printf(TEXT("%d.0"), ENGINE_MAJOR_VERSION + 1);
+		FUnrealMcpCatalogEntry& Current = Catalog.AddDefaulted_GetRef();
+		Current.ExtensionId = TEXT("com.example.unreal-mcp-spec-current");
+		Current.PluginName = TEXT("UnrealMcpSpecCurrentPluginThatIsNotInstalled");
+		Current.MinEngineVersion = FString::Printf(TEXT("%d.%d"), ENGINE_MAJOR_VERSION, ENGINE_MINOR_VERSION);
+		FUnrealMcpExtensionCatalog::PublishToAgents(Catalog);
+
+		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
+		const auto Has = [&Known](const TCHAR* Id) { return Known.ContainsByPredicate([Id](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == Id; }); };
+		TestFalse(TEXT("the one for a newer engine is left out"), Has(TEXT("com.example.unreal-mcp-spec-future")));
+		TestTrue(TEXT("the one for this engine is listed"), Has(TEXT("com.example.unreal-mcp-spec-current")));
+		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
+	});
+
 	It("names a missing extension when a query on its source fails, and warns when one on its domain finds nothing", [this]()
 	{
 		using namespace UnrealMcpRqlSpecHelpers;

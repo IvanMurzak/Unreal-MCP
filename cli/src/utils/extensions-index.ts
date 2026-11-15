@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { ExtensionDescriptor } from './extensions-catalog.js';
+import { ENGINE_VERSION, type ExtensionDescriptor } from './extensions-catalog.js';
 
 export const EXTENSIONS_INDEX_URL =
   'https://github.com/IvanMurzak/Unreal-MCP/releases/download/extensions-index/extensions-index.json';
@@ -13,6 +13,9 @@ export interface IndexedRelease {
   readonly sha256?: string;
   readonly minCoreVersion?: string | null;
   readonly enginePlugins?: readonly string[];
+  /** This version's engine floor and experimental flag; absent (a release published before them) = none. */
+  readonly minEngineVersion?: string | null;
+  readonly experimental?: boolean;
 }
 
 export interface IndexedExtension extends ExtensionDescriptor {
@@ -27,6 +30,14 @@ export interface ExtensionsIndex {
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const NAME = /^[A-Za-z][A-Za-z0-9]*$/;
 const REPO = /^IvanMurzak\/(Unreal-MCP|Unreal-AI-[A-Za-z0-9-]+)$/;
+
+/** Optional gates (`minEngineVersion`, `experimental`): absent or null, else well-formed. */
+function validGates(value: { minEngineVersion?: unknown; experimental?: unknown }): boolean {
+  const { minEngineVersion, experimental } = value;
+  return (minEngineVersion === undefined || minEngineVersion === null
+      || (typeof minEngineVersion === 'string' && ENGINE_VERSION.test(minEngineVersion)))
+    && (experimental === undefined || typeof experimental === 'boolean');
+}
 
 /** Reject malformed indices before either installation or caching. No executable paths/URLs. */
 export function parseExtensionsIndex(value: unknown): ExtensionsIndex {
@@ -44,6 +55,7 @@ export function parseExtensionsIndex(value: unknown): ExtensionsIndex {
       || (e.minCoreVersion !== null && (typeof e.minCoreVersion !== 'string' || !VERSION.test(e.minCoreVersion)))
       || !Array.isArray(e.enginePlugins) || !e.enginePlugins.every(p => typeof p === 'string' && NAME.test(p))
       || !Array.isArray(e.tools) || !e.tools.every(t => t && typeof t.name === 'string' && typeof t.description === 'string')
+      || !validGates(e)
       || !e.releases || typeof e.releases !== 'object' || Array.isArray(e.releases)) {
       throw new Error('Invalid extension descriptor in index.');
     }
@@ -59,7 +71,8 @@ export function parseExtensionsIndex(value: unknown): ExtensionsIndex {
         || !/^[A-Za-z0-9.-]+$/.test(release.tag)
         || (release.minCoreVersion !== undefined && release.minCoreVersion !== null && !VERSION.test(release.minCoreVersion))
         || (release.enginePlugins !== undefined && (!Array.isArray(release.enginePlugins) || !release.enginePlugins.every((p: unknown) => typeof p === 'string' && NAME.test(p))))
-        || (release.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(release.sha256))) {
+        || (release.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(release.sha256))
+        || !validGates(release)) {
         throw new Error('Invalid extension release in index.');
       }
     }

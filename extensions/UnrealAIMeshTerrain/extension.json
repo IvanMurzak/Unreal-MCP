@@ -7,10 +7,11 @@
   "version": "0.1.0",
   "minCoreVersion": "0.31.3",
   "minEngineVersion": "5.8",
+  "experimental": true,
   "enginePlugins": [
     "MeshPartition",
     "MeshTerrainMode"
   ],
   "tools": [],
-  "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'minEngineVersion' the lowest Unreal Engine it builds on (the suite skips it on older engines); 'enginePlugins' are the engine plugins the installer enables."
+  "_comment": "Install-catalog metadata (one unreal-mcp-cli ExtensionDescriptor). 'version' is the .uplugin VersionName; change both with `python scripts/extension_release.py bump --plugin <Plugin> --version <x.y.z>`. 'tools' is empty: the extension adds an RQL module (docs/rql.md), not MCP tools. 'minCoreVersion' is the lowest supported Unreal-MCP core; 'minEngineVersion' the lowest Unreal Engine it builds on (the suite skips it on older engines, unreal-mcp-cli install-extension and the editor's Extensions panel refuse it); 'experimental' mirrors the .uplugin IsExperimentalVersion (shown as Experimental by the installers); 'enginePlugins' are the engine plugins the installer enables."
 }

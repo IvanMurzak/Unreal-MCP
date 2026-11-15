@@ -522,7 +522,9 @@ What it does, and why:
    `github.com/<repo>/releases/latest` redirect (drafts/prereleases are never chosen; the tag must be a
    plain `vX.Y.Z` with a `<pluginName>-<X.Y.Z>.zip` asset). The catalog `version` is only the last
    known release — the fallback when resolution fails. `--version` wins; an installed newer copy is
-   never downgraded implicitly. So publishing release `vX.Y.Z` of your extension with that asset is all
+   never downgraded implicitly. An extension whose `extension.json` sets `minEngineVersion` (e.g.
+   `"5.8"`) is refused, with nothing written, in a project on an older Unreal Engine: its C++ cannot
+   compile there. So publishing release `vX.Y.Z` of your extension with that asset is all
    it takes for users to get it — no CLI release needed.
 2. **Place** the plugin into `<project>/Plugins/<pluginName>/` (build-cache / VCS subtrees excluded;
    staged-then-swapped so a failed install never corrupts an existing one).
