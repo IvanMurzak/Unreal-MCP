@@ -22,6 +22,10 @@
 
 #include "MeshPartition.h"
 #include "MeshPartitionModifierComponent.h"
+#include "MeshPartitionModifierActor.h"
+#include "Components/SplineComponent.h"
+#include "EngineUtils.h"
+#include "Modifiers/MeshPartitionPatchModifier.h"
 
 // ============================================================================================
 //  UE Automation spec for the `meshTerrainModifier` operations (UnrealAIMeshTerrainModifiersApi): add every modifier
@@ -117,6 +121,15 @@ BEGIN_DEFINE_SPEC(FUnrealAIMeshTerrainModifiersSpec, "UnrealAIMeshTerrain.Modifi
 		return nullptr;
 	}
 
+	/** How many modifier actors the editor world has (a refused Add must not leave one behind). */
+	static int32 ModSpecModifierActors()
+	{
+		int32 Count = 0;
+		for (TActorIterator<UE::MeshPartition::AModifierActor> It(UnrealMcpRql::EditorWorld()); It; ++It)
+			Count += IsValid(*It) ? 1 : 0;
+		return Count;
+	}
+
 	/** The built height (what traces hit) of @p Terrain at X, Y; -1e9 off the terrain. */
 	static double ModSpecHeight(const AMeshPartition* Terrain, double X, double Y)
 	{
@@ -174,7 +187,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TEXT("AddRemesh(MeshPartition Terrain, Vector Location, Vector Size, double EdgeLength, string Label)"),
 				TEXT("Add(MeshPartition Terrain, string Kind, Vector Location, string Label)"),
 				TEXT("Edit(ModifierComponent Modifier, Vector Size, double Radius, double Width, double Strength, double Falloff)"),
-				TEXT("Move(ModifierComponent Modifier, Vector Location)"), TEXT("SetSplinePoints(ModifierComponent Modifier, List<Vector> Points, bool Closed)"),
+				TEXT("Move(ModifierComponent Modifier, Vector Location)"), TEXT("SetSplinePoints(ModifierComponent Modifier, List<Vector> Points, int Closed)"),
 				TEXT("SetLatticePoints(ModifierComponent Modifier, List<Vector> Points)"), TEXT("SetOrder(ModifierComponent Modifier, double Priority, string PriorityLayer)"),
 				TEXT("Enable(ModifierComponent Modifier)"), TEXT("Disable(ModifierComponent Modifier)"), TEXT("Bind(ModifierComponent Modifier, MeshPartition Terrain)"),
 				TEXT("Remove(ModifierComponent Modifier)") })
@@ -182,7 +195,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TestTrue(*FString::Printf(TEXT("schema lists %s"), Method), Schema.Contains(Method));
 			}
 			const FString Lattice = UnrealMcpRqlTools::Schema(TEXT("LatticeModifier"), bOk);
-			TestTrue(TEXT("LatticeModifier has LatticePoints"), bOk && Lattice.Contains(TEXT("LatticePoints")));
+			TestTrue(*FString::Printf(TEXT("LatticeModifier has the LatticePoints member (%s)"), *Lattice.Left(300)), bOk && (Lattice.Contains(TEXT("\"LatticePoints\"")) || Lattice.Contains(TEXT(" LatticePoints ")) || Lattice.Contains(TEXT("{LatticePoints "))));
 			TestTrue(TEXT("the skill names the source"), UnrealMcpRqlTools::SkillMarkdown().Contains(TEXT("meshTerrainModifier | call AddNoise(")));
 		});
 	});
@@ -197,6 +210,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
 				return;
 			const FString T = ModSpecFind(Label);
+			const int32 ActorsBefore = ModSpecModifierActors();
 			// meshTerrainModifier | call AddNoise(unreal.find("<label>"), [-1200000, 0, 0])
 			ModSpecRefuses(TEXT("a noise off the terrain"), TEXT("AddNoise"), { T, ModSpecVec(-1200000.0, 0.0, 0.0) }, TEXT("would not change the terrain"));
 			ModSpecRefuses(TEXT("a negative size"), TEXT("AddNoise"), { T, ModSpecVec(-1300000.0, 0.0, 0.0), ModSpecVec2(-5.0, 100.0) }, TEXT("must be above 0"));
@@ -210,7 +224,10 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecRefuses(TEXT("a lattice resolution of 1"), TEXT("AddLattice"), { T, ModSpecVec(-1300000.0, 0.0, 0.0), ModSpecVec(500.0, 500.0, 500.0), ModSpecNum(1.0) }, TEXT("2 .. 9"));
 			ModSpecRefuses(TEXT("a remesh too fine"), TEXT("AddRemesh"), { T, ModSpecVec(-1300000.0, 0.0, 0.0), ModSpecVec(4000.0, 4000.0, 1000.0), ModSpecNum(1.5) }, TEXT("EdgeLength"));
 			ModSpecRefuses(TEXT("a base mesh kind"), TEXT("Add"), { T, ModSpecStr(TEXT("MeshProvider")), ModSpecVec(-1300000.0, 0.0, 0.0) }, TEXT("not a modifier kind"));
-			TestEqual(TEXT("nothing was added"), UnrealAIMeshTerrain::Modifiers(Terrain).Num(), 0);
+			ModSpecRefuses(TEXT("a two-point closed spline"), TEXT("AddSpline"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(-1300000.0, 0.0, 0.0), *ModSpecVec(-1299000.0, 0.0, 0.0)),
+				ModSpecNum(100.0), ModSpecNum(100.0), TEXT(R"({"lit":true})") }, TEXT("at least 3 points"));
+			TestEqual(TEXT("nothing was added to the terrain"), UnrealAIMeshTerrain::Modifiers(Terrain).Num(), 0);
+			TestEqual(TEXT("no modifier actor was left in the level"), ModSpecModifierActors(), ActorsBefore);
 
 			// A base mesh is not a modifier: meshTerrainModifier | call Remove(<base mesh>)
 			// meshTerrains | where Label == "<label>" | get BaseMeshes | call meshTerrainModifier.Remove($)
@@ -359,7 +376,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				ModSpecRun(TEXT("moved road"), TEXT("SetSplinePoints"), { ModSpecModifier(Road), FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0 - 5000.0, 5000.0, 100.0), *ModSpecVec(X0 + 5000.0, 5000.0, 100.0)) });
 				ModSpecExpectHeight(TEXT("on the moved road"), Terrain, X0, 5000.0, 100.0, 2.0);
 				ModSpecExpectHeight(TEXT("where the road was"), Terrain, X0, 4000.0, 0.0, 2.0);
-				ModSpecRefuses(TEXT("spline points on a patch"), TEXT("SetSplinePoints"), { ModSpecModifier(Box), FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 100.0, 0.0, 0.0)) }, TEXT("has no spline"));
+				ModSpecRefuses(TEXT("spline points on a box"), TEXT("SetSplinePoints"), { ModSpecModifier(Box), FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 100.0, 0.0, 0.0)) }, TEXT("has no spline"));
 			}
 
 			// meshTerrainModifier | call AddWeight(unreal.find("<label>"), "Green", [X0 + 2000, 2500, 0], 400, 200, 0.8, "<label>_Green")
@@ -387,7 +404,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecExpectHeight(TEXT("a remesh keeps flat ground flat"), Terrain, X0 + 4000.0, -1500.0, 0.0);
 
 			// The other kinds with their defaults: meshTerrainModifier | call Add(unreal.find("<label>"), "<Kind>", [x, y, 0])
-			for (const TCHAR* Kind : { TEXT("InstancedPatch"), TEXT("SplineRemesh"), TEXT("MeshProject"), TEXT("Boolean"), TEXT("ProjectMeshLayers") })
+			for (const TCHAR* Kind : { TEXT("InstancedPatch"), TEXT("SplineRemesh"), TEXT("MeshProject"), TEXT("Boolean"), TEXT("ProjectMeshLayers"), TEXT("Lattice") })
 			{
 				TSharedPtr<FJsonObject> Result;
 				if (ModSpecRun(Kind, TEXT("Add"), { T, ModSpecStr(Kind), ModSpecVec(X0, -5500.0, 0.0) }, &Result))
@@ -464,6 +481,83 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			TestNotNull(TEXT("the first terrain lists it now"), ModSpecFindModifier(A, Pad));
 			ModSpecExpectHeight(TEXT("the second terrain lost the pad"), B, -1700000.0, 2500.0, 100.0);
 			ModSpecExpectHeight(TEXT("the first terrain's edge rose"), A, -1700000.0, 1900.0, 400.0);
+		});
+
+		It("refuse a partial Edit whole, keep a closed spline closed, remove only the modifier of a shared actor, place a default Torus", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModEdge"));
+			const double X0 = -1900000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 8000.0, 8000.0, 80, 80);
+			AActor* Shared = nullptr;
+			ON_SCOPE_EXIT
+			{
+				if (IsValid(Shared))
+					Shared->GetWorld()->EditorDestroyActor(Shared, true);
+				UnrealAIMeshTerrain::DestroyTerrain(Terrain);
+			};
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain))
+				return;
+			const FString T = ModSpecFind(Label);
+
+			// An Edit with one parameter the kind lacks changes nothing: meshTerrainModifier | call Edit(<noise>, [3000, 3000, -1], 500)
+			const FString Noise = Label + TEXT("_Noise");
+			if (ModSpecRun(TEXT("noise"), TEXT("AddNoise"), { T, ModSpecVec(X0 - 2000.0, -2000.0, 0.0), ModSpecVec2(2000.0, 2000.0), ModSpecNum(300.0), ModSpecNum(0.002), ModSpecNum(0.3), ModSpecStr(Noise) }))
+			{
+				const UModifierComponent* NoiseModifier = ModSpecFindModifier(Terrain, Noise);
+				ModSpecRefuses(TEXT("a noise Radius"), TEXT("Edit"), { ModSpecModifier(Noise), ModSpecVec(3000.0, 3000.0, -1.0), ModSpecNum(500.0) }, TEXT("has no Radius"));
+				const FStructProperty* Coverage = NoiseModifier ? CastField<FStructProperty>(NoiseModifier->GetClass()->FindPropertyByName(TEXT("UnscaledCoverage"))) : nullptr;
+				TestTrue(TEXT("the refused Edit kept the size"), Coverage && FMath::IsNearlyEqual(Coverage->ContainerPtrToValuePtr<FVector>(const_cast<UModifierComponent*>(NoiseModifier))->X, 2000.0));
+			}
+
+			// A closed spline stays closed when only its points change (Closed -1).
+			const FString Plateau = Label + TEXT("_Plateau");
+			const auto Square = [X0](double Half, double Z)
+			{
+				TArray<FString> Points;
+				for (const FVector2D Corner : { FVector2D(-1.0, -1.0), FVector2D(1.0, -1.0), FVector2D(1.0, 1.0), FVector2D(-1.0, 1.0) })
+					Points.Add(ModSpecVec(X0 + 2000.0 + Corner.X * Half, 2000.0 + Corner.Y * Half, Z));
+				return FString::Printf(TEXT(R"({"list":[%s]})"), *FString::Join(Points, TEXT(",")));
+			};
+			if (ModSpecRun(TEXT("closed spline"), TEXT("AddSpline"), { T, Square(800.0, 200.0), ModSpecNum(0.0), ModSpecNum(300.0), TEXT(R"({"lit":true})"), ModSpecStr(TEXT("")), ModSpecStr(Plateau) }))
+			{
+				ModSpecExpectHeight(TEXT("inside the closed spline"), Terrain, X0 + 2000.0, 2000.0, 200.0, 2.0);
+				ModSpecRun(TEXT("new points"), TEXT("SetSplinePoints"), { ModSpecModifier(Plateau), Square(1000.0, 250.0) });
+				const UModifierComponent* Spline = ModSpecFindModifier(Terrain, Plateau);
+				const USplineComponent* Path = Spline ? Spline->GetOwner()->FindComponentByClass<USplineComponent>() : nullptr;
+				TestTrue(TEXT("still a closed loop"), Path && Path->IsClosedLoop());
+				ModSpecExpectHeight(TEXT("still filled"), Terrain, X0 + 2000.0, 2000.0, 250.0, 2.0);
+			}
+
+			// A modifier component on an actor that is not a modifier actor: Remove takes the component, not the actor.
+			Shared = Terrain->GetWorld()->SpawnActor<AActor>(FVector(X0 - 2000.0, 2000.0, 300.0), FRotator::ZeroRotator);
+			if (TestNotNull(TEXT("a plain actor"), Shared))
+			{
+				Shared->SetActorLabel(Label + TEXT("_Shared"));
+				USceneComponent* Root = NewObject<USceneComponent>(Shared, TEXT("Root"));
+				Shared->SetRootComponent(Root);
+				Root->RegisterComponent();
+				Root->SetWorldLocation(FVector(X0 - 2000.0, 2000.0, 300.0));
+				UE::MeshPartition::UPatchModifier* Patch = NewObject<UE::MeshPartition::UPatchModifier>(Shared, TEXT("Patch"));
+				Patch->SetupAttachment(Root);
+				Shared->AddInstanceComponent(Patch);
+				Patch->RegisterComponent();
+				Patch->BP_SetAffectedMegaMesh(Terrain);
+				TestTrue(TEXT("built with the shared patch"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0));
+				const FUnrealAIMeshTerrainModifierResult Removed = GetMutableDefault<UUnrealAIMeshTerrainModifiersApi>()->Remove(Patch);
+				TestTrue(TEXT("Remove returned built"), Removed.Ready);
+				TestTrue(TEXT("the plain actor stays"), IsValid(Shared));
+				TestFalse(TEXT("its patch is gone"), IsValid(Patch) && Patch->IsRegistered());
+				TestTrue(TEXT("the terrain stays"), IsValid(Terrain));
+			}
+
+			// A Torus at the default Size (a 1000 cm cube) is a ring 1000 cm high.
+			TSharedPtr<FJsonObject> Result;
+			if (ModSpecRun(TEXT("default torus"), TEXT("AddShape"), { T, ModSpecStr(TEXT("Torus")), ModSpecVec(X0 + 2000.0, -2000.0, 0.0) }, &Result))
+			{
+				TestTrue(TEXT("a unique default label"), Result->GetStringField(TEXT("Actor")).StartsWith(TEXT("Torus")));
+				ModSpecExpectHeight(TEXT("on the default torus ring"), Terrain, X0 + 2000.0 + 333.0, -2000.0, 500.0, 60.0);
+				ModSpecExpectHeight(TEXT("in its hole"), Terrain, X0 + 2000.0, -2000.0, 0.0);
+			}
 		});
 
 		It("rebuild after RQL set on a modifier and WaitForBuild", [this]()

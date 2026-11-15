@@ -269,9 +269,9 @@ meshTerrain | call EnableMeshTerrain()                                     MeshT
 actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. Mesh Terrain needs Unreal
 Engine 5.8+, the MeshTerrainMode plugin and a World Partition level.)MD"));
 		Context.AddGuide(TEXT("Mesh Terrain modifiers (Experimental, UE 5.8+)"), TEXT(R"MD(`meshTerrainModifier` adds and changes the modifiers that shape a
-Mesh Terrain. Every call names its terrain (a modifier is bound to it, never to the nearest one), is one undo step, and
+Mesh Terrain. Every Add names its terrain (a modifier is bound to it, never to the nearest one); every call is one undo step and
 returns after the terrain is rebuilt: `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority, Disabled, Ready, Seconds,
-State}`; read the result with `Surface`. Sizes, radii and heights are cm; Location Z matters for Patch, Shape, Spline.
+State}`; read the result with `Surface`. Sizes, radii and heights are cm; Location Z is the height of a Patch or Shape (a Spline takes its points' Z).
 
 ```
 meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005)        hills: Size [X, Y], Strength (height), Frequency (1/cm), Falloff 0..1
@@ -292,8 +292,8 @@ meshTerrainModifiers | where Kind == "Patch" | call meshTerrainModifier.Edit($, 
 
 Other properties: `set` them on the modifier (`rql-schema NoiseModifier`), then `meshTerrain | call WaitForBuild(terrain)`.
 Use the operations, not `set`, to move a modifier (`set Location` on its actor does not rebuild the terrain), to change a
-WeightUtility's InnerValue / OuterValue (the engine caches the old weights) and a Lattice's size or LatticeResolution (its
-points would no longer match: an ensure). Where two modifiers overlap the later one in build order wins (`Modifiers` lists
+WeightUtility's InnerValue (Edit Strength; the engine caches the old weights) and a Lattice's size (Edit; never set LatticeResolution: its
+points would no longer match, an engine ensure). Where two modifiers overlap the later one in build order wins (`Modifiers` lists
 them in order); the Boolean modifier may log "reported errors ... cracks" for box shapes: an engine warning, check
 `Surface`.)MD"));
 	}

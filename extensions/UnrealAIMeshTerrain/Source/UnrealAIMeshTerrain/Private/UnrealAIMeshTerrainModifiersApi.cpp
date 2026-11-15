@@ -12,6 +12,7 @@
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GeometryScript/MeshPrimitiveFunctions.h"
 #include "UDynamicMesh.h"
 
@@ -141,6 +142,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		FEditPropertyChain Chain;
 		Chain.AddHead(Property);
 		Chain.SetActivePropertyNode(Property);
+		Object->SetFlags(RF_Transactional);
 		Object->Modify();
 		Object->PreEditChange(Chain);
 		const TCHAR* End = Property->ImportText_InContainer(*Value, Object, Object, PPF_None);
@@ -186,7 +188,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	}
 
 	/** The guards every operation on an existing modifier runs: available, a live modifier of the editor world, not a base mesh. */
-	bool CheckModifier(const UModifierComponent* Modifier)
+	bool CheckModifier(const UModifierComponent* Modifier, bool bNeedsTerrain = true)
 	{
 		if (!CheckAvailable())
 			return false;
@@ -197,10 +199,17 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (Modifier->IsBase())
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is a base mesh (a section of the terrain itself), not a modifier: only the terrain's create / import operations make or replace those"),
 				*Modifier->GetOwner()->GetActorNameOrLabel()));
-		if (AMeshPartition* Terrain = TerrainOf(Modifier))
+		AMeshPartition* Terrain = TerrainOf(Modifier);
+		if (!Terrain && bNeedsTerrain)
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is not bound to a Mesh Terrain: call meshTerrainModifier | call Bind(modifier, terrain) first"),
+				*Modifier->GetOwner()->GetActorNameOrLabel()));
+		if (Terrain)
 			LoadTerrainActors(Terrain);
 		return true;
 	}
+
+	/** Whether @p Modifier is a @p Kind modifier or a subclass of one (a Blueprint of it, InstancedPatch for Patch). */
+	bool IsKind(const UModifierComponent* Modifier, const TCHAR* Kind);
 
 	/**
 	 * Place a modifier of @p Class the way the Modifiers palette does (UModifierActorFactory: an AModifierActor named after
@@ -210,6 +219,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	UModifierComponent* SpawnModifier(AMeshPartition* Terrain, UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label, AMeshPartition*& OutPrevious)
 	{
 		OutPrevious = nullptr;
+		if (!Class)
+			return UnrealMcpRql::Failed<UModifierComponent*>(TEXT("this engine's MeshPartitionEditor has no such modifier class"));
 		UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryByClass(UE::MeshPartition::UModifierActorFactory::StaticClass()) : nullptr;
 		UWorld* World = Terrain->GetWorld();
 		ULevel* Level = World ? World->GetCurrentLevel() : nullptr;
@@ -247,7 +258,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Out.Kind = ModifierKind(Modifier);
 			Out.PriorityLayer = Modifier->GetType().ToString();
 			Out.Priority = Modifier->GetPriority();
-			Out.Disabled = Modifier->GetIsDisabledFlag();
+			Out.Disabled = Modifier->IsDisabled();
 		}
 		Out.Terrain = Terrain ? Terrain->GetActorNameOrLabel() : FString();
 		Out.Seconds = FMath::RoundToDouble(Seconds * 100.0) / 100.0;
@@ -285,6 +296,54 @@ namespace UnrealAIMeshTerrainModifiersLocal
 				return FModifierOpResult();
 		}
 		return Describe(Modifier, Main, FPlatformTime::Seconds() - Start);
+	}
+
+	/**
+	 * One modifier an Add operation places: if a step after the spawn fails, the half-made modifier is taken out again
+	 * (in the same undo step) when this goes out of scope; Keep() hands it to the terrain and waits for the build.
+	 */
+	struct FPlacement
+	{
+		AMeshPartition* Terrain = nullptr;
+		AMeshPartition* Previous = nullptr;
+		UModifierComponent* Modifier = nullptr;
+		bool bKept = false;
+
+		explicit FPlacement(AMeshPartition* InTerrain) : Terrain(InTerrain) {}
+		~FPlacement()
+		{
+			AActor* Owner = !bKept && IsValid(Modifier) ? Modifier->GetOwner() : nullptr;
+			if (!Owner)
+				return;
+			Owner->GetWorld()->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
+			for (const AMeshPartition* Bound : { Terrain, Previous })
+			{
+				if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
+					Component->UpdateModifierList();
+			}
+		}
+		UModifierComponent* Spawn(UClass* Class, const FVector& Location, const FRotator& Rotation, const FString& Label)
+		{
+			Modifier = SpawnModifier(Terrain, Class, Location, Rotation, Label, Previous);
+			return Modifier;
+		}
+		FModifierOpResult Keep()
+		{
+			bKept = true;
+			return Finish(Modifier, { Terrain, Previous });
+		}
+	};
+
+	/** @p Base, or @p Base2, @p Base3, ...: the first actor label the editor world does not use yet. */
+	FString UniqueLabel(UWorld* World, const FString& Base)
+	{
+		TSet<FString> Used;
+		for (TActorIterator<AActor> It(World); It; ++It)
+			Used.Add(It->GetActorLabel());
+		FString Label = Base;
+		for (int32 Index = 2; Used.Contains(Label); ++Index)
+			Label = FString::Printf(TEXT("%s%d"), *Base, Index);
+		return Label;
 	}
 
 	/**
@@ -351,12 +410,11 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		}
 		else if (Shape == TEXT("Torus"))
 		{
-			// Size.Z is the ring's thickness; X and Y its outer diameter.
-			const double Minor = Size.Z / 2.0;
+			// X and Y are the outer diameter, Z the ring's height. The ring is at most a third of the radius thick (so a third
+			// of the diameter stays open as the hole) and stretched up or down to Size.Z.
+			const double Minor = FMath::Min(Size.Z / 2.0, Size.X / 6.0);
 			const double Major = Size.X / 2.0 - Minor;
-			if (Major <= 0.0)
-				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("a Torus needs Size X (outer diameter, %.0f) larger than Size Z (ring thickness, %.0f)"), Size.X, Size.Z));
-			const FTransform Stretch(FQuat::Identity, FVector::ZeroVector, FVector(1.0, Size.Y / Size.X, 1.0));
+			const FTransform Stretch(FQuat::Identity, FVector::ZeroVector, FVector(1.0, Size.Y / Size.X, Size.Z / (2.0 * Minor)));
 			UPrimitives::AppendTorus(Mesh, Options, Stretch, FGeometryScriptRevolveOptions(), static_cast<float>(Major), static_cast<float>(Minor), 32, 12, Center);
 		}
 		else if (Shape == TEXT("Rectangle"))
@@ -426,10 +484,14 @@ namespace UnrealAIMeshTerrainModifiersLocal
 
 	// ---- Splines -----------------------------------------------------------------------------------------------------
 
-	bool CheckPoints(const TArray<FVector>& Points)
+	bool CheckPoints(const TArray<FVector>& Points, bool bClosed = false)
 	{
 		if (Points.Num() < 2 || Points.Num() > 1000)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%d points: a spline needs 2 .. 1000 world points [[x, y, z], ...]"), Points.Num()));
+		if (bClosed && Points.Num() < 3)
+			return UnrealMcpRql::Failed<bool>(TEXT("a closed spline needs at least 3 points"));
+		if (bClosed && FVector::DistSquared(Points[0], Points.Last()) < 1.0)
+			return UnrealMcpRql::Failed<bool>(TEXT("a closed spline joins its last point to the first itself: leave the repeated first point out"));
 		for (int32 Index = 0; Index < Points.Num(); ++Index)
 		{
 			if (!IsPoint(Points[Index]))
@@ -457,7 +519,12 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (!Cast<USplineRemeshModifier>(Modifier) || !Owner)
 			return nullptr;
 		if (USplineComponent* Existing = Owner->FindComponentByClass<USplineComponent>())
+		{
+			// Make sure the modifier follows the spline the points go to.
+			if (bCreate)
+				Cast<USplineRemeshModifier>(Modifier)->SetSplineComponent(Existing, /*bUpdate*/ false);
 			return Existing;
+		}
 		if (!bCreate)
 			return nullptr;
 		Owner->Modify();
@@ -481,8 +548,13 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::World, /*bUpdateSpline*/ false);
 		Spline->SetClosedLoop(bClosed, /*bUpdateSpline*/ false);
 		Spline->UpdateSpline();
+		// A closed spline modifier fills its inside (a plateau outline), an open one is a path.
 		if (USplineModifier* SplineModifier = Cast<USplineModifier>(Modifier))
+		{
+			if (!SetProperty(SplineModifier, TEXT("bMeshClosedInterior"), bClosed ? TEXT("True") : TEXT("False")))
+				return false;
 			SplineModifier->UpdateSplineData();
+		}
 		else if (USplineRemeshModifier* Remesh = Cast<USplineRemeshModifier>(Modifier))
 			Remesh->UpdateSplineData();
 		Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
@@ -534,6 +606,12 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	}
 }
 
+bool UnrealAIMeshTerrainModifiersLocal::IsKind(const UModifierComponent* Modifier, const TCHAR* Kind)
+{
+	const UClass* Class = ModifierClassOf(Kind);
+	return Class && Modifier && Modifier->IsA(Class);
+}
+
 using namespace UnrealAIMeshTerrainModifiersLocal;
 
 TArray<FVector> UnrealAIMeshTerrain::LatticeWorldPoints(const UE::MeshPartition::UModifierComponent* Modifier)
@@ -557,13 +635,13 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddNoise(UE
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddNoise", "Add Mesh Terrain Noise"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Noise = SpawnModifier(Terrain, ModifierClassOf(TEXT("Noise")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Noise = Placed.Spawn(ModifierClassOf(TEXT("Noise")), Location, FRotator::ZeroRotator, Label);
 	if (!Noise || !SetProperty(Noise, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=50000)"), Size.X, Size.Y))
 		|| !SetNumber(Noise, TEXT("Intensity"), Strength) || !SetProperty(Noise, TEXT("NoiseFrequency"), FString::Printf(TEXT("(X=%.17g,Y=%.17g)"), Frequency, Frequency))
 		|| !SetNumber(Noise, TEXT("Falloff"), Falloff))
 		return FModifierOpResult();
-	return Finish(Noise, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, double Radius, double Falloff, const FString& Label)
@@ -575,11 +653,11 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE
 	if (!CheckFootprint(Terrain, Around(Location, Radius + Falloff, Radius + Falloff)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddPatch", "Add Mesh Terrain Patch"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Patch = SpawnModifier(Terrain, ModifierClassOf(TEXT("Patch")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Patch = Placed.Spawn(ModifierClassOf(TEXT("Patch")), Location, FRotator::ZeroRotator, Label);
 	if (!Patch || !SetNumber(Patch, TEXT("Radius"), Radius) || !SetNumber(Patch, TEXT("Falloff"), Falloff))
 		return FModifierOpResult();
-	return Finish(Patch, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Location, double Radius, double Falloff, double Value, const FString& Label)
@@ -593,32 +671,31 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(U
 	if (!CheckFootprint(Terrain, Around(Location, Radius + Falloff, Radius + Falloff)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddWeight", "Add Mesh Terrain Weight"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Weight = SpawnModifier(Terrain, ModifierClassOf(TEXT("WeightUtility")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Weight = Placed.Spawn(ModifierClassOf(TEXT("WeightUtility")), Location, FRotator::ZeroRotator, Label);
 	if (!Weight || !SetProperty(Weight, TEXT("WeightChannelName"), ChannelName(Terrain, Channel)) || !SetNumber(Weight, TEXT("Radius"), Radius)
 		|| !SetNumber(Weight, TEXT("Falloff"), Falloff) || !SetNumber(Weight, TEXT("InnerValue"), Value) || !SetNumber(Weight, TEXT("OuterValue"), 0.0))
 		return FModifierOpResult();
-	return Finish(Weight, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double Falloff, bool Closed, const FString& Channel, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain) || !CheckPoints(Points) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ true))
+	if (!CheckAvailable() || !CheckTerrain(Terrain) || !CheckPoints(Points, Closed) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ true))
 		return FModifierOpResult();
-	if (!IsLength(Width, /*bAllowZero*/ true) || !IsLength(Falloff))
-		return Fail(FString::Printf(TEXT("Width %g must be at least 0 and Falloff %g above 0, both at most 10000000 cm"), Width, Falloff));
+	if (!IsLength(Width, /*bAllowZero*/ true) || !IsLength(Falloff) || Falloff < 0.1)
+		return Fail(FString::Printf(TEXT("Width %g must be at least 0 and Falloff %g at least 0.1, both at most 10000000 cm"), Width, Falloff));
 	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddSpline", "Add Mesh Terrain Spline"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Spline = SpawnModifier(Terrain, ModifierClassOf(TEXT("Spline")), Points[0], FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Points[0], FRotator::ZeroRotator, Label);
 	if (!Spline || !SetNumber(Spline, TEXT("PlateauDistance"), Width / 2.0) || !SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
-		|| !SetProperty(Spline, TEXT("bMeshClosedInterior"), Closed ? TEXT("True") : TEXT("False"))
 		|| !SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
 			: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
 		|| !ApplySplinePoints(Spline, Points, Closed))
 		return FModifierOpResult();
-	return Finish(Spline, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size, const FString& Operation, FRotator Rotation, const FString& Label)
@@ -640,15 +717,17 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE
 		return Fail(FString::Printf(TEXT("a %s is flat (no volume to %s): use Operation Project, or a Box / Cylinder for a solid"), **ShapeName, **OpName));
 	if (!IsPoint(Location) || Rotation.ContainsNaN())
 		return Fail(FString::Printf(TEXT("Location %s / Rotation %s is not a world placement"), *Text(Location), *Rotation.ToString()));
+	if (bFlat)
+		Size.Z = 0.0; // a flat shape has no height
 	if (!IsLength(Size.X) || !IsLength(Size.Y) || (!bFlat && !IsLength(Size.Z)))
 		return Fail(FString::Printf(TEXT("Size %s must be above 0 and at most 10000000 cm on each axis"), *Text(Size)));
 	const double Reach = 0.5 * Size.Size();
 	if (!CheckFootprint(Terrain, Around(Location, Reach, Reach)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddShape", "Add Mesh Terrain Shape"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Modifier = SpawnModifier(Terrain, ModifierClassOf(*OpName == TEXT("Project") ? TEXT("MeshProject") : TEXT("Boolean")), Location, Rotation,
-		Label.IsEmpty() ? *ShapeName : Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Modifier = Placed.Spawn(ModifierClassOf(*OpName == TEXT("Project") ? TEXT("MeshProject") : TEXT("Boolean")), Location, Rotation,
+		Label.IsEmpty() ? UniqueLabel(Terrain->GetWorld(), *ShapeName) : Label);
 	if (!Modifier)
 		return FModifierOpResult();
 	AActor* Owner = Modifier->GetOwner();
@@ -668,7 +747,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE
 	if (*OpName != TEXT("Project") && !SetProperty(Modifier, TEXT("BooleanOp"), *OpName))
 		return FModifierOpResult();
 	UseShapeMesh(Modifier, Mesh);
-	return Finish(Modifier, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddLattice(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, int32 Resolution, const FString& Label)
@@ -682,13 +761,13 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddLattice(
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddLattice", "Add Mesh Terrain Lattice"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Lattice = SpawnModifier(Terrain, ModifierClassOf(TEXT("Lattice")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Lattice = Placed.Spawn(ModifierClassOf(TEXT("Lattice")), Location, FRotator::ZeroRotator, Label);
 	if (!Lattice || !SetProperty(Lattice, TEXT("Extents"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
 		|| !SetProperty(Lattice, TEXT("LatticeResolution"), FString::Printf(TEXT("(X=%d,Y=%d,Z=%d)"), Resolution, Resolution, Resolution)))
 		return FModifierOpResult();
 	ResetLattice(Cast<ULatticeModifier>(Lattice), Size, FIntVector(Resolution));
-	return Finish(Lattice, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetLatticePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points)
@@ -721,20 +800,21 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 		return Fail(FString::Printf(TEXT("Size [%g, %g] must be above 0 and at most 10000000 cm on X and Y"), Size.X, Size.Y));
 	if (!FMath::IsFinite(Height) || FMath::Abs(Height) > 1000000.0)
 		return Fail(FString::Printf(TEXT("Height %g cm is outside -1000000 .. 1000000"), Height));
+	UClass* EntryClass = FindObject<UClass>(nullptr, TEXT("/Script/MeshPartitionEditor.TexturePatchHeightEntry"));
+	const UClass* PatchClass = ModifierClassOf(TEXT("TexturePatch"));
+	const FObjectProperty* Entry = PatchClass ? CastField<FObjectProperty>(PatchClass->FindPropertyByName(TEXT("HeightChannel"))) : nullptr;
+	if (!Entry || !EntryClass)
+		return Fail(TEXT("this engine's TexturePatchModifier has no HeightChannel entry"));
 	if (Texture->VirtualTextureStreaming)
 		return Fail(FString::Printf(TEXT("%s is a virtual texture: a texture patch reads plain textures only (turn Virtual Texture Streaming off)"), *Texture->GetPathName()));
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddTexturePatch", "Add Mesh Terrain Texture Patch"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Patch = SpawnModifier(Terrain, ModifierClassOf(TEXT("TexturePatch")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Patch = Placed.Spawn(ModifierClassOf(TEXT("TexturePatch")), Location, FRotator::ZeroRotator, Label);
 	if (!Patch || !SetProperty(Patch, TEXT("UnscaledPatchCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g)"), Size.X, Size.Y)))
 		return FModifierOpResult();
 	// The height channel is an instanced entry object (UTexturePatchHeightEntry): its texture and scale.
-	const FObjectProperty* Entry = CastField<FObjectProperty>(Patch->GetClass()->FindPropertyByName(TEXT("HeightChannel")));
-	UClass* EntryClass = FindObject<UClass>(nullptr, TEXT("/Script/MeshPartitionEditor.TexturePatchHeightEntry"));
-	if (!Entry || !EntryClass)
-		return Fail(TEXT("this engine's TexturePatchModifier has no HeightChannel entry"));
 	UObject* Height_ = Entry->GetObjectPropertyValue_InContainer(Patch);
 	if (!Height_)
 	{
@@ -745,7 +825,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 	if (!SetProperty(Height_, TEXT("TextureAsset"), Texture->GetPathName()) || !SetNumber(Height_, TEXT("EncodingScale"), Height))
 		return FModifierOpResult();
 	Patch->OnChanged(Patch->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
-	return Finish(Patch, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, double EdgeLength, const FString& Label)
@@ -763,12 +843,12 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(U
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddRemesh", "Add Mesh Terrain Remesh"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Remesh = SpawnModifier(Terrain, ModifierClassOf(TEXT("Remesh")), Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Remesh = Placed.Spawn(ModifierClassOf(TEXT("Remesh")), Location, FRotator::ZeroRotator, Label);
 	if (!Remesh || !SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
 		|| !SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength))
 		return FModifierOpResult();
-	return Finish(Remesh, { Terrain, Previous });
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Add(UE::MeshPartition::AMeshPartition* Terrain, const FString& Kind, FVector Location, const FString& Label)
@@ -782,14 +862,23 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Add(UE::Mes
 	if (!CheckFootprint(Terrain, Around(Location, 1000.0, 1000.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddModifier", "Add Mesh Terrain Modifier"));
-	AMeshPartition* Previous = nullptr;
-	UModifierComponent* Modifier = SpawnModifier(Terrain, Class, Location, FRotator::ZeroRotator, Label, Previous);
+	FPlacement Placed(Terrain);
+	UModifierComponent* Modifier = Placed.Spawn(Class, Location, FRotator::ZeroRotator, Label);
 	if (!Modifier)
 		return FModifierOpResult();
 	// A spline remesh needs a spline to follow: give it the two-point one a spline modifier starts with.
 	if (Cast<USplineRemeshModifier>(Modifier) && !ApplySplinePoints(Modifier, { Location, Location + FVector(2000.0, 0.0, 0.0) }, false))
 		return FModifierOpResult();
-	return Finish(Modifier, { Terrain, Previous });
+	// A lattice's own points are made around the world origin: give it its undeformed grid where it is.
+	if (ULatticeModifier* Lattice = Cast<ULatticeModifier>(Modifier))
+	{
+		const FStructProperty* Extents = CastField<FStructProperty>(Lattice->GetClass()->FindPropertyByName(TEXT("Extents")));
+		const FStructProperty* Resolution = CastField<FStructProperty>(Lattice->GetClass()->FindPropertyByName(TEXT("LatticeResolution")));
+		if (!Extents || !Resolution)
+			return Fail(TEXT("this engine's LatticeModifier has no Extents / LatticeResolution"));
+		ResetLattice(Lattice, *Extents->ContainerPtrToValuePtr<FVector>(Lattice), *Resolution->ContainerPtrToValuePtr<FIntVector>(Lattice));
+	}
+	return Placed.Keep();
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::MeshPartition::UModifierComponent* Modifier, FVector Size, double Radius, double Width, double Strength, double Falloff)
@@ -824,136 +913,175 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 		}
 		return *Property->ContainerPtrToValuePtr<FVector>(Modifier);
 	};
-	FTerrainTransaction Transaction(LOCTEXT("ModifyModifier", "Modify Mesh Terrain Modifier"), { Modifier });
+	const auto SizeText = [](const FVector& Value) { return FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Value.X, Value.Y, Value.Z); };
+
+	// Check every parameter against the kind first: a refused Edit changes nothing.
+	FString Shape;
+	UDynamicMeshComponent* ShapeMesh = ShapeComponent(Modifier, &Shape);
+	ULatticeModifier* Lattice = Cast<ULatticeModifier>(Modifier);
+	const bool bNoise = IsKind(Modifier, TEXT("Noise"));
+	const bool bRemesh = IsKind(Modifier, TEXT("Remesh"));
+	const bool bTexture = IsKind(Modifier, TEXT("TexturePatch"));
+	const bool bPatch = IsKind(Modifier, TEXT("Patch"));
+	const bool bWeight = IsKind(Modifier, TEXT("WeightUtility"));
+	const bool bSpline = IsKind(Modifier, TEXT("Spline"));
+	FVector NewSize = FVector::ZeroVector;
+	FVector ShapeMade = FVector::ZeroVector;
 	if (bSize)
 	{
-		FString Shape;
-		if (UDynamicMeshComponent* Mesh = ShapeComponent(Modifier, &Shape))
+		if (ShapeMesh)
 		{
 			// A shape keeps the mesh it was made with and is resized by its actor's scale, which undo restores with the
 			// actor (a regenerated mesh would not reach the modifier on undo). A Capsule's caps and a Torus's ring stretch with it.
-			AActor* Owner = Modifier->GetOwner();
-			const FVector Made = ShapeSize(Mesh);
-			const FVector Scale = Owner->GetActorScale3D();
+			ShapeMade = ShapeSize(ShapeMesh);
+			const FVector Scale = Modifier->GetOwner()->GetActorScale3D();
 			const bool bFlat = IsFlatShape(Shape);
-			if (Made.X <= 0.0 || Made.Y <= 0.0 || (!bFlat && Made.Z <= 0.0))
-				return Fail(FString::Printf(TEXT("%s's shape size is unknown (its mesh component lost its MeshTerrainShapeSize tag)"), *Owner->GetActorNameOrLabel()));
-			const FVector New = Resized(FVector(Made.X * Scale.X, Made.Y * Scale.Y, bFlat ? 0.0 : Made.Z * Scale.Z));
-			if (!IsLength(New.X) || !IsLength(New.Y) || (!bFlat && !IsLength(New.Z)))
-				return Fail(FString::Printf(TEXT("Size %s must be above 0 on each axis"), *Text(New)));
-			Owner->Modify();
-			Owner->SetActorScale3D(FVector(New.X / Made.X, New.Y / Made.Y, bFlat ? Scale.Z : New.Z / Made.Z));
-			Owner->PostEditMove(/*bFinished*/ true);
+			if (ShapeMade.X <= 0.0 || ShapeMade.Y <= 0.0 || (!bFlat && ShapeMade.Z <= 0.0))
+				return Fail(FString::Printf(TEXT("%s's shape size is unknown (its mesh component lost its MeshTerrainShapeSize tag)"), *Modifier->GetOwner()->GetActorNameOrLabel()));
+			NewSize = Resized(FVector(ShapeMade.X * Scale.X, ShapeMade.Y * Scale.Y, bFlat ? 0.0 : ShapeMade.Z * Scale.Z));
+			if (!IsLength(NewSize.X) || !IsLength(NewSize.Y) || (!bFlat && !IsLength(NewSize.Z)))
+				return Fail(FString::Printf(TEXT("Size %s must be above 0 on each axis"), *Text(NewSize)));
 		}
-		else if (Kind == TEXT("Noise") || Kind == TEXT("Remesh"))
+		else if (bNoise)
 		{
-			const FVector New = Resized(VectorProperty(TEXT("UnscaledCoverage")));
-			if (!SetProperty(Modifier, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), New.X, New.Y, New.Z)))
-				return FModifierOpResult();
+			// A noise is a 2D area: Size Z is ignored (its vertical reach stays).
+			const FVector Current = VectorProperty(TEXT("UnscaledCoverage"));
+			NewSize = FVector(Size.X >= 0.0 ? Size.X : Current.X, Size.Y >= 0.0 ? Size.Y : Current.Y, Current.Z);
+			if (!IsLength(NewSize.X) || !IsLength(NewSize.Y))
+				return Fail(FString::Printf(TEXT("Size %s must be above 0 on X and Y"), *Text(NewSize)));
 		}
-		else if (ULatticeModifier* Lattice = Cast<ULatticeModifier>(Modifier))
+		else if (bRemesh)
 		{
-			// The points scale with the box around the lattice, so it keeps its deformation.
-			const FVector Old = VectorProperty(TEXT("Extents"));
-			const FVector New = Resized(Old);
-			if (!IsLength(New.X) || !IsLength(New.Y) || !IsLength(New.Z))
-				return Fail(FString::Printf(TEXT("Size %s must be above 0 on each axis"), *Text(New)));
-			TArray<FVector> Points = LatticePoints(Lattice);
-			if (!SetProperty(Modifier, TEXT("Extents"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), New.X, New.Y, New.Z)))
-				return FModifierOpResult();
-			// A lattice whose LatticeResolution was set directly holds the wrong number of points: start it over as a grid.
+			NewSize = Resized(VectorProperty(TEXT("UnscaledCoverage")));
+			if (!IsLength(NewSize.X) || !IsLength(NewSize.Y) || !IsLength(NewSize.Z))
+				return Fail(FString::Printf(TEXT("Size %s must be above 0 on each axis"), *Text(NewSize)));
+			const FNumericProperty* Edge = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength")));
+			const double EdgeLength = Edge ? Edge->GetFloatingPointPropertyValue(Edge->ContainerPtrToValuePtr<void>(Modifier)) : 0.0;
+			const double Triangles = EdgeLength > 0.0 ? 2.0 * (NewSize.X / EdgeLength) * (NewSize.Y / EdgeLength) : 0.0;
+			if (Triangles > 4000000.0)
+				return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: at most 4000000"), NewSize.X, NewSize.Y, EdgeLength, Triangles));
+		}
+		else if (Lattice)
+		{
+			NewSize = Resized(VectorProperty(TEXT("Extents")));
+			if (!IsLength(NewSize.X) || !IsLength(NewSize.Y) || !IsLength(NewSize.Z))
+				return Fail(FString::Printf(TEXT("Size %s must be above 0 on each axis"), *Text(NewSize)));
 			const FStructProperty* ResolutionProperty = CastField<FStructProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("LatticeResolution")));
 			const FIntVector Resolution = ResolutionProperty ? *ResolutionProperty->ContainerPtrToValuePtr<FIntVector>(Modifier) : FIntVector(0);
-			if (Points.Num() != Resolution.X * Resolution.Y * Resolution.Z)
-			{
-				ResetLattice(Lattice, New, Resolution);
-			}
-			else
-			{
-				const FVector Center = Lattice->GetComponentLocation();
-				const FVector Scale(Old.X > 0.0 ? New.X / Old.X : 1.0, Old.Y > 0.0 ? New.Y / Old.Y : 1.0, Old.Z > 0.0 ? New.Z / Old.Z : 1.0);
-				for (FVector& Point : Points)
-					Point = Center + (Point - Center) * Scale;
-				StoreLatticeWorldPoints(Lattice, Points);
-			}
+			if (Resolution.GetMin() < 2 || Resolution.GetMax() > 9)
+				return Fail(FString::Printf(TEXT("the lattice's LatticeResolution %s is outside 2 .. 9 per axis: remove it and AddLattice a new one"), *Resolution.ToString()));
 		}
-		else if (Kind == TEXT("TexturePatch"))
+		else if (bTexture)
 		{
-			const FVector New = Resized(VectorProperty(TEXT("UnscaledPatchCoverage")));
-			if (!SetProperty(Modifier, TEXT("UnscaledPatchCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g)"), New.X, New.Y)))
-				return FModifierOpResult();
+			NewSize = Resized(VectorProperty(TEXT("UnscaledPatchCoverage")));
+			if (!IsLength(NewSize.X) || !IsLength(NewSize.Y))
+				return Fail(FString::Printf(TEXT("Size %s must be above 0 on X and Y"), *Text(NewSize)));
 		}
 		else
 		{
 			return Unsupported(TEXT("Size"));
 		}
 	}
-	if (Radius >= 0.0)
-	{
-		if (Kind != TEXT("Patch") && Kind != TEXT("InstancedPatch") && Kind != TEXT("WeightUtility"))
-			return Unsupported(TEXT("Radius"));
-		if (!SetNumber(Modifier, TEXT("Radius"), Radius))
-			return FModifierOpResult();
-	}
-	if (Width >= 0.0)
-	{
-		if (Kind != TEXT("Spline"))
-			return Unsupported(TEXT("Width"));
-		if (!SetNumber(Modifier, TEXT("PlateauDistance"), Width / 2.0))
-			return FModifierOpResult();
-	}
+	if (Radius >= 0.0 && !(bPatch || bWeight))
+		return Unsupported(TEXT("Radius"));
+	if (Radius >= 0.0 && !IsLength(Radius))
+		return Fail(FString::Printf(TEXT("Radius %g must be above 0"), Radius));
+	if (Width >= 0.0 && !bSpline)
+		return Unsupported(TEXT("Width"));
+	UObject* HeightEntry = nullptr;
 	if (Strength >= 0.0)
 	{
-		if (Kind == TEXT("Noise"))
-		{
-			if (!SetNumber(Modifier, TEXT("Intensity"), Strength))
-				return FModifierOpResult();
-		}
-		else if (Kind == TEXT("WeightUtility"))
-		{
-			if (Strength > 1.0)
-				return Fail(FString::Printf(TEXT("Strength %g: a weight's value is 0 .. 1"), Strength));
-			if (!SetNumber(Modifier, TEXT("InnerValue"), Strength))
-				return FModifierOpResult();
-			RefreshWeightCacheKey(Modifier);
-		}
-		else if (Kind == TEXT("TexturePatch"))
+		if (bWeight && Strength > 1.0)
+			return Fail(FString::Printf(TEXT("Strength %g: a weight's value is 0 .. 1"), Strength));
+		if (bTexture)
 		{
 			const FObjectProperty* Entry = CastField<FObjectProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("HeightChannel")));
-			UObject* Height = Entry ? Entry->GetObjectPropertyValue_InContainer(Modifier) : nullptr;
-			if (!Height || !SetNumber(Height, TEXT("EncodingScale"), Strength))
-				return Height ? FModifierOpResult() : Fail(TEXT("the texture patch has no height channel"));
-			Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
+			HeightEntry = Entry ? Entry->GetObjectPropertyValue_InContainer(Modifier) : nullptr;
+			if (!HeightEntry)
+				return Fail(TEXT("the texture patch has no height channel: set HeightChannel first"));
 		}
-		else
+		else if (!bNoise && !bWeight)
 		{
 			return Unsupported(TEXT("Strength"));
 		}
 	}
 	if (Falloff >= 0.0)
 	{
-		if (Kind == TEXT("Noise"))
-		{
-			if (Falloff > 1.0)
-				return Fail(FString::Printf(TEXT("Falloff %g: a noise's falloff is 0 .. 1"), Falloff));
-			if (!SetNumber(Modifier, TEXT("Falloff"), Falloff))
-				return FModifierOpResult();
-		}
-		else if (Kind == TEXT("Patch") || Kind == TEXT("InstancedPatch") || Kind == TEXT("WeightUtility"))
-		{
-			if (!SetNumber(Modifier, TEXT("Falloff"), Falloff))
-				return FModifierOpResult();
-		}
-		else if (Kind == TEXT("Spline"))
-		{
-			if (Falloff < 0.1 || !SetNumber(Modifier, TEXT("FalloffDistance"), Falloff))
-				return Falloff < 0.1 ? Fail(TEXT("a spline's Falloff is at least 0.1 cm")) : FModifierOpResult();
-		}
-		else
-		{
+		if (bNoise && Falloff > 1.0)
+			return Fail(FString::Printf(TEXT("Falloff %g: a noise's falloff is 0 .. 1"), Falloff));
+		if (bSpline && Falloff < 0.1)
+			return Fail(TEXT("a spline's Falloff is at least 0.1 cm"));
+		if (!bNoise && !bPatch && !bWeight && !bSpline)
 			return Unsupported(TEXT("Falloff"));
+	}
+
+	FTerrainTransaction Transaction(LOCTEXT("ModifyModifier", "Modify Mesh Terrain Modifier"), { Modifier });
+	if (bSize)
+	{
+		if (ShapeMesh)
+		{
+			AActor* Owner = Modifier->GetOwner();
+			const bool bFlat = IsFlatShape(Shape);
+			Owner->Modify();
+			Owner->SetActorScale3D(FVector(NewSize.X / ShapeMade.X, NewSize.Y / ShapeMade.Y, bFlat ? Owner->GetActorScale3D().Z : NewSize.Z / ShapeMade.Z));
+			Owner->PostEditMove(/*bFinished*/ true);
+		}
+		else if (bNoise || bRemesh)
+		{
+			if (!SetProperty(Modifier, TEXT("UnscaledCoverage"), SizeText(NewSize)))
+				return FModifierOpResult();
+		}
+		else if (Lattice)
+		{
+			// The points scale with the box around the lattice, so it keeps its deformation.
+			const FVector Old = VectorProperty(TEXT("Extents"));
+			TArray<FVector> Points = LatticePoints(Lattice);
+			if (!SetProperty(Modifier, TEXT("Extents"), SizeText(NewSize)))
+				return FModifierOpResult();
+			// A lattice whose LatticeResolution was set directly holds the wrong number of points: start it over as a grid.
+			const FStructProperty* ResolutionProperty = CastField<FStructProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("LatticeResolution")));
+			const FIntVector Resolution = ResolutionProperty ? *ResolutionProperty->ContainerPtrToValuePtr<FIntVector>(Modifier) : FIntVector(0);
+			if (Points.Num() != Resolution.X * Resolution.Y * Resolution.Z)
+			{
+				ResetLattice(Lattice, NewSize, Resolution);
+			}
+			else
+			{
+				const FVector Center = Lattice->GetComponentLocation();
+				const FVector Scale(Old.X > 0.0 ? NewSize.X / Old.X : 1.0, Old.Y > 0.0 ? NewSize.Y / Old.Y : 1.0, Old.Z > 0.0 ? NewSize.Z / Old.Z : 1.0);
+				for (FVector& Point : Points)
+					Point = Center + (Point - Center) * Scale;
+				StoreLatticeWorldPoints(Lattice, Points);
+			}
+		}
+		else if (!SetProperty(Modifier, TEXT("UnscaledPatchCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g)"), NewSize.X, NewSize.Y)))
+		{
+			return FModifierOpResult();
 		}
 	}
+	if (Radius >= 0.0 && !SetNumber(Modifier, TEXT("Radius"), Radius))
+		return FModifierOpResult();
+	if (Width >= 0.0 && !SetNumber(Modifier, TEXT("PlateauDistance"), Width / 2.0))
+		return FModifierOpResult();
+	if (Strength >= 0.0)
+	{
+		if (bNoise && !SetNumber(Modifier, TEXT("Intensity"), Strength))
+			return FModifierOpResult();
+		if (bWeight)
+		{
+			if (!SetNumber(Modifier, TEXT("InnerValue"), Strength))
+				return FModifierOpResult();
+			RefreshWeightCacheKey(Modifier);
+		}
+		if (HeightEntry)
+		{
+			if (!SetNumber(HeightEntry, TEXT("EncodingScale"), Strength))
+				return FModifierOpResult();
+			Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
+		}
+	}
+	if (Falloff >= 0.0 && !SetNumber(Modifier, bSpline ? TEXT("FalloffDistance") : TEXT("Falloff"), Falloff))
+		return FModifierOpResult();
 	return Finish(Modifier, { TerrainOf(Modifier) });
 }
 
@@ -964,6 +1092,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::Me
 	if (!IsPoint(Location))
 		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	AActor* Owner = Modifier->GetOwner();
+	if (!Cast<UE::MeshPartition::AModifierActor>(Owner))
+		return Fail(FString::Printf(TEXT("%s's modifier lives on %s, not on a modifier actor of its own: move that actor itself"), *ModifierKind(Modifier), *Owner->GetActorNameOrLabel()));
 	FTerrainTransaction Transaction(LOCTEXT("MoveModifier", "Move Mesh Terrain Modifier"), { Owner, Modifier });
 	// As a viewport drag: the move notifies the modifier (PostEditMove), which rebuilds its old and new area (a lattice
 	// carries its world-space points along itself).
@@ -972,12 +1102,18 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::Me
 	return Finish(Modifier, { TerrainOf(Modifier) });
 }
 
-FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, bool Closed)
+FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, int32 Closed)
 {
-	if (!CheckModifier(Modifier) || !CheckPoints(Points))
+	if (!CheckModifier(Modifier))
+		return FModifierOpResult();
+	if (Closed < -1 || Closed > 1)
+		return Fail(FString::Printf(TEXT("Closed %d: use 1 (closed), 0 (open) or -1 (keep)"), Closed));
+	const USplineComponent* Current = SplineOf(Modifier, /*bCreate*/ false);
+	const bool bClosed = Closed < 0 ? Current && Current->IsClosedLoop() : Closed == 1;
+	if (!CheckPoints(Points, bClosed))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("SetSplinePoints", "Edit Mesh Terrain Spline"), { Modifier->GetOwner(), Modifier });
-	if (!ApplySplinePoints(Modifier, Points, Closed))
+	if (!ApplySplinePoints(Modifier, Points, bClosed))
 		return FModifierOpResult();
 	return Finish(Modifier, { TerrainOf(Modifier) });
 }
@@ -1021,6 +1157,9 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Enable(UE::
 	FTerrainTransaction Transaction(LOCTEXT("EnableModifier", "Enable Mesh Terrain Modifier"), { Modifier });
 	if (Modifier->GetIsDisabledFlag() && !SetProperty(Modifier, TEXT("bIsDisabled"), TEXT("False")))
 		return FModifierOpResult();
+	// "Disabled only in Editor" (transient) keeps it out of the editor build too.
+	if (Modifier->IsTemporarilyDisabledInEditor() && !SetProperty(Modifier, TEXT("bIsTemporarilyDisabledInEditor"), TEXT("False")))
+		return FModifierOpResult();
 	return Finish(Modifier, { TerrainOf(Modifier) });
 }
 
@@ -1036,7 +1175,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Disable(UE:
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::MeshPartition::UModifierComponent* Modifier, UE::MeshPartition::AMeshPartition* Terrain)
 {
-	if (!CheckModifier(Modifier) || !CheckTerrain(Terrain))
+	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false) || !CheckTerrain(Terrain))
 		return FModifierOpResult();
 	const FBox Bounds = Modifier->ComputeCombinedBounds();
 	if (Bounds.IsValid && !CheckFootprint(Terrain, FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max))))
@@ -1057,29 +1196,36 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::MeshPartition::UModifierComponent* Modifier)
 {
-	if (!CheckModifier(Modifier))
+	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false))
 		return FModifierOpResult();
 	AMeshPartition* Terrain = TerrainOf(Modifier);
 	AActor* Owner = Modifier->GetOwner();
-	UWorld* World = Owner->GetWorld();
 	const FString Label = Owner->GetActorNameOrLabel();
 	const FString Kind = ModifierKind(Modifier);
 	FTerrainTransaction Transaction(LOCTEXT("RemoveModifier", "Remove Mesh Terrain Modifier"));
-	// A modifier actor (what the palette and these operations place) goes as a whole; a modifier component someone added
-	// to another actor goes alone.
+	// A modifier actor holding only this modifier (what the palette and these operations place) goes as a whole; a
+	// modifier component on any other actor (the terrain itself, a Blueprint, a second modifier) goes alone, with the
+	// shape mesh AddShape gave it.
 	TArray<UModifierComponent*> Siblings;
 	Owner->GetComponents(Siblings);
-	if (Cast<UE::MeshPartition::AModifierActor>(Owner) || Siblings.Num() == 1)
+	if (Cast<UE::MeshPartition::AModifierActor>(Owner) && Siblings.Num() == 1)
 	{
-		if (!World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true))
-			return Fail(FString::Printf(TEXT("could not delete %s"), *Owner->GetActorNameOrLabel()));
+		if (!Owner->GetWorld()->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true))
+			return Fail(FString::Printf(TEXT("could not delete %s"), *Label));
 	}
 	else
 	{
 		Owner->Modify();
+		if (UDynamicMeshComponent* Mesh = ShapeComponent(Modifier))
+		{
+			Mesh->Modify();
+			Mesh->DestroyComponent();
+		}
 		Modifier->Modify();
 		Modifier->DestroyComponent();
 	}
+	if (Terrain && !IsValid(Terrain))
+		return Fail(FString::Printf(TEXT("removing %s deleted its terrain"), *Label));
 	FModifierOpResult Out = Finish(nullptr, { Terrain });
 	if (!Out.State.IsEmpty())
 	{

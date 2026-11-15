@@ -99,7 +99,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult AddSpline(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width = 400.0, double Falloff = 500.0, bool Closed = false, const FString& Channel = TEXT(""), const FString& Label = TEXT(""));
 
-	/** add a shape (Mesh Terrain Mode's Shapes): Shape is Box, Sphere, Cylinder, Capsule, Cone, Torus, Rectangle or Disc, Size [X, Y, Z] cm centred on Location, turned by Rotation [Pitch, Yaw, Roll]; Operation Union (add it to the ground: a mesa, a rock), Subtract (cut it out: a crater, a cave mouth), Trim (keep the ground only inside it) or Project (press the ground onto the shape's top: a flat pad; the default for the flat Rectangle and Disc) */
+	/** add a shape (Mesh Terrain Mode's Shapes): Shape is Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y: outer diameter, Z: ring height), Rectangle or Disc, Size [X, Y, Z] cm centred on Location, turned by Rotation [Pitch, Yaw, Roll]; Operation Union (add it to the ground: a mesa, a rock), Subtract (cut it out: a crater, a cave mouth), Trim (keep the ground only inside it) or Project (press the ground onto the shape's top: a flat pad; the default for the flat Rectangle and Disc) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size = FVector(1000.0, 1000.0, 1000.0), const FString& Operation = TEXT(""), FRotator Rotation = FRotator::ZeroRotator, const FString& Label = TEXT(""));
 
@@ -119,27 +119,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult AddRemesh(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size = FVector(2000.0, 2000.0, 50000.0), double EdgeLength = 200.0, const FString& Label = TEXT(""));
 
-	/** add a modifier of any other scriptable Kind with its defaults at Location (MeshProject, InstancedPatch, SplineRemesh, ProjectMeshLayers, or one of the kinds above), then shape it with set on its properties (rql-schema <Kind>Modifier) */
+	/** add a modifier of any other scriptable Kind with its defaults at Location (MeshProject, Boolean, InstancedPatch, SplineRemesh, ProjectMeshLayers, or one of the kinds above), then shape it with set on its properties (rql-schema <Kind>Modifier) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Add(UE::MeshPartition::AMeshPartition* Terrain, const FString& Kind, FVector Location, const FString& Label = TEXT(""));
 
-	/** change a modifier's common parameters (a negative value keeps the current one): Size [X, Y, Z] cm (Noise, Shape, Lattice, TexturePatch, Remesh; Z ignored by the flat ones), Radius cm (Patch, Weight), Width cm (Spline), Strength (Noise height cm, Weight value 0..1, TexturePatch height cm), Falloff (Noise 0..1; Patch, Weight, Spline cm); other properties: set */
+	/** change a modifier's common parameters (a negative value keeps the current one; a refused change changes nothing): Size [X, Y, Z] cm (Shape, Lattice, Remesh; Noise and TexturePatch take X and Y), Radius cm (Patch, Weight), Width cm (Spline), Strength (Noise height cm, Weight value 0..1, TexturePatch height cm), Falloff (Noise 0..1; Patch, Weight, Spline cm); other properties: set */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Edit(UE::MeshPartition::UModifierComponent* Modifier, FVector Size = FVector(-1.0, -1.0, -1.0), double Radius = -1.0, double Width = -1.0, double Strength = -1.0, double Falloff = -1.0);
 
-	/** move a modifier's actor to Location (world, cm; its rotation is kept): a patch or shape also takes its height from Z */
+	/** move a modifier's actor to Location (world, cm; its rotation is kept); Z moves every kind (a patch's or shape's height, a spline or lattice up or down with it): pass its current Z to keep it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Move(UE::MeshPartition::UModifierComponent* Modifier, FVector Location);
 
-	/** replace a spline modifier's path with Points (2 .. 1000 world points; Z is the ground height), Closed joining the last to the first */
+	/** replace a spline modifier's path with Points (2 .. 1000 world points; Z is the ground height; a closed one 3 or more, without repeating the first): Closed 1 joins the last to the first and fills the inside, 0 opens it, -1 (default) keeps it as it is */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
-	FUnrealAIMeshTerrainModifierResult SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, bool Closed = false);
+	FUnrealAIMeshTerrainModifierResult SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, int32 Closed = -1);
 
 	/** change where a modifier is applied in the build order: Priority (sub-priority: higher is applied later, on top of lower ones) within PriorityLayer (one of the terrain's PriorityLayers; empty keeps the current layer, "None" puts it after every listed layer) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult SetOrder(UE::MeshPartition::UModifierComponent* Modifier, double Priority, const FString& PriorityLayer = TEXT(""));
 
-	/** switch a modifier on again (its Disabled flag off) */
+	/** switch a modifier on again (its Disabled flag and the editor-only Disabled switch off) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Enable(UE::MeshPartition::UModifierComponent* Modifier);
 
@@ -151,7 +151,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Bind(UE::MeshPartition::UModifierComponent* Modifier, UE::MeshPartition::AMeshPartition* Terrain);
 
-	/** delete a modifier (its actor, when the actor holds nothing else) and rebuild the terrain without it; base meshes cannot be removed */
+	/** delete a modifier (its modifier actor, when that holds nothing else; else only the component) and rebuild the terrain without it; base meshes cannot be removed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Remove(UE::MeshPartition::UModifierComponent* Modifier);
 };

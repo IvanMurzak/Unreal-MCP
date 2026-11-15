@@ -33,6 +33,14 @@
     {
       "Name": "MeshTerrainMode",
       "Enabled": true
+    },
+    {
+      "Name": "GeometryScripting",
+      "Enabled": true
+    },
+    {
+      "Name": "MeshModelingToolset",
+      "Enabled": true
     }
   ]
 }

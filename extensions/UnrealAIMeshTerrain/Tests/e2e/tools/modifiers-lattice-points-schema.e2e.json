@@ -5,6 +5,6 @@
     "type": "LatticeModifier"
   },
   "assert": {
-    "pattern": "LatticePoints"
+    "pattern": "LatticePoints[^,]*control points"
   }
 }
