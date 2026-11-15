@@ -218,7 +218,7 @@ export async function installExtension(
     if (sourceArg !== '') descriptor = { ...descriptor, ...readSourceGates(sourceArg) };
 
     // Refuse an engine the extension cannot compile on, before anything is written.
-    const minEngine = descriptor.minEngineVersion ?? null;
+    const minEngine = descriptor.minEngineVersion;
     if (minEngine) {
       const engine = projectEngineVersion(uproject.engineAssociation, opts);
       if (engine === null) {
@@ -555,9 +555,9 @@ function readSourceGates(sourceArg: string): Pick<ExtensionDescriptor, 'minEngin
   const metadataFile = path.join(pluginRoot, 'extension.json');
   const metadata = fs.existsSync(metadataFile) ? (safeReadJson(metadataFile) as Record<string, unknown>) : {};
   if (typeof metadata.minEngineVersion === 'string') gates.minEngineVersion = metadata.minEngineVersion;
-  const uplugin = findUPluginFile(pluginRoot);
-  const descriptor = uplugin ? (safeReadJson(uplugin) as Record<string, unknown>) : {};
-  if (metadata.experimental === true || descriptor.IsExperimentalVersion === true) gates.experimental = true;
+  const upluginFile = findUPluginFile(pluginRoot);
+  const uplugin = upluginFile ? (safeReadJson(upluginFile) as Record<string, unknown>) : {};
+  if (metadata.experimental === true || uplugin.IsExperimentalVersion === true) gates.experimental = true;
   return gates;
 }
 
