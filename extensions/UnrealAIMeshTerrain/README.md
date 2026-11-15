@@ -39,8 +39,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain` |
-| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain` |
+| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain`, `meshTerrainBrush` |
+| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainBrush`: `Sculpt`, `Paint`, `Erase` |
 | Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
 
 ```
@@ -51,6 +51,8 @@ meshTerrain | call WaitForBuild(unreal.find("Terrain"))
 meshTerrain | call Surface(unreal.find("Terrain"), [1200, -800, 0])
 meshTerrain | call SurfacePoints(unreal.find("Terrain"), [[0, 0, 0], [500, 0, 0], [1000, 0, 0]])
 meshTerrain | call Rebuild(unreal.find("Terrain"))
+meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Raise", [1200, -800, 0], 1500, 400)
+meshTerrainBrush | call Paint(unreal.find("Terrain"), "Red", [1200, -800, 0], 2000, 1)
 ```
 
 A Mesh Terrain is a `MeshPartition` actor (no other actor class: Mesh Terrain Mode's Create tool makes one) shaped by
@@ -63,15 +65,29 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
   `Location`, `Normal`, `Channels` (the paint weights there, from the evaluated modifier stack).
 - `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
-- Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a build that does not finish in time
+- `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
+  within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
+  centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` 0..1 scales the stroke.
+- `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff)`:
+  move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0).
+- Strokes are stored the way Mesh Terrain Mode's Sculpt and Paint tools store theirs: in a brush modifier
+  (`ProjectMeshLayersModifier`, the mode's "BrushModifier", labelled `<terrain>_Brush`), the sculpt as offsets in its
+  active sculpt layer and the paint in its weight attributes (a `Set` channel entry per painted channel), edited through
+  the tools' own tool target. A stroke goes into a brush that covers its area, or near one that may grow to cover it (at
+  most 600 x 600 m, about a million vertices), else into a new brush placed after the terrain's other modifiers; so
+  repeated strokes accumulate in one brush and stay editable with the mode's Sculpt / Paint tools (select the brush). Each
+  call is one undo step and returns when the terrain is rebuilt: `Brush`, `NewBrush`, `Vertices` (changed), `Before` /
+  `After` (height or weight at the centre), `Ready`, `Seconds`.
+- Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a brush off the terrain, an unknown sculpt mode or
+  paint channel (with the ones there are), out-of-range radius / height / strength / weight / falloff, a build that does not finish in time
   (with what is still pending), Mesh Terrain plugins not enabled (with what to enable).
 
 ## Development
 
 The shared helpers every operation uses (find a terrain, wait for its build, transactions, load its actors, sample the
 surface, evaluate the modifier stack of a region, spawn a flat terrain the way the Create tool does) are in
-`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation spec is `UnrealAIMeshTerrain`
-(`Automation RunTests UnrealAIMeshTerrain`); live checks are in `Tests/e2e/tools/`.
+`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation specs are `UnrealAIMeshTerrain`
+(`Automation RunTests UnrealAIMeshTerrain`; brush strokes: `UnrealAIMeshTerrain.Sculpt`); live checks are in `Tests/e2e/tools/`.
 
 ## License
 
