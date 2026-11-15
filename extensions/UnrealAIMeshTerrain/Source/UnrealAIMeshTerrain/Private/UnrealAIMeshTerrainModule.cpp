@@ -60,9 +60,22 @@ namespace UnrealAIMeshTerrainModuleLocal
 		return MakeShared<FJsonValueObject>(Out);
 	}
 
+	/**
+	 * Load @p Terrain's World Partition base / modifier actors before listing them: after a level is reopened they are
+	 * unloaded, and an agent would find no modifier to name (unreal.find) until some operation loaded them. Not while
+	 * Mesh Terrain cannot be edited (Play In Editor running, plugins off).
+	 */
+	void LoadForListing(const AMeshPartition* Terrain)
+	{
+		if (UnavailableReason().IsEmpty())
+			LoadTerrainActors(Terrain);
+	}
+
 	/** Every modifier component of the editor world (base meshes left out unless @p bBases), bound to a terrain or not. */
 	TArray<UObject*> WorldModifiers(bool bBases)
 	{
+		for (const AMeshPartition* Terrain : Terrains())
+			LoadForListing(Terrain);
 		TArray<UObject*> Out;
 		const UWorld* World = UnrealMcpRql::EditorWorld();
 		for (TObjectIterator<UModifierComponent> It; It && World; ++It)
@@ -143,7 +156,7 @@ public:
 				return Out;
 			});
 		Context.AddObjectListSource(TEXT("meshTerrainModifiers"),
-			TEXT("the Mesh Terrain modifier components of the editor world (noise, splines, shapes, sculpt layers, ...; not the base meshes)"),
+			TEXT("the Mesh Terrain modifier components of the editor world (noise, splines, shapes, sculpt layers, ...; not the base meshes); loads the terrains' World Partition actors"),
 			ModifierClass, []() { return WorldModifiers(/*bBases*/ false); });
 
 		Context.AddApiSource(TEXT("meshTerrain"),
@@ -205,8 +218,10 @@ public:
 			TEXT("the modifiers that shape the terrain, in build order (priority layer, then sub-priority); base meshes left out"),
 			ModifierClass, [](UObject* Object)
 			{
+				const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
+				LoadForListing(Terrain);
 				TArray<UObject*> Out;
-				for (UModifierComponent* Modifier : Modifiers(Cast<AMeshPartition>(Object)))
+				for (UModifierComponent* Modifier : Modifiers(Terrain))
 					Out.Add(Modifier);
 				return Out;
 			});
@@ -214,8 +229,10 @@ public:
 			TEXT("the terrain's base meshes (MeshProvider modifiers: the sections Create or a heightmap import made)"),
 			ModifierClass, [](UObject* Object)
 			{
+				const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
+				LoadForListing(Terrain);
 				TArray<UObject*> Out;
-				for (UModifierComponent* Modifier : Modifiers(Cast<AMeshPartition>(Object), /*bBases*/ true))
+				for (UModifierComponent* Modifier : Modifiers(Terrain, /*bBases*/ true))
 				{
 					if (Modifier->IsBase())
 						Out.Add(Modifier);
@@ -294,21 +311,25 @@ meshTerrainBrush | call Erase(unreal.find("Terrain"), "Red", [0, 0, 0], 500)
 
 `Before` / `After` are the full-resolution ground height (or channel weight) at the vertex nearest the point; `Surface`
 reads the rendered collision, which on rough ground can differ by some cm. The operations load a terrain's base and modifier
-actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. Mesh Terrain needs Unreal
-Engine 5.8+, the MeshTerrainMode plugin and a World Partition level.)MD"));
+actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. After the level is reopened its
+modifiers are unloaded and `unreal.find("<modifier label>")` finds nothing: list `meshTerrainModifiers` (or a terrain's
+`Modifiers`) first, which loads them. Mesh Terrain needs Unreal Engine 5.8+, the MeshTerrainMode plugin and a World
+Partition level.)MD"));
 		Context.AddGuide(TEXT("Mesh Terrain modifiers (Experimental, UE 5.8+)"), TEXT(R"MD(`meshTerrainModifier` adds and changes the modifiers that shape a
 Mesh Terrain. Every Add names its terrain (a modifier is bound to it, never to the nearest one); every call is one undo step and
 returns after the terrain is rebuilt: `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority, Disabled, Ready, Seconds,
-State}`; read the result with `Surface`. Sizes, radii and heights are cm; Location Z is the height of a Patch or Shape (a Spline takes its points' Z).
+State}`; read the result with `Surface`. Give each modifier a Label to find it again (`unreal.find("Hills")`): default labels
+("NoiseModifier", "NoiseModifier2", ...) count across all terrains of the level. Sizes, radii and heights are cm; Location Z
+is the height of a Patch or Shape (a Spline takes its points' Z).
 
 ```
-meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005)        hills: Size [X, Y], Strength (height), Frequency (1/cm), Falloff 0..1
-meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800)                  flat pad at Z: Radius, Falloff
+meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005, 0.5, "Hills")   hills: Size [X, Y], Strength (height), Frequency (1/cm), Falloff 0..1, Label
+meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800, "Pad")           flat pad at Z: Radius, Falloff, Label
 meshTerrainModifier | call AddSpline(unreal.find("Terrain"), [[0, 0, 100], [5000, 2000, 150]], 600, 400)  road: Width, Falloff, Closed, Channel
 meshTerrainModifier | call AddShape(unreal.find("Terrain"), "Sphere", [3000, 0, 0], [2000, 2000, 1200], "Subtract")   Box Sphere Cylinder Capsule Cone Torus (Union / Subtract / Trim), Rectangle Disc (Project)
 meshTerrainModifier | call AddWeight(unreal.find("Terrain"), "Red", [0, 0, 0], 1000, 500, 1)              paint a channel (Channels)
 meshTerrainModifier | call AddLattice(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 2000], 3)           then SetLatticePoints(modifier, points) from its LatticePoints
-meshTerrainModifier | call AddTexturePatch(unreal.find("Terrain"), "/Game/T_Height", [0, 0, 0], [4000, 4000], 1000)   heightmap stamp
+meshTerrainModifier | call AddTexturePatch(unreal.find("Terrain"), "/Game/T_Height", [0, 0, 0], [4000, 4000], 1000)   heightmap stamp (not under -nullrhi)
 meshTerrainModifier | call AddRemesh(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 50000], 100)          finer triangles
 meshTerrainModifier | call Add(unreal.find("Terrain"), "InstancedPatch", [0, 0, 0])                         any other kind with defaults, then set
 meshTerrainModifier | call Edit(unreal.find("Hills").Modifier, [-1, -1, -1], -1, -1, 900)               Size / Radius / Width / Strength / Falloff (-1 keeps)
@@ -341,7 +362,8 @@ come from the definition (default `/MeshPartition/DataAssets/MPD_Default`): pass
 for another material. `ImportHeightmap(label, file, location, sizeMeters, heightScale = 100, resolution, definition,
 timeoutSeconds)` reads a 16-bit grayscale `.png` or a `.r16` / `.raw` (little-endian, square) in Landscape units: value 32768
 is `location` Z and one step is `heightScale / 128` cm (a Landscape's Z scale; 100 gives -256 .. +256 m); one quad per pixel
-step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Save the level before Play In Editor:
+step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Place terrains side by side, not
+overlapping: Play In Editor's section build then warns about the other terrain's actors. Save the level before Play In Editor:
 the engine asks about unsaved Mesh Terrain base meshes otherwise.)MD"));
 	}
 };

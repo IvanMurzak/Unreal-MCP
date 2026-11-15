@@ -114,6 +114,13 @@ public:
 	 */
 	static UNREALMCPEDITOR_API void PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries);
 
+	/**
+	 * The gates a local install source declares in its `extension.json` (@p ExtensionJson; null = no such file) into
+	 * @p OutEntry, replacing the catalog's: `minEngineVersion` (absent = none) and `experimental`. The same rule as the
+	 * CLI's `install-extension --source` (readSourceGates). False on a malformed value.
+	 */
+	static UNREALMCPEDITOR_API bool ReadSourceGates(const TSharedPtr<FJsonObject>& ExtensionJson, FUnrealMcpCatalogEntry& OutEntry);
+
 private:
 	static bool ParseEntry(const TSharedPtr<FJsonObject>& Obj, FUnrealMcpCatalogEntry& OutEntry, FString& OutError);
 };

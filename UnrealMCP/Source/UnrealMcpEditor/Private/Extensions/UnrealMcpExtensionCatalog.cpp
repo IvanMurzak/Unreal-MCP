@@ -16,10 +16,13 @@ const int32 FUnrealMcpExtensionCatalog::SupportedSchemaVersion = 1;
 
 namespace
 {
-	/** `"5.8"` (extension.json minEngineVersion: major.minor, no leading zero) into its numbers. */
+	/**
+	 * `"5.8"` (extension.json minEngineVersion: major.minor, no leading zero) into its numbers. Anchored with `\z`, not
+	 * `$` (ICU's `$` also matches before a final line break), to accept exactly what the CLI's ENGINE_VERSION accepts.
+	 */
 	bool ExtCatParseMinEngineVersion(const FString& Value, int32& OutMajor, int32& OutMinor)
 	{
-		const FRegexPattern Pattern(TEXT("^([1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
+		const FRegexPattern Pattern(TEXT("^([1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"));
 		FRegexMatcher Matcher(Pattern, Value);
 		if (!Matcher.FindNext())
 			return false;
@@ -260,6 +263,13 @@ const FUnrealMcpCatalogEntry* FUnrealMcpExtensionCatalog::FindEntry(
 		[&Needle](const FUnrealMcpCatalogEntry& E) { return E.PluginName.ToLower() == Needle; }))
 		return ByPlugin;
 	return nullptr;
+}
+
+bool FUnrealMcpExtensionCatalog::ReadSourceGates(const TSharedPtr<FJsonObject>& ExtensionJson, FUnrealMcpCatalogEntry& OutEntry)
+{
+	OutEntry.MinEngineVersion.Reset();
+	OutEntry.bExperimental = false;
+	return !ExtensionJson.IsValid() || ExtCatReadGates(*ExtensionJson, OutEntry);
 }
 
 void FUnrealMcpExtensionCatalog::PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries)

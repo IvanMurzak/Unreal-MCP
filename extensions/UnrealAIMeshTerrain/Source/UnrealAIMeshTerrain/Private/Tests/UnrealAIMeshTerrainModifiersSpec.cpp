@@ -17,6 +17,7 @@
 
 #include "Editor.h"
 #include "Engine/World.h"
+#include "Misc/App.h"
 #include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
 
@@ -396,7 +397,11 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			if (ModSpecRun(TEXT("texture patch"), TEXT("AddTexturePatch"), { T, ModSpecStr(TEXT("/Engine/EngineResources/WhiteSquareTexture")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(1000.0, 1000.0), ModSpecNum(1000.0),
 				ModSpecStr(Label + TEXT("_Tex")) }))
 			{
-				ModSpecExpectHeight(TEXT("white raises half the Height"), Terrain, X0, 0.0, 500.0, 2.0);
+				// Mesh Partition reads a texture patch's texture through the renderer: under -nullrhi (the suite) it applies nothing.
+				if (FApp::CanEverRender())
+					ModSpecExpectHeight(TEXT("white raises half the Height"), Terrain, X0, 0.0, 500.0, 2.0);
+				else
+					AddInfo(TEXT("-nullrhi: a texture patch changes no height without a renderer (engine); its height is checked in a rendering editor"));
 			}
 
 			// meshTerrainModifier | call AddRemesh(unreal.find("<label>"), [X0 + 4000, -1500, 0], [2000, 2000, 50000], 100)

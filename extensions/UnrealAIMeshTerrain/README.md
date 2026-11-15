@@ -64,7 +64,9 @@ A Mesh Terrain is a `MeshPartition` actor (no other actor class: Mesh Terrain Mo
 modifier components (noise, splines, shapes, sculpt layers, ...) on top of its base meshes. The editor builds it
 asynchronously into preview sections: first the full-resolution mesh, then a simplified (Nanite) static mesh with its
 collision. Every operation waits for that build (`Build.Ready`), so heights, traces and rendering agree when it returns;
-it also loads the terrain's spatially loaded base and modifier actors (World Partition) when they are not.
+it also loads the terrain's spatially loaded base and modifier actors (World Partition) when they are not. After the level
+is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` finds nothing until they are loaded: listing
+`meshTerrainModifiers` (or a terrain's `Modifiers`) loads them.
 
 - `Surface` / `SurfacePoints`: `Inside`, `Height` (world Z, cm, what traces and collision hit), `Slope` (degrees),
   `Location`, `Normal`, `Channels` (the paint weights there, from the evaluated modifier stack).
@@ -90,7 +92,9 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
 - `Delete(terrain)`: the terrain, its base meshes, the modifiers that target it and its built sections (it loads its World
   Partition actors first), one undo step.
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
-  ("Unsaved Mesh Partition Modifiers").
+  ("Unsaved Mesh Partition Modifiers"). Place terrains side by side, not overlapping: the editor builds overlapping
+  terrains fine, but Play In Editor's section build of one loads the other's actors and logs `LogLinker` warnings
+  ("Mapping for ... not provided while outer '/Temp/MeshPartitionBuilderPackage' is instanced").
 - `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
   within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
   centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
@@ -119,16 +123,17 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
 `meshTerrainModifier` places and changes the modifiers that shape a terrain, as Mesh Terrain Mode's Modifiers and Shapes
 palettes do. Every Add call names its terrain (the modifier is bound to it, never to whichever terrain is nearest); every
 call is one undo step, and returns after the terrain is rebuilt with `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority,
-Disabled, Ready, Seconds, State}`.
+Disabled, Ready, Seconds, State}`. Give each modifier a label (the last argument) to find it again with `unreal.find`: the
+default labels ("NoiseModifier", "NoiseModifier2", ...) count across every terrain of the level.
 
 ```
-meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005)
-meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800)
+meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005, 0.5, "Hills")
+meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800, "Pad")
 meshTerrainModifier | call AddSpline(unreal.find("Terrain"), [[0, 0, 100], [5000, 2000, 150]], 600, 400, false, "Red")
 meshTerrainModifier | call AddShape(unreal.find("Terrain"), "Sphere", [3000, 0, 0], [2000, 2000, 1200], "Subtract")
-meshTerrainModifier | call Edit(unreal.find("NoiseModifier").Modifier, [-1, -1, -1], -1, -1, 900)
-meshTerrainModifier | call SetOrder(unreal.find("PatchModifier").Modifier, 10)
-meshTerrainModifier | call Remove(unreal.find("PatchModifier").Modifier)
+meshTerrainModifier | call Edit(unreal.find("Hills").Modifier, [-1, -1, -1], -1, -1, 900)
+meshTerrainModifier | call SetOrder(unreal.find("Pad").Modifier, 10)
+meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 ```
 
 | Operation | What it places / changes |
@@ -139,7 +144,7 @@ meshTerrainModifier | call Remove(unreal.find("PatchModifier").Modifier)
 | `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
 | `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y outer diameter, Z ring height) as Boolean Union / Subtract / Trim; Rectangle, Disc as MeshProject |
 | `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
-| `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2) |
+| `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2); needs a rendering editor (under `-nullrhi` the engine applies no texture) |
 | `AddRemesh(terrain, location, size, edgeLength, label)` | Remesh: finer or coarser triangles in a box |
 | `Add(terrain, kind, location, label)` | any other scriptable kind with its defaults (InstancedPatch, SplineRemesh, MeshProject, Boolean, ProjectMeshLayers), then `set` |
 | `Edit(modifier, size, radius, width, strength, falloff)` | the common parameters; a negative value keeps the current one (a negative noise or texture height: `set` it) |

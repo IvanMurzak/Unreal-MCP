@@ -108,7 +108,8 @@ struct FUnrealMcpInstalledOnDisk
  *
  *   1. resolve the catalog descriptor (caller supplies it);
  *   2. resolve the install source — local `SourceDir` (offline/dev/CI) or the extension's
- *      github.com-only release zip (fail-closed host trust, mirrors extension-source.ts);
+ *      github.com-only release zip (fail-closed host trust, mirrors extension-source.ts); the engine gate
+ *      (`minEngineVersion`) is the catalog release's, or a local source's own `extension.json` (as the CLI's --source);
  *   3. materialize into `<project>/Plugins/<PluginName>/` (stage-then-swap, build-cache filtered);
  *   4. enable the extension + its gating engine plugins in the `.uproject` Plugins[] (idempotent);
  *   5. the extension ships as SOURCE → the editor recompiles it on next open (rebuildRequired) — the

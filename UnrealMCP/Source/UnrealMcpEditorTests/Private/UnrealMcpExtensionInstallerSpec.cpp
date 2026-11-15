@@ -212,19 +212,33 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 			InstallerSpecWrite(ProjectDir / TEXT("MyProj.uproject"), Uproject);
 			InstallerSpecWrite(SourceDir / TEXT("FutureExt.uplugin"), TEXT("{ \"VersionName\": \"1.0.0\" }"));
 
+			const FString Future = FString::Printf(TEXT("%d.0"), FEngineVersion::Current().GetMajor() + 1);
 			FUnrealMcpInstallOptions Opts;
 			Opts.ProjectDir = ProjectDir;
-			Opts.SourceDir = SourceDir;
 			Opts.Descriptor = InstallerSpecCatalogEntry(TEXT("com.x.future"), TEXT("FutureExt"), TEXT("1.0.0"));
-			Opts.Descriptor.MinEngineVersion = FString::Printf(TEXT("%d.0"), FEngineVersion::Current().GetMajor() + 1);
+			Opts.Descriptor.MinEngineVersion = Future;
+			auto ExpectRefused = [&](const TCHAR* What, const TCHAR* Reason)
+			{
+				const FUnrealMcpInstallResult Result = FUnrealMcpExtensionInstaller::Install(Opts);
+				TestFalse(*FString::Printf(TEXT("%s: install fails"), What), Result.bSuccess);
+				TestTrue(*FString::Printf(TEXT("%s: the error says why (%s)"), What, *Result.Error), Result.Error.Contains(Reason));
+				TestFalse(*FString::Printf(TEXT("%s: nothing placed"), What), FPaths::DirectoryExists(ProjectDir / TEXT("Plugins")));
+				FString After;
+				FFileHelper::LoadFileToString(After, *(ProjectDir / TEXT("MyProj.uproject")));
+				TestEqual(*FString::Printf(TEXT("%s: .uproject untouched"), What), After, Uproject);
+			};
+			ExpectRefused(TEXT("the catalog release's gate"), TEXT("requires Unreal Engine"));
 
-			const FUnrealMcpInstallResult Result = FUnrealMcpExtensionInstaller::Install(Opts);
-			TestFalse(TEXT("install fails"), Result.bSuccess);
-			TestTrue(*FString::Printf(TEXT("the error says why (%s)"), *Result.Error), Result.Error.Contains(TEXT("requires Unreal Engine")));
-			TestFalse(TEXT("nothing placed"), FPaths::DirectoryExists(ProjectDir / TEXT("Plugins")));
-			FString After;
-			FFileHelper::LoadFileToString(After, *(ProjectDir / TEXT("MyProj.uproject")));
-			TestEqual(TEXT(".uproject untouched"), After, Uproject);
+			// A local source states its own gates in its extension.json (as the CLI's --source), not the catalog's.
+			Opts.SourceDir = SourceDir;
+			InstallerSpecWrite(SourceDir / TEXT("extension.json"), FString::Printf(TEXT("{ \"minEngineVersion\": \"%s\" }"), *Future));
+			ExpectRefused(TEXT("the source's gate"), TEXT("requires Unreal Engine"));
+			InstallerSpecWrite(SourceDir / TEXT("extension.json"), TEXT("{ \"minEngineVersion\": \"5.8\\n\" }"));
+			ExpectRefused(TEXT("a malformed source gate"), TEXT("extension.json"));
+			IFileManager::Get().Delete(*(SourceDir / TEXT("extension.json")));
+			const FUnrealMcpInstallResult Ungated = FUnrealMcpExtensionInstaller::Install(Opts);
+			TestFalse(*FString::Printf(TEXT("a source without a gate is not refused for the catalog's (%s)"), *Ungated.Error),
+				Ungated.Error.Contains(TEXT("requires Unreal Engine")));
 		});
 	});
 

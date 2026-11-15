@@ -214,22 +214,8 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 	}
 
 	// Install / Update button — for catalog rows that are installable (have a repo or are available). A row this
-	// engine cannot build offers neither: it says why instead.
-	if (Row.bInCatalog && !Row.Incompatibility.IsEmpty())
-	{
-		// An installed copy keeps working (the reason line says why it is not updated); only a new install is refused.
-		if (!Row.bInstalled)
-		{
-			ActionRow->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ExtIncompatible", "Not available for this engine"))
-				.ToolTipText(FText::FromString(Row.Incompatibility))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			];
-		}
-	}
-	else if (Row.bInCatalog && OnInstall)
+	// engine cannot build offers neither: the reason line under its title says why (an installed copy keeps working).
+	if (Row.bInCatalog && Row.Incompatibility.IsEmpty() && OnInstall)
 	{
 		if (!Row.bInstalled)
 		{

@@ -751,13 +751,6 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 		return Result;
 	}
 
-	const FString Incompatibility = Options.Descriptor.EngineIncompatibility();
-	if (!Incompatibility.IsEmpty())
-	{
-		Result.Error = FString::Printf(TEXT("%s %s: it cannot compile here, so nothing was installed"), *PluginName, *Incompatibility);
-		return Result;
-	}
-
 	const FString UprojectPath = ExtInstFindUProjectFile(ProjectDir);
 	if (UprojectPath.IsEmpty())
 	{
@@ -765,6 +758,30 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 		return Result;
 	}
 	Result.UprojectPath = UprojectPath;
+
+	// The engine gate: the catalog release's, or (like the CLI's --source) what a local source's own extension.json states.
+	FUnrealMcpCatalogEntry Gates = Options.Descriptor;
+	FString SourceRoot;
+	if (!Options.SourceDir.TrimStartAndEnd().IsEmpty())
+	{
+		SourceRoot = ResolveLocalPluginRoot(Options.SourceDir, Result.Error);
+		if (SourceRoot.IsEmpty())
+			return Result;
+		const FString ExtensionJsonPath = SourceRoot / TEXT("extension.json");
+		const bool bHasExtensionJson = FPaths::FileExists(ExtensionJsonPath);
+		const TSharedPtr<FJsonObject> ExtensionJson = bHasExtensionJson ? ExtInstLoadJsonObject(ExtensionJsonPath) : nullptr;
+		if ((bHasExtensionJson && !ExtensionJson.IsValid()) || !FUnrealMcpExtensionCatalog::ReadSourceGates(ExtensionJson, Gates))
+		{
+			Result.Error = FString::Printf(TEXT("%s: malformed JSON or minEngineVersion / experimental (minEngineVersion is \"<major>.<minor>\", e.g. \"5.8\")"), *ExtensionJsonPath);
+			return Result;
+		}
+	}
+	const FString Incompatibility = Gates.EngineIncompatibility();
+	if (!Incompatibility.IsEmpty())
+	{
+		Result.Error = FString::Printf(TEXT("%s %s: it cannot compile here, so nothing was installed"), *PluginName, *Incompatibility);
+		return Result;
+	}
 
 	const FString ToVersion = Options.Descriptor.HasVersion() ? Options.Descriptor.Version.TrimStartAndEnd() : FString();
 	Result.ToVersion = ToVersion;
@@ -792,14 +809,9 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 			if (!ExtractDirToClean.IsEmpty())
 				IFileManager::Get().DeleteDirectory(*ExtractDirToClean, /*RequireExists*/ false, /*Tree*/ true);
 		};
-		if (!Options.SourceDir.TrimStartAndEnd().IsEmpty())
+		if (!SourceRoot.IsEmpty())
 		{
-			PluginRoot = ResolveLocalPluginRoot(Options.SourceDir, Err);
-			if (PluginRoot.IsEmpty())
-			{
-				Result.Error = Err;
-				return Result;
-			}
+			PluginRoot = SourceRoot;
 		}
 		else if (!Options.Descriptor.Repo.TrimStartAndEnd().IsEmpty() && !ToVersion.IsEmpty())
 		{

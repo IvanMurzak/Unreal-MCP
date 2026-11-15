@@ -140,7 +140,8 @@ void FUnrealMcpExtensionCatalogSpec::Define()
 			TestTrue(TEXT("the release gates win"), Parse(Parsed) && Parsed.MinEngineVersion.IsEmpty() && !Parsed.bExperimental);
 
 			const TArray<TSharedPtr<FJsonValue>> BadVersions = { MakeShared<FJsonValueString>(TEXT("5.8.0")),
-				MakeShared<FJsonValueString>(TEXT("05.8")), MakeShared<FJsonValueString>(TEXT("five")), MakeShared<FJsonValueNumber>(5.8) };
+				MakeShared<FJsonValueString>(TEXT("05.8")), MakeShared<FJsonValueString>(TEXT("five")), MakeShared<FJsonValueString>(TEXT("5.8\n")),
+				MakeShared<FJsonValueNumber>(5.8) };
 			for (const TSharedPtr<FJsonValue>& Bad : BadVersions)
 			{
 				Latest->SetField(TEXT("minEngineVersion"), Bad);
