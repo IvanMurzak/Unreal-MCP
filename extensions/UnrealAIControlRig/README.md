@@ -7,7 +7,7 @@ An optional editor plugin in the [Unreal MCP monorepository](../../README.md), w
 ## Requirements
 
 - Unreal Engine 5.7 or later (the shared extension suite verifies UE 5.7 and 5.8).
-- Unreal MCP 0.26.0 or later (the RQL runtime and operations these extensions use), installed in the same project.
+- Unreal MCP 0.28.0 or later (the RQL runtime, operations and Play In Editor play testing this extension uses), installed in the same project.
 - Engine plugins: `ControlRig`. The installer enables these dependencies. Full Body IK units (`PBIK`) are in the engine's
   experimental `FullBodyIK` plugin, which a project enables itself; `controlRigUnits` lists only the units of enabled plugins.
 - A C++ toolchain for your Unreal Engine installation. Extension releases contain source files and must be compiled for your project and engine.
