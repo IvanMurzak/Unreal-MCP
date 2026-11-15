@@ -39,8 +39,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 
 | Kind | Names |
 | --- | --- |
-| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain`, `meshTerrainCreate` |
-| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete` |
+| Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain`, `meshTerrainCreate`, `meshTerrainBrush` |
+| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete`; `meshTerrainBrush`: `Sculpt`, `Paint`, `Erase` |
 | Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
 
 ```
@@ -54,6 +54,8 @@ meshTerrain | call Rebuild(unreal.find("Terrain"))
 meshTerrainCreate | call Create("Terrain", [0, 0, 0], 500)
 meshTerrainCreate | call ImportHeightmap("Alps", "Heightmaps/alps.png", [0, 0, 0], 2000, 100)
 meshTerrainCreate | call Delete(unreal.find("Alps"))
+meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Raise", [1200, -800, 0], 1500, 400)
+meshTerrainBrush | call Paint(unreal.find("Terrain"), "Red", [1200, -800, 0], 2000, 1)
 ```
 
 A Mesh Terrain is a `MeshPartition` actor (no other actor class: Mesh Terrain Mode's Create tool makes one) shaped by
@@ -87,16 +89,36 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
   Partition actors first), one undo step.
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
   ("Unsaved Mesh Partition Modifiers").
+- `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
+  within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
+  centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
+- `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff = 0.5)`:
+  move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0).
+- Strokes are stored the way Mesh Terrain Mode's Sculpt and Paint tools store theirs: in a brush modifier
+  (`ProjectMeshLayersModifier`, the mode's "BrushModifier", labelled `<terrain>_Brush`), the sculpt as offsets in its
+  active sculpt layer and the paint in its weight attributes (a `Set` channel entry per painted channel), edited through
+  the tools' own tool target. A stroke goes into a brush that covers its area, or near one that may grow to cover it (at
+  most 600 x 600 m, about a million vertices), else into a new brush placed after the terrain's other modifiers; so
+  repeated strokes accumulate in one brush and stay editable with the mode's Sculpt / Paint tools (select the brush). Each
+  call is one undo step and returns when the terrain is rebuilt: `Brush`, `NewBrush`, `Vertices` (changed), `Before` /
+  `After` (full-resolution height or weight at the centre), `Ready`, `Seconds`.
+- Like the mode's brushes, a brush stores sculpt OFFSETS on top of the modifiers before it: when one of those changes later,
+  the sculpted ground moves with it (a flattened pad is no longer flat). A brush that has another modifier after it over
+  its area is not reused (a new brush is placed after it). A painted channel is `Set` by the brush over its whole box: the
+  channel there keeps the values it had when it was first painted, whatever the modifiers below write later.
+- When a stroke fails waiting for the build (timeout), it is already applied: call `WaitForBuild`, do not repeat it.
 - Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a size / resolution / section count
-  over the limits, a missing or malformed heightmap, a build that does not finish in time
+  over the limits, a missing or malformed heightmap, a brush off the terrain, an unknown sculpt mode or paint channel
+  (with the ones there are), out-of-range radius / height / strength / weight / falloff, a build that does not finish in time
   (with what is still pending), Mesh Terrain plugins not enabled (with what to enable).
 
 ## Development
 
 The shared helpers every operation uses (find a terrain, wait for its build, transactions, load its actors, sample the
 surface, evaluate the modifier stack of a region, spawn a flat terrain the way the Create tool does) are in
-`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation specs are `UnrealAIMeshTerrain` and
-`UnrealAIMeshTerrain.Create` (`Automation RunTests UnrealAIMeshTerrain`); live checks are in `Tests/e2e/tools/`.
+`Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation specs are `UnrealAIMeshTerrain`
+(`Automation RunTests UnrealAIMeshTerrain`; create / import / delete: `UnrealAIMeshTerrain.Create`; brush strokes:
+`UnrealAIMeshTerrain.Sculpt`); live checks are in `Tests/e2e/tools/`.
 
 ## License
 

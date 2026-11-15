@@ -154,6 +154,7 @@ OPERATIONS = ('EnhancedInputOperations : Object {} +methods: ' + ' | '.join(
                                     'RemoveMappingContextOnEvent', 'SetActionTriggers', 'SetMappingTriggers', 'SetPlayerMappable')))
 # Mesh Terrain (UE 5.8+): per check, the answer the live UE 5.8 editor gives and one that must not pass.
 MESH_TERRAIN = 'MeshTerrainOperations#1108806258508'
+MESH_TERRAIN_BRUSH = 'MeshTerrainBrushOperations#1107900288855'
 AUTHORING.update({
     'mesh-terrain-enable.e2e.json': (
         pcg_receipt(f'{MESH_TERRAIN}|EnableMeshTerrain()|MeshPartition is enabled in the project file; MeshTerrainMode is now enabled in '
@@ -164,6 +165,11 @@ AUTHORING.update({
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Surface on {MESH_TERRAIN}: argument 'Terrain': "
                                               'value is error(not-found)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call Surface: argument 'Point': Vector expects 3 numbers"}],
+         'isError': True}),
+    'mesh-terrain-brush-missing.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Sculpt on {MESH_TERRAIN_BRUSH}: argument 'Terrain': "
+                                              'value is error(not-found)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: Sculpt threw: Mode 'Pinch' is not one of Raise, Lower, Flatten, Smooth"}],
          'isError': True}),
 })
 # The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
@@ -456,7 +462,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 149)
+        self.assertEqual(len(all_checks()), 151)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

@@ -35,6 +35,11 @@ public class UnrealAIMeshTerrain : ModuleRules
 			"MeshPartitionEditor",
 			// FDynamicMesh3 (the preview sections' meshes, Surface).
 			"GeometryCore",
+			// Brush strokes (Sculpt / Paint): the Mesh Terrain Mode tools' modifier tool target (UEditableModifierToolTarget,
+			// MeshPartitionModelingToolset), its IDynamicMeshCommitter interface (ModelingComponents) and the tool framework.
+			"MeshPartitionModelingToolset",
+			"ModelingComponents",
+			"InteractiveToolsFramework",
 			"UnrealEd",
 			// IPluginManager / IProjectManager: the plugin guard and EnableMeshTerrain.
 			"Projects",
