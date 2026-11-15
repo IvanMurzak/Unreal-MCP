@@ -160,7 +160,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 
 <div dir="rtl">
 
-تحتاج الامتدادات إلى Unreal Engine 5.7+، وUnreal MCP 0.26.0+ في المشروع نفسه، وأدوات بناء C++: تُنشر الإصدارات كمصدر وتُجمَّع لمشروعك (عند فتح المحرر التالي، أو فورًا مع `--build`). معرّف التثبيت هو `com.ivanmurzak.unreal-ai-<id>` حيث يأتي `<id>` من الجدول أدناه. خيارات التثبيت (`--version`، `--build`، و`--source` دون اتصال): [تثبيت امتداد في مشروع](EXTENSIONS.md#installing-an-extension-into-a-project).
+تحتاج الامتدادات إلى Unreal Engine 5.7+ (Mesh Terrain 5.8+)، وUnreal MCP 0.26.0+ في المشروع نفسه، وأدوات بناء C++: تُنشر الإصدارات كمصدر وتُجمَّع لمشروعك (عند فتح المحرر التالي، أو فورًا مع `--build`). معرّف التثبيت هو `com.ivanmurzak.unreal-ai-<id>` حيث يأتي `<id>` من الجدول أدناه. خيارات التثبيت (`--version`، `--build`، و`--source` دون اتصال): [تثبيت امتداد في مشروع](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | الامتداد (المعرّف) | الوصف |
 | --- | --- |

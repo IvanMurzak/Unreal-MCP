@@ -290,7 +290,7 @@ Extensions आपके project में source से compile होते ह
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`, .NET 9 sidecar |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, npm package |
-| [`extensions/`](../extensions/) | छह वैकल्पिक engine extensions, जिनकी अपनी releases हैं |
+| [`extensions/`](../extensions/) | सात वैकल्पिक engine extensions, जिनकी अपनी releases हैं |
 | [`samples/`](../samples/) | एक editor extension template और एक runtime (game के अंदर) tool sample |
 
 ## Links

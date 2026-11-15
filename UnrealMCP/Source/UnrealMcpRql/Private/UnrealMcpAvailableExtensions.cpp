@@ -46,7 +46,7 @@ namespace
 #if !UE_VERSION_OLDER_THAN(5, 8, 0) // MeshPartition (Mesh Terrain) exists from UE 5.8: the extension cannot be installed before
 			{ TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), TEXT("Mesh Terrain Tools (Experimental)"), TEXT("UnrealAIMeshTerrain"),
 				TEXT("Mesh Terrain (UE 5.8+ Mesh Partition, Experimental): meshTerrains, meshTerrainModifiers, meshTerrain | call Rebuild / "
-					"WaitForBuild / Surface (ground height, slope, paint channels) / EnableMeshTerrain"),
+					"WaitForBuild / Surface / SurfacePoints (ground height, slope, paint channels) / EnableMeshTerrain"),
 				{ TEXT("meshterrain"), TEXT("meshpartition") }, true },
 #endif
 		};

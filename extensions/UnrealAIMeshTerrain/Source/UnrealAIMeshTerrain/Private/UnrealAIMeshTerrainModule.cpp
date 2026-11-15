@@ -171,7 +171,7 @@ public:
 			TEXT("the built terrain's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BoxJson(BuiltBounds(Cast<AMeshPartition>(Object))); });
 		Context.AddJsonMember(TerrainClass, TEXT("Build"),
-			TEXT("the asynchronous build: Ready (mesh, collision and rendering match the modifiers), Sections, Triangles (rendered now), Building, Cooking (collision), Finishing (final mesh not made), CompilingMeshes, Actors / LoadedActors (World Partition), State"),
+			TEXT("the asynchronous build: Ready (mesh, collision and rendering match the modifiers), Sections, Triangles (of the mesh shown now; the final Nanite mesh counts its fallback LOD), Building, Cooking (collision), Finishing (final mesh not made), CompilingMeshes, Actors / LoadedActors (World Partition), State"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BuildJson(Object); });
 		Context.AddJsonMember(TerrainClass, TEXT("Sections"),
 			TEXT("the built (preview) sections: Name, Triangles (rendered now), Bounds {Min, Max, SizeMeters}"),

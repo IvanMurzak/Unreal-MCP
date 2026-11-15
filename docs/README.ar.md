@@ -344,7 +344,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | إضافة Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`، العملية المرافقة المبنية على .NET 9 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، حزمة npm |
-| [`extensions/`](../extensions/) | ستة امتدادات اختيارية للمحرك بإصدارات مستقلة |
+| [`extensions/`](../extensions/) | سبعة امتدادات اختيارية للمحرك بإصدارات مستقلة |
 | [`samples/`](../samples/) | قالب امتداد للمحرر ومثال لأداة Runtime (داخل اللعبة) |
 
 ## روابط

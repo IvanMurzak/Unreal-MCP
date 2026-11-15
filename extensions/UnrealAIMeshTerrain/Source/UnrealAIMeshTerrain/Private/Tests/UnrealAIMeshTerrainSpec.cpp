@@ -126,7 +126,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("MeshTerrainOperations"), bOk);
 			TestTrue(TEXT("schema ok"), bOk);
 			for (const TCHAR* Method : { TEXT("Rebuild(MeshPartition Terrain, double TimeoutSeconds)"), TEXT("WaitForBuild(MeshPartition Terrain, double TimeoutSeconds)"),
-				TEXT("Surface(MeshPartition Terrain, Vector Point)"), TEXT("EnableMeshTerrain()") })
+				TEXT("Surface(MeshPartition Terrain, Vector Point)"), TEXT("SurfacePoints(MeshPartition Terrain, List<Vector> Points)"), TEXT("EnableMeshTerrain()") })
 			{
 				TestTrue(*FString::Printf(TEXT("schema lists %s (%s)"), Method, *Schema.Left(400)), Schema.Contains(Method));
 			}

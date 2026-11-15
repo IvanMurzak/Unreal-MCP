@@ -312,9 +312,9 @@ namespace UnrealAIMeshTerrain
 		if (!Component)
 			return State;
 		const TSet<UModifierComponent*> Current(Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier); }));
-		State.bNoBase = !Algo::AnyOf(Current, [](const UModifierComponent* Modifier) { return Modifier->IsBase(); });
+		State.bNoBase = !Algo::AnyOf(Current, [](const UModifierComponent* Modifier) { return Modifier->IsBase() && !Modifier->GetIsDisabledFlag(); });
 		// A modifier that loaded (World Partition) or was spawned joins the build when the editor component lists it.
-		ForEachTerrainActorDesc(Terrain, [&State, &Current](const FWorldPartitionActorDescInstance& Instance)
+		ForEachTerrainActorDesc(Terrain, [Terrain, &State, &Current](const FWorldPartitionActorDescInstance& Instance)
 		{
 			++State.Actors;
 			if (const AActor* Actor = Instance.IsLoaded() ? Instance.GetActor(/*bEvenIfPendingKill*/ false) : nullptr; IsValid(Actor))
@@ -323,7 +323,7 @@ namespace UnrealAIMeshTerrain
 				TArray<UModifierComponent*> Components;
 				Actor->GetComponents(Components);
 				for (UModifierComponent* Modifier : Components)
-					State.Unregistered += IsValid(Modifier) && !Current.Contains(Modifier) ? 1 : 0;
+					State.Unregistered += IsValid(Modifier) && TerrainOf(Modifier) == Terrain && !Current.Contains(Modifier) ? 1 : 0;
 			}
 		});
 		State.bBuilding = Component->IsAnyPreviewSectionBuildActive();
@@ -435,12 +435,14 @@ namespace UnrealAIMeshTerrain
 		Settings.bBuildSpatial = true;
 		Settings.bCacheResult = true;
 		Settings.bAllowDDCRead = true;
-		const TArray<UE::MeshPartition::FBuildTaskHandle> Handles = UE::MeshPartition::Build::LaunchBuilds(Settings);
+		TArray<UE::MeshPartition::FBuildTaskHandle> Handles = UE::MeshPartition::Build::LaunchBuilds(Settings);
 		const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
 		while (!UE::MeshPartition::Build::AreAllTasksComplete(Handles))
 		{
 			if (FPlatformTime::Seconds() > Deadline)
 			{
+				for (UE::MeshPartition::FBuildTaskHandle& Handle : Handles)
+					Handle.Cancel();
 				UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
 				return {};
 			}
@@ -488,32 +490,37 @@ namespace UnrealAIMeshTerrain
 		if (!Out.bInside || !bChannels)
 			return Out;
 		// The paint channels are not in the collision: evaluate the modifier stack around the point (cached per region).
-		TArray<FRegionMesh> Around;
-		if (!Evaluated)
+		// The builder keeps only triangles wholly inside the region: retry wider for a coarse terrain (quads over ~2.5 m).
+		const auto HitIn = [&Out, &Start, &End](const TArray<FRegionMesh>& Parts)
 		{
-			Around = BuildRegion(Terrain, FBox(FVector(X - 250.0, Y - 250.0, Bounds.Min.Z - 1000.0), FVector(X + 250.0, Y + 250.0, Bounds.Max.Z + 1000.0)));
-			Evaluated = &Around;
-		}
-		for (const FRegionMesh& Part : *Evaluated)
-		{
-			if (!Part.Spatial.IsValid())
-				continue;
-			const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
-			const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
-			double Distance = 0.0;
-			int32 Triangle = INDEX_NONE;
-			FVector3d Bary;
-			if (!Part.Spatial->FindNearestHitTriangle(FRay3d(LocalStart, LocalDirection), Distance, Triangle, Bary))
-				continue;
-			const UE::Geometry::FIndex3i Corners = Part.Mesh->GetTriangle(Triangle);
-			for (const FName& Channel : Part.Mesh->GetWeightLayerNames())
+			for (const FRegionMesh& Part : Parts)
 			{
-				Out.Channels.Add(Channel, Part.Mesh->GetWeightLayerValue(Channel, Corners.A) * Bary.X + Part.Mesh->GetWeightLayerValue(Channel, Corners.B) * Bary.Y
-					+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
+				if (!Part.Spatial.IsValid())
+					continue;
+				const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
+				const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
+				double Distance = 0.0;
+				int32 Triangle = INDEX_NONE;
+				FVector3d Bary;
+				if (!Part.Spatial->FindNearestHitTriangle(FRay3d(LocalStart, LocalDirection), Distance, Triangle, Bary))
+					continue;
+				const UE::Geometry::FIndex3i Corners = Part.Mesh->GetTriangle(Triangle);
+				for (const FName& Channel : Part.Mesh->GetWeightLayerNames())
+				{
+					Out.Channels.Add(Channel, Part.Mesh->GetWeightLayerValue(Channel, Corners.A) * Bary.X + Part.Mesh->GetWeightLayerValue(Channel, Corners.B) * Bary.Y
+						+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
+				}
+				Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
+				return true;
 			}
-			Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
-			break;
-		}
+			return false;
+		};
+		const auto Around = [Terrain, X, Y, &Bounds](double Half)
+		{
+			return BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
+		};
+		if (!HitIn(Evaluated ? *Evaluated : Around(250.0)))
+			HitIn(Around(2500.0));
 		return Out;
 	}
 
@@ -553,6 +560,7 @@ namespace UnrealAIMeshTerrain
 				Actors.AddUnique(Owner);
 		}
 		Actors.Add(Terrain);
+		const FScopedTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "DestroyTerrain", "Delete Mesh Terrain"));
 		for (AActor* Actor : Actors)
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
 	}

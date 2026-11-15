@@ -290,7 +290,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal プラグイン（C++）: `UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`、.NET 9 のサイドカー |
 | [`cli/`](../cli/) | `unreal-mcp-cli`、npm パッケージ |
-| [`extensions/`](../extensions/) | 個別にリリースされる 6 つのオプションのエンジン拡張機能 |
+| [`extensions/`](../extensions/) | 個別にリリースされる 7 つのオプションのエンジン拡張機能 |
 | [`samples/`](../samples/) | エディター拡張機能のテンプレートと、ランタイム（ゲーム内）ツールのサンプル |
 
 ## リンク

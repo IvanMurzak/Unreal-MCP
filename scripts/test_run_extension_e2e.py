@@ -152,8 +152,6 @@ COMPILE = '1 result\n$ref|method|result\nBlueprint#{0}|Compile()|{{Succeeded:{1}
 OPERATIONS = ('EnhancedInputOperations : Object {} +methods: ' + ' | '.join(
     f'{name}(...) - x' for name in ('AddMapping', 'AddMappingContextOnPossess', 'BindAction', 'BindActionToggle', 'EnableUserSettings',
                                     'RemoveMappingContextOnEvent', 'SetActionTriggers', 'SetMappingTriggers', 'SetPlayerMappable')))
-# The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
-# one that must not pass.
 # Mesh Terrain (UE 5.8+): per check, the answer the live UE 5.8 editor gives and one that must not pass.
 MESH_TERRAIN = 'MeshTerrainOperations#1108806258508'
 AUTHORING.update({
@@ -168,6 +166,8 @@ AUTHORING.update({
         {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call Surface: argument 'Point': Vector expects 3 numbers"}],
          'isError': True}),
 })
+# The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
+# one that must not pass.
 SCHEME = {
     'enhanced-input-operations-schema.e2e.json': (text_result(OPERATIONS), text_result(OPERATIONS.replace('BindActionToggle', 'Other'))),
     'enhanced-input-scheme-01-actions.e2e.json': (

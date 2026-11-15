@@ -69,14 +69,17 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 	for (const FVector& Point : Points)
 		Region += FVector(Point.X, Point.Y, 0.0);
 	TArray<UnrealAIMeshTerrain::FRegionMesh> Evaluated;
-	if (Built.IsValid && Region.IsValid)
+	// Points spread wider than 500 m (a long road, scattered spawn points) evaluate a small region each instead.
+	constexpr double MaxSharedRegion = 50000.0;
+	const bool bShared = Built.IsValid && Region.IsValid && Region.GetSize().X <= MaxSharedRegion && Region.GetSize().Y <= MaxSharedRegion;
+	if (bShared)
 	{
 		Region = Region.ExpandBy(FVector(250.0, 250.0, 0.0));
 		Evaluated = UnrealAIMeshTerrain::BuildRegion(Terrain, FBox(FVector(Region.Min.X, Region.Min.Y, Built.Min.Z - 1000.0), FVector(Region.Max.X, Region.Max.Y, Built.Max.Z + 1000.0)));
 	}
 	for (const FVector& Point : Points)
 	{
-		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, &Evaluated);
+		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, bShared ? &Evaluated : nullptr);
 		FUnrealAIMeshTerrainSurface& Surface = Out.AddDefaulted_GetRef();
 		if (!Sample.bInside)
 			continue;

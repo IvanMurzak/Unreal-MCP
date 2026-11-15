@@ -290,7 +290,8 @@ class MonorepoTests(unittest.TestCase):
             for project in built:
                 self.assertFalse((project.parent / 'Plugins/UnrealAIMeshTerrain').exists())
                 self.assertNotIn('UnrealAIMeshTerrain', project.read_text())
-            self.assertEqual(built[0].parent.name, 'all', 'every extension this engine builds is the "all" profile')
+            self.assertTrue(built[0].parent.name.startswith('all-'), 'every extension this engine builds is an "all" profile')
+            self.assertNotEqual(built[0].parent.name, built[1].parent.name, 'profiles of different plugin sets never share a folder')
 
 if __name__ == '__main__':
     unittest.main()

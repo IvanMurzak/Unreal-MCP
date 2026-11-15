@@ -19,7 +19,7 @@
  * What an agent learns about the Unreal-MCP extensions this editor does not have: the bundled first-party list (offline
  * too), merged with the online catalog; unreal-tool-list, rql-schema and the unreal-rql skill list them with how to
  * install each; a failed or empty RQL query on the domain of one names it. The live checks hold in both runs: the core
- * host (no extension installed) and the extension suite (all six installed), branching on the extension's state.
+ * host (no extension installed) and the extension suite (all installed), branching on the extension's state.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpAvailableExtensionsSpec, "UnrealMcp.AvailableExtensions",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

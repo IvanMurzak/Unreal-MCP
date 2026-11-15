@@ -189,6 +189,6 @@ namespace UnrealAIMeshTerrain
 	 */
 	AMeshPartition* SpawnFlatTerrain(const FString& Label, const FVector& Center, double SizeX, double SizeY, int32 QuadsX, int32 QuadsY);
 
-	/** Delete @p Terrain and every modifier actor that targets it (one undo step). */
+	/** Delete @p Terrain and the loaded base / modifier actors its editor component lists (one undo step). */
 	void DestroyTerrain(AMeshPartition* Terrain);
 }

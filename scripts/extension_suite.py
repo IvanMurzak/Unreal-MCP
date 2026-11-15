@@ -318,7 +318,8 @@ def main() -> int:
                 project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
                 build(engine, project)
         if args.mode != "isolated":
-            profile = "all" if args.extensions is None else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
+            # The plugin set is in the name: a runner's cache shared by branches with other extension sets never collides.
+            profile = ("all-" if args.extensions is None else "selected-") + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
             project = prepare(engine, profile, selected, output, core_tests=True)
             if args.mode != "prepare":
                 build(engine, project)
