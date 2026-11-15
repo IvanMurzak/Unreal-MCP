@@ -162,6 +162,7 @@ Extensions को Unreal Engine 5.7+, उसी project में Unreal MCP 0.2
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | Input Actions और Mapping Contexts को query करें, actions और contexts बनाएँ, keys map करें |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | C++ के बिना Gameplay Ability System authoring: effects (cost, cooldown, damage, regeneration), ability Blueprints, तैयार Health / Mana / Stamina attribute set के साथ ability system components, input bindings, Play In Editor checks |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape और Water: landscapes बनाएँ, sculpt और paint करें; oceans, lakes और rivers बनाएँ; landscapes, water bodies और water zones को query करें |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | Experimental, UE 5.8+: Mesh Terrain (Mesh Partition): terrains, उनके sections और modifiers query करें; सतह की ऊँचाई, slope और paint channels; rebuild करें और build पूरा होने तक प्रतीक्षा करें |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara VFX: systems और उनके emitters को query करें, systems को level में रखें |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: PCG graphs बनाएँ (nodes, connections, settings, parameters), उन्हें volumes पर रखें, scatters generate करें (forests, rocks, props) और counts पढ़ें |
 

@@ -4,6 +4,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/AutomationTest.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -57,12 +58,16 @@ END_DEFINE_SPEC(FUnrealMcpAvailableExtensionsSpec)
 
 void FUnrealMcpAvailableExtensionsSpec::Define()
 {
-	It("bundles the six first-party extensions with what they add and how to install them", [this]()
+	It("bundles the first-party extensions with what they add and how to install them", [this]()
 	{
 		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
 		for (const TCHAR* Id : { TEXT("com.ivanmurzak.unreal-ai-niagara"), TEXT("com.ivanmurzak.unreal-ai-enhanced-input"),
 			TEXT("com.ivanmurzak.unreal-ai-pcg"), TEXT("com.ivanmurzak.unreal-ai-gas"), TEXT("com.ivanmurzak.unreal-ai-landscape"),
-			TEXT("com.ivanmurzak.unreal-ai-control-rig") })
+			TEXT("com.ivanmurzak.unreal-ai-control-rig"),
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"),
+#endif
+			})
 		{
 			const FUnrealMcpKnownExtension* Extension = Known.FindByPredicate([Id](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == Id; });
 			if (!TestNotNull(*FString::Printf(TEXT("%s is bundled"), Id), Extension))
@@ -117,7 +122,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 
 	It("adds the online catalog's other extensions and keeps the bundled ones", [this]()
 	{
-		const int32 Bundled = 6;
+		const int32 Bundled = UE_VERSION_OLDER_THAN(5, 8, 0) ? 6 : 7; // Mesh Terrain is bundled from UE 5.8
 		TArray<FUnrealMcpKnownExtension> Fetched = UnrealMcpAvailableExtensions::Known(); // restored at the end: an interactive editor may have fetched it
 		Fetched.RemoveAt(0, Bundled);
 		TArray<FUnrealMcpCatalogEntry> Catalog;
@@ -133,7 +138,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		FUnrealMcpExtensionCatalog::PublishToAgents(Catalog);
 
 		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
-		TestEqual(TEXT("the bundled six plus the other one"), Known.Num(), Bundled + 1);
+		TestEqual(TEXT("the bundled ones plus the other one"), Known.Num(), Bundled + 1);
 		const FUnrealMcpKnownExtension* KnownNiagara = Known.FindByPredicate([](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == NiagaraId; });
 		TestTrue(TEXT("the bundled entry stays"), KnownNiagara && KnownNiagara->Name == TEXT("Niagara Tools"));
 		const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
@@ -143,7 +148,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 			&& UnrealMcpAvailableExtensions::Line(*Weather).Contains(TEXT("(Weather Tools): weather systems - not installed")));
 
 		FUnrealMcpExtensionCatalog::PublishToAgents({});
-		TestEqual(TEXT("an empty catalog leaves the bundled six"), UnrealMcpAvailableExtensions::Known().Num(), Bundled);
+		TestEqual(TEXT("an empty catalog leaves the bundled ones"), UnrealMcpAvailableExtensions::Known().Num(), Bundled);
 		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
 	});
 

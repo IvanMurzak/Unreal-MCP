@@ -1,0 +1,10 @@
+{
+  "description": "the count of mesh terrain modifiers",
+  "tool": "rql-query",
+  "input": {
+    "query": "meshTerrainModifiers | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

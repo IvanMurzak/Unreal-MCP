@@ -168,6 +168,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | الاستعلام عن Input Actions وMapping Contexts، وإنشاء actions وcontexts، وربط المفاتيح |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | بناء Gameplay Ability System دون C++: التأثيرات (التكلفة، وفترة التهدئة، والضرر، والتجدد)، وBlueprints للقدرات، ومكوّنات ability system مع attribute set جاهز لـ Health / Mana / Stamina، وربط الإدخال، وفحوص Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape وWater: إنشاء التضاريس ونحتها وطلاؤها؛ وإنشاء المحيطات والبحيرات والأنهار؛ والاستعلام عن التضاريس وwater bodies وwater zones |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | تجريبي، UE 5.8+‎: Mesh Terrain (Mesh Partition): الاستعلام عن التضاريس وأقسامها ومعدِّلاتها؛ ارتفاع السطح وميله وقنوات الطلاء؛ إعادة البناء وانتظار اكتماله |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | مؤثرات Niagara البصرية: الاستعلام عن الأنظمة وبواعثها (emitters)، ووضع الأنظمة في المستوى |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: إنشاء مخططات PCG (العقد، والتوصيلات، والإعدادات، والمعاملات)، ووضعها على volumes، وتوليد التوزيعات (غابات، وصخور، وعناصر) وقراءة أعدادها |
 

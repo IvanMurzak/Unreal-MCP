@@ -162,6 +162,7 @@ Las extensiones requieren Unreal Engine 5.7+, Unreal MCP 0.26.0+ en el mismo pro
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | Consulta Input Actions y Mapping Contexts, crea acciones y contextos, asigna teclas |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | Creación con Gameplay Ability System sin C++: efectos (coste, cooldown, daño, regeneración), Blueprints de habilidades, componentes de sistema de habilidades con un attribute set listo de Health / Mana / Stamina, bindings de input, comprobaciones en Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape y Water: crea, esculpe y pinta landscapes; crea océanos, lagos y ríos; consulta landscapes, water bodies y water zones |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | Experimental, UE 5.8+: Mesh Terrain (Mesh Partition): consulta terrenos, sus secciones y modificadores; altura, pendiente y canales de pintura de la superficie; reconstruye y espera la compilación |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | VFX de Niagara: consulta sistemas y sus emisores, coloca sistemas en el nivel |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: crea grafos PCG (nodos, conexiones, ajustes, parámetros), colócalos en volúmenes, genera dispersiones (bosques, rocas, props) y lee los recuentos |
 

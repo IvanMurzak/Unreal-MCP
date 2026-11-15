@@ -186,9 +186,7 @@ def suite(args) -> None:
     result_file = ROOT / ".artifacts/suite-result.json"
     command = [sys.executable, ROOT / "scripts/extension_suite.py", "--engine", env("UE_ROOT"), "--mode", args.mode,
                "--ue-lock-held", "--result-file", result_file]
-    # Extensions support UE 5.7+; older engines keep the core-only gates.
-    if args.ue and tuple(map(int, args.ue.split("."))) < (5, 7):
-        command.append("--extensions")
+    # Each extension's extension.json minEngineVersion decides which engines build it (UE 5.5/5.6: core only).
     code = run(command, cwd=ROOT)
     if result_file.is_file():
         report = json.loads(result_file.read_text(encoding="utf-8")).get("report")

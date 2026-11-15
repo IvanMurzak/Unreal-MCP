@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = "IvanMurzak/Unreal-MCP"
 INDEX_TAG = "extensions-index"
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+ENGINE_VERSION = re.compile(r"([1-9]\d*)\.(0|[1-9]\d*)\Z")
 SLUGS = {"UnrealAINiagara": "niagara", "UnrealAIEnhancedInput": "enhanced-input",
          "UnrealAIPCG": "pcg", "UnrealAIGAS": "gas", "UnrealAILandscape": "landscape",
          "UnrealAIControlRig": "control-rig"}
@@ -33,6 +34,23 @@ def components() -> dict[str, Path]:
 
 def slug(plugin: str) -> str:
     return SLUGS.get(plugin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", plugin.removeprefix("UnrealAI")).lower())
+
+
+def min_engine(plugin: str) -> tuple[int, int] | None:
+    """extension.json `minEngineVersion` ("5.8"): the oldest Unreal Engine the extension builds on; None when any."""
+    value = read(components()[plugin] / "extension.json").get("minEngineVersion")
+    if value is None:
+        return None
+    match = ENGINE_VERSION.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        raise ValueError(f"{plugin}: minEngineVersion must be '<major>.<minor>', got {value!r}")
+    return int(match[1]), int(match[2])
+
+
+def supports_engine(plugin: str, engine: tuple[int, int]) -> bool:
+    """Whether @plugin builds on Unreal Engine @engine (major, minor): every suite, release and build loop asks this."""
+    minimum = min_engine(plugin)
+    return minimum is None or tuple(engine[:2]) >= minimum
 
 
 def read(path: Path) -> dict:
@@ -52,6 +70,7 @@ def validate(plugin: str) -> dict:
     version = descriptor["VersionName"]
     if not VERSION.fullmatch(version) or metadata["version"] != version or metadata["pluginName"] != plugin:
         raise ValueError(f"Version/identity drift in {plugin}")
+    min_engine(plugin)  # a malformed minEngineVersion fails validation, not a later engine run
     sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (folder / "Source").rglob("*.cpp"))
     if f'PluginVersion(TEXT("{plugin}"))' not in sources:
         raise ValueError(f'{plugin} must report its .uplugin version: UnrealMcpRql::PluginVersion(TEXT("{plugin}"))')

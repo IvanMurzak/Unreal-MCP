@@ -239,6 +239,58 @@ class MonorepoTests(unittest.TestCase):
             metadata = release.validate(plugin)
             self.assertIn(f'{{ TEXT("{metadata["extensionId"]}"), TEXT("{metadata["name"]}"), TEXT("{plugin}"),', source)
 
+    def test_min_engine_version_is_validated_and_compared_by_major_minor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / 'extensions/UnrealAINew'
+            folder.mkdir(parents=True)
+            (folder / 'UnrealAINew.uplugin').write_text('{}')
+            with patch.object(release, 'ROOT', root):
+                release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew'})
+                self.assertIsNone(release.min_engine('UnrealAINew'))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 5)))
+                release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew', 'minEngineVersion': '5.8'})
+                self.assertEqual(release.min_engine('UnrealAINew'), (5, 8))
+                self.assertFalse(release.supports_engine('UnrealAINew', (5, 7)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 8)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 10)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (6, 0)))
+                for bad in ('5.8.0', '5', 'five', 58, '05.8'):
+                    release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew', 'minEngineVersion': bad})
+                    with self.assertRaisesRegex(ValueError, 'minEngineVersion'):
+                        release.min_engine('UnrealAINew')
+
+    def test_every_extension_declares_the_engines_it_builds_on(self):
+        # The data that replaced the CI's hard-coded "extensions need UE 5.7+": no extension on UE 5.5 / 5.6, Mesh Terrain
+        # (MeshPartition) only from UE 5.8.
+        for plugin in release.components():
+            self.assertIsNotNone(release.min_engine(plugin), plugin)
+            self.assertFalse(release.supports_engine(plugin, (5, 6)), plugin)
+        self.assertEqual(release.min_engine('UnrealAIMeshTerrain'), (5, 8))
+        self.assertEqual(suite.for_engine((5, 6), None), [])
+        self.assertNotIn('UnrealAIMeshTerrain', suite.for_engine((5, 7), None))
+        self.assertEqual(sorted(suite.for_engine((5, 7), None)), sorted(set(release.components()) - {'UnrealAIMeshTerrain'}))
+        self.assertIn('UnrealAIMeshTerrain', suite.for_engine((5, 8), None))
+        self.assertEqual(suite.for_engine((5, 7), ['UnrealAIMeshTerrain', 'UnrealAIPCG']), ['UnrealAIPCG'])
+
+    def test_suite_on_an_older_engine_neither_prepares_nor_builds_a_newer_extension(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 7})
+            built, ran = [], []
+            argv = ['extension_suite.py', '--engine', str(engine), '--output', str(root / 'out'), '--mode', 'automation']
+            with patch.object(suite, 'machine_lock'), patch.object(suite, 'build', lambda engine, project: built.append(project)),                     patch.object(suite, 'automation', lambda engine, project, selected, *a, **k: ran.append(selected) or {}),                     patch.object(suite.sys, 'argv', argv):
+                self.assertEqual(suite.main(), 0)
+                argv[-1:] = ['automation', '--extensions', 'UnrealAIMeshTerrain']
+                self.assertEqual(suite.main(), 0)
+            self.assertEqual(len(built), 2)
+            self.assertNotIn('UnrealAIMeshTerrain', ran[0])
+            self.assertEqual(ran[1], [])
+            for project in built:
+                self.assertFalse((project.parent / 'Plugins/UnrealAIMeshTerrain').exists())
+                self.assertNotIn('UnrealAIMeshTerrain', project.read_text())
+            self.assertEqual(built[0].parent.name, 'all', 'every extension this engine builds is the "all" profile')
 
 if __name__ == '__main__':
     unittest.main()

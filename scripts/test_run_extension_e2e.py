@@ -154,6 +154,20 @@ OPERATIONS = ('EnhancedInputOperations : Object {} +methods: ' + ' | '.join(
                                     'RemoveMappingContextOnEvent', 'SetActionTriggers', 'SetMappingTriggers', 'SetPlayerMappable')))
 # The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
 # one that must not pass.
+# Mesh Terrain (UE 5.8+): per check, the answer the live UE 5.8 editor gives and one that must not pass.
+MESH_TERRAIN = 'MeshTerrainOperations#1108806258508'
+AUTHORING.update({
+    'mesh-terrain-enable.e2e.json': (
+        pcg_receipt(f'{MESH_TERRAIN}|EnableMeshTerrain()|MeshPartition is enabled in the project file; MeshTerrainMode is now enabled in '
+                    'the project file; loaded now, no restart needed'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: EnableMeshTerrain threw: this engine has no MeshPartition plugin'}],
+         'isError': True}),
+    'mesh-terrain-surface-missing.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Surface on {MESH_TERRAIN}: argument 'Terrain': "
+                                              'value is error(not-found)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call Surface: argument 'Point': Vector expects 3 numbers"}],
+         'isError': True}),
+})
 SCHEME = {
     'enhanced-input-operations-schema.e2e.json': (text_result(OPERATIONS), text_result(OPERATIONS.replace('BindActionToggle', 'Other'))),
     'enhanced-input-scheme-01-actions.e2e.json': (
@@ -442,7 +456,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 143)
+        self.assertEqual(len(all_checks()), 149)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

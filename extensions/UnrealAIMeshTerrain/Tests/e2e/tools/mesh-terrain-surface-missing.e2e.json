@@ -1,0 +1,11 @@
+{
+  "description": "Surface on a terrain that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrain | call Surface(unreal.find(\"NoSuchMeshTerrainE2E\"), [0, 0, 0])"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Terrain'.*not-found"
+  }
+}

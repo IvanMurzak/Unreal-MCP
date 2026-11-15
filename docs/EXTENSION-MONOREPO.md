@@ -1,6 +1,6 @@
 # Optional extensions: one repository, independent releases, one editor per suite
 
-The six first-party extensions live under `extensions/UnrealAI<Feature>/` as independent UE
+The first-party extensions live under `extensions/UnrealAI<Feature>/` as independent UE
 plugins/modules. Stable extension IDs, plugin names, provider contracts, existing Automation specs,
 E2E checks and licenses are preserved. `extensions/migration-sources.json` records imported commits.
 Third-party plugins and the external Unreal-AI-Template repository remain supported.
@@ -17,7 +17,10 @@ py -3 -m unittest discover -s scripts -p 'test_*.py'
 py -3 scripts/extension_suite.py --engine 'C:/Program Files/Epic Games/UE_5.8' --mode full
 ```
 
-`full` compiles core alone and core + each extension with no sibling plugin present. Extension
+`full` compiles core alone and core + each extension with no sibling plugin present. An extension whose
+`extension.json` sets `minEngineVersion` (`"5.8"` for UnrealAIMeshTerrain: its engine plugin MeshPartition does not
+exist before) is left out of every build, Automation and E2E run on an older engine, with a printed note, whether
+`--extensions` names it or not; the CI (`ue_ci.py suite`) relies on the same field for UE 5.5 / 5.6 (core only). Extension
 modules use non-unity compilation with no PCH in these isolated copies. It then builds a combined
 host and starts **one** UnrealEditor-Cmd process for all core/extension Automation tests. All
 preserved extension E2E checks run against that same process, local sidecar and local server.

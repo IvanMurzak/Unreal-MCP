@@ -1,0 +1,10 @@
+{
+  "description": "EnableMeshTerrain keeps both plugins in the project file",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrain | call EnableMeshTerrain()"
+  },
+  "assert": {
+    "pattern": "MeshPartition is (now )?enabled in the project file.*MeshTerrainMode is (now )?enabled in the project file"
+  }
+}

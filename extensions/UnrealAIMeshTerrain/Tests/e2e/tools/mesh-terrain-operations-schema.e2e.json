@@ -1,0 +1,10 @@
+{
+  "description": "the SurfacePoints operation",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshTerrainOperations"
+  },
+  "assert": {
+    "pattern": "SurfacePoints"
+  }
+}

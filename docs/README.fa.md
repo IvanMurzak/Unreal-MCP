@@ -317,6 +317,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | اکشن‌های ورودی، کانتکست‌های نگاشت، تریگرها و مادیفایرها | `EnhancedInput`, UE 5.7+‎ |
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effectها، Blueprintهای توانایی و مجموعه‌های اتریبیوت | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+‎ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | لنداسکیپ‌ها، اقیانوس‌ها، دریاچه‌ها و رودخانه‌ها | `Water`, UE 5.7+‎ |
+| [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain (آزمایشی): زمین‌ها، modifierها، ارتفاع سطح، بازسازی | `MeshTerrainMode`, `MeshPartition`, UE 5.8+‎ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | سیستم‌ها، امیترها، ماژول‌ها و برخورد Niagara | `Niagara`, `ChaosNiagara`, UE 5.7+‎ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | گراف‌های PCG، حجم‌ها و پراکنش‌های تولیدشده | `PCG`, UE 5.7+‎ |
 

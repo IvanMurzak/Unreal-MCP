@@ -484,7 +484,7 @@ than one contract (tools + prompts + resources) and be registered under each.
 - [`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) — the **editor** extension sample: a complete,
   buildable `Type=Editor` plugin with an RQL module (the `hello` operations source, a computed member, a guide).
 - [`extensions/`](../extensions) — the first-party RQL modules (Niagara, Enhanced Input, GAS, Landscape / Water, PCG,
-  Control Rig).
+  Control Rig, Mesh Terrain).
 - [`samples/UnrealAIRuntimeSample/`](../samples/UnrealAIRuntimeSample) — the **runtime (in-game)** extension
   sample: a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live `UWorld`'s
   `AWorldSettings::TimeDilation`, callable in a running game over a runtime MCP connection (§12.9).

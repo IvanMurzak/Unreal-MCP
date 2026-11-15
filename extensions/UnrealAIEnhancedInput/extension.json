@@ -6,6 +6,7 @@
   "repo": "IvanMurzak/Unreal-MCP",
   "version": "0.2.0",
   "minCoreVersion": "0.26.0",
+  "minEngineVersion": "5.7",
   "enginePlugins": [
     "EnhancedInput"
   ],

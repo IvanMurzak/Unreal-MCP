@@ -162,6 +162,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | 查询 Input Action 和 Mapping Context，创建动作和上下文，映射按键 |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | 无需 C++ 即可编写 Gameplay Ability System：效果（消耗、冷却、伤害、恢复）、技能 Blueprint、带现成 Health / Mana / Stamina 属性集的技能系统组件、输入绑定、Play In Editor 检查 |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape 与 Water：创建、雕刻和绘制地形；创建海洋、湖泊和河流；查询地形、水体和水域区域 |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | 实验性，UE 5.8+：Mesh Terrain（Mesh Partition）：查询地形及其分区和修改器；地表高度、坡度和绘制通道；重建并等待构建完成 |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara 视觉特效：查询系统及其发射器，把系统放置到关卡中 |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | 程序化内容生成：编写 PCG 图表（节点、连接、设置、参数），把它们放到体积上，生成散布（森林、岩石、道具）并读取数量 |
 

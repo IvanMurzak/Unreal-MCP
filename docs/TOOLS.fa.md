@@ -168,6 +168,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | کوئری روی Input Action ها و Mapping Context ها، ساخت action و context، نگاشت کلیدها |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | ساخت Gameplay Ability System بدون C++: افکت‌ها (هزینه، cooldown، آسیب، بازیابی)، Blueprint های ability، کامپوننت‌های ability system با یک attribute set آماده Health / Mana / Stamina، اتصال ورودی‌ها، بررسی‌های Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape و Water: ساخت، حجاری و رنگ‌آمیزی landscape؛ ساخت اقیانوس، دریاچه و رودخانه؛ کوئری روی landscape ها، water body ها و water zone ها |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | آزمایشی، UE 5.8+‎: Mesh Terrain (Mesh Partition): پرس‌وجوی زمین‌ها، بخش‌ها و modifierهای آن‌ها؛ ارتفاع، شیب و کانال‌های رنگ سطح؛ بازسازی و انتظار برای پایان ساخت |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | جلوه‌های بصری Niagara: کوئری روی سیستم‌ها و emitter های آن‌ها، قرار دادن سیستم‌ها در لول |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: ساخت گراف‌های PCG (نودها، اتصال‌ها، تنظیمات، پارامترها)، قرار دادن آن‌ها روی volume ها، تولید پراکنش‌ها (جنگل، صخره، اشیای صحنه) و خواندن تعدادها |
 

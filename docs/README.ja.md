@@ -263,6 +263,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | 入力アクション、マッピングコンテキスト、トリガー、モディファイア | `EnhancedInput`, UE 5.7+ |
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effect、アビリティ Blueprint、アトリビュートセット | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | ランドスケープ、海、湖、川 | `Water`, UE 5.7+ |
+| [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain（実験的）: テレイン、モディファイア、地表の高さ、再ビルド | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara システム、エミッター、モジュール、コリジョン | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG グラフ、ボリューム、生成された配置 | `PCG`, UE 5.7+ |
 
