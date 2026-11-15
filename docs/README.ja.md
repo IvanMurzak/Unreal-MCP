@@ -43,7 +43,7 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 ✅ **ビジュアルフィードバック** — ビューポート、ゲームビュー、カメラ、単独アクターのスクリーンショット\
 ✅ **Python** — `unreal` API をすべて使えるエディター Python を実行\
 ✅ **Fab** — Fab の検索、ライブラリの一覧、所有コンテンツの追加\
-✅ **拡張機能** — GAS、Niagara、PCG、Landscape、Control Rig、Enhanced Input\
+✅ **拡張機能** — GAS、Niagara、PCG、Landscape、Control Rig、Enhanced Input、Mesh Terrain（実験的）\
 ✅ **独自ツール** — 任意のプラグインからツール、プロンプト、リソースを追加（[ガイド](EXTENSIONS.md)）\
 ✅ **ランタイムモード** — オプトインで実行中のゲームを操作（[docs/RUNTIME.md](RUNTIME.ja.md)）\
 ✅ **クラウドまたはローカル** — すぐ使える `ai-game.dev`、またはセルフホストの `gamedev-mcp-server`

@@ -43,7 +43,7 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 ✅ **Visual feedback** — viewport, game-view, camera और isolated-actor screenshots\
 ✅ **Python** — पूरे `unreal` API के साथ editor Python चलाएँ\
 ✅ **Fab** — Fab में खोजें, अपनी library देखें, अपना खरीदा content जोड़ें\
-✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input\
+✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input, Mesh Terrain (experimental)\
 ✅ **आपके अपने tools** — किसी भी plugin से tools, prompts और resources जोड़ें ([guide](EXTENSIONS.md))\
 ✅ **Runtime mode** — चाहें तो चलते हुए game को control करें ([docs/RUNTIME.md](RUNTIME.hi.md))\
 ✅ **Cloud या local** — तैयार `ai-game.dev`, या self-hosted `gamedev-mcp-server`

@@ -43,7 +43,7 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 ✅ **Feedback visual** — capturas del viewport, de la vista de juego, de cámara y de actores aislados\
 ✅ **Python** — ejecuta Python del editor con toda la API `unreal`\
 ✅ **Fab** — busca en Fab, lista tu biblioteca, añade contenido que posees\
-✅ **Extensiones** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input\
+✅ **Extensiones** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input, Mesh Terrain (experimental)\
 ✅ **Tus propias herramientas** — añade herramientas, prompts y recursos desde cualquier plugin ([guía](EXTENSIONS.md))\
 ✅ **Modo runtime** — actívalo para controlar un juego en ejecución ([docs/RUNTIME.md](RUNTIME.es.md))\
 ✅ **Nube o local** — `ai-game.dev` listo para usar, o un `gamedev-mcp-server` autoalojado

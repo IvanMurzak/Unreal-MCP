@@ -49,7 +49,7 @@
 ‏✅ ‏**بازخورد بصری** — اسکرین‌شات از ویوپورت، نمای بازی، دوربین و اکتور ایزوله\
 ‏✅ ‏**Python** — اجرای Python ویرایشگر با کل API `unreal`\
 ‏✅ ‏**Fab** — جستجو در Fab، فهرست کتابخانه شما، افزودن محتوایی که مالک آن هستید\
-‏✅ ‏**افزونه‌ها** — GAS، Niagara، PCG، Landscape، Control Rig، Enhanced Input\
+‏✅ ‏**افزونه‌ها** — GAS، Niagara، PCG، Landscape، Control Rig، Enhanced Input، Mesh Terrain (آزمایشی)\
 ‏✅ ‏**ابزارهای خودتان** — افزودن ابزار، پرامپت و منبع از هر پلاگینی ([راهنما](EXTENSIONS.md))\
 ‏✅ ‏**حالت Runtime** — در صورت تمایل، یک بازی در حال اجرا را کنترل کنید ([docs/RUNTIME.md](RUNTIME.fa.md))\
 ‏✅ ‏**ابری یا محلی** — `ai-game.dev` بدون هیچ تنظیمی، یا یک `gamedev-mcp-server` روی میزبان خودتان
