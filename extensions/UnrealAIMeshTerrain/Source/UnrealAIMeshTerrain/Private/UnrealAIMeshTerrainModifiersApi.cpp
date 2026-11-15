@@ -44,7 +44,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 
 	/** Sizes, radii and widths beyond 100 km are typos, not terrain features. */
 	constexpr double MaxLength = 10000000.0;
-	/** The component tag a shape's mesh component carries ("MeshTerrainShape:Box"), so Edit can rebuild it at a new size. */
+	/** The component tag a shape's mesh component carries ("MeshTerrainShape:Box"), so Edit can resize it. */
 	const TCHAR* ShapeTagPrefix = TEXT("MeshTerrainShape:");
 
 	FModifierOpResult Fail(const FString& Message)
@@ -150,16 +150,6 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (!End)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("could not write %s = %s on %s"), *Name.ToString(), *Value, *Object->GetClass()->GetName()));
 		return true;
-	}
-
-	/** The double property @p Name of @p Object (0 when missing). */
-	double GetNumber(const UObject* Object, const FName Name)
-	{
-		const FNumericProperty* Property = Object ? CastField<FNumericProperty>(Object->GetClass()->FindPropertyByName(Name)) : nullptr;
-		if (!Property)
-			return 0.0;
-		const void* Value = Property->ContainerPtrToValuePtr<void>(Object);
-		return Property->IsFloatingPoint() ? Property->GetFloatingPointPropertyValue(Value) : static_cast<double>(Property->GetSignedIntPropertyValue(Value));
 	}
 
 	/** Write a double / float / int property from a number. */
@@ -310,6 +300,14 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		Owner->PostEditMove(/*bFinished*/ true);
 	}
 
+	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
+	bool CheckAdd(const AMeshPartition* Terrain, const FVector& Location)
+	{
+		if (!CheckAvailable() || !CheckTerrain(Terrain))
+			return false;
+		return IsPoint(Location) || UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
+	}
+
 	// ---- Shapes ------------------------------------------------------------------------------------------------------
 
 	const TArray<FString>& ShapeNames()
@@ -324,24 +322,19 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	}
 
 	/**
-	 * Replace @p Mesh with @p Shape (one of ShapeNames) of @p Size (full extents, cm) centred on the origin, the way Mesh
+	 * Fill @p Mesh with @p Shape (one of ShapeNames) of @p Size (full extents, cm) centred on the origin, the way Mesh
 	 * Terrain Mode's Shapes tools generate them (GeometryScript primitives): closed solids, except the flat Rectangle and Disc
 	 * (facing up, at Z 0).
 	 */
 	bool BuildShape(UDynamicMesh* Mesh, const FString& Shape, const FVector& Size)
 	{
-		Mesh->Reset();
 		const FGeometryScriptPrimitiveOptions Options;
 		using UPrimitives = UGeometryScriptLibrary_MeshPrimitiveFunctions;
 		const EGeometryScriptPrimitiveOriginMode Center = EGeometryScriptPrimitiveOriginMode::Center;
 		// Round shapes are made 100 cm across and scaled to Size (an ellipse when X != Y).
 		const FTransform Unit(FQuat::Identity, FVector::ZeroVector, Size / 100.0);
 		if (Shape == TEXT("Box"))
-		{
-			// Faces split into ~2.5 m quads (at most 16 per side): long two-triangle faces make the terrain boolean report cracks.
-			const auto Steps = [](double Length) { return FMath::Clamp(FMath::RoundToInt32(Length / 250.0), 1, 16); };
-			UPrimitives::AppendBox(Mesh, Options, FTransform::Identity, Size.X, Size.Y, Size.Z, Steps(Size.X), Steps(Size.Y), Steps(Size.Z), Center);
-		}
+			UPrimitives::AppendBox(Mesh, Options, FTransform::Identity, Size.X, Size.Y, Size.Z, 0, 0, 0, Center);
 		else if (Shape == TEXT("Sphere"))
 			UPrimitives::AppendSphereLatLong(Mesh, Options, Unit, 50.0f, 16, 24, Center);
 		else if (Shape == TEXT("Cylinder"))
@@ -398,7 +391,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return nullptr;
 	}
 
-	/** The shape's size (full extents, cm), kept in the component's bounds-free tag "MeshTerrainShapeSize:X,Y,Z". */
+	/** The size (full extents, cm) the shape's mesh was made with, kept in the component tag "MeshTerrainShapeSize:X=.. Y=.. Z=..". */
 	FVector ShapeSize(const UDynamicMeshComponent* Component)
 	{
 		for (const FName& Tag : Component->ComponentTags)
@@ -413,7 +406,6 @@ namespace UnrealAIMeshTerrainModifiersLocal
 
 	void TagShape(UDynamicMeshComponent* Component, const FString& Shape, const FVector& Size)
 	{
-		Component->ComponentTags.RemoveAll([](const FName& Tag) { return Tag.ToString().StartsWith(TEXT("MeshTerrainShape")); });
 		Component->ComponentTags.Add(FName(ShapeTagPrefix + Shape));
 		Component->ComponentTags.Add(FName(TEXT("MeshTerrainShapeSize:") + Size.ToString()));
 	}
@@ -552,10 +544,8 @@ TArray<FVector> UnrealAIMeshTerrain::LatticeWorldPoints(const UE::MeshPartition:
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddNoise(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector2D Size, double Strength, double Frequency, double Falloff, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Size.X) || !IsLength(Size.Y))
 		return Fail(FString::Printf(TEXT("Size [%g, %g] must be above 0 and at most 10000000 cm on X and Y"), Size.X, Size.Y));
 	if (!FMath::IsFinite(Strength) || FMath::Abs(Strength) > 1000000.0)
@@ -578,10 +568,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddNoise(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, double Radius, double Falloff, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Radius) || !IsLength(Falloff, /*bAllowZero*/ true))
 		return Fail(FString::Printf(TEXT("Radius %g must be above 0 and Falloff %g at least 0, both at most 10000000 cm"), Radius, Falloff));
 	if (!CheckFootprint(Terrain, Around(Location, Radius + Falloff, Radius + Falloff)))
@@ -596,10 +584,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Location, double Radius, double Falloff, double Value, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ false))
+	if (!CheckAdd(Terrain, Location) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ false))
 		return FModifierOpResult();
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Radius) || !IsLength(Falloff, /*bAllowZero*/ true))
 		return Fail(FString::Printf(TEXT("Radius %g must be above 0 and Falloff %g at least 0, both at most 10000000 cm"), Radius, Falloff));
 	if (!FMath::IsFinite(Value) || Value < 0.0 || Value > 1.0)
@@ -687,10 +673,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddLattice(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, int32 Resolution, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Size.X) || !IsLength(Size.Y) || !IsLength(Size.Z))
 		return Fail(FString::Printf(TEXT("Size %s must be above 0 and at most 10000000 cm on each axis"), *Text(Size)));
 	if (Resolution < 2 || Resolution > 9)
@@ -729,12 +713,10 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetLatticeP
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTexturePatch(UE::MeshPartition::AMeshPartition* Terrain, UTexture2D* Texture, FVector Location, FVector2D Size, double Height, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!Texture)
 		return Fail(TEXT("Texture is null: pass a heightmap texture asset path (\"/Game/Heightmaps/T_Hill\")"));
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Size.X) || !IsLength(Size.Y))
 		return Fail(FString::Printf(TEXT("Size [%g, %g] must be above 0 and at most 10000000 cm on X and Y"), Size.X, Size.Y));
 	if (!FMath::IsFinite(Height) || FMath::Abs(Height) > 1000000.0)
@@ -768,10 +750,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, double EdgeLength, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!IsLength(Size.X) || !IsLength(Size.Y) || !IsLength(Size.Z))
 		return Fail(FString::Printf(TEXT("Size %s must be above 0 and at most 10000000 cm on each axis"), *Text(Size)));
 	if (!FMath::IsFinite(EdgeLength) || EdgeLength < 10.0 || EdgeLength > 100000.0)
@@ -793,14 +773,12 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(U
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Add(UE::MeshPartition::AMeshPartition* Terrain, const FString& Kind, FVector Location, const FString& Label)
 {
-	if (!CheckAvailable() || !CheckTerrain(Terrain))
+	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	UClass* Class = ModifierClassOf(Kind);
 	if (!Class)
 		return Fail(FString::Printf(TEXT("'%s' is not a modifier kind that can be added: use %s (base meshes come from the terrain's create / import, InstancedProjection / InstancedTexturePatch are filled by other tools)"),
 			*Kind, *FString::Join(AddableKinds(), TEXT(", "))));
-	if (!IsPoint(Location))
-		return Fail(FString::Printf(TEXT("Location %s is not a world position"), *Text(Location)));
 	if (!CheckFootprint(Terrain, Around(Location, 1000.0, 1000.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddModifier", "Add Mesh Terrain Modifier"));
