@@ -484,7 +484,7 @@ than one contract (tools + prompts + resources) and be registered under each.
 - [`samples/UnrealAITemplate/`](../samples/UnrealAITemplate) — the **editor** extension sample: a complete,
   buildable `Type=Editor` plugin with an RQL module (the `hello` operations source, a computed member, a guide).
 - [`extensions/`](../extensions) — the first-party RQL modules (Niagara, Enhanced Input, GAS, Landscape / Water, PCG,
-  Control Rig).
+  Control Rig, Mesh Terrain).
 - [`samples/UnrealAIRuntimeSample/`](../samples/UnrealAIRuntimeSample) — the **runtime (in-game)** extension
   sample: a `Type=Runtime` plugin whose `game-time-dilation` tool reads/sets the live `UWorld`'s
   `AWorldSettings::TimeDilation`, callable in a running game over a runtime MCP connection (§12.9).
@@ -522,7 +522,9 @@ What it does, and why:
    `github.com/<repo>/releases/latest` redirect (drafts/prereleases are never chosen; the tag must be a
    plain `vX.Y.Z` with a `<pluginName>-<X.Y.Z>.zip` asset). The catalog `version` is only the last
    known release — the fallback when resolution fails. `--version` wins; an installed newer copy is
-   never downgraded implicitly. So publishing release `vX.Y.Z` of your extension with that asset is all
+   never downgraded implicitly. An extension whose `extension.json` sets `minEngineVersion` (e.g.
+   `"5.8"`) is refused, with nothing written, in a project on an older Unreal Engine: its C++ cannot
+   compile there. So publishing release `vX.Y.Z` of your extension with that asset is all
    it takes for users to get it — no CLI release needed.
 2. **Place** the plugin into `<project>/Plugins/<pluginName>/` (build-cache / VCS subtrees excluded;
    staged-then-swapped so a failed install never corrupts an existing one).

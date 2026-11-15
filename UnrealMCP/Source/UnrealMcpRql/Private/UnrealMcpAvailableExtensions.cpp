@@ -7,6 +7,7 @@
 #include "UnrealMcpRqlTools.h"
 
 #include "Interfaces/IPluginManager.h"
+#include "Misc/EngineVersionComparison.h"
 
 namespace
 {
@@ -42,6 +43,13 @@ namespace
 			{ TEXT("com.ivanmurzak.unreal-ai-control-rig"), TEXT("ControlRig Tools"), TEXT("UnrealAIControlRig"),
 				TEXT("Control Rig, procedural animation without C++ (look-at, aim, foot IK): controlRigs, controlRigUnits, controlRig | call CreateRig / AddUnit / AddLookAt / AddTwoBoneIK / AddToAnimBlueprint (a rig in the Anim Blueprint) / TrackNearestActor"),
 				{ TEXT("controlrig"), TEXT("rigunit"), TEXT("cr_") }, true },
+#if !UE_VERSION_OLDER_THAN(5, 8, 0) // MeshPartition (Mesh Terrain) exists from UE 5.8: the extension cannot be installed before
+			{ TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), TEXT("Mesh Terrain Tools (Experimental)"), TEXT("UnrealAIMeshTerrain"),
+				TEXT("Mesh Terrain (UE 5.8+ Mesh Partition, Experimental): meshTerrains, meshTerrainModifiers, meshTerrain | call Rebuild / "
+					"WaitForBuild / Surface / SurfacePoints (ground height, slope, paint channels) / EnableMeshTerrain; meshTerrainCreate (Create, "
+					"ImportHeightmap, Delete), meshTerrainBrush (Sculpt, Paint), meshTerrainModifier (AddNoise, AddSpline, AddShape, Edit, Remove, ...)"),
+				{ TEXT("meshterrain"), TEXT("meshpartition") }, true },
+#endif
 		};
 		return Extensions;
 	}

@@ -1,0 +1,11 @@
+{
+  "description": "Create refuses a terrain over the resolution cap before it creates anything",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainCreate | call Create(\"E2ETooFine\", [0, 0, 0], 1000, 0, 5000)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "Resolution 5000 is outside 1 [.][.] 2000 quads"
+  }
+}

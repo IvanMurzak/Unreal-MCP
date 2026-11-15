@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 
-from extension_release import components as extensions
+from extension_release import components as extensions, supports_engine
 from ue_machine_lock import machine_lock
 import ue_json
 
@@ -99,10 +99,25 @@ def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: b
             file.unlink()
 
 
+def engine_version(engine: Path) -> tuple[int, int]:
+    version = ue_json.read(engine / "Engine/Build/Build.version")
+    return int(version["MajorVersion"]), int(version["MinorVersion"])
+
+
+def for_engine(engine: tuple[int, int], requested: list[str] | None) -> list[str]:
+    """The extensions this engine can build: @requested (default: all), without those whose extension.json
+    minEngineVersion is newer (e.g. UnrealAIMeshTerrain needs UE 5.8: MeshPartition does not exist before)."""
+    selected = list(extensions()) if requested is None else list(requested)
+    skipped = [n for n in selected if not supports_engine(n, engine)]
+    if skipped:
+        print(f"UE {engine[0]}.{engine[1]}: skipping {', '.join(skipped)} (extension.json minEngineVersion)", flush=True)
+    return [n for n in selected if n not in skipped]
+
+
 def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, strict: bool = False,
             core_tests: bool = False) -> Path:
-    version = ue_json.read(engine / "Engine/Build/Build.version")
-    engine_key = f"UE-{version['MajorVersion']}.{version['MinorVersion']}-" + hashlib.sha256(str(engine).encode()).hexdigest()[:8]
+    major, minor = engine_version(engine)
+    engine_key = f"UE-{major}.{minor}-" + hashlib.sha256(str(engine).encode()).hexdigest()[:8]
     base = output / engine_key / profile
     base.mkdir(parents=True, exist_ok=True)
     marker = base / ".unreal-mcp-suite"
@@ -120,7 +135,7 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
         copy_plugin(extensions()[name], plugins / name, strict)
     sync_template(ROOT / "tests/host-project", base)
     project = base / "UnrealMcpTests.uproject"
-    write_json(project, {"FileVersion": 3, "EngineAssociation": f"{version['MajorVersion']}.{version['MinorVersion']}",
+    write_json(project, {"FileVersion": 3, "EngineAssociation": f"{major}.{minor}",
                         "Modules": [{"Name": "UnrealMcpTests", "Type": "Runtime", "LoadingPhase": "Default"}],
                         "Plugins": [{"Name": n, "Enabled": True} for n in sorted(allowed)],
                         "DisableEnginePluginsByDefault": True})
@@ -287,9 +302,10 @@ def main() -> int:
     args = parser.parse_args()
     with machine_lock(args.ue_lock_held):
         engine = args.engine.resolve()
-        selected = args.extensions if args.extensions is not None else list(extensions())
-        if any(n not in extensions() for n in selected):
+        if args.extensions and any(n not in extensions() for n in args.extensions):
             parser.error("Unknown extension")
+        version = engine_version(engine)
+        selected = for_engine(version, args.extensions)
         output = args.output.resolve()
         if args.result_file:
             write_json(args.result_file, {"status": "running"})
@@ -302,7 +318,8 @@ def main() -> int:
                 project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
                 build(engine, project)
         if args.mode != "isolated":
-            profile = "all" if selected == list(extensions()) else "selected-" + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
+            # The plugin set is in the name: a runner's cache shared by branches with other extension sets never collides.
+            profile = ("all-" if args.extensions is None else "selected-") + hashlib.sha256(",".join(selected).encode()).hexdigest()[:8]
             project = prepare(engine, profile, selected, output, core_tests=True)
             if args.mode != "prepare":
                 build(engine, project)

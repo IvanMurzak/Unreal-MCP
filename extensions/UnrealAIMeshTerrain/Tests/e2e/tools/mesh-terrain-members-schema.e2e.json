@@ -1,0 +1,10 @@
+{
+  "description": "the BaseMeshes member of a mesh terrain",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshPartition"
+  },
+  "assert": {
+    "pattern": "BaseMeshes"
+  }
+}

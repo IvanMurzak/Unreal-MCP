@@ -9,6 +9,7 @@
 #include "Misc/Guid.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/EngineVersion.h"
 #include "HAL/FileManager.h"
 #include "Extensions/UnrealMcpExtensionInstaller.h"
 #include "Extensions/UnrealMcpExtensionManager.h" // FUnrealMcpExtensionRecord
@@ -167,6 +168,76 @@ void FUnrealMcpExtensionInstallerSpec::Define()
 			const TArray<FUnrealMcpExtensionRow> Rows = { Available, Current, Outdated, Local };
 			TestEqual(TEXT("install"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, false), TArray<FString>{ TEXT("com.x.available") });
 			TestEqual(TEXT("update"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+		});
+	});
+
+	Describe("engine compatibility", [this]()
+	{
+		It("marks a catalog version this engine cannot build, and bulk actions skip it", [this]()
+		{
+			FUnrealMcpCatalogEntry Terrain = InstallerSpecCatalogEntry(TEXT("com.x.terrain"), TEXT("Terrain"), TEXT("1.0.0"));
+			Terrain.MinEngineVersion = TEXT("5.8");
+			Terrain.bExperimental = true;
+			FUnrealMcpCatalogEntry Outdated = Terrain;
+			Outdated.ExtensionId = TEXT("com.x.outdated");
+			Outdated.PluginName = TEXT("Outdated");
+			const FUnrealMcpCatalogEntry Plain = InstallerSpecCatalogEntry(TEXT("com.x.plain"), TEXT("Plain"), TEXT("1.0.0"));
+			FUnrealMcpInstalledOnDisk Old;
+			Old.PluginName = TEXT("Outdated");
+			Old.Version = TEXT("0.1.0");
+
+			const TArray<FUnrealMcpExtensionRow> On57 = FUnrealMcpExtensionInstaller::BuildRows({ Terrain, Outdated, Plain }, {}, { Old }, 5, 7);
+			TestEqual(TEXT("the reason names both engines"), On57[0].Incompatibility,
+				FString(TEXT("requires Unreal Engine 5.8 or newer; this editor is 5.7")));
+			TestTrue(TEXT("experimental is carried to the row"), On57[0].bExperimental);
+			TestTrue(TEXT("no restriction without a minimum"), On57[2].Incompatibility.IsEmpty() && !On57[2].bExperimental);
+			TestEqual(TEXT("install all skips it"), FUnrealMcpExtensionInstaller::SelectBulkIds(On57, false), TArray<FString>{ TEXT("com.x.plain") });
+			TestEqual(TEXT("update all skips it"), FUnrealMcpExtensionInstaller::SelectBulkIds(On57, true), TArray<FString>());
+
+			for (const TPair<int32, int32>& Engine : { TPair<int32, int32>(5, 8), TPair<int32, int32>(5, 10), TPair<int32, int32>(6, 0) })
+			{
+				const TArray<FUnrealMcpExtensionRow> Rows = FUnrealMcpExtensionInstaller::BuildRows({ Terrain, Outdated }, {}, { Old }, Engine.Key, Engine.Value);
+				TestTrue(*FString::Printf(TEXT("UE %d.%d builds it"), Engine.Key, Engine.Value), Rows[0].Incompatibility.IsEmpty());
+				TestEqual(TEXT("and bulk update offers it"), FUnrealMcpExtensionInstaller::SelectBulkIds(Rows, true), TArray<FString>{ TEXT("com.x.outdated") });
+			}
+		});
+
+		It("refuses to install a version this engine cannot build, writing nothing", [this]()
+		{
+			const FString Root = InstallerSpecScratchRoot();
+			const FString ProjectDir = Root / TEXT("Project");
+			const FString SourceDir = Root / TEXT("Source") / TEXT("FutureExt");
+			ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Root, /*RequireExists*/ false, /*Tree*/ true); };
+			const FString Uproject = TEXT("{\n\t\"FileVersion\": 3,\n\t\"Plugins\": []\n}\n");
+			InstallerSpecWrite(ProjectDir / TEXT("MyProj.uproject"), Uproject);
+			InstallerSpecWrite(SourceDir / TEXT("FutureExt.uplugin"), TEXT("{ \"VersionName\": \"1.0.0\" }"));
+
+			const FString Future = FString::Printf(TEXT("%d.0"), FEngineVersion::Current().GetMajor() + 1);
+			FUnrealMcpInstallOptions Opts;
+			Opts.ProjectDir = ProjectDir;
+			Opts.Descriptor = InstallerSpecCatalogEntry(TEXT("com.x.future"), TEXT("FutureExt"), TEXT("1.0.0"));
+			Opts.Descriptor.MinEngineVersion = Future;
+			auto ExpectRefused = [&](const TCHAR* What, const TCHAR* Reason)
+			{
+				const FUnrealMcpInstallResult Result = FUnrealMcpExtensionInstaller::Install(Opts);
+				TestFalse(*FString::Printf(TEXT("%s: install fails"), What), Result.bSuccess);
+				TestTrue(*FString::Printf(TEXT("%s: the error says why (%s)"), What, *Result.Error), Result.Error.Contains(Reason));
+				TestFalse(*FString::Printf(TEXT("%s: nothing placed"), What), FPaths::DirectoryExists(ProjectDir / TEXT("Plugins")));
+				FString After;
+				FFileHelper::LoadFileToString(After, *(ProjectDir / TEXT("MyProj.uproject")));
+				TestEqual(*FString::Printf(TEXT("%s: .uproject untouched"), What), After, Uproject);
+			};
+			ExpectRefused(TEXT("the catalog release's gate"), TEXT("requires Unreal Engine"));
+
+			// A local source states its own gates in its extension.json (as the CLI's --source), not the catalog's.
+			Opts.SourceDir = SourceDir;
+			InstallerSpecWrite(SourceDir / TEXT("extension.json"), FString::Printf(TEXT("{ \"minEngineVersion\": \"%s\" }"), *Future));
+			ExpectRefused(TEXT("the source's gate"), TEXT("requires Unreal Engine"));
+			InstallerSpecWrite(SourceDir / TEXT("extension.json"), TEXT("{ \"minEngineVersion\": \"5.8\\n\" }"));
+			ExpectRefused(TEXT("a malformed source gate"), TEXT("extension.json"));
+			IFileManager::Get().Delete(*(SourceDir / TEXT("extension.json")));
+			const FUnrealMcpInstallResult Ungated = FUnrealMcpExtensionInstaller::Install(Opts);
+			TestTrue(*FString::Printf(TEXT("a source without a gate installs despite the catalog's (%s)"), *Ungated.Error), Ungated.bSuccess);
 		});
 	});
 

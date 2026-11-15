@@ -8,10 +8,69 @@
 #include "Dom/JsonObject.h"
 #include "Internationalization/Regex.h"
 #include "Dom/JsonValue.h"
+#include "Misc/EngineVersion.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
 const int32 FUnrealMcpExtensionCatalog::SupportedSchemaVersion = 1;
+
+namespace
+{
+	/**
+	 * `"5.8"` (extension.json minEngineVersion: major.minor, no leading zero) into its numbers. Anchored with `\z`, not
+	 * `$` (ICU's `$` also matches before a final line break), to accept exactly what the CLI's ENGINE_VERSION accepts.
+	 */
+	bool ExtCatParseMinEngineVersion(const FString& Value, int32& OutMajor, int32& OutMinor)
+	{
+		const FRegexPattern Pattern(TEXT("^([1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z"));
+		FRegexMatcher Matcher(Pattern, Value);
+		if (!Matcher.FindNext())
+			return false;
+		OutMajor = FCString::Atoi(*Matcher.GetCaptureGroup(1));
+		OutMinor = FCString::Atoi(*Matcher.GetCaptureGroup(2));
+		return true;
+	}
+
+	/**
+	 * Read the optional gates of an index entry or release record into @p OutEntry: `minEngineVersion` (a string, or
+	 * null for none) and `experimental` (a boolean). A field that is absent leaves @p OutEntry as it is. False on a
+	 * malformed value.
+	 */
+	bool ExtCatReadGates(const FJsonObject& Obj, FUnrealMcpCatalogEntry& OutEntry)
+	{
+		if (const TSharedPtr<FJsonValue> MinEngine = Obj.TryGetField(TEXT("minEngineVersion")))
+		{
+			int32 Major = 0, Minor = 0;
+			if (MinEngine->IsNull())
+				OutEntry.MinEngineVersion.Reset();
+			else if (MinEngine->Type != EJson::String || !ExtCatParseMinEngineVersion(MinEngine->AsString(), Major, Minor))
+				return false;
+			else
+				OutEntry.MinEngineVersion = MinEngine->AsString();
+		}
+		if (const TSharedPtr<FJsonValue> Experimental = Obj.TryGetField(TEXT("experimental")))
+		{
+			if (Experimental->Type != EJson::Boolean)
+				return false;
+			OutEntry.bExperimental = Experimental->AsBool();
+		}
+		return true;
+	}
+}
+
+FString FUnrealMcpCatalogEntry::EngineIncompatibility(int32 EngineMajor, int32 EngineMinor) const
+{
+	int32 Major = 0, Minor = 0;
+	if (!ExtCatParseMinEngineVersion(MinEngineVersion, Major, Minor)
+		|| EngineMajor > Major || (EngineMajor == Major && EngineMinor >= Minor))
+		return FString();
+	return FString::Printf(TEXT("requires Unreal Engine %s or newer; this editor is %d.%d"), *MinEngineVersion, EngineMajor, EngineMinor);
+}
+
+FString FUnrealMcpCatalogEntry::EngineIncompatibility() const
+{
+	return EngineIncompatibility(FEngineVersion::Current().GetMajor(), FEngineVersion::Current().GetMinor());
+}
 
 FString FUnrealMcpExtensionCatalog::DefaultCatalogUrl()
 {
@@ -51,6 +110,11 @@ bool FUnrealMcpExtensionCatalog::ParseEntry(
 	Obj->TryGetStringField(TEXT("repo"), OutEntry.Repo);
 	Obj->TryGetStringField(TEXT("version"), OutEntry.Version);
 	Obj->TryGetStringField(TEXT("minCoreVersion"), OutEntry.MinCoreVersion);
+	if (!ExtCatReadGates(*Obj, OutEntry))
+	{
+		OutError = FString::Printf(TEXT("catalog entry '%s' has a malformed minEngineVersion or experimental field"), *OutEntry.ExtensionId);
+		return false;
+	}
 	const TSharedPtr<FJsonObject>* Releases = nullptr;
 	if (Obj->TryGetObjectField(TEXT("releases"), Releases) && Releases && Releases->IsValid())
 	{
@@ -68,6 +132,13 @@ bool FUnrealMcpExtensionCatalog::ParseEntry(
 			|| OutEntry.ReleaseTag.EndsWith(TEXT("-v") + OutEntry.Version)))
 		{
 			OutError = TEXT("invalid extension release tag");
+			return false;
+		}
+		// The selected release's own gates win; a record without them (published before they existed) keeps the entry's,
+		// which describe this same latest version.
+		if (!ExtCatReadGates(**Latest, OutEntry))
+		{
+			OutError = TEXT("the selected extension release has a malformed minEngineVersion or experimental field");
 			return false;
 		}
 		(*Latest)->TryGetStringField(TEXT("sha256"), OutEntry.ArchiveSha256);
@@ -194,11 +265,20 @@ const FUnrealMcpCatalogEntry* FUnrealMcpExtensionCatalog::FindEntry(
 	return nullptr;
 }
 
+bool FUnrealMcpExtensionCatalog::ReadSourceGates(const TSharedPtr<FJsonObject>& ExtensionJson, FUnrealMcpCatalogEntry& OutEntry)
+{
+	OutEntry.MinEngineVersion.Reset();
+	OutEntry.bExperimental = false;
+	return !ExtensionJson.IsValid() || ExtCatReadGates(*ExtensionJson, OutEntry);
+}
+
 void FUnrealMcpExtensionCatalog::PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries)
 {
 	TArray<FUnrealMcpKnownExtension> Known;
 	for (const FUnrealMcpCatalogEntry& Entry : Entries)
 	{
+		if (!Entry.EngineIncompatibility().IsEmpty())
+			continue; // this engine cannot build it: never suggest installing it
 		FUnrealMcpKnownExtension& Extension = Known.AddDefaulted_GetRef();
 		Extension.ExtensionId = Entry.ExtensionId;
 		Extension.Name = Entry.Name;

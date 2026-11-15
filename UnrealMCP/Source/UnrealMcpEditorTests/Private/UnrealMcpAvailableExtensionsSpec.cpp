@@ -4,6 +4,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CoreMinimal.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/AutomationTest.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -18,13 +19,27 @@
  * What an agent learns about the Unreal-MCP extensions this editor does not have: the bundled first-party list (offline
  * too), merged with the online catalog; unreal-tool-list, rql-schema and the unreal-rql skill list them with how to
  * install each; a failed or empty RQL query on the domain of one names it. The live checks hold in both runs: the core
- * host (no extension installed) and the extension suite (all six installed), branching on the extension's state.
+ * host (no extension installed) and the extension suite (all installed), branching on the extension's state.
  */
 BEGIN_DEFINE_SPEC(FUnrealMcpAvailableExtensionsSpec, "UnrealMcp.AvailableExtensions",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 	static constexpr const TCHAR* PcgId = TEXT("com.ivanmurzak.unreal-ai-pcg");
 	static constexpr const TCHAR* NiagaraId = TEXT("com.ivanmurzak.unreal-ai-niagara");
+
+	/**
+	 * The online catalog's entries Known() holds now (an interactive editor may have fetched it), so a test can restore
+	 * them with SetCatalog, and in @p OutBundled how many bundled first-party extensions this engine has (Mesh Terrain
+	 * only from UE 5.8). Leaves the catalog empty.
+	 */
+	static TArray<FUnrealMcpKnownExtension> TakeCatalog(int32& OutBundled)
+	{
+		TArray<FUnrealMcpKnownExtension> Fetched = UnrealMcpAvailableExtensions::Known();
+		UnrealMcpAvailableExtensions::SetCatalog({});
+		OutBundled = UnrealMcpAvailableExtensions::Known().Num();
+		Fetched.RemoveAt(0, OutBundled);
+		return Fetched;
+	}
 
 	/** Every known extension, as not installed. */
 	static TArray<FUnrealMcpMissingExtension> AllNotInstalled()
@@ -57,12 +72,20 @@ END_DEFINE_SPEC(FUnrealMcpAvailableExtensionsSpec)
 
 void FUnrealMcpAvailableExtensionsSpec::Define()
 {
-	It("bundles the six first-party extensions with what they add and how to install them", [this]()
+	It("bundles the first-party extensions with what they add and how to install them", [this]()
 	{
 		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
-		for (const TCHAR* Id : { TEXT("com.ivanmurzak.unreal-ai-niagara"), TEXT("com.ivanmurzak.unreal-ai-enhanced-input"),
+		const TArray<const TCHAR*> Ids = { TEXT("com.ivanmurzak.unreal-ai-niagara"), TEXT("com.ivanmurzak.unreal-ai-enhanced-input"),
 			TEXT("com.ivanmurzak.unreal-ai-pcg"), TEXT("com.ivanmurzak.unreal-ai-gas"), TEXT("com.ivanmurzak.unreal-ai-landscape"),
-			TEXT("com.ivanmurzak.unreal-ai-control-rig") })
+			TEXT("com.ivanmurzak.unreal-ai-control-rig"),
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), // Mesh Partition exists from UE 5.8
+#endif
+		};
+		int32 Bundled = 0;
+		UnrealMcpAvailableExtensions::SetCatalog(TakeCatalog(Bundled));
+		TestEqual(TEXT("exactly these are bundled"), Bundled, Ids.Num());
+		for (const TCHAR* Id : Ids)
 		{
 			const FUnrealMcpKnownExtension* Extension = Known.FindByPredicate([Id](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == Id; });
 			if (!TestNotNull(*FString::Printf(TEXT("%s is bundled"), Id), Extension))
@@ -117,9 +140,8 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 
 	It("adds the online catalog's other extensions and keeps the bundled ones", [this]()
 	{
-		const int32 Bundled = 6;
-		TArray<FUnrealMcpKnownExtension> Fetched = UnrealMcpAvailableExtensions::Known(); // restored at the end: an interactive editor may have fetched it
-		Fetched.RemoveAt(0, Bundled);
+		int32 Bundled = 0;
+		TArray<FUnrealMcpKnownExtension> Fetched = TakeCatalog(Bundled); // restored at the end
 		TArray<FUnrealMcpCatalogEntry> Catalog;
 		FUnrealMcpCatalogEntry& Niagara = Catalog.AddDefaulted_GetRef();
 		Niagara.ExtensionId = NiagaraId;
@@ -133,7 +155,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		FUnrealMcpExtensionCatalog::PublishToAgents(Catalog);
 
 		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
-		TestEqual(TEXT("the bundled six plus the other one"), Known.Num(), Bundled + 1);
+		TestEqual(TEXT("the bundled ones plus the other one"), Known.Num(), Bundled + 1);
 		const FUnrealMcpKnownExtension* KnownNiagara = Known.FindByPredicate([](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == NiagaraId; });
 		TestTrue(TEXT("the bundled entry stays"), KnownNiagara && KnownNiagara->Name == TEXT("Niagara Tools"));
 		const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
@@ -143,7 +165,29 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 			&& UnrealMcpAvailableExtensions::Line(*Weather).Contains(TEXT("(Weather Tools): weather systems - not installed")));
 
 		FUnrealMcpExtensionCatalog::PublishToAgents({});
-		TestEqual(TEXT("an empty catalog leaves the bundled six"), UnrealMcpAvailableExtensions::Known().Num(), Bundled);
+		TestEqual(TEXT("an empty catalog leaves the bundled ones"), UnrealMcpAvailableExtensions::Known().Num(), Bundled);
+		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
+	});
+
+	It("never tells agents about an online extension this engine cannot build", [this]()
+	{
+		int32 Bundled = 0;
+		TArray<FUnrealMcpKnownExtension> Fetched = TakeCatalog(Bundled); // restored at the end
+		TArray<FUnrealMcpCatalogEntry> Catalog;
+		FUnrealMcpCatalogEntry& Future = Catalog.AddDefaulted_GetRef();
+		Future.ExtensionId = TEXT("com.example.unreal-mcp-spec-future");
+		Future.PluginName = TEXT("UnrealMcpSpecFuturePluginThatIsNotInstalled");
+		Future.MinEngineVersion = FString::Printf(TEXT("%d.0"), ENGINE_MAJOR_VERSION + 1);
+		FUnrealMcpCatalogEntry& Current = Catalog.AddDefaulted_GetRef();
+		Current.ExtensionId = TEXT("com.example.unreal-mcp-spec-current");
+		Current.PluginName = TEXT("UnrealMcpSpecCurrentPluginThatIsNotInstalled");
+		Current.MinEngineVersion = FString::Printf(TEXT("%d.%d"), ENGINE_MAJOR_VERSION, ENGINE_MINOR_VERSION);
+		FUnrealMcpExtensionCatalog::PublishToAgents(Catalog);
+
+		const TArray<FUnrealMcpKnownExtension> Known = UnrealMcpAvailableExtensions::Known();
+		const auto Has = [&Known](const TCHAR* Id) { return Known.ContainsByPredicate([Id](const FUnrealMcpKnownExtension& E) { return E.ExtensionId == Id; }); };
+		TestFalse(TEXT("the one for a newer engine is left out"), Has(TEXT("com.example.unreal-mcp-spec-future")));
+		TestTrue(TEXT("the one for this engine is listed"), Has(TEXT("com.example.unreal-mcp-spec-current")));
 		UnrealMcpAvailableExtensions::SetCatalog(MoveTemp(Fetched));
 	});
 

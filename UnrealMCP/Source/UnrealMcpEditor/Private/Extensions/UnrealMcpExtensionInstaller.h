@@ -82,6 +82,13 @@ struct FUnrealMcpExtensionRow
 	int32 ToolCount = 0;
 	/** Installed on disk (not as a link) at a version older than the catalog pin → an update is offered. */
 	bool bUpdateAvailable = false;
+	/** The catalog marks it experimental (shown as a badge). */
+	bool bExperimental = false;
+	/**
+	 * Why this engine cannot build the catalog version ("requires Unreal Engine 5.8 or newer; this editor is 5.7"), or
+	 * empty. A row with a reason offers no Install / Update (and bulk actions skip it): it shows the reason instead.
+	 */
+	FString Incompatibility;
 };
 
 /** A minimal on-disk install fact (plugin folder name + its `.uplugin` VersionName) the row-merge consumes. */
@@ -101,7 +108,8 @@ struct FUnrealMcpInstalledOnDisk
  *
  *   1. resolve the catalog descriptor (caller supplies it);
  *   2. resolve the install source — local `SourceDir` (offline/dev/CI) or the extension's
- *      github.com-only release zip (fail-closed host trust, mirrors extension-source.ts);
+ *      github.com-only release zip (fail-closed host trust, mirrors extension-source.ts); the engine gate
+ *      (`minEngineVersion`) is the catalog release's, or a local source's own `extension.json` (as the CLI's --source);
  *   3. materialize into `<project>/Plugins/<PluginName>/` (stage-then-swap, build-cache filtered);
  *   4. enable the extension + its gating engine plugins in the `.uproject` Plugins[] (idempotent);
  *   5. the extension ships as SOURCE → the editor recompiles it on next open (rebuildRequired) — the
@@ -142,15 +150,20 @@ public:
 		EUnrealMcpInstallOutcome Outcome, const FString& PluginName, const FString& FromVersion,
 		const FString& ToVersion, bool bRebuildRequired, const TArray<FString>& GatingPlugins);
 
-	/** The catalog ∪ loaded-providers ∪ on-disk row-merge the panel renders. Pure. */
+	/**
+	 * The catalog ∪ loaded-providers ∪ on-disk row-merge the panel renders, judging engine compatibility against
+	 * @p EngineMajor.@p EngineMinor (the running editor's engine when negative). Pure.
+	 */
 	static UNREALMCPEDITOR_API TArray<FUnrealMcpExtensionRow> BuildRows(
 		const TArray<FUnrealMcpCatalogEntry>& Catalog,
 		const TArray<FUnrealMcpExtensionRecord>& LoadedRecords,
-		const TArray<FUnrealMcpInstalledOnDisk>& InstalledOnDisk);
+		const TArray<FUnrealMcpInstalledOnDisk>& InstalledOnDisk,
+		int32 EngineMajor = -1, int32 EngineMinor = -1);
 
 	/**
 	 * The ids a bulk action acts on (pure): catalog rows not installed yet, or with @p bUpdate the installed
-	 * catalog rows with an update available. Exactly the rows whose own Install / Update button is shown.
+	 * catalog rows with an update available, never one this engine cannot build. Exactly the rows whose own
+	 * Install / Update button is shown.
 	 */
 	static UNREALMCPEDITOR_API TArray<FString> SelectBulkIds(const TArray<FUnrealMcpExtensionRow>& Rows, bool bUpdate);
 
@@ -177,7 +190,8 @@ public:
 	 * Install (or update / enable) the extension. The local `SourceDir` channel runs fully headless; the
 	 * github-release channel performs a bounded synchronous HTTP download + zip extract on the GAME thread
 	 * (the user explicitly clicked Install, mirroring the local-server download's bounded wait). Returns a
-	 * structured result; never throws.
+	 * structured result; never throws. Refuses a descriptor this engine cannot build (EngineIncompatibility) before
+	 * touching anything.
 	 */
 	static UNREALMCPEDITOR_API FUnrealMcpInstallResult Install(const FUnrealMcpInstallOptions& Options);
 

@@ -317,6 +317,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | اکشن‌های ورودی، کانتکست‌های نگاشت، تریگرها و مادیفایرها | `EnhancedInput`, UE 5.7+‎ |
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effectها، Blueprintهای توانایی و مجموعه‌های اتریبیوت | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+‎ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | لنداسکیپ‌ها، اقیانوس‌ها، دریاچه‌ها و رودخانه‌ها | `Water`, UE 5.7+‎ |
+| [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain (آزمایشی): ساخت زمین، modifierها، sculpt و رنگ‌آمیزی، ارتفاع سطح، بازسازی | `MeshTerrainMode`, `MeshPartition`, UE 5.8+‎ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | سیستم‌ها، امیترها، ماژول‌ها و برخورد Niagara | `Niagara`, `ChaosNiagara`, UE 5.7+‎ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | گراف‌های PCG، حجم‌ها و پراکنش‌های تولیدشده | `PCG`, UE 5.7+‎ |
 
@@ -343,7 +344,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | پلاگین Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`، sidecar مبتنی بر .NET 9 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، پکیج npm |
-| [`extensions/`](../extensions/) | شش افزونه اختیاری موتور با انتشارهای جداگانه |
+| [`extensions/`](../extensions/) | هفت افزونه اختیاری موتور با انتشارهای جداگانه |
 | [`samples/`](../samples/) | یک قالب افزونه ویرایشگر و یک نمونه ابزار Runtime (درون بازی) |
 
 ## پیوندها

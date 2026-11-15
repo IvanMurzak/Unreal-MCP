@@ -1,0 +1,10 @@
+{
+  "description": "the LatticePoints member of a lattice modifier",
+  "tool": "rql-schema",
+  "input": {
+    "type": "LatticeModifier"
+  },
+  "assert": {
+    "pattern": "LatticePoints[^,]*control points"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "AddNoise on a terrain that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainModifier | call AddNoise(unreal.find(\"NoSuchMeshTerrainE2E\"), [0, 0, 0])"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Terrain'.*not-found"
+  }
+}

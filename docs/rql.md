@@ -463,7 +463,7 @@ lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorW
 operations' rules (docs/EXTENSIONS.md).
 
 **Extensions an agent does not have yet** (`UnrealMcpRql/Public/UnrealMcpAvailableExtensions.h`). The editor bundles
-the six first-party extensions (id, name, plugin, what they add, the identifier prefixes of their domain); the online
+the first-party extensions (id, name, plugin, what they add, the identifier prefixes of their domain); the online
 extension index adds others when the editor fetches it (one asynchronous request per interactive session, or the
 Extensions panel's Refresh; never in unattended runs, never waited on). Every extension that is not loaded and enabled
 is listed, with its state (not installed, plugin disabled, not loaded yet, turned off) and what to do — install:

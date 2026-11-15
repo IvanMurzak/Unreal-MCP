@@ -154,7 +154,7 @@
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-拡張機能には Unreal Engine 5.7+、同じプロジェクト内の Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+）、C++ ツールチェーンが必要です。リリースはソースで配布され、あなたのプロジェクト向けにコンパイルされます（次にエディターを開いたとき、または `--build` で今すぐ）。インストール id は `com.ivanmurzak.unreal-ai-<id>` で、id は下の表のものです。インストールオプション（`--version`、`--build`、オフラインの `--source`）: [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
+拡張機能には Unreal Engine 5.7+（Mesh Terrain は 5.8+）、同じプロジェクト内の Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+、MeshTerrain 0.31.3+）、C++ ツールチェーンが必要です。リリースはソースで配布され、あなたのプロジェクト向けにコンパイルされます（次にエディターを開いたとき、または `--build` で今すぐ）。インストール id は `com.ivanmurzak.unreal-ai-<id>` で、id は下の表のものです。インストールオプション（`--version`、`--build`、オフラインの `--source`）: [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
 
 | 拡張機能（id） | 説明 |
 | --- | --- |
@@ -162,6 +162,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | Input Action と Mapping Context を検索、アクションとコンテキストを作成、キーを割り当て |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | C++ なしで Gameplay Ability System を作成: エフェクト（コスト、クールダウン、ダメージ、回復）、アビリティの Blueprint、Health / Mana / Stamina のアトリビュートセットを備えたアビリティシステムコンポーネント、入力バインディング、Play In Editor での確認 |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape と Water: ランドスケープの作成、スカルプト、ペイント。海、湖、川の作成。ランドスケープ、ウォーターボディ、ウォーターゾーンの検索 |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | 実験的、UE 5.8+: Mesh Terrain（Mesh Partition）: テレインの作成（平面またはハイトマップから）、モディファイアの照会・追加・編集・並べ替え・削除、スカルプトとペイント、地表の高さ・傾斜・ペイントチャンネル、再ビルドとビルド完了の待機 |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara VFX: システムとそのエミッターを検索、システムをレベルに配置 |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | プロシージャルコンテンツ生成: PCG グラフ（ノード、接続、設定、パラメーター）を作成し、ボリュームに配置し、散布（森、岩、小物）を生成して数を読み取る |
 

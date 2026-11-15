@@ -263,6 +263,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | 入力アクション、マッピングコンテキスト、トリガー、モディファイア | `EnhancedInput`, UE 5.7+ |
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effect、アビリティ Blueprint、アトリビュートセット | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | ランドスケープ、海、湖、川 | `Water`, UE 5.7+ |
+| [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain（実験的）: テレインの作成、モディファイア、スカルプトとペイント、地表の高さ、再ビルド | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara システム、エミッター、モジュール、コリジョン | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG グラフ、ボリューム、生成された配置 | `PCG`, UE 5.7+ |
 
@@ -289,7 +290,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal プラグイン（C++）: `UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`、.NET 9 のサイドカー |
 | [`cli/`](../cli/) | `unreal-mcp-cli`、npm パッケージ |
-| [`extensions/`](../extensions/) | 個別にリリースされる 6 つのオプションのエンジン拡張機能 |
+| [`extensions/`](../extensions/) | 個別にリリースされる 7 つのオプションのエンジン拡張機能 |
 | [`samples/`](../samples/) | エディター拡張機能のテンプレートと、ランタイム（ゲーム内）ツールのサンプル |
 
 ## リンク

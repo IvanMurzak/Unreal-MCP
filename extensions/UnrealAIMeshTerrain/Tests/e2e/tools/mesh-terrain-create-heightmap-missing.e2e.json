@@ -1,0 +1,11 @@
+{
+  "description": "ImportHeightmap of a file that does not exist fails naming the resolved path",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainCreate | call ImportHeightmap(\"E2EMissingHeightmap\", \"Heightmaps/NoSuchHeightmapE2E.png\", [0, 0, 0], 100)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "heightmap file not found: .*NoSuchHeightmapE2E[.]png"
+  }
+}

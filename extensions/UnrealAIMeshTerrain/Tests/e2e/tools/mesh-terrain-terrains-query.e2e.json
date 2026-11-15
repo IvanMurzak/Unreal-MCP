@@ -1,0 +1,10 @@
+{
+  "description": "the count of mesh terrains",
+  "tool": "rql-query",
+  "input": {
+    "query": "meshTerrains | count"
+  },
+  "assert": {
+    "pattern": "\"text\"\\s*:\\s*\"\\d+\"|value\\\\?\"\\s*:\\s*\\d"
+  }
+}

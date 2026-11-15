@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = "IvanMurzak/Unreal-MCP"
 INDEX_TAG = "extensions-index"
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
+ENGINE_VERSION = re.compile(r"([1-9]\d*)\.(0|[1-9]\d*)\Z")
 SLUGS = {"UnrealAINiagara": "niagara", "UnrealAIEnhancedInput": "enhanced-input",
          "UnrealAIPCG": "pcg", "UnrealAIGAS": "gas", "UnrealAILandscape": "landscape",
          "UnrealAIControlRig": "control-rig"}
@@ -33,6 +34,23 @@ def components() -> dict[str, Path]:
 
 def slug(plugin: str) -> str:
     return SLUGS.get(plugin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", plugin.removeprefix("UnrealAI")).lower())
+
+
+def min_engine(plugin: str) -> tuple[int, int] | None:
+    """extension.json `minEngineVersion` ("5.8"): the oldest Unreal Engine the extension builds on; None when any."""
+    value = read(components()[plugin] / "extension.json").get("minEngineVersion")
+    if value is None:
+        return None
+    match = ENGINE_VERSION.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        raise ValueError(f"{plugin}: minEngineVersion must be '<major>.<minor>', got {value!r}")
+    return int(match[1]), int(match[2])
+
+
+def supports_engine(plugin: str, engine: tuple[int, int]) -> bool:
+    """Whether @plugin builds on Unreal Engine @engine (major, minor) (extension_suite.for_engine asks this)."""
+    minimum = min_engine(plugin)
+    return minimum is None or tuple(engine[:2]) >= minimum
 
 
 def read(path: Path) -> dict:
@@ -52,6 +70,10 @@ def validate(plugin: str) -> dict:
     version = descriptor["VersionName"]
     if not VERSION.fullmatch(version) or metadata["version"] != version or metadata["pluginName"] != plugin:
         raise ValueError(f"Version/identity drift in {plugin}")
+    min_engine(plugin)  # a malformed minEngineVersion fails validation, not a later engine run
+    experimental = metadata.get("experimental", False)
+    if not isinstance(experimental, bool) or experimental != bool(descriptor.get("IsExperimentalVersion", False)):
+        raise ValueError(f"{plugin}: extension.json experimental must be a boolean equal to the .uplugin IsExperimentalVersion")
     sources = "\n".join(p.read_text(encoding="utf-8-sig") for p in (folder / "Source").rglob("*.cpp"))
     if f'PluginVersion(TEXT("{plugin}"))' not in sources:
         raise ValueError(f'{plugin} must report its .uplugin version: UnrealMcpRql::PluginVersion(TEXT("{plugin}"))')
@@ -95,6 +117,16 @@ def package(plugin: str, output: Path) -> Path:
     return archive
 
 
+# Optional extension.json fields that restrict or label an install, copied into each release record (when set) so a
+# consumer can judge any version: minEngineVersion ("5.8", the oldest Unreal Engine it builds on) and experimental.
+# An index record without them (published before they existed) means no restriction.
+GATES = ("minEngineVersion", "experimental")
+
+
+def _without_gates(record: dict) -> dict:
+    return {k: v for k, v in record.items() if k not in GATES}
+
+
 def update_index(index: dict, metadata: dict, tag: str, checksum: str) -> dict:
     """Keep all historic versions and every untouched extension. Never roll latest backwards."""
     result = json.loads(json.dumps(index))
@@ -108,13 +140,20 @@ def update_index(index: dict, metadata: dict, tag: str, checksum: str) -> dict:
         result["extensions"].append(entry)
     version = metadata["version"]
     release = {"repo": REPO, "tag": tag, "sha256": checksum,
-               "minCoreVersion": metadata["minCoreVersion"], "enginePlugins": metadata["enginePlugins"]}
+               "minCoreVersion": metadata["minCoreVersion"], "enginePlugins": metadata["enginePlugins"],
+               **{key: metadata[key] for key in GATES if metadata.get(key) not in (None, False)}}
     existing = entry["releases"].get(version)
-    if existing and existing["repo"] == REPO and existing != release:
+    # A release published before a gate existed lacks it (or stores it unset: null / false): the same archive may gain
+    # it, nothing else may change.
+    if existing and existing["repo"] == REPO and (
+            _without_gates(existing) != _without_gates(release)
+            or any(existing.get(k) not in (None, False, release.get(k)) for k in GATES)):
         raise ValueError("A published component version is immutable; bump its version")
     entry["releases"][version] = release
     if tuple(map(int, version.split('.'))) >= tuple(map(int, entry["version"].split('.'))):
         history = entry["releases"]
+        for key in GATES:  # a gate the new metadata dropped must not linger on the entry
+            entry.pop(key, None)
         entry.update(metadata)
         entry.update(repo=REPO, releases=history)
     return result

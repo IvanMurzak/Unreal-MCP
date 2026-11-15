@@ -4,7 +4,7 @@ import { installExtension } from '../lib/install-extension.js';
 import * as ui from '../utils/ui.js';
 
 export const installExtensionCommand = new Command('install-extension')
-  .description('Install an Unreal-MCP extension plugin into a project: place it under Plugins/, enable it + its gating engine plugins in the .uproject, then compile (on next editor open, or now with --build). Idempotent.')
+  .description('Install an Unreal-MCP extension plugin into a project: place it under Plugins/, enable it + its gating engine plugins in the .uproject, then compile (on next editor open, or now with --build). Refuses a project on an older Unreal Engine than the extension supports. Idempotent.')
   .argument('<id>', 'Extension id to install (the catalog extensionId / name / pluginName)')
   .argument('[path]', 'Unreal project directory (defaults to cwd)')
   .option('--source <dir>', 'Install from a local plugin directory (offline / CI / dev) instead of downloading')

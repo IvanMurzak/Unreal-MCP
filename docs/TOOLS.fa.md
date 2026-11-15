@@ -160,7 +160,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 
 <div dir="rtl">
 
-افزونه‌ها به Unreal Engine 5.7+، Unreal MCP 0.26.0+ (ControlRig 0.28.0+، EnhancedInput 0.29.0+) در همان پروژه و یک toolchain برای C++ نیاز دارند: نسخه‌ها به صورت سورس منتشر می‌شوند و برای پروژه شما کامپایل می‌شوند (در باز شدن بعدی ویرایشگر، یا همین حالا با `--build`). شناسه نصب `com.ivanmurzak.unreal-ai-<id>` است که `<id>` آن از جدول زیر می‌آید. گزینه‌های نصب (`--version`، `--build`، `--source` آفلاین): [نصب یک افزونه در پروژه](EXTENSIONS.md#installing-an-extension-into-a-project).
+افزونه‌ها به Unreal Engine 5.7+ (Mesh Terrain 5.8+)، Unreal MCP 0.26.0+ (ControlRig 0.28.0+، EnhancedInput 0.29.0+، MeshTerrain 0.31.3+) در همان پروژه و یک toolchain برای C++ نیاز دارند: نسخه‌ها به صورت سورس منتشر می‌شوند و برای پروژه شما کامپایل می‌شوند (در باز شدن بعدی ویرایشگر، یا همین حالا با `--build`). شناسه نصب `com.ivanmurzak.unreal-ai-<id>` است که `<id>` آن از جدول زیر می‌آید. گزینه‌های نصب (`--version`، `--build`، `--source` آفلاین): [نصب یک افزونه در پروژه](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | افزونه (شناسه) | توضیح |
 | --- | --- |
@@ -168,6 +168,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI&nbsp;Enhanced&nbsp;Input](../extensions/UnrealAIEnhancedInput/README.md)**<br>`enhanced-input` | کوئری روی Input Action ها و Mapping Context ها، ساخت action و context، نگاشت کلیدها |
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | ساخت Gameplay Ability System بدون C++: افکت‌ها (هزینه، cooldown، آسیب، بازیابی)، Blueprint های ability، کامپوننت‌های ability system با یک attribute set آماده Health / Mana / Stamina، اتصال ورودی‌ها، بررسی‌های Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape و Water: ساخت، حجاری و رنگ‌آمیزی landscape؛ ساخت اقیانوس، دریاچه و رودخانه؛ کوئری روی landscape ها، water body ها و water zone ها |
+| **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | آزمایشی، UE 5.8+‎: Mesh Terrain (Mesh Partition): ساخت زمین (تخت یا از heightmap)؛ پرس‌وجو، افزودن، ویرایش، مرتب‌سازی و حذف modifierها؛ sculpt و رنگ‌آمیزی؛ ارتفاع، شیب و کانال‌های رنگ سطح؛ بازسازی و انتظار برای پایان ساخت |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | جلوه‌های بصری Niagara: کوئری روی سیستم‌ها و emitter های آن‌ها، قرار دادن سیستم‌ها در لول |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: ساخت گراف‌های PCG (نودها، اتصال‌ها، تنظیمات، پارامترها)، قرار دادن آن‌ها روی volume ها، تولید پراکنش‌ها (جنگل، صخره، اشیای صحنه) و خواندن تعدادها |
 

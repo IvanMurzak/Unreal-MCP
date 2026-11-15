@@ -6,18 +6,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { listProcesses, selectEditorProcesses, type RunningProcess } from './close.js';
-import { compareSemver, installExtension } from './install-extension.js';
+import { compareSemver, installExtension, newestReleaseForEngine, projectEngineVersion, releaseGates } from './install-extension.js';
 import { installPlugin } from './install-plugin.js';
 import { cleanPluginBuildCache } from './clean-plugin.js';
 import { asError } from '../utils/error.js';
 import { isSymlink } from '../utils/fs.js';
-import { findUProjectFile } from '../utils/project.js';
+import { findUProjectFile, readUProject } from '../utils/project.js';
 import { emitProgress } from './progress.js';
 import { PACKAGE_VERSION } from '../version.js';
 import { defaultCorePluginSource, resolvePluginSource } from './plugin-source.js';
 import { stripLeadingV } from '../utils/extension-source.js';
 import { fetchLatestVersion } from '../utils/update-check.js';
-import { EXTENSIONS_CATALOG } from '../utils/extensions-catalog.js';
+import { EXTENSIONS_CATALOG, engineMeetsMinimum } from '../utils/extensions-catalog.js';
 import { loadExtensionsIndex } from '../utils/extensions-index.js';
 import type { ProgressCallback } from './types.js';
 
@@ -272,6 +272,10 @@ async function planInstalledExtensions(projectDir: string, opts: UpdateOptions, 
 
     const { index } = await loadExtensionsIndex({ fetchImpl: opts.fetchImpl, cachePath: opts.indexCachePath });
     const indexed = index?.extensions ?? [];
+    // The project's engine, read once and only when a latest release needs a newer one.
+    let engineRead: { engine: [number, number] | null } | undefined;
+    const projectEngine = (): [number, number] | null =>
+      (engineRead ??= { engine: projectEngineVersion(readUProject(projectDir)?.engineAssociation ?? '', {}) }).engine;
 
     return candidates.flatMap((pluginName): ExtensionUpdateItem[] => {
       const matches = (candidate: { pluginName: string }): boolean => candidate.pluginName.toLowerCase() === pluginName.toLowerCase();
@@ -280,7 +284,11 @@ async function planInstalledExtensions(projectDir: string, opts: UpdateOptions, 
       if (!extension) return [];
 
       const from = readPluginVersion(path.join(pluginsDir, pluginName, `${pluginName}.uplugin`));
-      const to = online?.version ?? null;
+      let to = online?.version ?? null;
+      // The target is what install-extension would install: the newest release this engine can build.
+      const gate = online && to !== null ? releaseGates(online, to).minEngineVersion : null;
+      const engine = online && gate ? projectEngine() : null;
+      if (online && engine && !engineMeetsMinimum(engine, gate)) to = newestReleaseForEngine(online, engine) ?? to;
       const status = to === null || from === null
         ? 'unknown'
         : compareSemver(stripLeadingV(from), stripLeadingV(to)) < 0 ? 'outdated' : 'current';

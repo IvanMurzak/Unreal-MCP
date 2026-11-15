@@ -1,6 +1,6 @@
 # Optional extensions: one repository, independent releases, one editor per suite
 
-The six first-party extensions live under `extensions/UnrealAI<Feature>/` as independent UE
+The first-party extensions live under `extensions/UnrealAI<Feature>/` as independent UE
 plugins/modules. Stable extension IDs, plugin names, provider contracts, existing Automation specs,
 E2E checks and licenses are preserved. `extensions/migration-sources.json` records imported commits.
 Third-party plugins and the external Unreal-AI-Template repository remain supported.
@@ -17,7 +17,10 @@ py -3 -m unittest discover -s scripts -p 'test_*.py'
 py -3 scripts/extension_suite.py --engine 'C:/Program Files/Epic Games/UE_5.8' --mode full
 ```
 
-`full` compiles core alone and core + each extension with no sibling plugin present. Extension
+`full` compiles core alone and core + each extension with no sibling plugin present. An extension whose
+`extension.json` sets `minEngineVersion` (`"5.8"` for UnrealAIMeshTerrain: its engine plugin MeshPartition does not
+exist before) is left out of every build, Automation and E2E run on an older engine, with a printed note, whether
+`--extensions` names it or not; the CI (`ue_ci.py suite`) relies on the same field for UE 5.5 / 5.6 (core only). Extension
 modules use non-unity compilation with no PCH in these isolated copies. It then builds a combined
 host and starts **one** UnrealEditor-Cmd process for all core/extension Automation tests. All
 preserved extension E2E checks run against that same process, local sidecar and local server.
@@ -111,7 +114,17 @@ checksums, with the legacy catalog URL as its migration fallback.
 
 `install-extension` loads the validated online index from the fixed public GitHub Releases URL. It
 resolves extension ID/name/pluginName from that index, so new extensions do not require a CLI release.
-Each historical release can carry its own minimum core version and engine-plugin dependencies.
+Each historical release can carry its own minimum core version and engine-plugin dependencies, and its
+`minEngineVersion` / `experimental` from `extension.json` (written by `extension_release.py` when set; a
+record without them was published before they existed: it takes the entry's engine floor, as the Editor
+panel does, since those releases were never built for older engines either; it gains its own only when that
+same version is published again, so older versions are never backfilled). `install-extension` resolves the project's engine
+(`--engine-root`'s `Build.version`, else a version EngineAssociation, else the `Build.version` of the
+engine a source-build GUID resolves to); without `--version` it falls back from a latest release that
+engine cannot build to the newest one it can (with a warning), and it refuses a selected version whose
+`minEngineVersion` is newer, before downloading or writing anything. A `--source` folder's own
+`extension.json` / `.uplugin` alone decide its gates. It warns that an experimental extension is experimental. The Editor's Extensions panel shows
+such a row with the reason and no Install button, marks experimental ones, and does not offer them to agents.
 The index's `version` is stable latest for that extension; `releases` maps exact versions to repo/tag
 and optional SHA-256. `--version` selects history; the default never downgrades an installed newer
 version. Component archives are hash-checked when hashes exist, before modifying the installation.

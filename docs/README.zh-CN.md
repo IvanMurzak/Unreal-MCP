@@ -263,6 +263,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](../extensions/UnrealAIEnhancedInput/README.md) | 输入操作、映射上下文、触发器和修饰器 | `EnhancedInput`, UE 5.7+ |
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effect、能力 Blueprint 和属性集 | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | 地形、海洋、湖泊和河流 | `Water`, UE 5.7+ |
+| [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain（实验性）：创建地形、修改器、雕刻和绘制、地表高度、重建 | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara 系统、发射器、模块和碰撞 | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG 图、体积和生成的散布 | `PCG`, UE 5.7+ |
 
@@ -289,7 +290,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal 插件（C++）：`UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`，.NET 9 边车进程 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`，npm 包 |
-| [`extensions/`](../extensions/) | 六个可选引擎扩展，各自独立发布 |
+| [`extensions/`](../extensions/) | 七个可选引擎扩展，各自独立发布 |
 | [`samples/`](../samples/) | 一个编辑器扩展模板和一个运行时（游戏内）工具示例 |
 
 ## 链接

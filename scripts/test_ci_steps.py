@@ -84,7 +84,7 @@ class CiStepTests(unittest.TestCase):
     def exported(self) -> dict:
         return dict(line.split("=", 1) for line in self.github_env.read_text().splitlines() if line)
 
-    def test_suite_gates_extensions_below_57_and_exports_the_report(self):
+    def test_suite_leaves_engine_gating_to_the_suite_and_exports_the_report(self):
         repo = self.temp / "repo"
         calls = []
 
@@ -97,8 +97,8 @@ class CiStepTests(unittest.TestCase):
         with mock.patch.object(ci, "ROOT", repo), mock.patch.object(ci, "run", fake_run):
             for argv in (["suite", "--ue", "5.6"], ["suite", "--ue", "5.8"], ["suite", "--mode", "full"]):
                 self.assertEqual(ci.main(argv), 0)
-        self.assertEqual(calls[0][-1], "--extensions")
-        self.assertNotIn("--extensions", calls[1])
+        # Which extensions an engine builds is extension.json minEngineVersion, read by extension_suite.py itself.
+        self.assertFalse(any("--extensions" in call for call in calls))
         self.assertIn("full", calls[2])
         self.assertEqual(self.exported()["REPORT_DIR"], "/r")
 

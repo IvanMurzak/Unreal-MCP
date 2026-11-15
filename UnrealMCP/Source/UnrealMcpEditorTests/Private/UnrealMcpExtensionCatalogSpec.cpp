@@ -97,6 +97,61 @@ void FUnrealMcpExtensionCatalogSpec::Define()
 			TestFalse(TEXT("missing selected release rejected"), Parse(Entries, Error, Warning));
 		});
 
+		It("reads the engine gate and experimental flag of the entry and of the selected release", [this]()
+		{
+			TSharedPtr<FJsonObject> Root = CatalogSpecParseObject(CatalogSpecSampleJson());
+			TSharedPtr<FJsonObject> Entry = Root->GetArrayField(TEXT("extensions"))[0]->AsObject();
+			auto Parse = [&Root](FUnrealMcpCatalogEntry& Out)
+			{
+				FString Json, Error, Warning;
+				FJsonSerializer::Serialize(Root.ToSharedRef(), TJsonWriterFactory<>::Create(&Json));
+				TArray<FUnrealMcpCatalogEntry> Entries;
+				const bool bOk = FUnrealMcpExtensionCatalog::ParseCatalogJson(Json, Entries, Error, Warning);
+				if (bOk)
+					Out = Entries[0];
+				return bOk;
+			};
+			FUnrealMcpCatalogEntry Parsed;
+			TestTrue(TEXT("a legacy entry without gates parses"), Parse(Parsed));
+			TestTrue(TEXT("and restricts nothing"), Parsed.MinEngineVersion.IsEmpty() && !Parsed.bExperimental
+				&& Parsed.EngineIncompatibility(4, 27).IsEmpty());
+
+			Entry->SetStringField(TEXT("minEngineVersion"), TEXT("5.8"));
+			Entry->SetBoolField(TEXT("experimental"), true);
+			TestTrue(TEXT("entry gates parse"), Parse(Parsed));
+			TestEqual(TEXT("entry minEngineVersion"), Parsed.MinEngineVersion, FString(TEXT("5.8")));
+			TestTrue(TEXT("entry experimental"), Parsed.bExperimental);
+			TestEqual(TEXT("UE 5.7 cannot build it"), Parsed.EngineIncompatibility(5, 7),
+				FString(TEXT("requires Unreal Engine 5.8 or newer; this editor is 5.7")));
+			TestTrue(TEXT("UE 5.8, 5.10 and 6.0 can"), Parsed.EngineIncompatibility(5, 8).IsEmpty()
+				&& Parsed.EngineIncompatibility(5, 10).IsEmpty() && Parsed.EngineIncompatibility(6, 0).IsEmpty());
+
+			// The selected release: one published before the gates keeps the entry's; its own gates win (null = none).
+			TSharedPtr<FJsonObject> Latest = MakeShared<FJsonObject>();
+			Latest->SetStringField(TEXT("repo"), TEXT("IvanMurzak/Unreal-MCP"));
+			Latest->SetStringField(TEXT("tag"), TEXT("niagara-v0.1.0"));
+			TSharedPtr<FJsonObject> Releases = MakeShared<FJsonObject>();
+			Releases->SetObjectField(TEXT("0.1.0"), Latest);
+			Entry->SetObjectField(TEXT("releases"), Releases);
+			TestTrue(TEXT("a release without gates keeps the entry gates"),
+				Parse(Parsed) && Parsed.MinEngineVersion == TEXT("5.8") && Parsed.bExperimental);
+			Latest->SetField(TEXT("minEngineVersion"), MakeShared<FJsonValueNull>());
+			Latest->SetBoolField(TEXT("experimental"), false);
+			TestTrue(TEXT("the release gates win"), Parse(Parsed) && Parsed.MinEngineVersion.IsEmpty() && !Parsed.bExperimental);
+
+			const TArray<TSharedPtr<FJsonValue>> BadVersions = { MakeShared<FJsonValueString>(TEXT("5.8.0")),
+				MakeShared<FJsonValueString>(TEXT("05.8")), MakeShared<FJsonValueString>(TEXT("five")), MakeShared<FJsonValueString>(TEXT("5.8\n")),
+				MakeShared<FJsonValueNumber>(5.8) };
+			for (const TSharedPtr<FJsonValue>& Bad : BadVersions)
+			{
+				Latest->SetField(TEXT("minEngineVersion"), Bad);
+				TestFalse(TEXT("a malformed release minEngineVersion is rejected"), Parse(Parsed));
+			}
+			Latest->RemoveField(TEXT("minEngineVersion"));
+			Entry->SetStringField(TEXT("experimental"), TEXT("yes"));
+			TestFalse(TEXT("a malformed experimental flag is rejected"), Parse(Parsed));
+		});
+
 		It("uses the online index with a separate legacy catalog fallback URL", [this]()
 		{
 			TestTrue(TEXT("default points at release index"), FUnrealMcpExtensionCatalog::DefaultCatalogUrl().EndsWith(

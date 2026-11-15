@@ -18,6 +18,7 @@
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "Misc/EngineVersion.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -244,7 +245,7 @@ TArray<FString> FUnrealMcpExtensionInstaller::SelectBulkIds(const TArray<FUnreal
 	TArray<FString> Ids;
 	for (const FUnrealMcpExtensionRow& Row : Rows)
 	{
-		if (Row.bInCatalog && (bUpdate ? (Row.bInstalled && Row.bUpdateAvailable) : !Row.bInstalled))
+		if (Row.bInCatalog && Row.Incompatibility.IsEmpty() && (bUpdate ? (Row.bInstalled && Row.bUpdateAvailable) : !Row.bInstalled))
 			Ids.Add(Row.ExtensionId);
 	}
 	return Ids;
@@ -257,8 +258,14 @@ TArray<FString> FUnrealMcpExtensionInstaller::SelectBulkIds(const TArray<FUnreal
 TArray<FUnrealMcpExtensionRow> FUnrealMcpExtensionInstaller::BuildRows(
 	const TArray<FUnrealMcpCatalogEntry>& Catalog,
 	const TArray<FUnrealMcpExtensionRecord>& LoadedRecords,
-	const TArray<FUnrealMcpInstalledOnDisk>& InstalledOnDisk)
+	const TArray<FUnrealMcpInstalledOnDisk>& InstalledOnDisk,
+	int32 EngineMajor, int32 EngineMinor)
 {
+	if (EngineMajor < 0 || EngineMinor < 0)
+	{
+		EngineMajor = FEngineVersion::Current().GetMajor();
+		EngineMinor = FEngineVersion::Current().GetMinor();
+	}
 	TArray<FUnrealMcpExtensionRow> Rows;
 	TSet<FString> CatalogExtensionIds; // lowercased, to detect loaded-but-not-cataloged extras
 
@@ -272,6 +279,8 @@ TArray<FUnrealMcpExtensionRow> FUnrealMcpExtensionInstaller::BuildRows(
 		Row.Repo = Entry.Repo;
 		Row.CatalogVersion = Entry.Version;
 		Row.bInCatalog = true;
+		Row.bExperimental = Entry.bExperimental;
+		Row.Incompatibility = Entry.EngineIncompatibility(EngineMajor, EngineMinor);
 		CatalogExtensionIds.Add(Entry.ExtensionId.ToLower());
 
 		// On-disk match by plugin folder name (case-insensitive — UE plugin names are case-insensitive).
@@ -750,6 +759,30 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 	}
 	Result.UprojectPath = UprojectPath;
 
+	// The engine gate: the catalog release's, or (like the CLI's --source) what a local source's own extension.json states.
+	FUnrealMcpCatalogEntry Gates = Options.Descriptor;
+	FString SourceRoot;
+	if (!Options.SourceDir.TrimStartAndEnd().IsEmpty())
+	{
+		SourceRoot = ResolveLocalPluginRoot(Options.SourceDir, Result.Error);
+		if (SourceRoot.IsEmpty())
+			return Result;
+		const FString ExtensionJsonPath = SourceRoot / TEXT("extension.json");
+		const bool bHasExtensionJson = FPaths::FileExists(ExtensionJsonPath);
+		const TSharedPtr<FJsonObject> ExtensionJson = bHasExtensionJson ? ExtInstLoadJsonObject(ExtensionJsonPath) : nullptr;
+		if ((bHasExtensionJson && !ExtensionJson.IsValid()) || !FUnrealMcpExtensionCatalog::ReadSourceGates(ExtensionJson, Gates))
+		{
+			Result.Error = FString::Printf(TEXT("%s: malformed JSON or minEngineVersion / experimental (minEngineVersion is \"<major>.<minor>\", e.g. \"5.8\")"), *ExtensionJsonPath);
+			return Result;
+		}
+	}
+	const FString Incompatibility = Gates.EngineIncompatibility();
+	if (!Incompatibility.IsEmpty())
+	{
+		Result.Error = FString::Printf(TEXT("%s %s: it cannot compile here, so nothing was installed"), *PluginName, *Incompatibility);
+		return Result;
+	}
+
 	const FString ToVersion = Options.Descriptor.HasVersion() ? Options.Descriptor.Version.TrimStartAndEnd() : FString();
 	Result.ToVersion = ToVersion;
 	const FString InstalledPath = ProjectDir / TEXT("Plugins") / PluginName;
@@ -776,14 +809,9 @@ FUnrealMcpInstallResult FUnrealMcpExtensionInstaller::Install(const FUnrealMcpIn
 			if (!ExtractDirToClean.IsEmpty())
 				IFileManager::Get().DeleteDirectory(*ExtractDirToClean, /*RequireExists*/ false, /*Tree*/ true);
 		};
-		if (!Options.SourceDir.TrimStartAndEnd().IsEmpty())
+		if (!SourceRoot.IsEmpty())
 		{
-			PluginRoot = ResolveLocalPluginRoot(Options.SourceDir, Err);
-			if (PluginRoot.IsEmpty())
-			{
-				Result.Error = Err;
-				return Result;
-			}
+			PluginRoot = SourceRoot;
 		}
 		else if (!Options.Descriptor.Repo.TrimStartAndEnd().IsEmpty() && !ToVersion.IsEmpty())
 		{

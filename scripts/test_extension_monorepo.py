@@ -225,6 +225,76 @@ class MonorepoTests(unittest.TestCase):
                 self.assertNotIn(tool['name'], tools)
                 tools.add(tool['name'])
 
+    def test_index_records_carry_the_engine_gate_and_experimental_flag_per_release(self):
+        index = release.read(release.ROOT / 'extensions-index.json')
+        terrain = release.validate('UnrealAIMeshTerrain')
+        niagara = release.validate('UnrealAINiagara')
+        index = release.update_index(index, terrain, f"mesh-terrain-v{terrain['version']}", 'a' * 64)
+        index = release.update_index(index, niagara, f"niagara-v{niagara['version']}", 'b' * 64)
+        entries = {e['pluginName']: e for e in index['extensions']}
+        self.assertEqual(entries['UnrealAIMeshTerrain']['minEngineVersion'], '5.8')
+        self.assertIs(entries['UnrealAIMeshTerrain']['experimental'], True)
+        record = entries['UnrealAIMeshTerrain']['releases'][terrain['version']]
+        self.assertEqual((record['minEngineVersion'], record['experimental']), ('5.8', True))
+        record = entries['UnrealAINiagara']['releases'][niagara['version']]
+        self.assertEqual(record['minEngineVersion'], '5.7')
+        self.assertNotIn('experimental', record)  # only a set flag is written
+
+        # A later version without the flag drops it from the entry; the history keeps what each version declared.
+        stable = {**terrain, 'version': '0.2.0'}
+        del stable['experimental']
+        index = release.update_index(index, stable, 'mesh-terrain-v0.2.0', 'c' * 64)
+        entry = next(e for e in index['extensions'] if e['pluginName'] == 'UnrealAIMeshTerrain')
+        self.assertNotIn('experimental', entry)
+        self.assertNotIn('experimental', entry['releases']['0.2.0'])
+        self.assertIs(entry['releases'][terrain['version']]['experimental'], True)
+
+    def test_a_release_published_before_the_gates_gains_them_but_stays_immutable(self):
+        index = release.read(release.ROOT / 'extensions-index.json')
+        meta = release.validate('UnrealAINiagara')
+        tag = f"niagara-v{meta['version']}"
+        index = release.update_index(index, meta, tag, 'a' * 64)
+        entry = next(e for e in index['extensions'] if e['pluginName'] == 'UnrealAINiagara')
+        legacy = entry['releases'][meta['version']]
+        del legacy['minEngineVersion']  # as published by the tooling before minEngineVersion existed
+        republished = release.update_index(index, meta, tag, 'a' * 64)
+        entry = next(e for e in republished['extensions'] if e['pluginName'] == 'UnrealAINiagara')
+        self.assertEqual(entry['releases'][meta['version']]['minEngineVersion'], '5.7')
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(index, meta, tag, 'b' * 64)
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(republished, {**meta, 'minEngineVersion': '5.8'}, tag, 'a' * 64)
+        # A record storing a gate unset (null / false) is the same as one without it.
+        legacy.update(minEngineVersion=None, experimental=False)
+        republished = release.update_index(index, meta, tag, 'a' * 64)
+        record = next(e for e in republished['extensions'] if e['pluginName'] == 'UnrealAINiagara')['releases'][meta['version']]
+        self.assertEqual(record['minEngineVersion'], '5.7')
+        self.assertNotIn('experimental', record)
+        # Dropping a gate from an already gated version is a change.
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(republished, {k: v for k, v in meta.items() if k != 'minEngineVersion'}, tag, 'a' * 64)
+
+    def test_experimental_must_match_the_uplugin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / 'extensions/UnrealAINew'
+            (folder / 'Source').mkdir(parents=True)
+            (folder / 'Tests/e2e/tools').mkdir(parents=True)
+            (folder / 'Tests/e2e/tools/a.e2e.json').write_text('{}')
+            (folder / 'Source/A.cpp').write_text('UnrealMcpRql::PluginVersion(TEXT("UnrealAINew"))')
+            metadata = {'pluginName': 'UnrealAINew', 'version': '0.1.0'}
+            with patch.object(release, 'ROOT', root):
+                for experimental_uplugin, experimental_metadata, ok in (
+                        (False, None, True), (True, True, True), (True, None, False), (False, True, False), (True, 'yes', False)):
+                    release.write(folder / 'UnrealAINew.uplugin', {'VersionName': '0.1.0', 'IsExperimentalVersion': experimental_uplugin})
+                    extra = {} if experimental_metadata is None else {'experimental': experimental_metadata}
+                    release.write(folder / 'extension.json', {**metadata, **extra})
+                    if ok:
+                        release.validate('UnrealAINew')
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'experimental'):
+                            release.validate('UnrealAINew')
+
     def test_migrated_catalog_names_remain_valid_cli_install_aliases(self):
         seed = release.read(release.ROOT / 'extensions-index.json')
         for entry in seed['extensions']:
@@ -239,6 +309,59 @@ class MonorepoTests(unittest.TestCase):
             metadata = release.validate(plugin)
             self.assertIn(f'{{ TEXT("{metadata["extensionId"]}"), TEXT("{metadata["name"]}"), TEXT("{plugin}"),', source)
 
+    def test_min_engine_version_is_validated_and_compared_by_major_minor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / 'extensions/UnrealAINew'
+            folder.mkdir(parents=True)
+            (folder / 'UnrealAINew.uplugin').write_text('{}')
+            with patch.object(release, 'ROOT', root):
+                release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew'})
+                self.assertIsNone(release.min_engine('UnrealAINew'))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 5)))
+                release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew', 'minEngineVersion': '5.8'})
+                self.assertEqual(release.min_engine('UnrealAINew'), (5, 8))
+                self.assertFalse(release.supports_engine('UnrealAINew', (5, 7)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 8)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (5, 10)))
+                self.assertTrue(release.supports_engine('UnrealAINew', (6, 0)))
+                for bad in ('5.8.0', '5', 'five', 58, '05.8'):
+                    release.write(folder / 'extension.json', {'pluginName': 'UnrealAINew', 'minEngineVersion': bad})
+                    with self.assertRaisesRegex(ValueError, 'minEngineVersion'):
+                        release.min_engine('UnrealAINew')
+
+    def test_every_extension_declares_the_engines_it_builds_on(self):
+        # The data that replaced the CI's hard-coded "extensions need UE 5.7+": no extension on UE 5.5 / 5.6, Mesh Terrain
+        # (MeshPartition) only from UE 5.8.
+        for plugin in release.components():
+            self.assertIsNotNone(release.min_engine(plugin), plugin)
+            self.assertFalse(release.supports_engine(plugin, (5, 6)), plugin)
+        self.assertEqual(release.min_engine('UnrealAIMeshTerrain'), (5, 8))
+        self.assertEqual(suite.for_engine((5, 6), None), [])
+        self.assertNotIn('UnrealAIMeshTerrain', suite.for_engine((5, 7), None))
+        self.assertEqual(sorted(suite.for_engine((5, 7), None)), sorted(set(release.components()) - {'UnrealAIMeshTerrain'}))
+        self.assertIn('UnrealAIMeshTerrain', suite.for_engine((5, 8), None))
+        self.assertEqual(suite.for_engine((5, 7), ['UnrealAIMeshTerrain', 'UnrealAIPCG']), ['UnrealAIPCG'])
+
+    def test_suite_on_an_older_engine_neither_prepares_nor_builds_a_newer_extension(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 7})
+            built, ran = [], []
+            argv = ['extension_suite.py', '--engine', str(engine), '--output', str(root / 'out'), '--mode', 'automation']
+            with patch.object(suite, 'machine_lock'), patch.object(suite, 'build', lambda engine, project: built.append(project)),                     patch.object(suite, 'automation', lambda engine, project, selected, *a, **k: ran.append(selected) or {}),                     patch.object(suite.sys, 'argv', argv):
+                self.assertEqual(suite.main(), 0)
+                argv[-1:] = ['automation', '--extensions', 'UnrealAIMeshTerrain']
+                self.assertEqual(suite.main(), 0)
+            self.assertEqual(len(built), 2)
+            self.assertNotIn('UnrealAIMeshTerrain', ran[0])
+            self.assertEqual(ran[1], [])
+            for project in built:
+                self.assertFalse((project.parent / 'Plugins/UnrealAIMeshTerrain').exists())
+                self.assertNotIn('UnrealAIMeshTerrain', project.read_text())
+            self.assertTrue(built[0].parent.name.startswith('all-'), 'every extension this engine builds is an "all" profile')
+            self.assertNotEqual(built[0].parent.name, built[1].parent.name, 'profiles of different plugin sets never share a folder')
 
 if __name__ == '__main__':
     unittest.main()
