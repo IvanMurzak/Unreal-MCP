@@ -43,7 +43,7 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 ✅ **Visual feedback** — viewport, game-view, camera and isolated-actor screenshots\
 ✅ **Python** — run editor Python with the full `unreal` API\
 ✅ **Fab** — search Fab, list your library, add owned content\
-✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input\
+✅ **Extensions** — GAS, Niagara, PCG, Landscape, Control Rig, Enhanced Input, Mesh Terrain (experimental)\
 ✅ **Your own tools** — add tools, prompts and resources from any plugin ([guide](docs/EXTENSIONS.md))\
 ✅ **Runtime mode** — opt in to drive a running game ([docs/RUNTIME.md](docs/RUNTIME.md))\
 ✅ **Cloud or local** — `ai-game.dev` out of the box, or a self-hosted `gamedev-mcp-server`

@@ -43,7 +43,7 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 ✅ **可视化反馈** — 视口、游戏视图、摄像机和单独 Actor 的截图\
 ✅ **Python** — 运行编辑器 Python，可使用完整的 `unreal` API\
 ✅ **Fab** — 搜索 Fab、列出你的资源库、添加你拥有的内容\
-✅ **扩展** — GAS、Niagara、PCG、Landscape、Control Rig、Enhanced Input\
+✅ **扩展** — GAS、Niagara、PCG、Landscape、Control Rig、Enhanced Input、Mesh Terrain（实验性）\
 ✅ **你自己的工具** — 从任何插件添加工具、提示词和资源（[指南](EXTENSIONS.md)）\
 ✅ **运行时模式** — 可选开启，用于驱动正在运行的游戏（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）\
 ✅ **云端或本地** — 开箱即用的 `ai-game.dev`，或自托管的 `gamedev-mcp-server`

@@ -49,7 +49,7 @@
 ‏✅ ‏**تغذية راجعة مرئية** — لقطات شاشة لنافذة العرض، وعرض اللعبة، والكاميرا، والأكتور المعزول\
 ‏✅ ‏**Python** — شغّل Python المحرر مع واجهة `unreal` البرمجية كاملة\
 ‏✅ ‏**Fab** — ابحث في Fab، واعرض مكتبتك، وأضف المحتوى الذي تملكه\
-‏✅ ‏**الامتدادات** — GAS وNiagara وPCG وLandscape وControl Rig وEnhanced Input\
+‏✅ ‏**الامتدادات** — GAS وNiagara وPCG وLandscape وControl Rig وEnhanced Input وMesh Terrain (تجريبي)\
 ‏✅ ‏**أدواتك الخاصة** — أضف أدوات ومطالبات وموارد من أي إضافة ([الدليل](EXTENSIONS.md))\
 ‏✅ ‏**وضع Runtime** — فعّله اختياريًا للتحكم في لعبة قيد التشغيل ([docs/RUNTIME.md](RUNTIME.ar.md))\
 ‏✅ ‏**سحابي أو محلي** — ‏`ai-game.dev` جاهز للاستخدام، أو `gamedev-mcp-server` مستضاف ذاتيًا
