@@ -6,6 +6,7 @@ import { findUnrealProjectRoot, update, updateProject, readPluginVersion } from 
 import * as os from 'os';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
+import { EXTENSIONS_INDEX_URL } from '../src/utils/extensions-index.js';
 import { makeMinisignKeypair, type MinisignTestKeypair } from './minisign-fixture.js';
 
 const dirs: string[] = [];
@@ -385,6 +386,29 @@ describe('update and an open editor, the dry run, and links', () => {
     expect(r.toVersion).toBe('0.2.0');
     expect(r.extensions).toEqual([expect.objectContaining({ pluginName: 'UnrealAINiagara', from: '0.0.1', status: 'unknown' })]);
     expect(readPluginVersion(path.join(project, 'Plugins', 'UnrealMCP', 'UnrealMCP.uplugin'))).toBe('0.1.0');
+  });
+
+  it('plans an extension update only to a release the project engine can build', async () => {
+    const project = seededProject(); // UE 5.7
+    const dir = path.join(project, 'Plugins', 'UnrealAINiagara');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'UnrealAINiagara.uplugin'), JSON.stringify({ VersionName: '0.1.0' }), 'utf-8');
+    const index = { schemaVersion: 1, extensions: [{
+      extensionId: 'com.ivanmurzak.unreal-ai-niagara', name: 'Niagara', description: 'x', pluginName: 'UnrealAINiagara',
+      repo: 'IvanMurzak/Unreal-MCP', version: '0.2.0', minCoreVersion: '0.1.0', enginePlugins: ['Niagara'], tools: [], minEngineVersion: '5.8',
+      releases: {
+        '0.1.0': { repo: 'IvanMurzak/Unreal-MCP', tag: 'niagara-v0.1.0', minEngineVersion: '5.7' },
+        '0.2.0': { repo: 'IvanMurzak/Unreal-MCP', tag: 'niagara-v0.2.0', minEngineVersion: '5.8' },
+      },
+    }] };
+    const fetchImpl = (async (url: string) => (String(url) === EXTENSIONS_INDEX_URL
+      ? new Response(JSON.stringify(index))
+      : new Response('', { status: 404 }))) as unknown as typeof fetch;
+
+    const r = await update({ projectDir: project, pluginSourceDir: makeSource('0.2.0'), fetchImpl, indexCachePath: path.join(tmp(), 'index.json'), dryRun: true });
+
+    if (r.kind !== 'success') throw r.error;
+    expect(r.extensions).toEqual([expect.objectContaining({ pluginName: 'UnrealAINiagara', from: '0.1.0', to: '0.1.0', status: 'current' })]);
   });
 
   it('checks the extensions even when the plugin is current', async () => {

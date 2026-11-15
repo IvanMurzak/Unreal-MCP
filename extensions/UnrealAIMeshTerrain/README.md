@@ -1,8 +1,9 @@
 # Mesh Terrain RQL module (Experimental)
 
 **Experimental, Unreal Engine 5.8+ only.** RQL module for Unreal's experimental Mesh Terrain (the Mesh Partition plugin
-behind Mesh Terrain Mode): query mesh terrains, their built sections and their modifiers; read the ground height, slope
-and paint channels; rebuild a terrain and wait until its mesh, collision and rendering match its modifiers.
+behind Mesh Terrain Mode): create mesh terrains (flat or from a heightmap); query, add, edit, reorder and remove their
+modifiers (noise, splines, shapes, lattices, ...); sculpt and paint; read the ground height, slope and paint channels;
+rebuild a terrain and wait until its mesh, collision and rendering match its modifiers.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release
 archive. Mesh Terrain itself is experimental in Unreal Engine 5.8 and changes between engine versions; so does this

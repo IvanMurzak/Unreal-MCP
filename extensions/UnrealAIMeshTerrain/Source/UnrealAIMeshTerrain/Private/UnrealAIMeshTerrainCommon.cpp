@@ -7,6 +7,7 @@
 #include "UnrealMcpRqlPlay.h"
 
 #include "ActorFactories/ActorFactory.h"
+#include "Algo/AllOf.h"
 #include "Algo/AnyOf.h"
 #include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
@@ -385,7 +386,7 @@ namespace UnrealAIMeshTerrain
 		if (!Component)
 			return State;
 		const TSet<UModifierComponent*> Current(Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier); }));
-		State.bNoBase = !Algo::AnyOf(Current, [](const UModifierComponent* Modifier) { return Modifier->IsBase() && !Modifier->GetIsDisabledFlag(); });
+		State.bNoBase = !Algo::AnyOf(Current, [](const UModifierComponent* Modifier) { return Modifier->IsBase() && !Modifier->IsDisabled(); });
 		// A modifier that loaded (World Partition) or was spawned joins the build when the editor component lists it.
 		ForEachTerrainActorDesc(Terrain, [Terrain, &State, &Current](const FWorldPartitionActorDescInstance& Instance)
 		{
@@ -615,7 +616,10 @@ namespace UnrealAIMeshTerrain
 		Params.LocationVolumesResolution = FInt32Point(0, 0);
 		UE::MeshPartition::FMegaMeshRectangleGenerator Generator(Params, *World, FTransform(Center));
 		if (!Generator.Generate(nullptr) || !Generator.GetMegaMesh())
+		{
+			DestroyTerrain(Generator.GetMegaMesh()); // whatever a failed generation spawned (null-safe)
 			return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("Mesh Terrain creation failed: %s"), *Generator.GetErrorText().ToString()));
+		}
 		AMeshPartition* Terrain = Generator.GetMegaMesh();
 		if (!Label.IsEmpty())
 			Terrain->SetActorLabel(Label);
@@ -627,14 +631,32 @@ namespace UnrealAIMeshTerrain
 		if (!IsValid(Terrain))
 			return;
 		UWorld* World = Terrain->GetWorld();
+		// The terrain's own actors go whole: its base meshes (attached to it) and modifier actors whose modifiers all shape
+		// it. A modifier on any other actor (a Blueprint, an actor that also shapes another terrain) goes alone, as Remove does.
 		TArray<AActor*> Actors;
+		TArray<UModifierComponent*> Components;
 		for (UModifierComponent* Modifier : Modifiers(Terrain, /*bBases*/ true))
 		{
-			if (AActor* Owner = Modifier->GetOwner(); Owner && Owner != Terrain)
+			AActor* Owner = Modifier->GetOwner();
+			if (!Owner || Owner == Terrain)
+				continue;
+			TArray<UModifierComponent*> Siblings;
+			Owner->GetComponents(Siblings);
+			const bool bTerrainActor = (Modifier->IsBase() || Cast<UE::MeshPartition::AModifierActor>(Owner) || Owner->GetAttachParentActor() == Terrain)
+				&& Algo::AllOf(Siblings, [Terrain](const UModifierComponent* Sibling) { return TerrainOf(Sibling) == Terrain; });
+			if (bTerrainActor)
 				Actors.AddUnique(Owner);
+			else
+				Components.Add(Modifier);
 		}
 		Actors.Add(Terrain);
 		const FScopedTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "DestroyTerrain", "Delete Mesh Terrain"));
+		for (UModifierComponent* Modifier : Components)
+		{
+			Modifier->GetOwner()->Modify();
+			Modifier->Modify();
+			Modifier->DestroyComponent();
+		}
 		for (AActor* Actor : Actors)
 			World->EditorDestroyActor(Actor, /*bShouldModifyLevel*/ true);
 	}

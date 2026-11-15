@@ -123,7 +123,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Add(UE::MeshPartition::AMeshPartition* Terrain, const FString& Kind, FVector Location, const FString& Label = TEXT(""));
 
-	/** change a modifier's common parameters (a negative value keeps the current one; a refused change changes nothing): Size [X, Y, Z] cm (Shape, Lattice, Remesh; Noise and TexturePatch take X and Y), Radius cm (Patch, Weight), Width cm (Spline), Strength (Noise height cm, Weight value 0..1, TexturePatch height cm), Falloff (Noise 0..1; Patch, Weight, Spline cm); other properties: set */
+	/** change a modifier's common parameters (a negative value keeps the current one; a refused change changes nothing): Size [X, Y, Z] cm (Shape, Lattice, Remesh; Noise and TexturePatch take X and Y), Radius cm (Patch, Weight), Width cm (Spline), Strength (Noise height cm, Weight value 0..1, TexturePatch height cm; to make a Noise height negative: set Intensity), Falloff (Noise 0..1; Patch, Weight, Spline cm); other properties: set */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Edit(UE::MeshPartition::UModifierComponent* Modifier, FVector Size = FVector(-1.0, -1.0, -1.0), double Radius = -1.0, double Width = -1.0, double Strength = -1.0, double Falloff = -1.0);
 

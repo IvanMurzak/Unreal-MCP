@@ -220,7 +220,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::Create(const F
 	if (!(SizeYMeters >= MinSizeMeters && SizeYMeters <= MaxSizeMeters))
 		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("SizeYMeters %g is outside %g .. %g (0 = square)"), SizeYMeters, MinSizeMeters, MaxSizeMeters));
 	if (Resolution < 0 || Resolution > MaxQuadsPerSide)
-		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("Resolution %d is outside 1 .. %d quads (0 = about one per metre)"), Resolution, MaxQuadsPerSide));
+		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("Resolution %d is outside 1 .. %d quads (0 = about one per metre, at most 1000)"), Resolution, MaxQuadsPerSide));
 
 	// Square quads: Resolution along X, Y in proportion (0: about one quad per metre, at most 1000 per side).
 	const double LongerMeters = FMath::Max(SizeMeters, SizeYMeters);

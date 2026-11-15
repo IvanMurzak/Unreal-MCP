@@ -192,9 +192,7 @@ export async function installExtension(
       const latestGate = releaseGates(indexed, toVersion).minEngineVersion;
       const engine = latestGate ? projectEngine() : null;
       if (latestGate && engine && !engineMeetsMinimum(engine, latestGate)) {
-        const fallback = Object.keys(indexed.releases)
-          .filter((v) => engineMeetsMinimum(engine, releaseGates(indexed, v).minEngineVersion))
-          .sort((a, b) => compareSemver(b, a))[0];
+        const fallback = newestReleaseForEngine(indexed, engine);
         if (fallback !== undefined) {
           warnings.push(
             `The latest ${pluginName} ${toVersion} requires Unreal Engine ${latestGate} or newer; installing ${fallback}, ` +
@@ -558,7 +556,7 @@ function extractZip(zipBytes: Uint8Array, destDir: string, warnings: string[]): 
  * install, `"5.8"`), else the `Build.version` of `--engine-root` or of the engine the association
  * resolves to (a source build's GUID). `null` when unknown.
  */
-function projectEngineVersion(engineAssociation: string, opts: InstallExtensionOptions): [number, number] | null {
+export function projectEngineVersion(engineAssociation: string, opts: EngineLookupOptions): [number, number] | null {
   // --engine-root is the engine that builds the project (runUbtBuild uses it first), so it is asked first too.
   const explicitRoot = (opts.engineRoot ?? '').trim();
   if (explicitRoot) {
@@ -571,18 +569,28 @@ function projectEngineVersion(engineAssociation: string, opts: InstallExtensionO
   return engineRoot ? parseEngineVersion(readEngineAssociationFromBuildVersion(engineRoot, process.platform)) : null;
 }
 
+/** What projectEngineVersion needs from the install options. */
+type EngineLookupOptions = Pick<InstallExtensionOptions, 'engineRoot' | 'resolveEngineRootImpl'>;
+
 /**
- * The gates of indexed release @p version: its own record's, else (a record published before the gates
- * existed) the entry's when it is the latest version, which the entry describes, else none.
+ * The gates of indexed release @p version: its own record's. A record published before the gates existed
+ * has no engine floor of its own: it takes the entry's (the floor never drops, and those releases were never
+ * built for older engines either); it is experimental only when it is the latest version, which the entry describes.
  */
-function releaseGates(indexed: IndexedExtension, version: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
+export function releaseGates(indexed: IndexedExtension, version: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
   const release = indexed.releases[stripLeadingV(version)];
   const latest = stripLeadingV(version) === indexed.version;
   return {
-    minEngineVersion: release?.minEngineVersion !== undefined ? release.minEngineVersion
-      : latest ? indexed.minEngineVersion ?? null : null,
+    minEngineVersion: release?.minEngineVersion !== undefined ? release.minEngineVersion : indexed.minEngineVersion ?? null,
     experimental: release?.experimental ?? (latest ? indexed.experimental === true : false),
   };
+}
+
+/** The newest release of @p indexed that an engine `[major, minor]` can build, or undefined when none. */
+export function newestReleaseForEngine(indexed: IndexedExtension, engine: readonly [number, number]): string | undefined {
+  return Object.keys(indexed.releases)
+    .filter((v) => engineMeetsMinimum(engine, releaseGates(indexed, v).minEngineVersion))
+    .sort((a, b) => compareSemver(b, a))[0];
 }
 
 /**
@@ -592,7 +600,11 @@ function releaseGates(indexed: IndexedExtension, version: string): Pick<Extensio
 function readSourceGates(sourceArg: string): Pick<ExtensionDescriptor, 'minEngineVersion' | 'experimental'> {
   const pluginRoot = resolveLocalPluginRoot(sourceArg);
   const metadataFile = path.join(pluginRoot, 'extension.json');
-  const metadata = fs.existsSync(metadataFile) ? (safeReadJson(metadataFile) as Record<string, unknown>) : {};
+  const parsed: unknown = fs.existsSync(metadataFile) ? safeReadJson(metadataFile) : {};
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${metadataFile}: must be a JSON object.`);
+  }
+  const metadata = parsed as Record<string, unknown>;
   const minEngineVersion = metadata.minEngineVersion ?? null;
   if (minEngineVersion !== null && (typeof minEngineVersion !== 'string' || !ENGINE_VERSION.test(minEngineVersion))) {
     throw new Error(`${metadataFile}: minEngineVersion must be "<major>.<minor>" (e.g. "5.8"), got ${JSON.stringify(minEngineVersion)}.`);
@@ -672,7 +684,7 @@ async function runUbtBuild(
 }
 
 /** Resolve an engine root from the project's EngineAssociation via the discovery chain. */
-function resolveEngineRoot(engineAssociation: string, opts: InstallExtensionOptions): string | null {
+function resolveEngineRoot(engineAssociation: string, opts: EngineLookupOptions): string | null {
   if (opts.resolveEngineRootImpl) return opts.resolveEngineRootImpl(engineAssociation);
   const r = discoverEngine({ engineAssociation, noCache: true });
   return r.kind === 'resolved' ? r.engineRoot : null;

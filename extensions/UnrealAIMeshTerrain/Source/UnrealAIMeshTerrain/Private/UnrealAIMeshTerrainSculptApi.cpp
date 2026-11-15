@@ -13,6 +13,7 @@
 
 #include "MeshPartition.h"
 #include "MeshPartitionDefinition.h"
+#include "MeshPartitionEditorComponent.h"
 #include "MeshPartitionModifierToolTarget.h"
 #include "Modifiers/MeshPartitionMeshProvider.h"
 #include "Modifiers/MeshPartitionProjectSculptLayersModifier.h"
@@ -111,7 +112,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 	{
 		const FTransform Transform = Brush->GetComponentTransform();
 		const uint8* Method = PropertyValue<uint8>(Brush, TEXT("ProjectMethod"));
-		if (Brush->GetIsDisabledFlag() || !Transform.GetRotation().Equals(FQuat::Identity, 1e-4) || !Transform.GetScale3D().Equals(FVector::OneVector, 1e-4)
+		if (Brush->IsDisabled() || !Transform.GetRotation().Equals(FQuat::Identity, 1e-4) || !Transform.GetScale3D().Equals(FVector::OneVector, 1e-4)
 			|| !Method || *Method != static_cast<uint8>(UE::MeshPartition::ESculptLayerProjectMethod::FixedDirection) || BoolProperty(Brush, TEXT("bSculptAbsolutePositions")))
 			return false;
 		const int32 Layer = Brush->GetActiveLayer() - 1; // LayerWeights leaves out the base layer (0)
@@ -368,12 +369,12 @@ namespace UnrealAIMeshTerrainSculptLocal
 
 		FScopedTransaction Transaction(Description);
 		UWorld* World = Terrain->GetWorld();
+		AMeshPartition* Previous = nullptr; // the terrain the factory bound a new brush to first
 		if (bNew)
 		{
 			// Placed the way Mesh Terrain Mode's modifier palette places one, on the ground under the point.
 			const FSurfaceSample Ground = SampleSurface(Terrain, Stroke.Point.X, Stroke.Point.Y, /*bChannels*/ false);
 			const FVector Location(Stroke.Point, Ground.bInside ? Ground.Height : Terrain->GetActorLocation().Z);
-			AMeshPartition* Previous = nullptr;
 			Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
 				UniqueLabel(World, Terrain->GetActorLabel() + TEXT("_Brush")), Previous));
 			if (!Brush)
@@ -433,6 +434,11 @@ namespace UnrealAIMeshTerrainSculptLocal
 			{
 				if (Owner)
 					World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
+				for (const AMeshPartition* Bound : { Terrain, Previous })
+				{
+					if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
+						Component->UpdateModifierList();
+				}
 				return;
 			}
 			Brush->SetChannelEntries(OldEntries);

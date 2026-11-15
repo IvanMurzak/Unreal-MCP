@@ -263,7 +263,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;EnhancedInput](extensions/UnrealAIEnhancedInput/README.md) | Input actions, mapping contexts, triggers and modifiers | `EnhancedInput`, UE 5.7+ |
 | [AI&nbsp;GAS](extensions/UnrealAIGAS/README.md) | Gameplay Effects, ability Blueprints and attribute sets | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](extensions/UnrealAILandscape/README.md) | Landscapes, oceans, lakes and rivers | `Water`, UE 5.7+ |
-| [AI&nbsp;MeshTerrain](extensions/UnrealAIMeshTerrain/README.md) | Mesh terrains (experimental): terrains, modifiers, surface height, rebuild | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
+| [AI&nbsp;MeshTerrain](extensions/UnrealAIMeshTerrain/README.md) | Mesh terrains (experimental): create, modifiers, sculpt and paint, surface height, rebuild | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](extensions/UnrealAINiagara/README.md) | Niagara systems, emitters, modules and collision | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](extensions/UnrealAIPCG/README.md) | PCG graphs, volumes and generated scatters | `PCG`, UE 5.7+ |
 
