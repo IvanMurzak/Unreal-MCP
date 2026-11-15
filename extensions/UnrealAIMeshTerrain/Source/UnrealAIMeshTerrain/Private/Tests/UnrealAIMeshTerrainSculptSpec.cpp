@@ -269,6 +269,9 @@ void FUnrealAIMeshTerrainSculptSpec::Define()
 		// Erasing where nothing is painted changes nothing: a no-op, not an error.
 		Stroke = SculptSpecStroke(TEXT("Erase"), Label, { TEXT("\"Blue\""), Point, TEXT("300") }, &Json);
 		TestTrue(*FString::Printf(TEXT("Erase of an unpainted channel is a no-op (%s)"), *Json), Stroke.IsValid() && Stroke->GetIntegerField(TEXT("Vertices")) == 0);
+		const TArray<UE::MeshPartition::UProjectMeshLayersModifier*> After = SculptSpecBrushes(Terrain);
+		TestTrue(TEXT("... and adds no Blue entry to the brush"), After.Num() == 1 && After[0]->GetChannelEntries().Num() == 2
+			&& !After[0]->GetChannelEntries().ContainsByPredicate([](const UE::MeshPartition::FSculptLayerModifierWeightAttributeEntry& Entry) { return Entry.ChannelName.GetName() == TEXT("Blue"); }));
 	});
 
 	It("undoes and redoes a stroke (one undo step per call)", [this]()
@@ -297,7 +300,7 @@ void FUnrealAIMeshTerrainSculptSpec::Define()
 		TestTrue(*FString::Printf(TEXT("both strokes again (%.2f)"), SculptSpecHeight(Terrain, Center.X, Center.Y)), FMath::IsNearlyEqual(SculptSpecHeight(Terrain, Center.X, Center.Y), 300.0, 1.0));
 	});
 
-	It("flattens over a noise modifier: the brush applies after the terrain's other modifiers", [this]()
+	It("flattens over a noise modifier: the brush applies after the terrain's other modifiers, and is not reused under a later one", [this]()
 	{
 		const FString Label = SculptSpecLabel(TEXT("SculptNoise"));
 		const FVector Center(-1000000.0, 2000000.0, 0.0);
@@ -331,6 +334,16 @@ void FUnrealAIMeshTerrainSculptSpec::Define()
 			// The collision is the simplified (Nanite fallback) mesh: flat ground stays within a few cm of the model.
 			TestTrue(*FString::Printf(TEXT("flat at 120 cm at %s (%.2f)"), *Offset.ToString(), Height), FMath::IsNearlyEqual(Height, 120.0, 5.0));
 		}
+
+		// Move the noise after the brush: a stroke there must not go into that brush (the noise would move it), but a new one.
+		// meshTerrainModifiers | where Owner.Label == "<label>_Noise" | set Priority = 10
+		TestTrue(TEXT("noise after the brush"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifiers"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Owner","Label"]},{"lit":"%s_Noise"}]}},{"op":"set","assign":[{"target":{"path":["Priority"]},"value":{"lit":10}}]}]})RQL"), *Label), true));
+		const TSharedPtr<FJsonObject> Later = SculptSpecStroke(TEXT("Sculpt"), Label, { TEXT("\"Flatten\""), TEXT("[-1000000, 2000000]"), TEXT("1000"), TEXT("200"), TEXT("1"), TEXT("0.2") }, &Json);
+		TestTrue(*FString::Printf(TEXT("a new brush after the noise (%s)"), *Json), Later.IsValid() && Later->GetBoolField(TEXT("NewBrush")));
+		const TArray<UE::MeshPartition::UProjectMeshLayersModifier*> Brushes = SculptSpecBrushes(Terrain);
+		TestTrue(TEXT("two brushes, the new one last"), Brushes.Num() == 2 && Brushes.Last()->GetPriority() > 10.0);
+		const double Pad = SculptSpecHeight(Terrain, Center.X + 130.0, Center.Y + 270.0);
+		TestTrue(*FString::Printf(TEXT("flat at 200 cm on top of the moved noise (%.2f)"), Pad), FMath::IsNearlyEqual(Pad, 200.0, 5.0));
 	});
 
 	It("sculpts and paints across a section border into one brush modifier", [this]()

@@ -67,8 +67,8 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
 - `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
   within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
-  centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` 0..1 scales the stroke.
-- `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff)`:
+  centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
+- `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff = 0.5)`:
   move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0).
 - Strokes are stored the way Mesh Terrain Mode's Sculpt and Paint tools store theirs: in a brush modifier
   (`ProjectMeshLayersModifier`, the mode's "BrushModifier", labelled `<terrain>_Brush`), the sculpt as offsets in its
@@ -77,7 +77,12 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
   most 600 x 600 m, about a million vertices), else into a new brush placed after the terrain's other modifiers; so
   repeated strokes accumulate in one brush and stay editable with the mode's Sculpt / Paint tools (select the brush). Each
   call is one undo step and returns when the terrain is rebuilt: `Brush`, `NewBrush`, `Vertices` (changed), `Before` /
-  `After` (height or weight at the centre), `Ready`, `Seconds`.
+  `After` (full-resolution height or weight at the centre), `Ready`, `Seconds`.
+- Like the mode's brushes, a brush stores sculpt OFFSETS on top of the modifiers before it: when one of those changes later,
+  the sculpted ground moves with it (a flattened pad is no longer flat). A brush that has another modifier after it over
+  its area is not reused (a new brush is placed after it). A painted channel is `Set` by the brush over its whole box: the
+  channel there keeps the values it had when it was first painted, whatever the modifiers below write later.
+- When a stroke fails waiting for the build (timeout), it is already applied: call `WaitForBuild`, do not repeat it.
 - Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a brush off the terrain, an unknown sculpt mode or
   paint channel (with the ones there are), out-of-range radius / height / strength / weight / falloff, a build that does not finish in time
   (with what is still pending), Mesh Terrain plugins not enabled (with what to enable).

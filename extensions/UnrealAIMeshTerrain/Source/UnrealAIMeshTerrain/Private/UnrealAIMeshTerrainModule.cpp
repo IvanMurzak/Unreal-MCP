@@ -259,10 +259,12 @@ meshTerrain | call EnableMeshTerrain()                                     MeshT
 
 Brush strokes (`meshTerrainBrush`) shape and paint by hand, like Mesh Terrain Mode's Sculpt and Paint tools: around a
 world X, Y within `Radius` cm (at most 25000) with a soft edge (`Falloff` 0..1, 0 = hard). Sculpt modes: `Raise` / `Lower`
-(by `Height` cm at the centre), `Flatten` (to world Z `Height`), `Smooth`; `Strength` 0..1 scales a stroke. `Paint` moves a
+(by `Height` cm at the centre), `Flatten` (to world Z `Height`), `Smooth`; `Strength` (0, 1] scales a stroke. `Paint` moves a
 channel (one of the terrain's `Channels`, e.g. "Red") towards `Weight` 0..1; `Erase` takes it to 0. A stroke is stored in a
 brush modifier (`Kind` ProjectMeshLayers, "<terrain>_Brush"): strokes near one go into it, so they accumulate and stay
-editable in the mode. Each call is one undo step and returns when the terrain is rebuilt.
+editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (a stroke that times out
+waiting for the build is already applied: `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
+modifiers before it, so edit noise / shapes first and sculpt last.
 
 ```
 meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Raise", [1200, -800, 0], 1500, 400)      a 4 m hill, 15 m radius

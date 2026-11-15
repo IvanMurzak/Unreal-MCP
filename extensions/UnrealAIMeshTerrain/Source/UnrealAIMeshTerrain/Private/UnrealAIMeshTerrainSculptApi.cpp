@@ -107,8 +107,8 @@ namespace UnrealAIMeshTerrainSculptLocal
 	/**
 	 * Whether a stroke can go into @p Brush the way these operations edit it: enabled, upright and unscaled (the stroke is a
 	 * world-space circle moved along world Z), projecting along a fixed direction, storing offsets (not absolute positions),
-	 * an active sculpt layer with a weight (else the layer cannot be edited) and, to paint, a plain Set entry for the channel
-	 * (or none yet).
+	 * a sculpt layer active (not the locked base) with a weight (else the layer cannot be edited), no channel scaling its
+	 * sculpt layers (a Raise would move less than asked) and, to paint, a plain Set entry for the channel (or none yet).
 	 */
 	bool CanTakeStroke(UProjectMeshLayersModifier* Brush, const FStroke& Stroke)
 	{
@@ -117,14 +117,15 @@ namespace UnrealAIMeshTerrainSculptLocal
 		if (Brush->GetIsDisabledFlag() || !Transform.GetRotation().Equals(FQuat::Identity, 1e-4) || !Transform.GetScale3D().Equals(FVector::OneVector, 1e-4)
 			|| !Method || *Method != static_cast<uint8>(UE::MeshPartition::ESculptLayerProjectMethod::FixedDirection) || BoolProperty(Brush, TEXT("bSculptAbsolutePositions")))
 			return false;
-		const int32 Layer = Brush->GetActiveLayer() - 1; // LayerWeights leaves out the base layer
-		if (Brush->LayerWeights.IsValidIndex(Layer) && FMath::IsNearlyZero(Brush->LayerWeights[Layer]))
+		const int32 Layer = Brush->GetActiveLayer() - 1; // LayerWeights leaves out the base layer (0)
+		if (Layer < 0 || (Brush->LayerWeights.IsValidIndex(Layer) && FMath::IsNearlyZero(Brush->LayerWeights[Layer])))
 			return false;
-		if (Stroke.Kind != EStroke::Paint)
-			return true;
-		const FSculptLayerModifierWeightAttributeEntry* Entry = ChannelEntry(Brush->GetChannelEntries(), Stroke.Channel);
+		const TArray<FSculptLayerModifierWeightAttributeEntry> Entries = Brush->GetChannelEntries(); // a copy: returned by value
+		if (Entries.ContainsByPredicate([](const FSculptLayerModifierWeightAttributeEntry& Entry) { return Entry.bScaleSculptLayers; }))
+			return false;
+		const FSculptLayerModifierWeightAttributeEntry* Entry = Stroke.Kind == EStroke::Paint ? ChannelEntry(Entries, Stroke.Channel) : nullptr;
 		return !Entry || (Entry->Method == UE::MeshPartition::ESculptLayerSetWeightChannelMethod::Set && !Entry->bInternalChannel
-			&& FMath::IsNearlyEqual(Entry->BlendWeight, 1.0f) && !Entry->bScaleSculptLayers);
+			&& FMath::IsNearlyEqual(Entry->BlendWeight, 1.0f));
 	}
 
 	/** The terrain's vertices per cm² (the densest base mesh near @p Area): to bound the size of a brush's edit mesh. */
@@ -165,8 +166,12 @@ namespace UnrealAIMeshTerrainSculptLocal
 
 	/**
 	 * Move the vertices of @p Mesh (in the brush's local space, @p Transform to world) that the stroke covers (or their
-	 * channel weights); returns how many changed, INDEX_NONE when no vertex is under the brush.
+	 * channel weights); returns how many changed, NoVertex when no vertex is under the brush, NoWeightLayer when the mesh has
+	 * no weight attribute for the painted channel.
 	 */
+	constexpr int32 NoVertex = -1;
+	constexpr int32 NoWeightLayer = -2;
+
 	int32 ApplyStroke(FDynamicMesh3& Mesh, const FTransform& Transform, const FStroke& Stroke, double& OutBefore, double& OutAfter)
 	{
 		const FVector Local = Transform.InverseTransformPosition(FVector(Stroke.Point, 0.0));
@@ -188,7 +193,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			}
 		}
 		if (Weights.IsEmpty())
-			return INDEX_NONE;
+			return NoVertex;
 
 		if (Stroke.Kind == EStroke::Paint)
 		{
@@ -200,7 +205,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 					Channel = Attributes->GetWeightLayer(Index);
 			}
 			if (!Channel)
-				return 0;
+				return NoWeightLayer;
 			const auto Read = [Channel](int32 Vertex) { float Value = 0.0f; Channel->GetValue(Vertex, &Value); return Value; };
 			OutBefore = Read(Nearest);
 			int32 Changed = 0;
@@ -315,35 +320,55 @@ namespace UnrealAIMeshTerrainSculptLocal
 					Stroke.Radius, *Terrain->GetActorNameOrLabel(), Built.Min.X, Built.Max.X, Built.Min.Y, Built.Max.Y)
 				: FString::Printf(TEXT("%s has no built ground to sculpt (no base mesh?)"), *Terrain->GetActorNameOrLabel()));
 		}
-		const double Density = VertexDensity(Terrain, Area);
-		const double Spacing = Density > 0.0 ? FMath::Sqrt(1.0 / Density) : 100.0;
+		const double StrokeDensity = VertexDensity(Terrain, Area);
+		const double Spacing = StrokeDensity > 0.0 ? FMath::Sqrt(1.0 / StrokeDensity) : 100.0;
 		const double Margin = 2.0 * Spacing + 100.0;
-		const auto Estimate = [Density](const FVector2D& HalfExtents) { return Density * 4.0 * HalfExtents.X * HalfExtents.Y; };
+		const auto BoxAround = [](const FVector2D& Center, const FVector2D& HalfExtents) { return FBox2D(Center - HalfExtents, Center + HalfExtents); };
+		// The vertices a brush box holds, from the densest base mesh it reaches.
+		const auto Estimate = [Terrain](const FBox2D& Box) { return VertexDensity(Terrain, Box) * Box.GetArea(); };
 
 		// The brush modifier the stroke goes into: one that covers the area already (the last in build order), else one that
 		// overlaps it or is near (within MinBrushHalfExtent) and may grow to cover it (the smallest growth), else a new one.
+		// Never one with an enabled modifier after it over its box: the stroke is made on the ground as the modifiers before
+		// the brush leave it, so a later one would move it (a Flatten would not be flat).
+		const TArray<UModifierComponent*> Stack = Modifiers(Terrain);
+		const auto CoveredLater = [&Stack](int32 Index, const FBox2D& Box)
+		{
+			for (int32 Later = Index + 1; Later < Stack.Num(); ++Later)
+			{
+				const FBox Bounds = Stack[Later]->ComputeCombinedBounds();
+				if (!Stack[Later]->GetIsDisabledFlag() && Bounds.IsValid && Box.Intersect(FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max))))
+					return true;
+			}
+			return false;
+		};
 		UProjectMeshLayersModifier* Brush = nullptr;
 		FVector2D Extents = FVector2D::ZeroVector;
 		double BestGrowth = TNumericLimits<double>::Max();
-		for (UModifierComponent* Modifier : Modifiers(Terrain))
+		for (int32 Index = 0; Index < Stack.Num(); ++Index)
 		{
-			UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Modifier);
+			UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Stack[Index]);
 			if (!Candidate || !CanTakeStroke(Candidate, Stroke))
 				continue;
+			const FVector2D Center(Candidate->GetComponentLocation());
 			const FVector2D Have = EditExtents(Candidate);
-			const FVector2D Offset = (Stroke.Point - FVector2D(Candidate->GetComponentLocation())).GetAbs();
+			const FVector2D Offset = (Stroke.Point - Center).GetAbs();
 			if (Offset.X + Stroke.Radius <= Have.X && Offset.Y + Stroke.Radius <= Have.Y)
 			{
-				Brush = Candidate;
-				Extents = Have;
-				BestGrowth = 0.0;
+				if (Estimate(BoxAround(Center, Have)) <= MaxVertices && !CoveredLater(Index, BoxAround(Center, Have)))
+				{
+					Brush = Candidate;
+					Extents = Have;
+					BestGrowth = 0.0;
+				}
 				continue;
 			}
 			if (BestGrowth == 0.0 || Offset.X - Stroke.Radius - Have.X > MinBrushHalfExtent || Offset.Y - Stroke.Radius - Have.Y > MinBrushHalfExtent)
 				continue; // a covering brush was found, or this one is far from the stroke
 			const FVector2D Need(FMath::Max(Have.X, Offset.X + Stroke.Radius + Margin), FMath::Max(Have.Y, Offset.Y + Stroke.Radius + Margin));
 			const double Growth = Need.X * Need.Y - Have.X * Have.Y;
-			if (Need.X <= MaxBrushHalfExtent && Need.Y <= MaxBrushHalfExtent && Estimate(Need) <= MaxVertices && Growth < BestGrowth)
+			if (Need.X <= MaxBrushHalfExtent && Need.Y <= MaxBrushHalfExtent && Growth < BestGrowth
+				&& Estimate(BoxAround(Center, Need)) <= MaxVertices && !CoveredLater(Index, BoxAround(Center, Need)))
 			{
 				Brush = Candidate;
 				Extents = Need;
@@ -354,14 +379,15 @@ namespace UnrealAIMeshTerrainSculptLocal
 		if (bNew)
 		{
 			double Half = Stroke.Radius + Margin;
-			if (Estimate(FVector2D(MinBrushHalfExtent)) <= MaxVertices / 4.0)
+			if (Estimate(BoxAround(Stroke.Point, FVector2D(MinBrushHalfExtent))) <= MaxVertices / 4.0)
 				Half = FMath::Max(Half, MinBrushHalfExtent);
 			Extents = FVector2D(Half);
-		}
-		if (Estimate(Extents) > MaxVertices)
-		{
-			return Failed(FString::Printf(TEXT("the stroke would edit about %.0f terrain vertices (at most %.0f, the terrain has a vertex every %.0f cm): use a smaller Radius"),
-				Estimate(Extents), MaxVertices, Spacing));
+			const double Vertices = Estimate(BoxAround(Stroke.Point, Extents));
+			if (Vertices > MaxVertices)
+			{
+				return Failed(FString::Printf(TEXT("the stroke would edit about %.0f terrain vertices (at most %.0f, the terrain has a vertex every %.0f cm): use a smaller Radius"),
+					Vertices, MaxVertices, Spacing));
+			}
 		}
 
 		FScopedTransaction Transaction(Description);
@@ -391,6 +417,11 @@ namespace UnrealAIMeshTerrainSculptLocal
 			Brush->SetPriority(Last);
 		}
 		AActor* Owner = Brush->GetOwner();
+		const auto FloatProperty = [Brush](const TCHAR* Name) { const float* Value = PropertyValue<float>(Brush, Name); return Value ? *Value : 0.0f; };
+		const FVector2D OldExtents = EditExtents(Brush);
+		const float OldUp = FloatProperty(TEXT("VerticalExtentUp"));
+		const float OldDown = FloatProperty(TEXT("VerticalExtentDown"));
+		const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
 		Brush->Modify();
 		if (Owner)
 			Owner->Modify();
@@ -399,15 +430,16 @@ namespace UnrealAIMeshTerrainSculptLocal
 			MeshObject->Modify(); // the stored sculpt mesh: undo restores it
 		if (EditExtents(Brush) != Extents)
 			SetProperty(Brush, TEXT("EditExtents"), Extents);
-		// Deep enough to reach all of the terrain's ground under the brush (and what the stroke raises).
-		const double Depth = FMath::Max(10000.0, Built.Max.Z - Built.Min.Z + 10000.0 + (Stroke.Kind == EStroke::Raise || Stroke.Kind == EStroke::Lower ? Stroke.Amount : 0.0));
+		// Deep enough to reach all of the terrain's ground under the brush, and where the stroke moves it.
+		const double BrushZ = Brush->GetComponentLocation().Z;
+		const double Reach = Stroke.Kind == EStroke::Raise || Stroke.Kind == EStroke::Lower ? Stroke.Amount
+			: Stroke.Kind == EStroke::Flatten ? FMath::Abs(Stroke.Amount - BrushZ) : 0.0;
+		const float Depth = static_cast<float>(FMath::Max(Built.Max.Z - BrushZ, BrushZ - Built.Min.Z) + Reach + 10000.0);
 		for (const TCHAR* Name : { TEXT("VerticalExtentUp"), TEXT("VerticalExtentDown") })
 		{
-			const float* Value = PropertyValue<float>(Brush, Name);
-			if (Value && *Value < Depth)
-				SetProperty(Brush, Name, static_cast<float>(Depth));
+			if (FloatProperty(Name) < Depth)
+				SetProperty(Brush, Name, Depth);
 		}
-		const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
 		if (Stroke.Kind == EStroke::Paint && !ChannelEntry(OldEntries, Stroke.Channel))
 		{
 			// What the Paint tool adds for a channel it paints: Set the brush's weights, unscaled. GetDynamicMesh then has a
@@ -420,12 +452,26 @@ namespace UnrealAIMeshTerrainSculptLocal
 		UE::MeshPartition::UEditableModifierToolTarget* Target = NewObject<UE::MeshPartition::UEditableModifierToolTarget>();
 		Target->Initialize(Brush);
 		FDynamicMesh3 Mesh = Target->GetDynamicMesh();
+		// A stroke that stores nothing (it failed, or changes nothing) leaves no new brush behind and a reused one as it was.
+		const auto Restore = [&]()
+		{
+			if (bNew)
+			{
+				if (Owner)
+					World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
+				return;
+			}
+			Brush->SetChannelEntries(OldEntries);
+			if (EditExtents(Brush) != OldExtents)
+				SetProperty(Brush, TEXT("EditExtents"), OldExtents);
+			if (FloatProperty(TEXT("VerticalExtentUp")) != OldUp)
+				SetProperty(Brush, TEXT("VerticalExtentUp"), OldUp);
+			if (FloatProperty(TEXT("VerticalExtentDown")) != OldDown)
+				SetProperty(Brush, TEXT("VerticalExtentDown"), OldDown);
+		};
 		const auto Abandon = [&](const FString& Message)
 		{
-			if (bNew && Owner)
-				World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
-			else
-				Brush->SetChannelEntries(OldEntries);
+			Restore();
 			return Failed(Message);
 		};
 		if (Mesh.VertexCount() > MaxVertices * 1.5)
@@ -436,7 +482,9 @@ namespace UnrealAIMeshTerrainSculptLocal
 
 		FUnrealAIMeshTerrainStroke Out;
 		Out.Vertices = ApplyStroke(Mesh, Target->GetWorldTransform(), Stroke, Out.Before, Out.After);
-		if (Out.Vertices == INDEX_NONE)
+		if (Out.Vertices == NoWeightLayer)
+			return Abandon(FString::Printf(TEXT("the brush modifier %s has no weight attribute for the channel %s"), Owner ? *Owner->GetActorLabel() : TEXT("?"), *Stroke.Channel.ToString()));
+		if (Out.Vertices == NoVertex)
 		{
 			return Abandon(FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
 				Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
@@ -445,15 +493,10 @@ namespace UnrealAIMeshTerrainSculptLocal
 		{
 			// Already that shape / weight there (an Erase where nothing is painted): nothing to store, and no new channel
 			// entry (a Set entry with nothing painted would pin the channel to its current values under the brush).
-			if (bNew && Owner)
-			{
-				World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
-			}
-			else
-			{
-				Brush->SetChannelEntries(OldEntries);
-				Out.Brush = Owner ? Owner->GetActorLabel() : FString();
-			}
+			Restore();
+			Out.Brush = bNew || !Owner ? FString() : Owner->GetActorLabel();
+			if (!WaitForBuild(Terrain))
+				return FUnrealAIMeshTerrainStroke();
 			Out.Ready = true;
 			Out.Seconds = Elapsed();
 			return Out;
