@@ -38,6 +38,11 @@ public class UnrealAIMeshTerrain : ModuleRules
 			"UnrealEd",
 			// IPluginManager / IProjectManager: the plugin guard and EnableMeshTerrain.
 			"Projects",
+			// The modifier operations: shapes as UDynamicMeshComponent meshes made with GeometryScript primitives (the Shapes
+			// tools' generators), splines (USplineComponent, Engine), the lattice's ILatticeStateStorage (ModelingComponents).
+			"GeometryFramework",
+			"GeometryScriptingCore",
+			"ModelingComponents",
 		});
 	}
 }

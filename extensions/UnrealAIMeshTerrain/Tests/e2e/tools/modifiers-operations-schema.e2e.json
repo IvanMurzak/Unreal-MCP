@@ -1,0 +1,10 @@
+{
+  "description": "the meshTerrainModifier operations (AddShape with its parameters)",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshTerrainModifierOperations"
+  },
+  "assert": {
+    "pattern": "AddShape.MeshPartition Terrain, string Shape, Vector Location, Vector Size, string Operation"
+  }
+}

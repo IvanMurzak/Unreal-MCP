@@ -41,6 +41,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | --- | --- |
 | Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain` |
 | Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain` |
+| Modifier operations (`call`) | `meshTerrainModifier`: `AddNoise`, `AddPatch`, `AddWeight`, `AddSpline`, `AddShape`, `AddLattice`, `AddTexturePatch`, `AddRemesh`, `Add`, `Edit`, `Move`, `SetSplinePoints`, `SetLatticePoints`, `SetOrder`, `Enable`, `Disable`, `Bind`, `Remove` |
+| Modifier members | `LatticeModifier.LatticePoints` |
 | Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
 
 ```
@@ -66,12 +68,52 @@ it also loads the terrain's spatially loaded base and modifier actors (World Par
 - Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a build that does not finish in time
   (with what is still pending), Mesh Terrain plugins not enabled (with what to enable).
 
+### Modifiers
+
+`meshTerrainModifier` places and changes the modifiers that shape a terrain, as Mesh Terrain Mode's Modifiers and Shapes
+palettes do. Every call names its terrain (the modifier is bound to it, never to whichever terrain is nearest), is one
+undo step, and returns after the terrain is rebuilt with `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority,
+Disabled, Ready, Seconds, State}`.
+
+```
+meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005)
+meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800)
+meshTerrainModifier | call AddSpline(unreal.find("Terrain"), [[0, 0, 100], [5000, 2000, 150]], 600, 400, false, "Red")
+meshTerrainModifier | call AddShape(unreal.find("Terrain"), "Sphere", [3000, 0, 0], [2000, 2000, 1200], "Subtract")
+meshTerrainModifier | call Edit(unreal.find("NoiseModifier").Modifier, [-1, -1, -1], -1, -1, 900)
+meshTerrainModifier | call SetOrder(unreal.find("PatchModifier").Modifier, 10)
+meshTerrainModifier | call Remove(unreal.find("PatchModifier").Modifier)
+```
+
+| Operation | What it places / changes |
+| --- | --- |
+| `AddNoise(terrain, location, size [X, Y], strength, frequency, falloff, label)` | Noise: hills over an area; Strength cm, Frequency 1/cm, Falloff 0..1 |
+| `AddPatch(terrain, location, radius, falloff, label)` | Patch: a flat round pad at the location's Z |
+| `AddWeight(terrain, channel, location, radius, falloff, value, label)` | WeightUtility: paints a channel of the definition (value 0..1) |
+| `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
+| `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (Boolean Union / Subtract / Trim), Rectangle, Disc (MeshProject) |
+| `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
+| `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2) |
+| `AddRemesh(terrain, location, size, edgeLength, label)` | Remesh: finer or coarser triangles in a box |
+| `Add(terrain, kind, location, label)` | any other scriptable kind with its defaults (InstancedPatch, SplineRemesh, MeshProject, Boolean, ProjectMeshLayers), then `set` |
+| `Edit(modifier, size, radius, width, strength, falloff)` | the common parameters; a negative value keeps the current one |
+| `Move(modifier, location)`, `SetSplinePoints(modifier, points, closed)`, `SetLatticePoints(modifier, points)` | placement and paths |
+| `SetOrder(modifier, priority, priorityLayer)` | build order: the definition's priority layer, then Priority (higher is applied later, on top) |
+| `Enable`, `Disable`, `Remove(modifier)`, `Bind(modifier, terrain)` | switch, delete, re-bind to another terrain |
+
+Not offered: MeshProvider (the base meshes, made by the terrain's create / import), InstancedProjection and
+InstancedTexturePatch (their instances are filled by other tools and read-only), SimpleWrite, LevelInstanceAdapter and
+TestModifierComponent (engine-internal). Any other property is a `set` on the modifier followed by
+`meshTerrain | call WaitForBuild(terrain)`; use the operations instead of `set` to move a modifier (`set Location` on
+its actor does not rebuild the terrain), to change a WeightUtility's InnerValue / OuterValue (UE 5.8 builds it from cached
+weights) and a Lattice's size or LatticeResolution (its points would no longer match: an engine ensure).
+
 ## Development
 
 The shared helpers every operation uses (find a terrain, wait for its build, transactions, load its actors, sample the
 surface, evaluate the modifier stack of a region, spawn a flat terrain the way the Create tool does) are in
 `Source/UnrealAIMeshTerrain/Private/UnrealAIMeshTerrainCommon.h`. The Automation spec is `UnrealAIMeshTerrain`
-(`Automation RunTests UnrealAIMeshTerrain`); live checks are in `Tests/e2e/tools/`.
+(`Automation RunTests UnrealAIMeshTerrain`; the modifier operations: `UnrealAIMeshTerrain.Modifiers`); live checks are in `Tests/e2e/tools/`.
 
 ## License
 

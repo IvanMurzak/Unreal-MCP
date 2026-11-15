@@ -8,6 +8,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAIMeshTerrainCommon.h"
 #include "UnrealAIMeshTerrainRqlApi.h"
+#include "UnrealAIMeshTerrainModifiersApi.h"
 
 #include "Engine/World.h"
 #include "UObject/UObjectIterator.h"
@@ -17,6 +18,7 @@
 #include "MeshPartitionEditorComponent.h"
 #include "MeshPartitionModifierComponent.h"
 #include "MeshPartitionPreviewSection.h"
+#include "Modifiers/MeshPartitionLatticeModifier.h"
 
 namespace UnrealAIMeshTerrainModuleLocal
 {
@@ -145,6 +147,9 @@ public:
 		Context.AddApiSource(TEXT("meshTerrain"),
 			TEXT("Mesh Terrain operations: call Rebuild(terrain, timeoutSeconds) / WaitForBuild(terrain, timeoutSeconds) / Surface(terrain, point) / SurfacePoints(terrain, points) / EnableMeshTerrain()"),
 			UUnrealAIMeshTerrainRqlApi::StaticClass(), TEXT("MeshTerrainOperations"));
+		Context.AddApiSource(TEXT("meshTerrainModifier"),
+			TEXT("Mesh Terrain modifier operations: call AddNoise / AddPatch / AddWeight / AddSpline / AddShape / AddLattice / AddTexturePatch / AddRemesh / Add(terrain, kind, location) / Edit / Move / SetSplinePoints / SetLatticePoints / SetOrder / Enable / Disable / Bind / Remove(modifier); each waits until the terrain is rebuilt"),
+			UUnrealAIMeshTerrainModifiersApi::StaticClass(), TEXT("MeshTerrainModifierOperations"));
 
 		Context.AddObjectMember(TerrainClass, TEXT("Definition"), TEXT("the terrain's Mesh Partition definition (material, priority layers, paint channels)"),
 			UMeshPartitionDefinition::StaticClass(), [](UObject* Object) -> UObject*
@@ -223,6 +228,15 @@ public:
 		Context.AddJsonMember(ModifierClass, TEXT("Modifier"),
 			TEXT("modifier summary: Kind, Actor, Terrain, PriorityLayer, LayerIndex (build order of the layer), SubPriority (order within it, higher later), Disabled, IsBase, Bounds"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return ModifierJson(Object); });
+		Context.AddJsonMember(UE::MeshPartition::ULatticeModifier::StaticClass(), TEXT("LatticePoints"),
+			TEXT("the lattice's control points (world [X, Y, Z], cm) in the order meshTerrainModifier | call SetLatticePoints(modifier, points) takes them"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				TArray<TSharedPtr<FJsonValue>> Items;
+				for (const FVector& Point : LatticeWorldPoints(Cast<UModifierComponent>(Object)))
+					Items.Add(MakeShared<FJsonValueArray>(Vector({ Point.X, Point.Y, Point.Z })));
+				return MakeShared<FJsonValueArray>(Items);
+			});
 
 		Context.AddGuide(TEXT("Mesh Terrain (Experimental, UE 5.8+)"), TEXT(R"MD(A Mesh Terrain (Unreal 5.8's experimental Mesh Partition) is a `MeshPartition` actor shaped by a stack of
 modifier components (noise, splines, shapes, sculpt layers, ...) on top of its base meshes, built asynchronously into
@@ -254,6 +268,34 @@ meshTerrain | call EnableMeshTerrain()                                     MeshT
 `Channels` the paint weights there; off the terrain `Inside` is false. The operations load a terrain's base and modifier
 actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. Mesh Terrain needs Unreal
 Engine 5.8+, the MeshTerrainMode plugin and a World Partition level.)MD"));
+		Context.AddGuide(TEXT("Mesh Terrain modifiers (Experimental, UE 5.8+)"), TEXT(R"MD(`meshTerrainModifier` adds and changes the modifiers that shape a
+Mesh Terrain. Every call names its terrain (a modifier is bound to it, never to the nearest one), is one undo step, and
+returns after the terrain is rebuilt: `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority, Disabled, Ready, Seconds,
+State}`; read the result with `Surface`. Sizes, radii and heights are cm; Location Z matters for Patch, Shape, Spline.
+
+```
+meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005)        hills: Size [X, Y], Strength (height), Frequency (1/cm), Falloff 0..1
+meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800)                  flat pad at Z: Radius, Falloff
+meshTerrainModifier | call AddSpline(unreal.find("Terrain"), [[0, 0, 100], [5000, 2000, 150]], 600, 400)  road: Width, Falloff, Closed, Channel
+meshTerrainModifier | call AddShape(unreal.find("Terrain"), "Sphere", [3000, 0, 0], [2000, 2000, 1200], "Subtract")   Box Sphere Cylinder Capsule Cone Torus (Union / Subtract / Trim), Rectangle Disc (Project)
+meshTerrainModifier | call AddWeight(unreal.find("Terrain"), "Red", [0, 0, 0], 1000, 500, 1)              paint a channel (Channels)
+meshTerrainModifier | call AddLattice(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 2000], 3)           then SetLatticePoints(modifier, points) from its LatticePoints
+meshTerrainModifier | call AddTexturePatch(unreal.find("Terrain"), "/Game/T_Height", [0, 0, 0], [4000, 4000], 1000)   heightmap stamp
+meshTerrainModifier | call AddRemesh(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 50000], 100)          finer triangles
+meshTerrainModifier | call Add(unreal.find("Terrain"), "InstancedPatch", [0, 0, 0])                         any other kind with defaults, then set
+meshTerrainModifier | call Edit(unreal.find("Hills").Modifier, [-1, -1, -1], -1, -1, 900)               Size / Radius / Width / Strength / Falloff (-1 keeps)
+meshTerrainModifier | call Move(unreal.find("Pad").Modifier, [0, 500, 400])
+meshTerrainModifier | call SetOrder(unreal.find("Pad").Modifier, 10)                                    higher Priority = applied later, on top
+meshTerrainModifier | call Disable(unreal.find("Pad").Modifier)        / Enable / Remove / Bind(modifier, terrain) / SetSplinePoints(modifier, points, closed)
+meshTerrainModifiers | where Kind == "Patch" | call meshTerrainModifier.Edit($, [-1, -1, -1], 2000)       one call per modifier
+```
+
+Other properties: `set` them on the modifier (`rql-schema NoiseModifier`), then `meshTerrain | call WaitForBuild(terrain)`.
+Use the operations, not `set`, to move a modifier (`set Location` on its actor does not rebuild the terrain), to change a
+WeightUtility's InnerValue / OuterValue (the engine caches the old weights) and a Lattice's size or LatticeResolution (its
+points would no longer match: an ensure). Where two modifiers overlap the later one in build order wins (`Modifiers` lists
+them in order); the Boolean modifier may log "reported errors ... cracks" for box shapes: an engine warning, check
+`Surface`.)MD"));
 	}
 };
 

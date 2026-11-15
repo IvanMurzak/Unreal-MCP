@@ -1,0 +1,11 @@
+{
+  "description": "Remove without a modifier is refused before anything changes",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainModifier | call Remove(null)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "null is not allowed for ModifierComponent"
+  }
+}
