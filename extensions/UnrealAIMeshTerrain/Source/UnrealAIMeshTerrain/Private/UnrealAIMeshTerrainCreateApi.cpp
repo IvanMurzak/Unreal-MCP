@@ -75,32 +75,16 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 	}
 
 	/**
-	 * Label the new terrain, give it @p Definition (when set) and record both in the open transaction; then build it. The
-	 * generators spawn the terrain and its base-mesh actors inside that transaction, so one undo removes them all.
+	 * Record the new terrain in @p Transaction (opened before the generator spawned it and its base-mesh actors, so one undo
+	 * removes them all), label it and give it @p Definition when set.
 	 */
-	void Finish(AMeshPartition* Terrain, const FString& Label, UMeshPartitionDefinition* Definition)
+	void Finish(FTerrainTransaction& Transaction, AMeshPartition* Terrain, const FString& Label, UMeshPartitionDefinition* Definition)
 	{
-		Terrain->Modify();
+		Transaction.Modify(Terrain);
 		Terrain->SetActorLabel(Label);
 		if (Definition && Terrain->GetMeshPartitionDefinition() != Definition)
 			Terrain->SetMeshPartitionDefinition(Definition);
 	}
-
-	/** WaitForBuild with the message the create operations need: the terrain exists even when the wait times out. */
-	AMeshPartition* Built(AMeshPartition* Terrain, double TimeoutSeconds)
-	{
-		if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
-			Component->UpdateModifierList();
-		return WaitForBuild(Terrain, TimeoutSeconds) ? Terrain : nullptr;
-	}
-
-	/** A heightmap decoded to 16-bit gray. */
-	struct FHeightmap
-	{
-		int32 Width = 0;
-		int32 Height = 0;
-		TArray64<uint16> Values;
-	};
 
 	FString ResolvePath(const FString& File)
 	{
@@ -110,8 +94,8 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		return FPaths::ConvertRelativePathToFull(Path);
 	}
 
-	/** Read @p Path (.png of any bit depth / colour, or .r16 / .raw: little-endian 16-bit, square) as 16-bit gray. */
-	bool LoadHeightmap(const FString& Path, FHeightmap& Out)
+	/** Read @p Path (.png of any bit depth / colour, or .r16 / .raw: little-endian 16-bit, square) as a 16-bit gray image. */
+	bool LoadHeightmap(const FString& Path, FImage& Out)
 	{
 		const FString Extension = FPaths::GetExtension(Path).ToLower();
 		const bool bRaw = Extension == TEXT("r16") || Extension == TEXT("raw");
@@ -134,40 +118,35 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %lld bytes: a .r16 / .raw heightmap is a square of 16-bit little-endian values (side x side x 2 bytes)"),
 					*Path, static_cast<long long>(Bytes.Num())));
 			}
-			Out.Width = Out.Height = Side;
-			Out.Values.SetNumUninitialized(Count);
-			for (int64 Index = 0; Index < Count; ++Index)
-				Out.Values[Index] = static_cast<uint16>(Bytes[Index * 2] | (Bytes[Index * 2 + 1] << 8));
+			static_assert(PLATFORM_LITTLE_ENDIAN, "a .r16 / .raw file is little-endian");
+			Out.Init(Side, Side, ERawImageFormat::G16, EGammaSpace::Linear);
+			FMemory::Memcpy(Out.RawData.GetData(), Bytes.GetData(), Bytes.Num());
 		}
 		else
 		{
 			IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-			FImage Image;
-			if (Images.DetectImageFormat(Bytes.GetData(), Bytes.Num()) != EImageFormat::PNG || !Images.DecompressImage(Bytes.GetData(), Bytes.Num(), Image))
+			if (Images.DetectImageFormat(Bytes.GetData(), Bytes.Num()) != EImageFormat::PNG || !Images.DecompressImage(Bytes.GetData(), Bytes.Num(), Out))
 				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is not a readable PNG image"), *Path));
 			// Heights are linear: an 8-bit PNG's sRGB flag must not bend them.
-			if (ERawImageFormat::GetFormatNeedsGammaSpace(Image.Format))
-				Image.GammaSpace = EGammaSpace::Linear;
-			Image.ChangeFormat(ERawImageFormat::G16, EGammaSpace::Linear);
-			Out.Width = Image.SizeX;
-			Out.Height = Image.SizeY;
-			Out.Values = TArray64<uint16>(Image.AsG16().GetData(), Image.AsG16().Num());
+			if (ERawImageFormat::GetFormatNeedsGammaSpace(Out.Format))
+				Out.GammaSpace = EGammaSpace::Linear;
+			Out.ChangeFormat(ERawImageFormat::G16, EGammaSpace::Linear);
 		}
-		if (Out.Width < 2 || Out.Height < 2 || Out.Width > MaxHeightmapPixels || Out.Height > MaxHeightmapPixels)
+		if (Out.SizeX < 2 || Out.SizeY < 2 || Out.SizeX > MaxHeightmapPixels || Out.SizeY > MaxHeightmapPixels)
 		{
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is %d x %d pixels: a heightmap is 2 .. %d pixels per side"),
-				*Path, Out.Width, Out.Height, MaxHeightmapPixels));
+				*Path, Out.SizeX, Out.SizeY, MaxHeightmapPixels));
 		}
 		return true;
 	}
 
-	/** Write @p Heightmap as the 16-bit gray PNG Mesh Partition's importer reads (it reads only .png). */
-	bool WriteImporterPng(const FHeightmap& Heightmap, const FString& Path)
+	/** Write @p Heightmap as the 16-bit gray PNG Mesh Partition's importer reads (only .png; written once, read once: uncompressed). */
+	bool WriteImporterPng(const FImage& Heightmap, const FString& Path)
 	{
 		IImageWrapperModule& Images = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-		const FImageView View(const_cast<uint16*>(Heightmap.Values.GetData()), Heightmap.Width, Heightmap.Height, ERawImageFormat::G16);
 		TArray64<uint8> Png;
-		if (!Images.CompressImage(Png, EImageFormat::PNG, View) || !FFileHelper::SaveArrayToFile(Png, *Path))
+		if (!Images.CompressImage(Png, EImageFormat::PNG, Heightmap, static_cast<int32>(EImageCompressionQuality::Uncompressed))
+			|| !FFileHelper::SaveArrayToFile(Png, *Path))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("could not write the heightmap for the importer to %s"), *Path));
 		return true;
 	}
@@ -196,30 +175,23 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::Create(const F
 	const int32 QuadsX = Resolution > 0 ? Resolution
 		: FMath::Max(1, FMath::RoundToInt(FMath::Clamp(FMath::RoundToDouble(LongerMeters), 10.0, 1000.0) * SizeMeters / LongerMeters));
 	const int32 QuadsY = FMath::Max(1, FMath::RoundToInt(QuadsX * SizeYMeters / SizeMeters));
-	if (QuadsX < 1 || QuadsY > MaxQuadsPerSide)
+	if (QuadsY > MaxQuadsPerSide)
 		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("%d x %d quads: at most %d per side, lower Resolution"), QuadsX, QuadsY, MaxQuadsPerSide));
+	// The automatic sections SpawnFlatTerrain makes (at most 500 x 500 quads each), checked against the cap first.
 	FInt32Point SectionCount;
 	if (!Sections(FInt32Point(QuadsX, QuadsY), 500 * 500 * 2, SectionCount))
 		return nullptr;
 
-	UWorld* World = UnrealMcpRql::EditorWorld();
-	UE::MeshPartition::FMegaMeshRectangleGeneratorParams Params;
-	Params.MeshSize = FVector2D(SizeMeters * 100.0, SizeYMeters * 100.0);
-	Params.MeshResolution = FInt32Point(QuadsX, QuadsY);
-	Params.SectionsResolution = SectionCount;
-	// Saving and unloading as it goes (World Partition) would save packages and may prompt source control: never.
-	Params.bSaveAndUnload = false;
-	Params.LocationVolumesResolution = FInt32Point(0, 0);
 	AMeshPartition* Terrain = nullptr;
 	{
-		const FScopedTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "CreateTerrain", "Create Mesh Terrain"));
-		UE::MeshPartition::FMegaMeshRectangleGenerator Generator(Params, *World, FTransform(Location));
-		if (!Generator.Generate(nullptr) || !Generator.GetMegaMesh())
-			return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("Mesh Terrain creation failed: %s"), *Generator.GetErrorText().ToString()));
-		Terrain = Generator.GetMegaMesh();
-		Finish(Terrain, Label, Definition);
+		FTerrainTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "CreateTerrain", "Create Mesh Terrain"));
+		Terrain = SpawnFlatTerrain(Label, Location, SizeMeters * 100.0, SizeYMeters * 100.0, QuadsX, QuadsY);
+		if (!Terrain)
+			return nullptr; // SpawnFlatTerrain failed with the reason
+		Finish(Transaction, Terrain, Label, Definition);
 	}
-	return Built(Terrain, TimeoutSeconds);
+	// The terrain stays when the wait times out: WaitForBuild's error names it.
+	return WaitForBuild(Terrain, TimeoutSeconds) ? Terrain : nullptr;
 }
 
 UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightmap(const FString& Label, const FString& File, FVector Location, double SizeMeters,
@@ -233,13 +205,13 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 	if (!CheckCommon(Label, Location, SizeMeters, TimeoutSeconds))
 		return nullptr;
 	const FString Path = ResolvePath(File);
-	FHeightmap Heightmap;
+	FImage Heightmap;
 	if (!LoadHeightmap(Path, Heightmap))
 		return nullptr;
 
 	// Quads along X (one per pixel step by default, at most MaxHeightmapQuads); Y keeps the image's aspect (square quads).
-	const double Aspect = double(Heightmap.Height - 1) / double(Heightmap.Width - 1);
-	const int32 QuadsX = Resolution > 0 ? Resolution : FMath::Min(Heightmap.Width - 1, MaxHeightmapQuads);
+	const double Aspect = double(Heightmap.SizeY - 1) / double(Heightmap.SizeX - 1);
+	const int32 QuadsX = Resolution > 0 ? Resolution : FMath::Min(Heightmap.SizeX - 1, MaxHeightmapQuads);
 	const int32 QuadsY = FMath::Max(1, FMath::RoundToInt(QuadsX * Aspect));
 	if (QuadsY > MaxHeightmapQuads)
 		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("%d x %d quads: at most %d per side, lower Resolution"), QuadsX, QuadsY, MaxHeightmapQuads));
@@ -270,16 +242,16 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 
 	AMeshPartition* Terrain = nullptr;
 	{
-		const FScopedTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "ImportHeightmap", "Import Mesh Terrain Heightmap"));
+		FTerrainTransaction Transaction(NSLOCTEXT("UnrealAIMeshTerrain", "ImportHeightmap", "Import Mesh Terrain Heightmap"));
 		UE::MeshPartition::FHeightmapImporter Importer(Params);
 		if (!Importer.Import(nullptr) || !Importer.GetMegaMesh())
 			return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("heightmap import failed: %s"), *Importer.GetErrorText().ToString()));
 		Terrain = Importer.GetMegaMesh();
-		Finish(Terrain, Label, Definition);
+		Finish(Transaction, Terrain, Label, Definition);
 		// The importer centres the terrain on the origin with value 0 at Z 0: move it onto Location, value 32768 at its Z.
 		Terrain->SetActorLocation(Location - FVector(0.0, 0.0, LandscapeMidValue * LandscapeZScale * HeightScale));
 	}
-	return Built(Terrain, TimeoutSeconds);
+	return WaitForBuild(Terrain, TimeoutSeconds) ? Terrain : nullptr;
 }
 
 FString UUnrealAIMeshTerrainCreateApi::Delete(UE::MeshPartition::AMeshPartition* Terrain)
@@ -287,6 +259,8 @@ FString UUnrealAIMeshTerrainCreateApi::Delete(UE::MeshPartition::AMeshPartition*
 	using namespace UnrealAIMeshTerrainCreateApiLocal;
 	if (!CheckAvailable() || !CheckTerrain(Terrain))
 		return FString();
+	// Right after an undo / redo the editor component may not list the restored modifiers yet: refresh before counting and
+	// before DestroyTerrain collects the actors from that list.
 	if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
 		Component->UpdateModifierList();
 	int32 Bases = 0;

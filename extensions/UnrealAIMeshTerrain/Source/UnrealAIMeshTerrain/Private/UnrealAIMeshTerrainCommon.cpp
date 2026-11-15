@@ -370,7 +370,8 @@ namespace UnrealAIMeshTerrain
 		while (true)
 		{
 			// Queued modifier changes start their section builds and finished builds are applied to their sections here.
-			if (State.Unregistered > 0)
+			// (first round too: a terrain or modifier spawned in this call may not be listed yet)
+			if (Rounds == 0 || State.Unregistered > 0)
 				Component->UpdateModifierList();
 			Component->Update();
 			// Collision cooking and the transformer pipeline finish through game-thread tasks.
