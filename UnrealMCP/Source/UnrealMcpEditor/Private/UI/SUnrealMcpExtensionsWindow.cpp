@@ -213,8 +213,23 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 		];
 	}
 
-	// Install / Update button — for catalog rows that are installable (have a repo or are available).
-	if (Row.bInCatalog && OnInstall)
+	// Install / Update button — for catalog rows that are installable (have a repo or are available). A row this
+	// engine cannot build offers neither: it says why instead.
+	if (Row.bInCatalog && !Row.Incompatibility.IsEmpty())
+	{
+		// An installed copy keeps working (the reason line says why it is not updated); only a new install is refused.
+		if (!Row.bInstalled)
+		{
+			ActionRow->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ExtIncompatible", "Not available for this engine"))
+				.ToolTipText(FText::FromString(Row.Incompatibility))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			];
+		}
+	}
+	else if (Row.bInCatalog && OnInstall)
 	{
 		if (!Row.bInstalled)
 		{
@@ -252,6 +267,14 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 			[
 				SNew(STextBlock).Text(StateBadge).ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+			[
+				SNew(STextBlock)
+				.Visibility(Row.bExperimental ? EVisibility::Visible : EVisibility::Collapsed)
+				.Text(LOCTEXT("ExtExperimental", "Experimental"))
+				.ToolTipText(LOCTEXT("ExtExperimentalTip", "An experimental extension: its operations and behaviour may change between versions."))
+				.ColorAndOpacity(FLinearColor(0.95f, 0.65f, 0.2f))
+			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 		[
@@ -260,6 +283,20 @@ TSharedRef<SWidget> SUnrealMcpExtensionsWindow::BuildRow(const FUnrealMcpExtensi
 			.AutoWrapText(true)
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		];
+
+	if (!Row.Incompatibility.IsEmpty())
+	{
+		TextCol->AddSlot().AutoHeight().Padding(0, 2, 0, 0)
+		[
+			SNew(STextBlock)
+			.Text(FText::Format(Row.bInstalled
+				? LOCTEXT("ExtIncompatibleUpdate", "Catalog version {1} not available: {0}.")
+				: LOCTEXT("ExtIncompatibleReason", "Not available: {0}."),
+				FText::FromString(Row.Incompatibility), FText::FromString(Row.CatalogVersion)))
+			.AutoWrapText(true)
+			.ColorAndOpacity(FLinearColor(0.95f, 0.65f, 0.2f))
+		];
+	}
 
 	// Per-extension error badge — the registry surfaces invalid/duplicate-id / per-tool validation failures.
 	if (Row.bHasError)

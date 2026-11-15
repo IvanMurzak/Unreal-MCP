@@ -48,9 +48,24 @@ struct FUnrealMcpCatalogEntry
 	TArray<FString> EnginePlugins;
 	/** The MCP tools this extension contributes (advisory; for the panel's detail view). */
 	TArray<FUnrealMcpCatalogTool> Tools;
+	/**
+	 * The oldest Unreal Engine the selected release builds on (`"5.8"`, extension.json `minEngineVersion`); empty = any
+	 * (an index entry published before the field existed).
+	 */
+	FString MinEngineVersion;
+	/** The selected release is experimental (extension.json `experimental`). */
+	bool bExperimental = false;
 
 	/** True when the descriptor carries a concrete version pin (drives the up-to-date / update decision). */
 	bool HasVersion() const { return !Version.TrimStartAndEnd().IsEmpty(); }
+
+	/**
+	 * Why an engine @p EngineMajor.@p EngineMinor cannot build this extension ("requires Unreal Engine 5.8 or newer; this
+	 * editor is 5.7"), or empty when it can. Pure.
+	 */
+	UNREALMCPEDITOR_API FString EngineIncompatibility(int32 EngineMajor, int32 EngineMinor) const;
+	/** EngineIncompatibility for the running editor's engine. */
+	UNREALMCPEDITOR_API FString EngineIncompatibility() const;
 };
 
 /**
@@ -76,7 +91,8 @@ public:
 	/**
 	 * Parse the shared catalog JSON `{ schemaVersion, extensions[] }` into typed entries. Returns false +
 	 * a human-readable reason on malformed JSON, a missing/!array `extensions`, or an entry missing the
-	 * required `extensionId` / `pluginName`. A schemaVersion newer than @ref SupportedSchemaVersion is a
+	 * required `extensionId` / `pluginName`, or a malformed `minEngineVersion` / `experimental` (as strict as the CLI's
+	 * parseExtensionsIndex, so both channels accept the same index). A schemaVersion newer than @ref SupportedSchemaVersion is a
 	 * WARNING returned via @p OutWarning (still parsed best-effort), not a hard failure — a newer catalog
 	 * should degrade gracefully rather than block installs of the entries this client understands.
 	 */
@@ -94,6 +110,7 @@ public:
 	/**
 	 * Hand a fetched catalog to the list agents read of the extensions this editor does not have yet
 	 * (UnrealMcpAvailableExtensions: unreal-tool-list, rql-schema); the bundled first-party entries stay as bundled.
+	 * An entry this engine cannot build (EngineIncompatibility) is left out: agents are never told to install it.
 	 */
 	static UNREALMCPEDITOR_API void PublishToAgents(const TArray<FUnrealMcpCatalogEntry>& Entries);
 

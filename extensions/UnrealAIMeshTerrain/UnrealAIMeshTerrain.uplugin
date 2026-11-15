@@ -3,7 +3,7 @@
   "Version": 1,
   "VersionName": "0.1.0",
   "FriendlyName": "Unreal AI Mesh Terrain (Experimental)",
-  "Description": "Experimental, UE 5.8+ only. RQL module for Unreal's experimental Mesh Terrain (Mesh Partition): query mesh terrains, their sections and modifiers, read the surface height and rebuild with a deterministic wait. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
+  "Description": "Experimental, UE 5.8+ only. RQL module for Unreal's experimental Mesh Terrain (Mesh Partition): create terrains (flat or from a heightmap), add / edit / reorder / remove modifiers (noise, splines, shapes, lattices, ...), sculpt and paint, read the surface height and rebuild with a deterministic wait. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
   "Category": "AI",
   "CreatedBy": "Ivan Murzak",
   "CreatedByURL": "https://github.com/IvanMurzak/Unreal-MCP",

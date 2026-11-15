@@ -154,6 +154,9 @@ OPERATIONS = ('EnhancedInputOperations : Object {} +methods: ' + ' | '.join(
                                     'RemoveMappingContextOnEvent', 'SetActionTriggers', 'SetMappingTriggers', 'SetPlayerMappable')))
 # Mesh Terrain (UE 5.8+): per check, the answer the live UE 5.8 editor gives and one that must not pass.
 MESH_TERRAIN = 'MeshTerrainOperations#1108806258508'
+MESH_TERRAIN_BRUSH = 'MeshTerrainBrushOperations#1107900288855'
+MESH_TERRAIN_MODIFIER = 'MeshTerrainModifierOperations#1108537823073'
+MESH_TERRAIN_CREATE = 'MeshTerrainCreateOperations#1108537823074'
 AUTHORING.update({
     'mesh-terrain-enable.e2e.json': (
         pcg_receipt(f'{MESH_TERRAIN}|EnableMeshTerrain()|MeshPartition is enabled in the project file; MeshTerrainMode is now enabled in '
@@ -164,6 +167,42 @@ AUTHORING.update({
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Surface on {MESH_TERRAIN}: argument 'Terrain': "
                                               'value is error(not-found)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call Surface: argument 'Point': Vector expects 3 numbers"}],
+         'isError': True}),
+    'modifiers-add-missing-terrain.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call AddNoise on {MESH_TERRAIN_MODIFIER}: argument 'Terrain': "
+                                              'value is error(not-found)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: AddNoise threw: Size [-5, 100] must be above 0"}], 'isError': True}),
+    'modifiers-remove-null.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Remove on {MESH_TERRAIN_MODIFIER}: argument 'Modifier': "
+                                              'null is not allowed for ModifierComponent'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: Remove threw: Section_X0-Y0_0 is a base mesh"}], 'isError': True}),
+    'modifiers-operations-schema.e2e.json': (
+        text_result('MeshTerrainModifierOperations : Object {} +methods: AddShape(MeshPartition Terrain, string Shape, Vector Location, '
+                    'Vector Size, string Operation, Rotator Rotation, string Label)'),
+        text_result('MeshTerrainModifierOperations : Object {} +methods: AddNoise(MeshPartition Terrain, Vector Location)')),
+    'modifiers-lattice-points-schema.e2e.json': (
+        text_result("LatticeModifier : EditableModifierBase {bDrawLatticePoints bool, LatticePoints object? ro (the lattice's control points "
+                    '(world [X, Y, Z], cm) ...)}'),
+        text_result('LatticeModifier : EditableModifierBase {Extents Vector3d, bDrawLatticePoints bool}')),
+    'mesh-terrain-create-delete-missing.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Delete on {MESH_TERRAIN_CREATE}: argument 'Terrain': "
+                                              'value is error(not-found)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: Delete threw: the level has no Mesh Terrain"}], 'isError': True}),
+    'mesh-terrain-create-heightmap-missing.e2e.json': (
+        {'content': [{'type': 'text', 'text': 'error call-threw: ImportHeightmap threw: heightmap file not found: '
+                                              'C:/Project/Heightmaps/NoSuchHeightmapE2E.png'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call ImportHeightmap: argument 'Location'"}], 'isError': True}),
+    'mesh-terrain-create-limits.e2e.json': (
+        {'content': [{'type': 'text', 'text': 'error call-threw: Create threw: Resolution 5000 is outside 1 .. 2000 quads'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': 'error call-threw: Create threw: SizeMeters 1000000 is outside 10 .. 20000'}], 'isError': True}),
+    'mesh-terrain-create-schema.e2e.json': (
+        text_result('MeshTerrainCreateOperations : Object {} +methods: Create(string Label, Vector Location, double SizeMeters, double SizeYMeters) '
+                    '| Delete(MeshPartition Terrain) | ImportHeightmap(string Label, string File, Vector Location, double SizeMeters, double HeightScale)'),
+        text_result('MeshTerrainCreateOperations : Object {} +methods: Create(string Label)')),
+    'mesh-terrain-brush-missing.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Sculpt on {MESH_TERRAIN_BRUSH}: argument 'Terrain': "
+                                              'value is error(not-found)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: Sculpt threw: Mode 'Pinch' is not one of Raise, Lower, Flatten, Smooth"}],
          'isError': True}),
 })
 # The Enhanced Input control-scheme sequence (on foot + vehicle): per check, an answer of the live UE 5.7 editor's shape and
@@ -456,7 +495,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 149)
+        self.assertEqual(len(all_checks()), 159)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

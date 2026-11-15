@@ -35,14 +35,21 @@ public class UnrealAIMeshTerrain : ModuleRules
 			"MeshPartitionEditor",
 			// FDynamicMesh3 (the preview sections' meshes, Surface).
 			"GeometryCore",
+			// Brush strokes (Sculpt / Paint): the Mesh Terrain Mode tools' modifier tool target (UEditableModifierToolTarget,
+			// MeshPartitionModelingToolset), its IDynamicMeshCommitter interface (ModelingComponents) and the tool framework.
+			"MeshPartitionModelingToolset",
+			"ModelingComponents",
+			"InteractiveToolsFramework",
 			"UnrealEd",
 			// IPluginManager / IProjectManager: the plugin guard and EnableMeshTerrain.
 			"Projects",
 			// The modifier operations: shapes as UDynamicMeshComponent meshes made with GeometryScript primitives (the Shapes
-			// tools' generators), splines (USplineComponent, Engine), the lattice's ILatticeStateStorage (ModelingComponents).
+			// tools' generators), splines (USplineComponent, Engine), the lattice's ILatticeStateStorage (ModelingComponents, above).
 			"GeometryFramework",
 			"GeometryScriptingCore",
-			"ModelingComponents",
+			// ImportHeightmap: decode .png heightmaps (any bit depth) and hand Mesh Partition's importer a 16-bit gray .png.
+			"ImageWrapper",
+			"ImageCore",
 		});
 	}
 }

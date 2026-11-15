@@ -225,6 +225,76 @@ class MonorepoTests(unittest.TestCase):
                 self.assertNotIn(tool['name'], tools)
                 tools.add(tool['name'])
 
+    def test_index_records_carry_the_engine_gate_and_experimental_flag_per_release(self):
+        index = release.read(release.ROOT / 'extensions-index.json')
+        terrain = release.validate('UnrealAIMeshTerrain')
+        niagara = release.validate('UnrealAINiagara')
+        index = release.update_index(index, terrain, f"mesh-terrain-v{terrain['version']}", 'a' * 64)
+        index = release.update_index(index, niagara, f"niagara-v{niagara['version']}", 'b' * 64)
+        entries = {e['pluginName']: e for e in index['extensions']}
+        self.assertEqual(entries['UnrealAIMeshTerrain']['minEngineVersion'], '5.8')
+        self.assertIs(entries['UnrealAIMeshTerrain']['experimental'], True)
+        record = entries['UnrealAIMeshTerrain']['releases'][terrain['version']]
+        self.assertEqual((record['minEngineVersion'], record['experimental']), ('5.8', True))
+        record = entries['UnrealAINiagara']['releases'][niagara['version']]
+        self.assertEqual(record['minEngineVersion'], '5.7')
+        self.assertNotIn('experimental', record)  # only a set flag is written
+
+        # A later version without the flag drops it from the entry; the history keeps what each version declared.
+        stable = {**terrain, 'version': '0.2.0'}
+        del stable['experimental']
+        index = release.update_index(index, stable, 'mesh-terrain-v0.2.0', 'c' * 64)
+        entry = next(e for e in index['extensions'] if e['pluginName'] == 'UnrealAIMeshTerrain')
+        self.assertNotIn('experimental', entry)
+        self.assertNotIn('experimental', entry['releases']['0.2.0'])
+        self.assertIs(entry['releases'][terrain['version']]['experimental'], True)
+
+    def test_a_release_published_before_the_gates_gains_them_but_stays_immutable(self):
+        index = release.read(release.ROOT / 'extensions-index.json')
+        meta = release.validate('UnrealAINiagara')
+        tag = f"niagara-v{meta['version']}"
+        index = release.update_index(index, meta, tag, 'a' * 64)
+        entry = next(e for e in index['extensions'] if e['pluginName'] == 'UnrealAINiagara')
+        legacy = entry['releases'][meta['version']]
+        del legacy['minEngineVersion']  # as published by the tooling before minEngineVersion existed
+        republished = release.update_index(index, meta, tag, 'a' * 64)
+        entry = next(e for e in republished['extensions'] if e['pluginName'] == 'UnrealAINiagara')
+        self.assertEqual(entry['releases'][meta['version']]['minEngineVersion'], '5.7')
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(index, meta, tag, 'b' * 64)
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(republished, {**meta, 'minEngineVersion': '5.8'}, tag, 'a' * 64)
+        # A record storing a gate unset (null / false) is the same as one without it.
+        legacy.update(minEngineVersion=None, experimental=False)
+        republished = release.update_index(index, meta, tag, 'a' * 64)
+        record = next(e for e in republished['extensions'] if e['pluginName'] == 'UnrealAINiagara')['releases'][meta['version']]
+        self.assertEqual(record['minEngineVersion'], '5.7')
+        self.assertNotIn('experimental', record)
+        # Dropping a gate from an already gated version is a change.
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            release.update_index(republished, {k: v for k, v in meta.items() if k != 'minEngineVersion'}, tag, 'a' * 64)
+
+    def test_experimental_must_match_the_uplugin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            folder = root / 'extensions/UnrealAINew'
+            (folder / 'Source').mkdir(parents=True)
+            (folder / 'Tests/e2e/tools').mkdir(parents=True)
+            (folder / 'Tests/e2e/tools/a.e2e.json').write_text('{}')
+            (folder / 'Source/A.cpp').write_text('UnrealMcpRql::PluginVersion(TEXT("UnrealAINew"))')
+            metadata = {'pluginName': 'UnrealAINew', 'version': '0.1.0'}
+            with patch.object(release, 'ROOT', root):
+                for experimental_uplugin, experimental_metadata, ok in (
+                        (False, None, True), (True, True, True), (True, None, False), (False, True, False), (True, 'yes', False)):
+                    release.write(folder / 'UnrealAINew.uplugin', {'VersionName': '0.1.0', 'IsExperimentalVersion': experimental_uplugin})
+                    extra = {} if experimental_metadata is None else {'experimental': experimental_metadata}
+                    release.write(folder / 'extension.json', {**metadata, **extra})
+                    if ok:
+                        release.validate('UnrealAINew')
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'experimental'):
+                            release.validate('UnrealAINew')
+
     def test_migrated_catalog_names_remain_valid_cli_install_aliases(self):
         seed = release.read(release.ROOT / 'extensions-index.json')
         for entry in seed['extensions']:
