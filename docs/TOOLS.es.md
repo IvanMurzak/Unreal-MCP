@@ -154,7 +154,7 @@ Instala una extensión cuando tu proyecto use uno de los sistemas del motor de a
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Las extensiones requieren Unreal Engine 5.7+, Unreal MCP 0.26.0+ en el mismo proyecto y una toolchain de C++: las releases se distribuyen como código fuente y se compilan para tu proyecto (al abrir el editor la próxima vez, o en el momento con `--build`). El id de instalación es `com.ivanmurzak.unreal-ai-<id>` con el id de la tabla de abajo. Opciones de instalación (`--version`, `--build`, `--source` offline): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
+Las extensiones requieren Unreal Engine 5.7+, Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+) en el mismo proyecto y una toolchain de C++: las releases se distribuyen como código fuente y se compilan para tu proyecto (al abrir el editor la próxima vez, o en el momento con `--build`). El id de instalación es `com.ivanmurzak.unreal-ai-<id>` con el id de la tabla de abajo. Opciones de instalación (`--version`, `--build`, `--source` offline): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | Extensión (id) | Descripción |
 | --- | --- |
