@@ -217,6 +217,16 @@ public:
 		return Out;
 	}
 
+	/** "0" .. "<Count - 1>" mapped to their numbers (a map-valued call result) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	TMap<FString, int32> SequenceMap(int32 Count)
+	{
+		TMap<FString, int32> Out;
+		for (int32 I = 0; I < Count; ++I)
+			Out.Add(FString::FromInt(I), I);
+		return Out;
+	}
+
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
 };
 

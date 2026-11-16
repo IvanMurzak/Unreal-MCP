@@ -113,7 +113,34 @@ namespace UnrealMcpRqlSessionLocal
 		return !Plan.stages.empty() && Plan.stages.back().kind == rql::StageKind::Call;
 	}
 
-	/** A call result list cut at MaxCallResultItems gets a warning that says how many items were left out and what to do. */
+	/**
+	 * The lists and maps of one encoded call result that RQL cut at MaxCallResultItems, at any depth: a list ends in
+	 * "…+<left out>", a map has the key "…" with the value "+<left out>" (U+2026 in UTF-8).
+	 */
+	void CountCutLists(const rql::Json& Value, int32& OutLists, int64& OutLeftOut)
+	{
+		static const std::string Ellipsis = "\xE2\x80\xA6";
+		const size_t Cut = static_cast<size_t>(MaxCallResultItems) + 1;
+		if (Value.is_array() && Value.size() == Cut && Value.at(MaxCallResultItems).is_string()
+			&& Value.at(MaxCallResultItems).as_string().rfind(Ellipsis + "+", 0) == 0)
+		{
+			++OutLists;
+			OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Value.at(MaxCallResultItems).as_string().c_str() + Ellipsis.size() + 1));
+		}
+		else if (Value.is_object() && Value.size() == Cut)
+		{
+			const rql::Json* LeftOut = Value.find(Ellipsis);
+			if (LeftOut && LeftOut->is_string() && LeftOut->as_string().rfind("+", 0) == 0)
+			{
+				++OutLists;
+				OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(LeftOut->as_string().c_str() + 1));
+			}
+		}
+		for (const rql::Json& Item : Value.items())
+			CountCutLists(Item, OutLists, OutLeftOut);
+	}
+
+	/** Call results with a list or map cut at MaxCallResultItems get a warning: how many items were left out, and what to do. */
 	void AddCallResultListNote(rql::QueryResult& Result)
 	{
 		if (!Result.ok || !Result.rows || !Result.columns)
@@ -123,29 +150,28 @@ namespace UnrealMcpRqlSessionLocal
 		if (Column == Columns.end())
 			return;
 		const size_t Index = static_cast<size_t>(Column - Columns.begin());
-		// RQL's marker of a cut list: its last element, "…+<left out>" (U+2026 in UTF-8).
-		static const std::string Marker = "\xE2\x80\xA6+";
 		int64 LeftOut = 0;
 		int32 Lists = 0;
+		bool bWholeResult = false; // the one cut list is the result itself (not a member or an output of it)
 		for (const std::vector<rql::Json>& Row : *Result.rows)
 		{
-			if (Index >= Row.size() || !Row[Index].is_array() || Row[Index].size() != static_cast<size_t>(MaxCallResultItems) + 1)
+			if (Index >= Row.size())
 				continue;
-			const rql::Json& Last = Row[Index].at(MaxCallResultItems);
-			if (!Last.is_string() || Last.as_string().rfind(Marker, 0) != 0)
-				continue;
-			LeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Last.as_string().c_str() + Marker.size()));
-			++Lists;
+			const int32 Before = Lists;
+			CountCutLists(Row[Index], Lists, LeftOut);
+			if (Before == 0 && Lists == 1)
+				bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
 		}
 		if (Lists == 0)
 			return;
-		const FString Message = Lists == 1
+		const FString Message = Lists == 1 && bWholeResult
 			? FString::Printf(TEXT("the call result lists %lld items: the first %d are shown, %lld left out"),
 				LeftOut + MaxCallResultItems, MaxCallResultItems, LeftOut)
-			: FString::Printf(TEXT("%d call results list more than %d items each: the first %d of each are shown, %lld items left out"),
+			: FString::Printf(TEXT("%d list(s) in the call results hold more than %d items: the first %d of each are shown, %lld item(s) left out"),
 				Lists, MaxCallResultItems, MaxCallResultItems, LeftOut);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("call-result-truncated", UnrealMcpRqlToStd(Message),
-			UnrealMcpRqlToStd(FString::Printf(TEXT("call again with fewer inputs (at most %d results per call)"), MaxCallResultItems))));
+			UnrealMcpRqlToStd(FString::Printf(TEXT("the call ran: only its result is shortened. To see every item, call again with fewer inputs "
+				"(at most %d items per list); do not repeat a call that creates or changes things just to read its result"), MaxCallResultItems))));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
