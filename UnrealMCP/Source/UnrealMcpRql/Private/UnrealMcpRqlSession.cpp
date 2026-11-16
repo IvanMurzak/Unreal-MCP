@@ -20,10 +20,12 @@
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <stdexcept>
 #include <string_view>
 
@@ -45,6 +47,99 @@ namespace UnrealMcpRqlSessionLocal
 		if (Last == rql::StageKind::Count)
 			return Result.value.is_number() && Result.value.as_number() == 0;
 		return (Last == rql::StageKind::Min || Last == rql::StageKind::Max || Last == rql::StageKind::Avg) && Result.value.is_null();
+	}
+
+	/**
+	 * The full text of a call argument for the duplicate-call guard: lists, maps and structs element by element, numbers at
+	 * full precision, strings quoted, objects by identity (their text is only a type name). rql::to_text reads every vector,
+	 * list or struct as its type name, so two calls differing only in a point would look identical.
+	 */
+	void AppendCallKey(std::string& Out, const rql::Value& Value, int32 Depth = 0)
+	{
+		if (Depth > 32)
+		{
+			Out += "...";
+			return;
+		}
+		switch (Value.kind())
+		{
+		case rql::Value::Kind::Number:
+			Out += Value.is_single() ? rql::format_float(static_cast<float>(Value.as_number())) : rql::format_double(Value.as_number());
+			return;
+		case rql::Value::Kind::String:
+			Out += rql::Json(Value.as_string()).dump();
+			return;
+		case rql::Value::Kind::Object:
+		{
+			char Buffer[32];
+			std::snprintf(Buffer, sizeof(Buffer), "@%p", Value.ptr());
+			Out += Buffer;
+			return;
+		}
+		case rql::Value::Kind::Struct:
+			Out += Value.type()->name + "{";
+			for (const rql::MemberDescriptor& Member : Value.type()->members)
+			{
+				if (Member.explicit_only || !Member.getter)
+					continue;
+				Out += Member.name + "=";
+				try
+				{
+					AppendCallKey(Out, Member.getter(Value.ptr()), Depth + 1);
+				}
+				catch (const std::exception&)
+				{
+					Out += "?";
+				}
+				Out += ",";
+			}
+			Out += "}";
+			return;
+		case rql::Value::Kind::List:
+			Out += "[";
+			for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			{
+				AppendCallKey(Out, Value.list().at(Index), Depth + 1);
+				Out += ",";
+			}
+			Out += "]";
+			return;
+		case rql::Value::Kind::Map:
+			Out += "{";
+			Value.map().for_each([&Out, Depth](const rql::Value& Key, const rql::Value& Item)
+			{
+				AppendCallKey(Out, Key, Depth + 1);
+				Out += ":";
+				AppendCallKey(Out, Item, Depth + 1);
+				Out += ",";
+				return true;
+			});
+			Out += "}";
+			return;
+		case rql::Value::Kind::Entry:
+			AppendCallKey(Out, Value.entry().key, Depth + 1);
+			Out += ":";
+			AppendCallKey(Out, Value.entry().value, Depth + 1);
+			return;
+		case rql::Value::Kind::Row:
+			Out += "(";
+			for (const rql::Value& Cell : Value.row().values)
+			{
+				AppendCallKey(Out, Cell, Depth + 1);
+				Out += ",";
+			}
+			Out += ")";
+			return;
+		case rql::Value::Kind::Null:
+			Out += "null";
+			return;
+		case rql::Value::Kind::Missing:
+			Out += "missing";
+			return;
+		default: // bool, enum, error, unknown
+			Out += rql::describe_value(Value) + ":" + rql::to_text(Value);
+			return;
+		}
 	}
 
 	/**
@@ -497,9 +592,14 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			{
 				if (Key.StartsWith(TEXT("spawn")))
 					continue;
-				// An object argument by identity: its text is only its type name (two Blueprints both read "Blueprint").
+				std::string Arguments;
 				for (const rql::Value& Argument : Record.args)
-					Key += TEXT("|") + (Argument.is_object() ? FString::Printf(TEXT("%p"), Argument.ptr()) : UnrealMcpRqlFromStd(rql::to_text(Argument)));
+				{
+					Arguments += "|";
+					AppendCallKey(Arguments, Argument);
+				}
+				// Hashed: an argument can be a whole heightmap or vertex list, and every key stays alive for the batch.
+				Key += FSHA1::HashBuffer(Arguments.data(), Arguments.size()).ToString();
 			}
 			bool bTwice = false;
 			Called.Add({ Record.item.ptr(), Key }, &bTwice);

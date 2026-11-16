@@ -843,6 +843,17 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("in-out parameter, reported after the call (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(Doubled), *UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2)),
 				UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2) == TEXT("6"));
 
+			// The duplicate-call guard keys an operation by its full arguments: a point or a nested list is not just its type name.
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Marks = 0;
+			const TSharedPtr<FJsonObject> Points = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[0, 0, 0], [1000, 0, 0]] | call rqlSpecApi.Mark($, [[0, 0, 0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":0},{"lit":0}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"path":[]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls differing only in a vector argument both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Points)), UnrealMcpRqlSpecHelpers::IsOk(Points) && Api->Marks == 2);
+			const TSharedPtr<FJsonObject> Paths = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[[0, 0, 0]], [[0, 0, 0.5]]] | call rqlSpecApi.Mark([0, 0, 0], $) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0.5}]}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"path":[]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls differing only in a nested list both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paths)), UnrealMcpRqlSpecHelpers::IsOk(Paths) && Api->Marks == 4);
+			const TSharedPtr<FJsonObject> Same = UnrealMcpRqlSpecHelpers::Exec(*this, /* [1, 2] | call rqlSpecApi.Mark([5, 0, 0], [[0, 0, 0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("identical vector arguments are still refused before anything runs (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Same)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Same) && UnrealMcpRqlSpecHelpers::Codes(Same).Contains(TEXT("would run twice")) && Api->Marks == 4);
+
 			// A list-valued call result lists every item up to 1000 (RQL lists 20 per list in plain queries, then "…+N").
 			const auto CallResultList = [](const TSharedPtr<FJsonObject>& Result) -> TArray<TSharedPtr<FJsonValue>>
 			{
