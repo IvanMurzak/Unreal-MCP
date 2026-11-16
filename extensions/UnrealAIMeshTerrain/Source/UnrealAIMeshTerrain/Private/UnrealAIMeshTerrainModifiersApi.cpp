@@ -207,6 +207,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (Modifier)
 		{
 			Out.Actor = Modifier->GetOwner() ? Modifier->GetOwner()->GetActorNameOrLabel() : FString();
+			Out.Location = Modifier->GetOwner() ? Modifier->GetOwner()->GetActorLocation() : Modifier->GetComponentLocation();
 			Out.Kind = ModifierKind(Modifier);
 			Out.PriorityLayer = Modifier->GetType().ToString();
 			Out.Priority = Modifier->GetPriority();
@@ -673,6 +674,168 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(U
 		|| !ApplySplinePoints(Spline, Points, Closed))
 		return FModifierOpResult();
 	return Placed.Keep();
+}
+
+FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double MaxSlope, double Falloff, const FString& Label)
+{
+	using FRoadResult = FUnrealAIMeshTerrainRoadResult;
+	const double Start = FPlatformTime::Seconds();
+	if (!CheckTerrain(Terrain) || !CheckPoints(Points))
+		return FRoadResult();
+	if (!FMath::IsFinite(Width) || Width < 100.0 || Width > 10000.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Width %g is outside 100 .. 10000 cm"), Width));
+	if (!FMath::IsFinite(MaxSlope) || MaxSlope < 0.5 || MaxSlope > 45.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("MaxSlope %g is outside 0.5 .. 45 degrees"), MaxSlope));
+	if (Falloff < 0.0)
+		Falloff = Width;
+	if (!FMath::IsFinite(Falloff) || Falloff < 10.0 || Falloff > 100000.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Falloff %g is outside 10 .. 100000 cm (-1: Width)"), Falloff));
+	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff)))
+		return FRoadResult();
+
+	// The path every few metres (at most 1000 points: the spline's limit).
+	double Length = 0.0;
+	for (int32 Index = 1; Index < Points.Num(); ++Index)
+		Length += FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index]));
+	const double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
+	TArray<FVector2D> Path = { FVector2D(Points[0]) };
+	TArray<double> Along = { 0.0 };
+	for (int32 Index = 1; Index < Points.Num(); ++Index)
+	{
+		const FVector2D From(Points[Index - 1]), To(Points[Index]);
+		const double Segment = FVector2D::Distance(From, To);
+		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Segment / Step));
+		for (int32 Piece = 1; Piece <= Pieces; ++Piece)
+		{
+			Path.Add(FMath::Lerp(From, To, double(Piece) / Pieces));
+			Along.Add(Along.Last() + Segment / Pieces);
+		}
+	}
+	TArray<double> Ground;
+	for (const FVector2D& Point : Path)
+	{
+		const FSurfaceSample Sample = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false);
+		if (!Sample.bInside)
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("the road leaves %s at X %.0f, Y %.0f: keep its points on the terrain"), *Terrain->GetActorNameOrLabel(), Point.X, Point.Y));
+		Ground.Add(Sample.Height);
+	}
+
+	// The grade-limited profile (MaxSlope with a margin for the spline's curve and the mesh). When the climb fits the path,
+	// both ends sit on the ground: every point stays within what the start and the end can reach (so the road starts
+	// climbing early enough), as close to the ground as that allows. Otherwise it follows the ground from the start as far up
+	// as it can. Then at most the grade per step, forwards and backwards.
+	const double Tan = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9));
+	const double Total = Along.Last();
+	const bool bFits = FMath::Abs(Ground.Last() - Ground[0]) <= Total * Tan;
+	TArray<double> Z = Ground;
+	if (bFits)
+	{
+		for (int32 Index = 0; Index < Z.Num(); ++Index)
+		{
+			const double FromStart = Along[Index] * Tan, FromEnd = (Total - Along[Index]) * Tan;
+			Z[Index] = FMath::Clamp(Ground[Index], FMath::Max(Ground[0] - FromStart, Ground.Last() - FromEnd), FMath::Min(Ground[0] + FromStart, Ground.Last() + FromEnd));
+		}
+	}
+	for (int32 Index = 1; Index < Z.Num(); ++Index)
+	{
+		const double Rise = (Along[Index] - Along[Index - 1]) * Tan;
+		Z[Index] = FMath::Clamp(Z[Index], Z[Index - 1] - Rise, Z[Index - 1] + Rise);
+	}
+	for (int32 Index = Z.Num() - 2; Index >= 0; --Index)
+	{
+		const double Rise = (Along[Index + 1] - Along[Index]) * Tan;
+		Z[Index] = FMath::Clamp(Z[Index], Z[Index + 1] - Rise, Z[Index + 1] + Rise);
+	}
+	TArray<FVector> Road;
+	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	{
+		Road.Add(FVector(Path[Index], Z[Index]));
+	}
+
+	// A Boolean shape's surface keeps its own coarse triangles (100+ m across), which no spline can bend: remesh it finer than
+	// the road first.
+	// The remesh covers each crossed shape whole: a coarse triangle straddling the remesh's edge stays as it is.
+	TArray<UModifierComponent*> Existing = Modifiers(Terrain);
+	FBox Coarse(ForceInit);
+	for (const UModifierComponent* Modifier : Existing)
+	{
+		const FBox Box = Modifier->ComputeCombinedBounds();
+		if (!IsKind(Modifier, TEXT("Boolean")) || Modifier->GetIsDisabledFlag() || !Box.IsValid)
+			continue;
+		const FBox2D Area(FVector2D(Box.Min), FVector2D(Box.Max));
+		if (Path.ContainsByPredicate([&Area](const FVector2D& Point) { return Area.IsInside(Point); }))
+			Coarse += Box.ExpandBy(FVector(0.05 * Box.GetSize().X + 1000.0, 0.05 * Box.GetSize().Y + 1000.0, 0.0));
+	}
+	double Order = 0.0;
+	for (const UModifierComponent* Modifier : Existing)
+		Order = FMath::Max(Order, double(Modifier->GetPriority()));
+
+	FTerrainTransaction Transaction(LOCTEXT("AddRoad", "Add Mesh Terrain Road"));
+	FPlacement Remeshed(Terrain);
+	FString RemeshLabel;
+	if (Coarse.IsValid)
+	{
+		// A Remesh box (a SplineRemesh along the path leaves a Boolean shape's triangles as they are).
+		FBox Box = Coarse;
+		const FBox Built = BuiltBounds(Terrain);
+		Box.Min.Z = FMath::Min(Built.Min.Z, Box.Min.Z) - 1000.0;
+		Box.Max.Z = FMath::Max(Built.Max.Z, Box.Max.Z) + 1000.0;
+		const FVector Size = Box.GetSize();
+		// Edges a sixth of the road's width, longer when that would pass about 4M triangles (AddRemesh's limit).
+		const double Edge = FMath::Max(FMath::Clamp(Width / 6.0, 50.0, 300.0), FMath::Sqrt(2.0 * Size.X * Size.Y / 4000000.0));
+		UModifierComponent* Remesh = Remeshed.Spawn(ModifierClassOf(TEXT("Remesh")), Box.GetCenter(), FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Remesh"));
+		if (!Remesh || !SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
+			|| !SetNumber(Remesh, TEXT("TargetEdgeLength"), Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
+			return FRoadResult();
+		RemeshLabel = Remesh->GetOwner()->GetActorNameOrLabel();
+	}
+	FPlacement Placed(Terrain);
+	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
+	// Flat 1 m past each edge, so the whole Width is flat (the banks start outside it).
+	if (!Spline || !SetNumber(Spline, TEXT("PlateauDistance"), Width / 2.0 + 100.0) || !SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
+		|| !SetProperty(Spline, TEXT("WeightChannels"), TEXT("()")) || !SetNumber(Spline, TEXT("Priority"), Order + 2.0)
+		|| !ApplySplinePoints(Spline, Road, /*bClosed*/ false))
+		return FRoadResult();
+	Remeshed.bKept = true;
+	const FModifierOpResult Built = Placed.Keep();
+	if (!Built.Modifier)
+		return FRoadResult();
+
+	FRoadResult Out;
+	Out.Modifier = Spline;
+	Out.Actor = Built.Actor;
+	Out.Remesh = RemeshLabel;
+	Out.Terrain = Built.Terrain;
+	Out.Ready = Built.Ready;
+	Out.State = Built.State;
+	Out.LengthMeters = Length / 100.0;
+	Out.StartZ = Z[0];
+	Out.EndZ = Z.Last();
+	Out.EndGroundZ = Ground.Last();
+	Out.Reached = FMath::Abs(Z.Last() - Ground.Last()) <= 100.0;
+	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / FMath::Tan(FMath::DegreesToRadians(MaxSlope)) / 100.0;
+	// The built road: its grade along the centre line, from the collision.
+	double Previous = 0.0;
+	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	{
+		const double Height = SampleSurface(Terrain, Path[Index].X, Path[Index].Y, /*bChannels*/ false).Height;
+		if (Index > 0)
+			Out.MaxSlope = FMath::Max(Out.MaxSlope, FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - Previous) / (Along[Index] - Along[Index - 1]))));
+		Previous = Height;
+	}
+	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
+	if (!Out.Reached)
+	{
+		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
+			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
+			Out.MinLengthMeters * 1.1, RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" and its Remesh"));
+	}
+	else if (Out.MaxSlope > MaxSlope + 0.5)
+	{
+		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, FMath::Clamp(Width / 6.0, 50.0, 300.0));
+	}
+	Out.Seconds = SecondsSince(Start);
+	return Out;
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size, const FString& Operation, FRotator Rotation, const FString& Label)

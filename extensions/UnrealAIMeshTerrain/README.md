@@ -110,8 +110,8 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
 - `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff = 0.5)`:
   move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0). The channels
-  are generic slots (the default definition's Red, Green, Blue, Yellow; its material decides how each looks): a "rock"
-  layer is painted into one of them. A stroke is at most 250 m in radius: larger features are modifiers (AddShape, AddNoise,
+  are generic slots (the default definition's Red, Green, Blue, Yellow; its material decides how each looks; the default
+  material only tints them with flat debug colours over a grey base): a "rock" layer is painted into one of them. A stroke is at most 250 m in radius: larger features are modifiers (AddShape, AddNoise,
   AddTexturePatch, AddWeight).
 - Strokes are stored the way Mesh Terrain Mode's Sculpt and Paint tools store theirs: in a brush modifier
   (`ProjectMeshLayersModifier`, the mode's "BrushModifier", labelled `<terrain>_Brush`), the sculpt as offsets in its
@@ -135,8 +135,8 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
 
 `meshTerrainModifier` places and changes the modifiers that shape a terrain, as Mesh Terrain Mode's Modifiers and Shapes
 palettes do. Every Add call names its terrain (the modifier is bound to it, never to whichever terrain is nearest); every
-call is one undo step, and returns after the terrain is rebuilt with `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority,
-Disabled, Ready, Seconds, State}`. Give each modifier a label (the last argument) to find it again with `unreal.find`: the
+call is one undo step, and returns after the terrain is rebuilt with `{Modifier, Actor, Kind, Terrain, Location, PriorityLayer,
+Priority, Disabled, Ready, Seconds, State}` (`Location`: the modifier actor's world position). Give each modifier a label (the last argument) to find it again with `unreal.find`: the
 default labels ("NoiseModifier", "NoiseModifier2", ...) count across every terrain of the level.
 
 ```
@@ -155,13 +155,14 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | `AddPatch(terrain, location, radius, falloff, label)` | Patch: a flat round pad at the location's Z, cut into or built up from any ground height there |
 | `AddWeight(terrain, channel, location, radius, falloff, value, label)` | WeightUtility: paints a channel of the definition (value 0..1) on the ground at every height |
 | `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
+| `AddRoad(terrain, points, width = 800, maxSlope = 8, falloff = Width, label)` | Spline: a road along the points' X, Y that follows the ground and cuts or fills where it is steeper than maxSlope (degrees), flat across Width; over a Boolean shape's coarse surface it also places a Remesh box over that part (`Remesh`). Returns `{Modifier, Actor, Remesh, Terrain, LengthMeters, StartZ, EndZ, EndGroundZ, Reached, MinLengthMeters, MaxSlope (built, along its centre line), Ready, Seconds, Note, State}`; a path too short for the climb is built as far up as it goes (`Reached` false, `Note` says how long the path must be) |
 | `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y outer diameter, Z ring height) as Boolean Union / Subtract / Trim; Rectangle, Disc as MeshProject |
 | `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
 | `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2); needs a rendering editor (under `-nullrhi` the engine applies no texture); its vertical extents (engine default 100 m up and down, which clamp the stamp) are widened to the terrain's heights plus `height` (Edit Strength and Move too), so it takes in all the ground under it, overhangs included |
 | `AddRemesh(terrain, location, size, edgeLength, label)` | Remesh: finer or coarser triangles in a box |
 | `Add(terrain, kind, location, label)` | any other scriptable kind with its defaults (InstancedPatch, SplineRemesh, MeshProject, Boolean, ProjectMeshLayers), then `set` |
 | `Edit(modifier, size, radius, width, strength, falloff)` | the common parameters; a negative value keeps the current one (a negative noise or texture height: `set` it) |
-| `Move(modifier, location)`, `SetSplinePoints(modifier, points, closed)`, `SetLatticePoints(modifier, points)` | placement (Z moves every kind) and paths (closed 1 / 0 / -1 keep) |
+| `Move(modifier, location)`, `SetSplinePoints(modifier, points, closed)`, `SetLatticePoints(modifier, points)` | placement TO a world position, not an offset (Z moves every kind) and paths (closed 1 / 0 / -1 keep) |
 | `SetOrder(modifier, priority, priorityLayer)` | build order: the definition's priority layer, then Priority (higher is applied later, on top) |
 | `Enable`, `Disable`, `Remove(modifier)`, `Bind(modifier, terrain)` | switch, delete (also a base mesh a deleted terrain left behind), re-bind to another terrain |
 

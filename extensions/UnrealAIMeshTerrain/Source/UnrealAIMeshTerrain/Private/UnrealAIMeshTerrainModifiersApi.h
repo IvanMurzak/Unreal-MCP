@@ -44,6 +44,10 @@ struct FUnrealAIMeshTerrainModifierResult
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	FString Terrain;
 
+	/** where the modifier is now (world, cm): what Move takes */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FVector Location = FVector::ZeroVector;
+
 	/** its build position: the definition's priority layer ("None": after every listed layer) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	FString PriorityLayer;
@@ -63,6 +67,71 @@ struct FUnrealAIMeshTerrainModifierResult
 	/** how long the call waited for the terrain to build (seconds) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double Seconds = 0.0;
+
+	/** "built", or what is still pending */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString State;
+};
+
+/** The result of `meshTerrainModifier | call AddRoad(...)`: the road's spline modifier, how far it climbs and its built grade. */
+USTRUCT(BlueprintType)
+struct FUnrealAIMeshTerrainRoadResult
+{
+	GENERATED_BODY()
+
+	/** the road's spline modifier (Remove it to take the road away; its Remesh too) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	TObjectPtr<UE::MeshPartition::UModifierComponent> Modifier = nullptr;
+
+	/** the label of the road's actor */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString Actor;
+
+	/** the label of the Remesh box placed where the path crosses a Boolean shape's coarse surface ("" when none was needed) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString Remesh;
+
+	/** the label of the terrain */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString Terrain;
+
+	/** the road's length along its points (m) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double LengthMeters = 0.0;
+
+	/** the road's height at its start and its end (world Z, cm) and the ground's height at the end before the road */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double StartZ = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double EndZ = 0.0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double EndGroundZ = 0.0;
+
+	/** true when the road reaches the ground at its last point (within 1 m) without being steeper than MaxSlope */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	bool Reached = false;
+
+	/** the shortest path (m) that climbs from the start's ground to the end's at MaxSlope */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double MinLengthMeters = 0.0;
+
+	/** the steepest grade of the BUILT ground along the road's centre line (degrees, sampled every few metres) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double MaxSlope = 0.0;
+
+	/** true when the terrain's mesh, collision and rendering match its modifiers */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	bool Ready = false;
+
+	/** how long the call took (seconds) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	double Seconds = 0.0;
+
+	/** what to do when the road falls short, else "" */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString Note;
 
 	/** "built", or what is still pending */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
@@ -94,6 +163,10 @@ public:
 	/** add a weight (paint) modifier: write Value (0..1) into the paint channel Channel (one of the terrain's Channels) in a disc of Radius cm around Location, fading to 0 over Falloff cm; the ground's shape is not changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult AddWeight(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Location, double Radius = 1000.0, double Falloff = 1000.0, double Value = 1.0, const FString& Label = TEXT(""));
+
+	/** a road no steeper than MaxSlope degrees along Points (2 .. 1000 world points; their X, Y give the path, Z is ignored): it follows the ground where it can and cuts or fills where the ground is steeper, starting on the ground at the first point; Width (cm, flat across), Falloff (cm, the cut / fill banks; -1: Width). Where the path crosses a Boolean shape's coarse surface it also places a Remesh box over that part (finer triangles to cut into). When the path is too short to climb to the last point's ground at MaxSlope the road is built as far up as it can go, Reached is false and MinLengthMeters says how long the path must be (wind it: switchbacks or a spiral; Remove the road and call again). One undo step; returns when built, with the built MaxSlope along it. */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealAIMeshTerrainRoadResult AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width = 800.0, double MaxSlope = 8.0, double Falloff = -1.0, const FString& Label = TEXT(""));
 
 	/** add a spline modifier: the ground follows a path through Points (2 .. 1000 world points; their Z is the ground height there) Width cm wide, blending into the ground over Falloff cm on each side (a road, a river bed, a ridge); Closed joins the last point to the first and fills the inside (a plateau outline); Channel (optional) also paints that channel along it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
@@ -127,7 +200,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Edit(UE::MeshPartition::UModifierComponent* Modifier, FVector Size = FVector(-1.0, -1.0, -1.0), double Radius = -1.0, double Width = -1.0, double Strength = -1.0, double Falloff = -1.0);
 
-	/** move a modifier's actor to Location (world, cm; its rotation is kept); Z moves every kind (a patch's or shape's height, a spline or lattice up or down with it): pass its current Z to keep it */
+	/** move a modifier's actor TO Location (an absolute world position, cm, not an offset: to lower a pad 30 m pass its own X, Y and its Z - 3000; the result's Location shows where it is now; its rotation is kept); Z moves every kind (a patch's or shape's height, a spline or lattice up or down with it): pass its current Z to keep it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult Move(UE::MeshPartition::UModifierComponent* Modifier, FVector Location);
 

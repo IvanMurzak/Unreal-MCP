@@ -214,7 +214,7 @@ public:
 			TEXT("Mesh Terrain operations: call Rebuild(terrain, timeoutSeconds) / WaitForBuild(terrain, timeoutSeconds) / Surface(terrain, point) / SurfacePoints(terrain, points) / EnableMeshTerrain()"),
 			UUnrealAIMeshTerrainRqlApi::StaticClass(), TEXT("MeshTerrainOperations"));
 		Context.AddApiSource(TEXT("meshTerrainModifier"),
-			TEXT("Mesh Terrain modifier operations: call AddNoise / AddPatch / AddWeight / AddSpline / AddShape / AddLattice / AddTexturePatch / AddRemesh / Add(terrain, kind, location) / Edit / Move / SetSplinePoints / SetLatticePoints / SetOrder / Enable / Disable / Bind / Remove(modifier); each waits until the terrain is rebuilt"),
+			TEXT("Mesh Terrain modifier operations: call AddNoise / AddPatch / AddWeight / AddSpline / AddRoad / AddShape / AddLattice / AddTexturePatch / AddRemesh / Add(terrain, kind, location) / Edit / Move / SetSplinePoints / SetLatticePoints / SetOrder / Enable / Disable / Bind / Remove(modifier); each waits until the terrain is rebuilt"),
 			UUnrealAIMeshTerrainModifiersApi::StaticClass(), TEXT("MeshTerrainModifierOperations"));
 		Context.AddApiSource(TEXT("meshTerrainCreate"),
 			TEXT("make and delete Mesh Terrains: call Create(label, location, sizeMeters, ...) / ImportHeightmap(label, file, location, sizeMeters, heightScale, ...) / Delete(terrain)"),
@@ -337,7 +337,10 @@ world X, Y within `Radius` cm (at most 25000) with a soft edge (`Falloff` 0..1, 
 (by `Height` cm at the centre), `Flatten` (to world Z `Height`), `Smooth`; `Strength` (0, 1] scales a stroke. `Paint` moves a
 channel (one of the terrain's `Channels`, e.g. "Red") towards `Weight` 0..1; `Erase` takes it to 0. The channels are the
 definition's generic paint slots (the default definition's are Red, Green, Blue, Yellow; its material decides how each
-looks): paint a "rock" or "sand" layer into one of them and say which; unpainted ground keeps the base look. A stroke is stored in a
+looks): paint a "rock" or "sand" layer into one of them and say which; unpainted ground keeps the base look. The default
+material (`/MeshPartition/Materials/M_MeshPartition_Default`) only tints each channel with a flat debug colour over a grey
+base: there is no grass, sand or rock look to find in it (do not dig through its graph); for real looks the terrain needs a
+definition with its own material. A stroke is stored in a
 brush modifier (`Kind` ProjectMeshLayers, "<terrain>_Brush"): strokes near one go into it, so they accumulate and stay
 editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (a stroke that times out
 waiting for the build is already applied: `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
@@ -362,8 +365,8 @@ modifiers are unloaded and `unreal.find("<modifier label>")` finds nothing: list
 Partition level.)MD"));
 		Context.AddGuide(TEXT("Mesh Terrain modifiers (Experimental, UE 5.8+)"), TEXT(R"MD(`meshTerrainModifier` adds and changes the modifiers that shape a
 Mesh Terrain. Every Add names its terrain (a modifier is bound to it, never to the nearest one); every call is one undo step and
-returns after the terrain is rebuilt: `{Modifier, Actor, Kind, Terrain, PriorityLayer, Priority, Disabled, Ready, Seconds,
-State}`; read the result with `Surface`. Give each modifier a Label to find it again (`unreal.find("Hills")`): default labels
+returns after the terrain is rebuilt: `{Modifier, Actor, Kind, Terrain, Location, PriorityLayer, Priority, Disabled, Ready,
+Seconds, State}`; read the result with `Surface`. Give each modifier a Label to find it again (`unreal.find("Hills")`): default labels
 ("NoiseModifier", "NoiseModifier2", ...) count across all terrains of the level. Sizes, radii and heights are cm; Location Z
 is the height of a Patch or Shape (a Spline takes its points' Z).
 
@@ -371,6 +374,7 @@ is the height of a Patch or Shape (a Spline takes its points' Z).
 meshTerrainModifier | call AddNoise(unreal.find("Terrain"), [0, 0, 0], [8000, 8000], 600, 0.0005, 0.5, "Hills")   hills: Size [X, Y], Strength (height), Frequency (1/cm), Falloff 0..1, Label
 meshTerrainModifier | call AddPatch(unreal.find("Terrain"), [1200, -800, 350], 1500, 800, "Pad")           flat pad at Z: Radius, Falloff, Label
 meshTerrainModifier | call AddSpline(unreal.find("Terrain"), [[0, 0, 100], [5000, 2000, 150]], 600, 400)  road: Width, Falloff, Closed, Channel
+meshTerrainModifier | call AddRoad(unreal.find("Terrain"), [[0, 0, 0], [30000, 5000, 0], [60000, 0, 0]], 800, 8)   road: Width cm, MaxSlope deg (path X, Y; Z from the ground)
 meshTerrainModifier | call AddShape(unreal.find("Terrain"), "Sphere", [3000, 0, 0], [2000, 2000, 1200], "Subtract")   Box Sphere Cylinder Capsule Cone Torus (Union / Subtract / Trim), Rectangle Disc (Project)
 meshTerrainModifier | call AddWeight(unreal.find("Terrain"), "Red", [0, 0, 0], 1000, 500, 1)              paint a channel (Channels)
 meshTerrainModifier | call AddLattice(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 2000], 3)           then SetLatticePoints(modifier, points) from its LatticePoints
@@ -378,7 +382,7 @@ meshTerrainModifier | call AddTexturePatch(unreal.find("Terrain"), "/Game/T_Heig
 meshTerrainModifier | call AddRemesh(unreal.find("Terrain"), [0, 0, 0], [4000, 4000, 50000], 100)          finer triangles
 meshTerrainModifier | call Add(unreal.find("Terrain"), "InstancedPatch", [0, 0, 0])                         any other kind with defaults, then set
 meshTerrainModifier | call Edit(unreal.find("Hills").Modifier, [-1, -1, -1], -1, -1, 900)               Size / Radius / Width / Strength / Falloff (-1 keeps)
-meshTerrainModifier | call Move(unreal.find("Pad").Modifier, [0, 500, 400])
+meshTerrainModifier | call Move(unreal.find("Pad").Modifier, [0, 500, 400])                          TO this world position (not an offset)
 meshTerrainModifier | call SetOrder(unreal.find("Pad").Modifier, 10)                                    higher Priority = applied later, on top
 meshTerrainModifier | call Disable(unreal.find("Pad").Modifier)        / Enable / Remove / Bind(modifier, terrain) / SetSplinePoints(modifier, points, closed)
 meshTerrainModifiers | where Kind == "Patch" | call meshTerrainModifier.Edit($, [-1, -1, -1], 2000)       one call per modifier
@@ -393,9 +397,14 @@ them in order); the Boolean modifier may log "reported errors ... cracks" for bo
 own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller than those changes nothing there (`AddRemesh`
 over the shape first gives it finer triangles).
 
+A road with a grade limit: `AddRoad(terrain, points, width, maxSlope)` takes the path's X, Y, follows the ground and cuts or
+fills where it is steeper, and remeshes a Boolean shape's coarse surface under it. Read `Reached`, `MaxSlope` (built) and
+`Note`: a path too short for the climb (`MinLengthMeters`: rise / tan(maxSlope)) ends below the target; wind it
+(switchbacks, a spiral around a hill), `Remove` the road (and its `Remesh`) and call again.
+
 Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` a modifier to
 a terrain or `Remove` it; a deleted terrain's base meshes (`Modifier.IsBase`) can only be removed; `meshTerrainCreate | call Delete(terrain)` deletes a whole
-terrain with its modifiers. A pad at the wrong height: `Move` it (its location Z). A stray brush stroke: the opposite stroke
+terrain with its modifiers. A pad at the wrong height: `Move` it to its own X, Y with the new Z (`Move` takes a world position, not an offset). A stray brush stroke: the opposite stroke
 (Raise / Lower) at the same point with the same radius, height and falloff cancels it exactly (the brush stores offsets), or
 `Remove` its brush when it holds no other stroke.)MD"));
 
