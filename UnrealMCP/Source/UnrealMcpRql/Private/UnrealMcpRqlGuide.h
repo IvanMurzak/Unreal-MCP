@@ -109,6 +109,8 @@ Results come back as compact rows (header line, then col|col). Long results are 
   call Method(args)      invoke a method the tools expose
                          installed extensions add sources with operations (rql-schema lists them): read the extension's
                          guide, rql-schema {"guide": "<name>"}, before writing C++ or Python for an editor feature
+                         in a World Partition level actors reaches only loaded actors: load the others first with
+                         editor | call LoadActors(["Lake"]) (rql-query unloadedActors lists them)
 )RQL";
 	}
 
