@@ -158,9 +158,9 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 * Wait for @p Terrain's pending build, then fail unless the XY box @p Footprint overlaps its ground: a modifier placed off
 	 * the terrain changes nothing, which is always a mistake (a wrong terrain or a wrong unit).
 	 */
-	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint)
+	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint, double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 	{
-		if (!WaitForBuild(Terrain))
+		if (!WaitForBuild(Terrain, TimeoutSeconds))
 			return false;
 		const FBox2D Area = TerrainArea(Terrain);
 		if (!Area.bIsValid || Area.Intersect(Footprint))
@@ -234,7 +234,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 * Let the edited terrains pick the change up (their modifier lists) and wait until each is rebuilt, then describe
 	 * @p Modifier. @p Terrains may hold nulls and duplicates; the first non-null one is the result's terrain.
 	 */
-	FModifierOpResult Finish(UModifierComponent* Modifier, std::initializer_list<AMeshPartition*> Terrains)
+	FModifierOpResult Finish(UModifierComponent* Modifier, std::initializer_list<AMeshPartition*> Terrains, double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 	{
 		const double Start = FPlatformTime::Seconds();
 		AMeshPartition* Main = nullptr;
@@ -245,7 +245,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 				continue;
 			Main = Main ? Main : Terrain;
 			Done.Add(Terrain);
-			if (!WaitForBuild(Terrain)) // its first round updates the terrain's modifier list
+			if (!WaitForBuild(Terrain, TimeoutSeconds)) // its first round updates the terrain's modifier list
 				return FModifierOpResult();
 		}
 		return Describe(Modifier, Main, Start);
@@ -280,10 +280,10 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Modifier = SpawnModifier(Terrain, Class, Location, Rotation, Label, Previous);
 			return Modifier;
 		}
-		FModifierOpResult Keep()
+		FModifierOpResult Keep(double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 		{
 			bKept = true;
-			return Finish(Modifier, { Terrain, Previous });
+			return Finish(Modifier, { Terrain, Previous }, TimeoutSeconds);
 		}
 	};
 
@@ -691,11 +691,11 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(U
 	return Placed.Keep();
 }
 
-FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double MaxSlope, double Falloff, const FString& Label)
+FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double MaxSlope, double Falloff, const FString& Label, double TimeoutSeconds)
 {
 	using FRoadResult = FUnrealAIMeshTerrainRoadResult;
 	const double Start = FPlatformTime::Seconds();
-	if (!CheckTerrain(Terrain) || !CheckPoints(Points))
+	if (!CheckTimeout(TimeoutSeconds) || !CheckTerrain(Terrain) || !CheckPoints(Points))
 		return FRoadResult();
 	if (!FMath::IsFinite(Width) || Width < 100.0 || Width > 10000.0)
 		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Width %g is outside 100 .. 10000 cm"), Width));
@@ -705,10 +705,10 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Falloff = Width;
 	if (!FMath::IsFinite(Falloff) || Falloff < 10.0 || Falloff > 100000.0)
 		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Falloff %g is outside 10 .. 100000 cm (-1: Width)"), Falloff));
-	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff)))
+	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff), TimeoutSeconds)) // the terrain may still rebuild a remeshed hill
 		return FRoadResult();
 
-	const double RoadEdge = FMath::Clamp(Width / 6.0, 50.0, 300.0); // remesh edges under a road
+	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
 	// The path every few metres (at most 1000 points: the spline's limit).
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
@@ -818,7 +818,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Box.Min.Z = FMath::Min(Built.Min.Z, Box.Min.Z) - 1000.0;
 		Box.Max.Z = FMath::Max(Built.Max.Z, Box.Max.Z) + 1000.0;
 		const FVector Size = Box.GetSize();
-		// Edges a sixth of the road's width, longer when that would pass AddRemesh's triangle limit.
+		// Edges a fifth of the road's width, longer when that would pass AddRemesh's triangle limit.
 		const double Edge = FMath::Max(RoadEdge, FMath::Sqrt(2.0 * Size.X * Size.Y / MaxRemeshTriangles));
 		UModifierComponent* Remesh = Remeshed.Spawn(ModifierClassOf(TEXT("Remesh")), Box.GetCenter(), FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Remesh"));
 		if (!Remesh || !SetRemesh(Remesh, Size, Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
@@ -836,7 +836,8 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		|| !SetSpline(Terrain, Spline, Road, Width / 2.0 + 100.0, Falloff, FString(), /*bClosed*/ false))
 		return FRoadResult();
 	Remeshed.bKept = true;
-	const FModifierOpResult Built = Placed.Keep();
+	// A remeshed shape takes minutes to build (its final mesh has a million triangles): wait as long as the caller allows.
+	const FModifierOpResult Built = Placed.Keep(TimeoutSeconds);
 	if (!Built.Modifier)
 		return FRoadResult();
 
