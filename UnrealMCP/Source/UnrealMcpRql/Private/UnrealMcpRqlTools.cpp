@@ -54,11 +54,19 @@ namespace UnrealMcpRqlToolsLocal
 
 	void RegisterTools(FUnrealMcpToolRegistry& Registry)
 	{
-		const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
+		FString Skill;
+		FString Extensions;
+		{
+			FUnrealMcpRqlSession Session;
+			Skill = Session.SkillMarkdown();
+			Extensions = UnrealMcpRqlGuide::ExtensionsLine(Session.ModuleNames());
+		}
+		// The installed extensions right after the intro (empty when none): a model learns they exist before the language.
+		const FString AfterIntro = Extensions.IsEmpty() ? FString() : TEXT(" ") + Extensions;
 
 		Registry.Tool(TEXT("rql-query"))
 			.Title(TEXT("RQL / Query"))
-			.Description(Text(UnrealMcpRqlGuide::QueryIntro()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::Language()) + TEXT("\n")
+			.Description(Text(UnrealMcpRqlGuide::QueryIntro()) + AfterIntro + TEXT("\n\n") + Text(UnrealMcpRqlGuide::Language()) + TEXT("\n")
 				+ Text(UnrealMcpRqlGuide::LanguageRules()) + TEXT("\n") + Text(UnrealMcpRqlGuide::QueryExamples()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::QueryBlurb()))
 			// The unreal-rql skill (sources and guides of the installed modules): the sidecar writes it beside the tool pages.
@@ -71,7 +79,7 @@ namespace UnrealMcpRqlToolsLocal
 
 		Registry.Tool(TEXT("rql-mutate"))
 			.Title(TEXT("RQL / Mutate"))
-			.Description(Text(UnrealMcpRqlGuide::MutateIntro()) + TEXT("\n") + Text(UnrealMcpRqlGuide::MutateStages())
+			.Description(Text(UnrealMcpRqlGuide::MutateIntro()) + AfterIntro + TEXT("\n") + Text(UnrealMcpRqlGuide::MutateStages())
 				+ Text(UnrealMcpRqlGuide::MutateExamples()) + Text(UnrealMcpRqlGuide::MutateOutro()) + TEXT("\n\n")
 				+ Text(UnrealMcpRqlGuide::QuerySyntaxShort()) + TEXT("\n\n") + Text(UnrealMcpRqlGuide::LanguageRules()))
 			.SkillDescription(Text(UnrealMcpRqlGuide::MutateBlurb()))
@@ -90,11 +98,12 @@ namespace UnrealMcpRqlToolsLocal
 			.SkillDescription(Text(UnrealMcpRqlGuide::SchemaBlurb()))
 			.Rql(TEXT("schema"))
 			.ParamString(TEXT("type"), TEXT("Optional type name, e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\""))
+			.ParamString(TEXT("guide"), TEXT("Optional: an installed extension's name or one of its sources (e.g. \"landscape\"): returns its guide and sources"))
 			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call)
 			{
 				bool bOk = false;
-				const FString Json = UnrealMcpRqlTools::Schema(Call.GetString(TEXT("type")), bOk);
+				const FString Json = UnrealMcpRqlTools::Schema(Call.GetString(TEXT("type")), Call.GetString(TEXT("guide")), bOk);
 				return bOk ? FUnrealMcpToolResult::Success(Json) : FUnrealMcpToolResult::Error(Json);
 			});
 	}
@@ -159,8 +168,13 @@ namespace UnrealMcpRqlTools
 
 	FString Schema(const FString& TypeName, bool& bOutOk)
 	{
+		return Schema(TypeName, FString(), bOutOk);
+	}
+
+	FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk)
+	{
 		FUnrealMcpRqlSession Session;
-		return Session.Schema(TypeName, bOutOk);
+		return Session.Schema(TypeName, Guide, bOutOk);
 	}
 
 	FString SkillMarkdown()

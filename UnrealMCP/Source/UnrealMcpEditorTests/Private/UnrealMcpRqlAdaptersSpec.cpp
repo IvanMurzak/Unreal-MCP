@@ -903,6 +903,54 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			bool bOk = false;
 			const TSharedPtr<FJsonObject> Schema = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(TEXT("RqlSpecApi"), bOk));
 			TestTrue(TEXT("the api type is in the schema under its name"), bOk && Schema.IsValid());
+			TestEqual(TEXT("the api type points at its module's guide"), Schema.IsValid() ? Schema->GetStringField(TEXT("guideCall")) : FString(),
+				FString(TEXT("rql-schema {\"guide\": \"RqlAdaptersSpec\"}")));
+
+			// The guide in-band (any MCP client, no skill installed): by module name and by one of its sources.
+			for (const TCHAR* Key : { TEXT("RqlAdaptersSpec"), TEXT("rqlspecapi") })
+			{
+				bool bGuideOk = false;
+				const TSharedPtr<FJsonObject> Guide = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), Key, bGuideOk));
+				const TSharedPtr<FJsonObject>* Body = nullptr;
+				if (!TestTrue(*FString::Printf(TEXT("guide '%s' found"), Key), bGuideOk && Guide.IsValid() && Guide->TryGetObjectField(TEXT("guide"), Body)))
+					continue;
+				TestEqual(TEXT("its module"), (*Body)->GetStringField(TEXT("module")), FString(TEXT("RqlAdaptersSpec")));
+				const TArray<TSharedPtr<FJsonValue>>& Sections = (*Body)->GetArrayField(TEXT("sections"));
+				TestTrue(TEXT("its AddGuide markdown"), Sections.Num() == 1
+					&& Sections[0]->AsObject()->GetStringField(TEXT("topic")) == TEXT("RqlAdaptersSpec guide")
+					&& Sections[0]->AsObject()->GetStringField(TEXT("markdown")) == TEXT("the rqlSpec guide body"));
+				TArray<FString> GuideSources;
+				for (const TSharedPtr<FJsonValue>& Source : (*Body)->GetArrayField(TEXT("sources")))
+					GuideSources.Add(Source->AsObject()->GetStringField(TEXT("name")));
+				TestTrue(TEXT("its sources, and only its"), GuideSources.Contains(TEXT("rqlSpecApi")) && GuideSources.Contains(TEXT("rqlSpecLights"))
+					&& !GuideSources.Contains(TEXT("actors")));
+			}
+			bool bMissingOk = true;
+			const TSharedPtr<FJsonObject> Missing = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), TEXT("NoSuchRqlSpecGuide"), bMissingOk));
+			TestFalse(TEXT("an unknown guide fails"), bMissingOk);
+			TestTrue(TEXT("unknown-guide"), Missing.IsValid() && Missing->GetStringField(TEXT("error")) == TEXT("unknown-guide"));
+
+			// The overview lists the module, its sources and the call that returns its guide.
+			bool bOverviewOk = false;
+			const TSharedPtr<FJsonObject> Overview = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), bOverviewOk));
+			const TArray<TSharedPtr<FJsonValue>>* ModuleList = nullptr;
+			bool bListed = false;
+			if (TestTrue(TEXT("overview lists modules"), bOverviewOk && Overview.IsValid() && Overview->TryGetArrayField(TEXT("modules"), ModuleList)))
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *ModuleList)
+				{
+					const TSharedPtr<FJsonObject> Entry = Value->AsObject();
+					if (Entry->GetStringField(TEXT("name")) != TEXT("RqlAdaptersSpec"))
+						continue;
+					bListed = Entry->GetStringField(TEXT("guideCall")) == TEXT("rql-schema {\"guide\": \"RqlAdaptersSpec\"}")
+						&& Entry->GetArrayField(TEXT("sources")).Num() == 5;
+				}
+			}
+			TestTrue(TEXT("the spec module with its 5 sources and guide call"), bListed);
+			TestTrue(TEXT("rql-query names the installed extension and the guide call"), Query && Query->Description.Contains(TEXT("RqlAdaptersSpec"))
+				&& Query->Description.Contains(TEXT("rql-schema {\"guide\": \"")));
+			const FUnrealMcpRegisteredTool* SchemaTool = Registry.Find(TEXT("rql-schema"));
+			TestTrue(TEXT("rql-schema takes a guide argument"), SchemaTool && SchemaTool->Description.Contains(TEXT("With guide")));
 		});
 	});
 }

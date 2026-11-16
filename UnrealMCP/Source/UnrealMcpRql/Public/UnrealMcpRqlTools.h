@@ -46,6 +46,12 @@ namespace UnrealMcpRqlTools
 	/** The rql-schema JSON for @p TypeName (empty = overview). Game thread. */
 	UNREALMCPRQL_API FString Schema(const FString& TypeName, bool& bOutOk);
 
+	/**
+	 * The rql-schema JSON with @p Guide: non-empty returns that installed module's guide and sources (module name, extension
+	 * id, one of its sources or their type), else as Schema(TypeName). Game thread.
+	 */
+	UNREALMCPRQL_API FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk);
+
 	/** The `unreal-rql` skill markdown (core + installed modules). Game thread. */
 	UNREALMCPRQL_API FString SkillMarkdown();
 

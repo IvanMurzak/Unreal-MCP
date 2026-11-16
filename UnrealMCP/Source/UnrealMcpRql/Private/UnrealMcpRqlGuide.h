@@ -9,6 +9,7 @@
 // RQL's shared language rules (LanguageRules) follow the language section, so the rules every host states alike are not
 // copied here.
 
+#include "CoreMinimal.h"
 #include "UnrealMcpRqlInclude.h"
 
 /** Appended to every rql-* description: names RQL and links its documentation. */
@@ -106,8 +107,8 @@ Results come back as compact rows (header line, then col|col). Long results are 
 		return R"RQL(  set path = expr, ...   assign members (paths may go through structs: set Location.Z = Location.Z + 100)
                          values see each target: $ (the target), $index (its position in the stream entering set / call), $count (how many enter)
   call Method(args)      invoke a method the tools expose
-                         installed extensions add sources with operations (e.g. landscapes, Control Rig, Niagara, PCG,
-                         Enhanced Input): check rql-schema before writing C++ or Python for an editor feature
+                         installed extensions add sources with operations (rql-schema lists them): read the extension's
+                         guide, rql-schema {"guide": "<name>"}, before writing C++ or Python for an editor feature
 )RQL";
 	}
 
@@ -214,10 +215,24 @@ Widgets and sequences:
 
 	inline const char* SchemaDescription()
 	{
-		return "Without a type: RQL sources, functions, the Unreal-MCP extensions you can still install (with how), and the actor "
-			"and component classes in the editor world (with counts), "
+		return "Without a type: RQL sources, functions, the installed extensions (their sources and guides), the Unreal-MCP "
+			"extensions you can still install (with how), and the actor and component classes in the editor world (with counts), "
 			"plus the Actor members. With a type name (e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\"): that type's "
-			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class." UNREAL_MCP_RQL_DOCS_LINE;
+			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class. With guide (an installed "
+			"extension or one of its sources, e.g. {\"guide\": \"landscape\"}): that extension's guide, how its operations work "
+			"together; read it before using them." UNREAL_MCP_RQL_DOCS_LINE;
+	}
+
+	/**
+	 * The installed extension modules, for the rql-query / rql-mutate descriptions (built at registration, which re-runs when
+	 * the module set changes). Empty when none is installed.
+	 */
+	inline FString ExtensionsLine(const TArray<FString>& ModuleNames)
+	{
+		if (ModuleNames.IsEmpty())
+			return FString();
+		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: "
+			"rql-schema {\"guide\": \"%s\"}."), *FString::Join(ModuleNames, TEXT(", ")), *ModuleNames[0]);
 	}
 
 	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */

@@ -65,7 +65,7 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 
 **C++ es un ciclo de primera clase.** `source-compile` compila con Live Coding cuando está activo y, si no, con UnrealBuildTool, y devuelve cada diagnóstico con su archivo, línea y severidad, así que el agente corrige errores sin leer el log de compilación. Avisa cuando un cambio necesita una compilación completa y reiniciar el editor (clases nuevas, declaraciones `UCLASS` / `UPROPERTY` / `UFUNCTION` cambiadas). Las operaciones con archivos se quedan dentro de `<Project>/Source/`. Desde una terminal, `unreal-mcp-cli compile` imprime diagnósticos `file:line:col` sin editor.
 
-**RQL se aprende del propio editor:** `rql-schema` lista cada fuente, tipo y miembro, y la skill `unreal-rql` enseña la sintaxis con recetas (`unreal-mcp-cli setup-skills` la escribe para tu agente).
+**RQL se aprende del propio editor:** `rql-schema` lista cada fuente, tipo y miembro, y la skill `unreal-rql` enseña la sintaxis con recetas (el editor la escribe para tu agente: `unreal-mcp-cli setup-skills` con el editor abierto, el botón **Generate skill files** o la generación automática); `rql-schema` con `guide` (p. ej. `{"guide": "landscape"}`) devuelve la guía de una extensión instalada a cualquier cliente.
 
 ## Requisitos
 

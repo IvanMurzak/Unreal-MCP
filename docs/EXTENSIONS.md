@@ -61,7 +61,7 @@ IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyNiagaraAI)
 | `AddApiSource(Name, Description, Class, TypeName)` | `AddApiClass` plus a source holding the class default object (`niagara \| call SpawnSystem(...)`) |
 | `ExposeProperties(Owner, Names, bWritable)` | properties reflection hides (not EditAnywhere / BlueprintVisible) as members |
 | `AddJsonMember` / `AddObjectMember` / `AddObjectListMember` | read-only computed members (JSON values, one object reference, owning object lists) |
-| `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill |
+| `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill and of `rql-schema {"guide": "<module or one of its sources>"}` (agents without the skill read it there) |
 
 Operations classes: declare the functions `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))`
 (UHT records C++ default arguments for BlueprintCallable functions only; the meta keeps them out of Blueprint menus),

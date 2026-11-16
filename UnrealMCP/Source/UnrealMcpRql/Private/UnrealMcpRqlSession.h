@@ -57,8 +57,18 @@ public:
 	 */
 	void SetUndoTitle(const FString& QueryText);
 
-	/** rql-schema data: sources, functions, present classes and type descriptors (JSON the sidecar renders). */
-	FString Schema(const FString& TypeName, bool& bOutOk);
+	/**
+	 * rql-schema data (JSON the sidecar renders). @p Guide non-empty: that installed module's guide and sources (matched by
+	 * module name, extension id, source name or source type). Else @p TypeName: that type, or without one the overview
+	 * (sources, functions, installed modules with their guide call, present classes).
+	 */
+	FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk);
+
+	/** The installed modules that add sources or guides, by name (the rql-* descriptions name them). */
+	TArray<FString> ModuleNames() const;
+
+	/** The rql-schema call that returns @p ModuleName's guide: rql-schema {"guide": "MeshTerrain"}. */
+	static FString GuideCall(const FString& ModuleName);
 
 	/** The unreal-rql skill: language, operations, live sources / functions, module guides, installed modules. */
 	FString SkillMarkdown() const;
@@ -91,6 +101,18 @@ private:
 	TArray<FEntry> FunctionEntries;
 	TArray<TPair<FString, FString>> Guides;
 	TArray<FString> ModuleReports;
+	/** An extension module and the sources / guides its ConfigureRql added (index ranges into SourceEntries / Guides). */
+	struct FModuleInfo
+	{
+		FString Name;
+		FString ExtensionId;
+		FString Version;
+		int32 SourceBegin = 0;
+		int32 SourceEnd = 0;
+		int32 GuideBegin = 0;
+		int32 GuideEnd = 0;
+	};
+	TArray<FModuleInfo> ModuleInfos;
 	TArray<FBatchValidator> BatchValidators;
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
@@ -103,6 +125,11 @@ private:
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);
 	/** {"type": descriptor, "shared": its base, whose members the sidecar summarises once} for rql-schema. */
 	rql::Json Describe(const rql::TypeDescriptor* Type);
+	/** The module @p Key names (module name, extension id, one of its sources or their type; case-insensitive), or null. */
+	const FModuleInfo* FindModuleInfo(const FString& Key) const;
+	/** The module one of whose sources has @p Type, or null. */
+	const FModuleInfo* ModuleOfType(const rql::TypeDescriptor* Type) const;
+	FString GuideSchema(const FString& Key, bool& bOutOk) const;
 	void ConfigureMutations();
 	void ConfigureModules();
 	void CloseTransaction();

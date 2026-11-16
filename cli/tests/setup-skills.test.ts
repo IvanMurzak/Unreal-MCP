@@ -1,11 +1,24 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EXIT_CODES } from '@baizor/gamedev-cli-core';
-import { setupSkills } from '../src/lib/setup-skills.js';
+import { EDITOR_SKILLS_HINT, setupSkills } from '../src/lib/setup-skills.js';
 import { buildGuideFiles, EXIT_CODE_ACTIONS } from '../src/lib/skill-guides.js';
 import { RQL_LANGUAGE, RQL_RECIPES } from '../src/lib/cli-guide.js';
 import { makeTempDir, rmTempDir, writeUProject } from './helpers.js';
+import { probePing } from '../src/utils/probe.js';
+import { runSystemTool } from '../src/lib/run-tool.js';
+
+// The editor step: no editor answers unless a test says so (the probe never reaches the network).
+vi.mock('../src/utils/probe.js', () => ({ probePing: vi.fn() }));
+vi.mock('../src/lib/run-tool.js', () => ({ runSystemTool: vi.fn() }));
+const probeMock = vi.mocked(probePing);
+const systemToolMock = vi.mocked(runSystemTool);
+beforeEach(() => {
+  probeMock.mockReset();
+  probeMock.mockResolvedValue({ ok: false, baseUrl: 'http://127.0.0.1:1', reason: 'connection refused' });
+  systemToolMock.mockReset();
+});
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -130,5 +143,49 @@ describe('the unreal-mcp-cli skill', () => {
     expect(Buffer.byteLength(skillMd())).toBeLessThan(2800);
     const all = buildGuideFiles().map((f) => f.content).join('\n');
     expect(all).not.toMatch(/\b(Arena|Crate|Platform|Level1|EnemyStats|GameMath)\b/);
+  });
+
+  it('asks a running editor for its skills (unreal-rql, tools) with the agent\'s folder, then writes the offline skills', async () => {
+    const dir = tmp();
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    systemToolMock.mockResolvedValue({
+      kind: 'success', success: true, endpoint: 'x', httpStatus: 200,
+      data: { status: 'success', structured: { skillsPath: '/p/.cursor/skills', filesWritten: 41, filesPruned: 2, toolsConsidered: 40 } },
+    });
+    const r = await setupSkills({ projectDir: dir, agentId: 'cursor', url: 'http://localhost:1234' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(systemToolMock).toHaveBeenCalledTimes(1);
+    expect(systemToolMock.mock.calls[0][0]).toMatchObject({ toolName: 'unreal-skill-generate', url: 'http://localhost:1234', input: { path: '.cursor/skills' } });
+    expect(r.editorSkills).toEqual({ generated: true, message: '41 file(s) written, 2 stale pruned in /p/.cursor/skills' });
+    expect(fs.existsSync(path.join(dir, '.cursor', 'skills', 'unreal-mcp-cli', 'SKILL.md'))).toBe(true);
+  });
+
+  it('without an editor writes the offline skills and says unreal-rql needs the editor', async () => {
+    const dir = tmp();
+    const r = await setupSkills({ projectDir: dir, url: 'http://127.0.0.1:1' });
+    expect(r.kind).toBe('success');
+    if (r.kind !== 'success') return;
+    expect(probeMock).toHaveBeenCalledTimes(1);
+    expect(systemToolMock).not.toHaveBeenCalled();
+    expect(r.editorSkills).toMatchObject({ generated: false, reachable: false });
+    expect(r.filesWritten).toHaveLength(4);
+    expect(EDITOR_SKILLS_HINT).toContain('`unreal-rql` (RQL + extension guides) needs the editor');
+  });
+
+  it('reports an editor that answers but fails to generate, and still writes the offline skills', async () => {
+    const dir = tmp();
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    systemToolMock.mockResolvedValue({ kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 500, data: { error: '[tool_error] no tools' }, message: 'HTTP 500' });
+    const r = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(r.kind === 'success' && r.editorSkills).toEqual({ generated: false, reachable: true, reason: '[tool_error] no tools' });
+    expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'SKILL.md'))).toBe(true);
+  });
+
+  it('skips the editor step offline', async () => {
+    const dir = tmp();
+    const r = await setupSkills({ projectDir: dir, editor: false });
+    expect(probeMock).not.toHaveBeenCalled();
+    expect(r.kind === 'success' && r.editorSkills).toBeUndefined();
   });
 });

@@ -785,8 +785,18 @@ void FUnrealMcpRqlSession::ConfigureModules()
 			if (bAlreadyConfigured)
 				continue;
 		}
+		FModuleInfo Info;
+		Info.Name = Module->GetRqlModuleName();
+		Info.ExtensionId = Extension;
+		Info.SourceBegin = SourceEntries.Num();
+		Info.GuideBegin = Guides.Num();
 		Module->ConfigureRql(Context);
 		const FString Version = Module->GetExtensionVersion();
+		Info.Version = Version;
+		Info.SourceEnd = SourceEntries.Num();
+		Info.GuideEnd = Guides.Num();
+		if (Info.SourceEnd > Info.SourceBegin || Info.GuideEnd > Info.GuideBegin)
+			ModuleInfos.Add(MoveTemp(Info));
 		FString Report = FString::Printf(TEXT("`%s`"), *Module->GetRqlModuleName());
 		if (!Extension.IsEmpty())
 			Report += FString::Printf(TEXT(" - %s %s"), *Extension, *Version);
@@ -992,8 +1002,107 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 	return false;
 }
 
-FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
+FString FUnrealMcpRqlSession::GuideCall(const FString& ModuleName)
 {
+	return FString::Printf(TEXT("rql-schema {\"guide\": \"%s\"}"), *ModuleName);
+}
+
+TArray<FString> FUnrealMcpRqlSession::ModuleNames() const
+{
+	TArray<FString> Names;
+	for (const FModuleInfo& Info : ModuleInfos)
+		Names.Add(Info.Name);
+	return Names;
+}
+
+const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(const FString& Key) const
+{
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		if (Info.Name.Equals(Key, ESearchCase::IgnoreCase) || (!Info.ExtensionId.IsEmpty() && Info.ExtensionId.Equals(Key, ESearchCase::IgnoreCase)))
+			return &Info;
+	}
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
+		{
+			const FEntry& Source = SourceEntries[Index];
+			if (Source.Name.Equals(Key, ESearchCase::IgnoreCase)
+				|| (Source.Type && UnrealMcpRqlFromStd(Source.Type->name).Equals(Key, ESearchCase::IgnoreCase)))
+				return &Info;
+		}
+	}
+	return nullptr;
+}
+
+const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::ModuleOfType(const rql::TypeDescriptor* Type) const
+{
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		if (Info.GuideEnd == Info.GuideBegin)
+			continue; // nothing to point at
+		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
+		{
+			if (Type && SourceEntries[Index].Type == Type)
+				return &Info;
+		}
+	}
+	return nullptr;
+}
+
+FString FUnrealMcpRqlSession::GuideSchema(const FString& Key, bool& bOutOk) const
+{
+	rql::Json Root = rql::Json::object();
+	const FModuleInfo* Info = FindModuleInfo(Key);
+	if (!Info)
+	{
+		bOutOk = false;
+		Root.set("error", "unknown-guide");
+		Root.set("name", UnrealMcpRqlToStd(Key));
+		rql::Json Candidates = rql::Json::array();
+		for (const FModuleInfo& Each : ModuleInfos)
+			Candidates.push(rql::Json(UnrealMcpRqlToStd(Each.Name)));
+		Root.set("candidates", std::move(Candidates));
+		return UnrealMcpRqlFromStd(Root.dump());
+	}
+	bOutOk = true;
+	rql::Json Guide = rql::Json::object();
+	Guide.set("module", UnrealMcpRqlToStd(Info->Name));
+	if (!Info->ExtensionId.IsEmpty())
+		Guide.set("extension", UnrealMcpRqlToStd(Info->ExtensionId));
+	if (!Info->Version.IsEmpty())
+		Guide.set("version", UnrealMcpRqlToStd(Info->Version));
+	rql::Json SourceList = rql::Json::array();
+	for (int32 Index = Info->SourceBegin; Index < Info->SourceEnd; ++Index)
+	{
+		const FEntry& Entry = SourceEntries[Index];
+		rql::Json Item = rql::Json::object();
+		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
+		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
+		if (!Entry.Description.IsEmpty())
+			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
+		SourceList.push(std::move(Item));
+	}
+	Guide.set("sources", std::move(SourceList));
+	rql::Json Sections = rql::Json::array();
+	for (int32 Index = Info->GuideBegin; Index < Info->GuideEnd; ++Index)
+	{
+		rql::Json Item = rql::Json::object();
+		Item.set("topic", UnrealMcpRqlToStd(Guides[Index].Key));
+		Item.set("markdown", UnrealMcpRqlToStd(Guides[Index].Value.TrimStartAndEnd()));
+		Sections.push(std::move(Item));
+	}
+	Guide.set("sections", std::move(Sections));
+	Root.set("guide", std::move(Guide));
+	return UnrealMcpRqlFromStd(Root.dump());
+}
+
+FString FUnrealMcpRqlSession::Schema(const FString& TypeName, const FString& Guide, bool& bOutOk)
+{
+	const FString WantedGuide = Guide.TrimStartAndEnd();
+	if (!WantedGuide.IsEmpty())
+		return GuideSchema(WantedGuide, bOutOk);
+
 	rql::Json Root = rql::Json::object();
 	bOutOk = true;
 
@@ -1055,6 +1164,9 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		rql::Json TypeList = rql::Json::array();
 		TypeList.push(Describe(Found));
 		Root.set("types", std::move(TypeList));
+		// An extension's source type: its guide says how the operations work together.
+		if (const FModuleInfo* Owner = ModuleOfType(Found))
+			Root.set("guideCall", UnrealMcpRqlToStd(GuideCall(Owner->Name)));
 		return UnrealMcpRqlFromStd(Root.dump());
 	}
 
@@ -1079,6 +1191,29 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		FunctionList.push(std::move(Item));
 	}
 	Root.set("functions", std::move(FunctionList));
+
+	// The installed extension modules: their sources and the call that returns their guide (AddGuide).
+	if (!ModuleInfos.IsEmpty())
+	{
+		rql::Json ModuleList = rql::Json::array();
+		for (const FModuleInfo& Info : ModuleInfos)
+		{
+			rql::Json Item = rql::Json::object();
+			Item.set("name", UnrealMcpRqlToStd(Info.Name));
+			if (!Info.ExtensionId.IsEmpty())
+				Item.set("extension", UnrealMcpRqlToStd(Info.ExtensionId));
+			if (!Info.Version.IsEmpty())
+				Item.set("version", UnrealMcpRqlToStd(Info.Version));
+			rql::Json Names = rql::Json::array();
+			for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
+				Names.push(rql::Json(UnrealMcpRqlToStd(SourceEntries[Index].Name)));
+			Item.set("sources", std::move(Names));
+			if (Info.GuideEnd > Info.GuideBegin)
+				Item.set("guideCall", UnrealMcpRqlToStd(GuideCall(Info.Name)));
+			ModuleList.push(std::move(Item));
+		}
+		Root.set("modules", std::move(ModuleList));
+	}
 
 	// The extensions agents could add (each brings sources and operations), with how to get them.
 	const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();

@@ -275,6 +275,50 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void RenderSchema_OverviewListsInstalledExtensionsWithTheirGuideCall()
+        {
+            var json = JsonNode.Parse(@"{
+                ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
+                ""functions"": [],
+                ""modules"": [{""name"": ""MeshTerrain"", ""extension"": ""com.ivanmurzak.unreal-ai-mesh-terrain"", ""version"": ""0.1.0"",
+                    ""sources"": [""meshTerrain"", ""meshTerrainModifier""], ""guideCall"": ""rql-schema {\""guide\"": \""MeshTerrain\""}""},
+                    {""name"": ""NoGuide"", ""sources"": [""plain""]}]
+            }")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.Contains("installed extensions (sources; read the guide before using them):\n"
+                + "  MeshTerrain (com.ivanmurzak.unreal-ai-mesh-terrain 0.1.0): meshTerrain, meshTerrainModifier — guide: rql-schema {\"guide\": \"MeshTerrain\"}\n"
+                + "  NoGuide: plain\n", text);
+        }
+
+        [Fact]
+        public void RenderSchema_GuideRendersTheSourcesAndEverySection()
+        {
+            var json = JsonNode.Parse(@"{""guide"": {""module"": ""Landscape"", ""extension"": ""com.ivanmurzak.unreal-ai-landscape"", ""version"": ""0.3.0"",
+                ""sources"": [{""name"": ""landscape"", ""type"": ""LandscapeApi"", ""description"": ""landscape operations""}],
+                ""sections"": [{""topic"": ""Landscape and Water"", ""markdown"": ""Sculpt with `landscape | call Sculpt(...)`.""}, {""topic"": ""More"", ""markdown"": ""second""}]}}")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.StartsWith("# Landscape guide (extension com.ivanmurzak.unreal-ai-landscape 0.3.0)\n\n", text);
+            Assert.Contains("  landscape: LandscapeApi — landscape operations\n", text);
+            Assert.Contains("\n## Landscape and Water\n\nSculpt with `landscape | call Sculpt(...)`.\n", text);
+            Assert.EndsWith("\n## More\n\nsecond", text);
+        }
+
+        [Fact]
+        public void RenderSchema_UnknownGuideNamesTheInstalledOnes()
+        {
+            var json = JsonNode.Parse(@"{""error"": ""unknown-guide"", ""name"": ""terrain"", ""candidates"": [""Landscape"", ""MeshTerrain""]}")!.AsObject();
+            Assert.Equal("error unknown-guide: no installed extension 'terrain'; guides: Landscape, MeshTerrain (or one of their sources)", RqlBridge.RenderSchema(json));
+        }
+
+        [Fact]
+        public void RenderSchema_OneExtensionTypePointsAtItsGuide()
+        {
+            var json = JsonNode.Parse(@"{""types"": [{""type"": {""name"": ""MeshTerrainApi"", ""kind"": ""object"", ""members"": [], ""methods"": [""Create()""]}}],
+                ""guideCall"": ""rql-schema {\""guide\"": \""MeshTerrain\""}""}")!.AsObject();
+            Assert.EndsWith("\nguide (how these operations work together): rql-schema {\"guide\": \"MeshTerrain\"}", RqlBridge.RenderSchema(json));
+        }
+
+        [Fact]
         public void RenderSchema_OneTypeSummarisesTheSharedBase()
         {
             var json = JsonNode.Parse(@"{""types"": [{

@@ -438,6 +438,10 @@ the kept tools take simple arguments already.
 to parse `query` into `plan` (query / mutate) and to render the answer, and rql-query ships the `unreal-rql` skill (the
 guide, the live sources and functions, the guides of installed RQL modules) as `"skills": [{name, description,
 markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL.md`; skills never reach `tools/list`.
+Skill files are written by the editor's sidecar only: the panel's **Generate skill files** button, the per-agent
+**auto-generate** setting (on each connection and after the tool / module set changes, debounced,
+`UnrealMcpEditor/Private/Skills/UnrealMcpSkillAutoGenerator`), `unreal-skill-generate`, and `unreal-mcp-cli setup-skills`
+while the editor answers (it calls `unreal-skill-generate`; offline it writes only its own skills).
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
 The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` from `rql/guide.hpp`,
 with `editor.SpawnActor` examples; the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline,
@@ -461,7 +465,11 @@ Reflection already exposes every type the extension's engine plugin defines, so 
   UHT records default arguments; the doc comment is the description; failures via `UnrealMcpRql::Failed<T>`; object
   parameters are required unless their C++ default is `nullptr`);
 - members: `ExposeProperties` (properties reflection hides), `AddJsonMember`, `AddObjectMember`, `AddObjectListMember`;
-- `AddGuide(topic, markdown)`, rendered into the `unreal-rql` skill.
+- `AddGuide(topic, markdown)`, rendered into the `unreal-rql` skill and returned in-band by `rql-schema` with `guide` (the
+  module name, its extension id, one of its sources or their type: `{"guide": "landscape"}`) with the module's sources, for
+  clients that never install a skill. The `rql-schema` overview lists every installed module with its sources and that
+  call; one of a module's source types names it too; the rql-query / rql-mutate descriptions name the installed modules
+  (built at registration, so the module re-registration above refreshes them).
 
 `IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's
 lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core

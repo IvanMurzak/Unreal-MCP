@@ -24,6 +24,7 @@ class FUnrealMcpDevControlServer;
 class FUnrealMcpEditorSession;
 class FUnrealMcpBackgroundRendering;
 class FUnrealMcpModalWatch;
+class FUnrealMcpSkillAutoGenerator;
 
 /**
  * Plugin-lifetime EDITOR coordinator (docs/ARCHITECTURE.md §0, §12.3 Model A). Builds the runtime-owned
@@ -111,6 +112,9 @@ private:
 	TSharedPtr<FUnrealMcpEditorViewModel> ViewModel;
 	TUniquePtr<FUnrealMcpMainWindowTab> MainWindowTab;
 	TUniquePtr<FUnrealMcpAuxWindows> AuxWindows;
+	// The per-agent "auto-generate skills" setting: regenerates the enabled agents' skills on a sidecar handshake and after
+	// the tool / RQL module set changes (debounced; the sidecar writes the files).
+	TUniquePtr<FUnrealMcpSkillAutoGenerator> SkillAutoGenerator;
 
 	// Teardown alive-flag guarding the embedded Extensions panel's InstalledProvider (issue #179). The provider
 	// captures the raw FUnrealMcpExtensionManager*; a deferred main-window paint (a queued RequestCloseTab) could

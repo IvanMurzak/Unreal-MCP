@@ -277,25 +277,43 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 return string.IsNullOrEmpty(hint) ? error : error.TrimEnd() + "\nhint: " + hint;
             }
 
+            if (Str(json, "error") == "unknown-guide")
+            {
+                var names = (json["candidates"] as JsonArray)?.Select(c => c?.GetValue<string>() ?? "").Where(c => c.Length > 0).ToList()
+                    ?? new List<string>();
+                return $"error unknown-guide: no installed extension '{Str(json, "name")}'"
+                    + (names.Count > 0 ? $"; guides: {string.Join(", ", names)} (or one of their sources)" : "; none is installed (rql-schema lists the extensions you can add)");
+            }
+            if (json["guide"] is JsonObject guide)
+                return RenderGuide(guide);
+
             var sb = new StringBuilder();
             if (json["sources"] is JsonArray sources)
             {
                 sb.Append("sources:\n");
-                foreach (var s in sources.OfType<JsonObject>())
-                {
-                    sb.Append("  ").Append(Str(s, "name"));
-                    var type = Str(s, "type");
-                    if (!string.IsNullOrEmpty(type)) sb.Append(": ").Append(type);
-                    var description = Str(s, "description");
-                    if (!string.IsNullOrEmpty(description)) sb.Append(" — ").Append(description);
-                    sb.Append('\n');
-                }
+                AppendSources(sb, sources);
             }
             if (json["functions"] is JsonArray functions && functions.Count > 0)
             {
                 sb.Append("functions:\n");
                 foreach (var f in functions.OfType<JsonObject>().OrderBy(f => Str(f, "name"), StringComparer.Ordinal))
                     sb.Append("  ").Append(Str(f, "name")).Append("(…) — ").Append(Str(f, "description")).Append('\n');
+            }
+            if (json["modules"] is JsonArray modules && modules.Count > 0)
+            {
+                // The installed extensions: their sources, and the call that returns the guide on how their operations work.
+                sb.Append("installed extensions (sources; read the guide before using them):\n");
+                foreach (var m in modules.OfType<JsonObject>())
+                {
+                    sb.Append("  ").Append(Str(m, "name"));
+                    var extension = Str(m, "extension");
+                    if (!string.IsNullOrEmpty(extension)) sb.Append(" (").Append(extension).Append(' ').Append(Str(m, "version") ?? "").Append(')');
+                    var names = (m["sources"] as JsonArray)?.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).ToList() ?? new List<string>();
+                    if (names.Count > 0) sb.Append(": ").Append(string.Join(", ", names));
+                    var call = Str(m, "guideCall");
+                    if (!string.IsNullOrEmpty(call)) sb.Append(" — guide: ").Append(call);
+                    sb.Append('\n');
+                }
             }
             if (json["extensions"] is JsonArray extensions && extensions.Count > 0)
             {
@@ -331,6 +349,44 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     }
                 }
             }
+            var guideCall = Str(json, "guideCall");
+            if (!overview && !string.IsNullOrEmpty(guideCall))
+                sb.Append("guide (how these operations work together): ").Append(guideCall).Append('\n');
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>`source: type — description` lines.</summary>
+        private static void AppendSources(StringBuilder sb, JsonArray sources)
+        {
+            foreach (var s in sources.OfType<JsonObject>())
+            {
+                sb.Append("  ").Append(Str(s, "name"));
+                var type = Str(s, "type");
+                if (!string.IsNullOrEmpty(type)) sb.Append(": ").Append(type);
+                var description = Str(s, "description");
+                if (!string.IsNullOrEmpty(description)) sb.Append(" — ").Append(description);
+                sb.Append('\n');
+            }
+        }
+
+        /// <summary>
+        /// One installed extension's guide (rql-schema with <c>guide</c>): a header, its sources, then each AddGuide section as
+        /// Markdown, unabridged (the guide is the reason for the call).
+        /// </summary>
+        private static string RenderGuide(JsonObject guide)
+        {
+            var sb = new StringBuilder();
+            sb.Append("# ").Append(Str(guide, "module")).Append(" guide");
+            var extension = Str(guide, "extension");
+            if (!string.IsNullOrEmpty(extension)) sb.Append(" (extension ").Append(extension).Append(' ').Append(Str(guide, "version") ?? "").Append(')');
+            sb.Append("\n\n");
+            if (guide["sources"] is JsonArray sources && sources.Count > 0)
+            {
+                sb.Append("sources (rql-schema \"<type>\" lists a type's members and operations):\n");
+                AppendSources(sb, sources);
+            }
+            foreach (var section in (guide["sections"] as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+                sb.Append("\n## ").Append(Str(section, "topic")).Append("\n\n").Append(Str(section, "markdown")).Append('\n');
             return sb.ToString().TrimEnd();
         }
 

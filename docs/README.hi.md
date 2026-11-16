@@ -65,7 +65,7 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 
 **C++ एक first-class loop है।** `source-compile` Live Coding चालू होने पर उससे, वरना UnrealBuildTool से build करता है, और हर diagnostic उसकी file, line और severity के साथ लौटाता है, इसलिए agent build log पढ़े बिना errors ठीक कर लेता है। जब किसी बदलाव के लिए full build और editor restart चाहिए (नई classes, बदली हुई `UCLASS` / `UPROPERTY` / `UFUNCTION` declarations), तो वह यह बताता है। File operations `<Project>/Source/` के अंदर ही रहते हैं। Terminal से `unreal-mcp-cli compile` बिना editor के `file:line:col` diagnostics print करता है।
 
-**RQL editor से ही सीखा जाता है:** `rql-schema` हर source, type और member की सूची देता है, और `unreal-rql` skill recipes के साथ syntax सिखाती है (`unreal-mcp-cli setup-skills` उसे आपके agent के लिए लिखता है)।
+**RQL editor से ही सीखा जाता है:** `rql-schema` हर source, type और member की सूची देता है, और `unreal-rql` skill recipes के साथ syntax सिखाती है (editor उसे आपके agent के लिए लिखता है: editor खुला होने पर `unreal-mcp-cli setup-skills`, **Generate skill files** बटन, या auto-generate)। `guide` के साथ `rql-schema` (जैसे `{"guide": "landscape"}`) किसी भी client को install किए गए extension की गाइड लौटाता है।
 
 ## आवश्यकताएँ
 
