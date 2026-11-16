@@ -58,12 +58,17 @@ def remove_link(link: Path) -> None:
         os.unlink(link)
 
 
+def append_job_file(variable: str, line: str) -> None:
+    """Append one line to the runner file named by `variable` (GITHUB_ENV, GITHUB_PATH)."""
+    if any(c in line for c in "\r\n\0"):
+        raise SystemExit(f"refusing to write {line!r} to {variable}: it contains a line break or NUL")
+    with open(os.environ[variable], "a", encoding="utf-8") as handle:
+        handle.write(f"{line}\n")
+    print(f"ue-env: {variable} += {line}", flush=True)
+
+
 def add_job_env(name: str, value: str) -> None:
-    if any(c in value for c in "\r\n\0"):
-        raise SystemExit(f"refusing to export {name}: its value contains a line break or NUL")
-    with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
-        handle.write(f"{name}={value}\n")
-    print(f"ue-env: {name}={value}", flush=True)
+    append_job_file("GITHUB_ENV", f"{name}={value}")
 
 
 def engine_root(version: str) -> Path:
@@ -133,20 +138,9 @@ def developer_dir(root: Path, version: str):
 # call with `[ ! -x ]`. The engine is never written to: this shim, first on the job's PATH, skips that one no-op call
 # (the file is already executable) and runs the real chmod for anything else.
 CHMOD_SHIM = """#!/bin/sh
-# ue_env.py: skip `chmod u+x FILE` when FILE is already executable (UE 5.7+ SetupDotnet.sh behaviour).
 if [ "$#" -eq 2 ] && [ "$1" = "u+x" ] && [ -f "$2" ] && [ -x "$2" ]; then exit 0; fi
-for chmod in /usr/bin/chmod /bin/chmod; do
-    if [ -x "$chmod" ]; then exec "$chmod" "$@"; fi
-done
-echo "chmod shim: no chmod in /usr/bin or /bin" >&2
-exit 127
+exec /bin/chmod "$@"
 """
-
-
-def add_job_path(folder: Path) -> None:
-    with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as handle:
-        handle.write(f"{folder}\n")
-    print(f"ue-env: PATH+={folder}", flush=True)
 
 
 def install_chmod_shim() -> Path:
@@ -212,7 +206,7 @@ def resolve(version: str) -> None:
     if ca_bundle:
         add_job_env("SSL_CERT_FILE", ca_bundle)
     if UE_PLATFORM == "Linux":
-        add_job_path(install_chmod_shim())
+        append_job_file("GITHUB_PATH", str(install_chmod_shim()))
 
 
 def main() -> int:

@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -331,19 +330,18 @@ class UeEnvTests(unittest.TestCase):
             temp = Path(folder)
             github_path = temp / "github_path"
             with mock.patch.dict(os.environ, {"RUNNER_TEMP": folder, "GITHUB_PATH": str(github_path)}):
-                ue_env.add_job_path(ue_env.install_chmod_shim())
+                ue_env.append_job_file("GITHUB_PATH", str(ue_env.install_chmod_shim()))
             shims = temp / "ue-shims"
             self.assertEqual(github_path.read_text(encoding="utf-8"), f"{shims}\n")
             shim = (shims / "chmod").read_bytes()
             self.assertTrue(shim.startswith(b"#!/bin/sh\n") and b"\r" not in shim)
-            sh = shutil.which("sh")
-            if sh is None or os.name == "nt":
-                return  # the shim's behaviour runs where Build.sh does (POSIX)
+            if os.name == "nt":
+                return  # the shim runs where Build.sh does (POSIX)
             tool = temp / "dotnet"
             tool.write_text("")
             tool.chmod(0o555)
-            self.assertEqual(subprocess.run([sh, str(shims / "chmod"), "u+x", str(tool)]).returncode, 0)
-            self.assertEqual(subprocess.run([sh, str(shims / "chmod"), "644", str(tool)]).returncode, 0)  # passed on
+            subprocess.run([str(shims / "chmod"), "u+x", str(tool)], check=True)  # skipped: already executable
+            subprocess.run([str(shims / "chmod"), "644", str(tool)], check=True)  # passed on to the real chmod
             self.assertEqual(tool.stat().st_mode & 0o777, 0o644)
 
     def test_xcode_versions_compare_as_three_parts(self):
