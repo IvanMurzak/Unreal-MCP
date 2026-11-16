@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape`, `water` |
-| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
+| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Bumps`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
 | Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
 
 ```
@@ -44,6 +44,9 @@ landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")
 landscape | call Sculpt(unreal.find("Terrain"), [2000, 1500, 0], 1200, 600)
 landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)
 landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)
+landscape | call Bumps(unreal.find("Terrain"))
+landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)
+landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
 landscapes | where IsPrimary | select Label Bounds
@@ -55,9 +58,14 @@ waterBodies | select Label Water Path
 
 `Create` makes a flat landscape of about one vertex per metre in at most 8 x 8 components (63-quad sections, 2 x 2
 per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape takes seconds), scaled to the requested
-size; `Sculpt` raises or lowers a smooth circular area (cm); `Flatten` levels a circle to a world height (a building pad),
-blending its edge back to the old ground over `Falloff`; `Carve` digs a channel a given depth below the ground along your
-points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks); `Paint` adds a paint layer by name (creating
+size; `Sculpt` raises or lowers a smooth circular area (cm: the full height at the centre, a cosine down to nothing at
+`Radius`); `Flatten` levels everything within `Radius` to a world height (a building pad), then blends back to the old
+ground between `Radius` and `Radius + Falloff` (`Falloff` defaults to 0: a sharp step at the edge); `Carve` digs a channel a given depth below the ground along your
+points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks at most 2 x `Width` long); `Smooth` replaces the ground within a radius by
+the smoothest surface meeting the ground around it (a spike, pit or bump blends away, a slope stays a slope); `Ramp` sets a
+strip along points to their Z (a road bed or ramp, cut and fill, sides blended over `Falloff`; `MaxSlope` refuses a stretch
+steeper than that); `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`, `Location`,
+`Height`, `Radius`); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
 coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the
 landscape actor alone leaves the proxies behind).
@@ -70,13 +78,15 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 
 On a World Partition map, an editor that opens the map loads only the region around the camera. The operations and
 `Bounds` load the landscape's streaming proxies they need first (as the World Partition window's region loading does), so
-they see the whole landscape and not only the loaded part.
+they see the whole landscape and not only the loaded part; `landscapes`, `waterBodies` and `waterZones` load every actor of
+their kind on the map, so a far lake or the streaming proxies a deleted landscape left behind are listed too. Loading
+changes and dirties nothing.
 
 `Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
 traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without
 that the engine merges on the GPU over the next editor frames, and a caller that sculpts and then traces or places actors
 in the same step reads the old ground. `Surface` reads the ground back at a world X, Y (`Inside`, `Height` in cm,
-`Slope` in degrees, `Location` on the ground, `Normal`; read-only, run it through `rql-mutate` like every `call`) and
+`Slope` in degrees, `Location` on the ground, `Normal`, `Layers`: each paint layer's weight; read-only, so `rql-query` runs it) and
 `Bounds` gives the landscape's world box with its lowest and highest ground, and where they are (`Highest`,
 `Lowest`: [X, Y, Z], to a vertex). `Rebuild` merges every edit layer of a
 landscape edited elsewhere (Landscape mode, Python) again and rebuilds its collision and, when enabled, its Nanite mesh.

@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Landscape.h"
 #include "LandscapeDataAccess.h"
+#include "LandscapeComponent.h"
 #include "LandscapeEdit.h"
 #include "LandscapeEditLayer.h"
 #include "LandscapeEditTypes.h"
@@ -96,22 +97,20 @@ namespace UnrealAILandscapeRqlApiLocal
 			*Landscape->GetActorNameOrLabel(), Suggested, Suggested));
 	}
 
-	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	/**
+	 * Load the World Partition actors of the editor world's descs @p Wanted accepts (only unloaded ones are offered), as the
+	 * editor's region loading does; false after Fail when the engine cannot load them.
+	 */
+	bool LoadDescs(UClass* Class, TFunctionRef<bool(const FWorldPartitionActorDescInstance*)> Wanted)
 	{
-		UWorld* World = Landscape ? Landscape->GetWorld() : nullptr;
+		UWorld* World = UnrealMcpRql::EditorWorld();
 		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
-		// LoadActors loads into the editor world only (another world, e.g. play in editor, streams by itself).
-		if (!Partition || World != UnrealMcpRql::EditorWorld())
+		if (!Partition)
 			return true;
-		const FGuid Guid = Landscape->GetLandscapeGuid();
 		TArray<FGuid> ToLoad;
-		FWorldPartitionHelpers::ForEachActorDescInstance<ALandscapeStreamingProxy>(Partition, [&](const FWorldPartitionActorDescInstance* Instance)
+		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, Class, [&](const FWorldPartitionActorDescInstance* Instance)
 		{
-			const FPartitionActorDesc* Desc = static_cast<const FPartitionActorDesc*>(Instance->GetActorDesc());
-			if (Desc->GridGuid != Guid || Instance->IsLoaded())
-				return true;
-			const FBox Box = Instance->GetEditorBounds();
-			if (!Area || FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(*Area))
+			if (!Instance->IsLoaded() && Wanted(Instance))
 				ToLoad.Add(Instance->GetGuid());
 			return true;
 		});
@@ -122,10 +121,32 @@ namespace UnrealAILandscapeRqlApiLocal
 		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
 		static UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
 		if (!Load)
-			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
+			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the regions in the World Partition window first"));
 		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
 		Library->GetDefaultObject()->ProcessEvent(Load, &Params);
 		return true;
+	}
+
+	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	{
+		// LoadActors loads into the editor world only (another world, e.g. play in editor, streams by itself).
+		if (!Landscape || Landscape->GetWorld() != UnrealMcpRql::EditorWorld())
+			return true;
+		const FGuid Guid = Landscape->GetLandscapeGuid();
+		return LoadDescs(ALandscapeStreamingProxy::StaticClass(), [&Guid, Area](const FWorldPartitionActorDescInstance* Instance)
+		{
+			if (static_cast<const FPartitionActorDesc*>(Instance->GetActorDesc())->GridGuid != Guid)
+				return false;
+			const FBox Box = Instance->GetEditorBounds();
+			return !Area || FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(*Area);
+		});
+	}
+
+	void LoadAll(UClass* Class)
+	{
+		// Listing a source has no call to fail: the reason goes to the log, the loaded actors are still listed.
+		if (!LoadDescs(Class, [](const FWorldPartitionActorDescInstance*) { return true; }))
+			UE_LOG(LogUnrealAILandscape, Warning, TEXT("could not load the World Partition actors of class %s: only the loaded ones are listed"), *GetNameSafe(Class));
 	}
 
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
@@ -460,6 +481,27 @@ namespace UnrealAILandscapeRqlApiLocal
 			Info->Layers[Index].LayerInfoObj = LayerInfo;
 		return LayerInfo;
 	}
+
+	/** The plane z = C[0] + C[1] u + C[2] v that fits points in least squares, from its normal equations (sums of 1, u, v, uu, uv, vv, z, uz, vz); the mean when degenerate. */
+	void FitPlane(double N, double Su, double Sv, double Suu, double Suv, double Svv, double Sz, double Suz, double Svz, double C[3])
+	{
+		const double M[3][3] = { { N, Su, Sv }, { Su, Suu, Suv }, { Sv, Suv, Svv } };
+		const double V[3] = { Sz, Suz, Svz };
+		const auto Det = [](const double A[3][3]) { return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]); };
+		const double D = Det(M);
+		C[0] = N > 0.0 ? Sz / N : 0.0;
+		C[1] = C[2] = 0.0;
+		if (FMath::Abs(D) <= UE_SMALL_NUMBER)
+			return;
+		for (int32 Col = 0; Col < 3; ++Col)
+		{
+			double Mc[3][3];
+			for (int32 Row = 0; Row < 3; ++Row)
+				for (int32 K = 0; K < 3; ++K)
+					Mc[Row][K] = K == Col ? V[Row] : M[Row][K];
+			C[Col] = Det(Mc) / D;
+		}
+	}
 }
 
 using namespace UnrealAILandscapeRqlApiLocal;
@@ -607,6 +649,392 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	});
 }
 
+int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength)
+{
+	if (!(Radius > 0.0 && Radius <= 30000.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be within 0 (exclusive) .. 30000 cm"));
+	if (!(Strength > 0.0 && Strength <= 1.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
+	// The circle plus a ring of 3 vertices around it: the ground the new surface is fitted to.
+	const double Quad = FMath::Max(Landscape ? FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X) : 1.0, UE_KINDA_SMALL_NUMBER);
+	constexpr double MaxInner = 512.0; // vertices: the fill converges within the time limit up to here
+	if (Radius / Quad > MaxInner)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Quad, MaxInner, MaxInner * Quad));
+	FCircle Area;
+	if (!Circle(Landscape, Center, Radius + 3.0 * Quad, Area))
+		return 0;
+	const double Inner = Radius / Quad; // vertices
+	const FGuid EditLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
+	if (!EditLayer.IsValid())
+		return 0;
+	const FIntRect& R = Area.Rect;
+	const int32 W = R.Width() + 1, H = R.Height() + 1;
+	// The ground: with one height layer that layer, with several their sum (the merged heights); the change is then added to
+	// the layer edits are written to, as Carve and Ramp do.
+	int32 HeightLayers = 0;
+	if (const ALandscape* Primary = Landscape->GetLandscapeActor())
+	{
+		for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+			HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
+	}
+	TArray<uint16> Ground;
+	Ground.SetNumZeroed(W * H);
+	{
+		FHeightmapAccessor<false> Reader(Area.Info);
+		if (HeightLayers <= 1)
+			Reader.SetEditLayer(EditLayer);
+		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
+	}
+	// Vertices with a loaded component under them (the rest of the rectangle reads as 0, not ground).
+	TBitArray<> Valid(false, W * H);
+	const int32 ComponentQuads = Area.Info->ComponentSizeQuads;
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
+			const auto Has = [&Area, ComponentQuads](int32 CX, int32 CY) { return Area.Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
+			const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
+			// A vertex on a seam belongs to the components on both sides: any of them will do.
+			Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
+				|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
+		}
+	}
+	// Inside the circle the ground is unknown; around it, fixed. The fill is the smoothest surface (Laplace's equation, solved by
+	// over-relaxation) that meets the ground at the circle's edge: a plane or a hill's flank stays one, a spike or pit is gone.
+	TArray<double> Fill;
+	Fill.SetNumUninitialized(W * H);
+	TBitArray<> Free(false, W * H);
+	// Start from the plane through the ring (fewer iterations than from a constant).
+	double Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0, Sz = 0, Sxz = 0, Syz = 0, N = 0;
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			const int32 I = Y * W + X;
+			Fill[I] = Ground[I];
+			if (!Valid[I])
+				continue;
+			const double Dx = R.Min.X + X - Area.Center.X, Dy = R.Min.Y + Y - Area.Center.Y;
+			const double D = FMath::Sqrt(Dx * Dx + Dy * Dy);
+			// Free: inside, not on the rectangle's border, and all four neighbours on loaded ground.
+			const bool bInside = D <= Inner && X > 0 && Y > 0 && X < W - 1 && Y < H - 1
+				&& Valid[I - 1] && Valid[I + 1] && Valid[I - W] && Valid[I + W];
+			Free[I] = bInside;
+			if (!bInside && D <= Inner + 3.0)
+			{
+				Sxx += Dx * Dx; Sxy += Dx * Dy; Syy += Dy * Dy; Sx += Dx; Sy += Dy; Sz += Ground[I]; Sxz += Dx * Ground[I]; Syz += Dy * Ground[I]; N += 1;
+			}
+		}
+	}
+	if (N < 3)
+		return UnrealMcpRql::Failed<int32>(TEXT("the circle has no ground around it on the landscape: move Center onto it or make Radius smaller"));
+	{
+		double Coef[3];
+		FitPlane(N, Sx, Sy, Sxx, Sxy, Syy, Sz, Sxz, Syz, Coef);
+		for (int32 Y = 0; Y < H; ++Y)
+			for (int32 X = 0; X < W; ++X)
+				if (Free[Y * W + X])
+					Fill[Y * W + X] = Coef[0] + Coef[1] * (R.Min.X + X - Area.Center.X) + Coef[2] * (R.Min.Y + Y - Area.Center.Y);
+	}
+	const double Omega = 2.0 / (1.0 + PI / FMath::Max(W, H)); // near-optimal over-relaxation for the square
+	const double Deadline = FPlatformTime::Seconds() + 20.0;
+	bool bConverged = false;
+	while (!bConverged && FPlatformTime::Seconds() < Deadline)
+	{
+		double MaxStep = 0.0;
+		for (int32 Y = 1; Y < H - 1; ++Y)
+		{
+			for (int32 X = 1; X < W - 1; ++X)
+			{
+				const int32 I = Y * W + X;
+				if (!Free[I])
+					continue;
+				const double Step = Omega * ((Fill[I - 1] + Fill[I + 1] + Fill[I - W] + Fill[I + W]) * 0.25 - Fill[I]);
+				Fill[I] += Step;
+				MaxStep = FMath::Max(MaxStep, FMath::Abs(Step));
+			}
+		}
+		bConverged = MaxStep < 0.02; // height units (~0.02 cm at the default Z scale)
+	}
+	if (!bConverged)
+		return UnrealMcpRql::Failed<int32>(TEXT("the smooth surface did not settle in time: nothing was changed; smooth a smaller Radius"));
+	TArray<int32> Delta;
+	Delta.SetNumZeroed(W * H);
+	int32 Changed = 0;
+	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest();
+	for (int32 I = 0; I < Ground.Num(); ++I)
+	{
+		if (!Free[I])
+			continue;
+		const int32 New = FMath::RoundToInt(FMath::Lerp(static_cast<double>(Ground[I]), Fill[I], Strength));
+		Low = FMath::Min(Low, New);
+		High = FMath::Max(High, New);
+		Delta[I] = New - Ground[I];
+		Changed += Delta[I] != 0 ? 1 : 0;
+	}
+	if (Changed == 0)
+		return 0;
+	if (!FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High)))
+		return 0;
+	FHeightmapAccessor<false> Accessor(Area.Info);
+	Accessor.SetEditLayer(EditLayer);
+	TArray<uint16> Data;
+	Data.SetNumZeroed(W * H);
+	Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
+	for (int32 I = 0; I < Data.Num(); ++I)
+		Data[I] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Data[I]) + Delta[I], 0, 65535));
+	Landscape->Modify();
+	WriteData(Accessor, R, Data.GetData());
+	Accessor.Flush();
+	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	return Changed;
+}
+
+int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff, double MaxSlope)
+{
+	if (!Landscape)
+		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (Points.Num() < 2 || Points.Num() > 1000)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Ramp needs 2 .. 1000 points, got %d"), Points.Num()));
+	if (Points.ContainsByPredicate([](const FVector& Point) { return Point.ContainsNaN(); }))
+		return UnrealMcpRql::Failed<int32>(TEXT("Points must be finite numbers"));
+	if (!(Width >= 100.0 && Width <= 20000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	if (!(Falloff >= 0.0 && Falloff <= 20000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Falloff %g is outside 0 .. 20000 cm"), Falloff));
+	if (!(MaxSlope >= 0.0 && MaxSlope < 90.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("MaxSlope must be within 0 (no limit) .. 90 degrees"));
+	if (MaxSlope > 0.0)
+	{
+		const double Limit = FMath::Tan(FMath::DegreesToRadians(MaxSlope));
+		for (int32 Index = 0; Index + 1 < Points.Num(); ++Index)
+		{
+			const FVector& A = Points[Index];
+			const FVector& B = Points[Index + 1];
+			const double Run = FVector2D::Distance(FVector2D(A), FVector2D(B));
+			const double Rise = FMath::Abs(B.Z - A.Z);
+			if (Rise > Run * Limit + 0.5)
+				return UnrealMcpRql::Failed<int32>(FString::Printf(
+					TEXT("from point %d [%.0f, %.0f, %.0f] to point %d [%.0f, %.0f, %.0f] the ramp climbs %.1f degrees, more than MaxSlope %g: %.0f cm of rise needs %.0f cm of length at that slope (this stretch is %.0f): nothing was changed. Add points so the path winds (switchbacks, around a hill) or change the Z"),
+					Index, A.X, A.Y, A.Z, Index + 1, B.X, B.Y, B.Z, FMath::RadiansToDegrees(FMath::Atan2(Rise, Run)), MaxSlope, Rise, Rise / Limit, Run));
+		}
+	}
+	return RampAlong(Landscape, Points, Width, Falloff);
+}
+
+TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
+{
+	using FBumps = TArray<FUnrealAILandscapeBump>;
+	if (!Landscape)
+		return UnrealMcpRql::Failed<FBumps>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (!(MinHeight > 0.0) || !(Scale >= 500.0 && Scale <= 50000.0))
+		return UnrealMcpRql::Failed<FBumps>(TEXT("MinHeight must be greater than 0 cm and Scale within 500 .. 50000 cm"));
+	if (!LoadLandscape(Landscape))
+		return {};
+	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+	FIntRect Whole;
+	if (!Info || !Info->GetLandscapeExtent(Whole))
+		return UnrealMcpRql::Failed<FBumps>(FString::Printf(TEXT("%s has no landscape components"), *Landscape->GetActorNameOrLabel()));
+	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+	const double Quad = FMath::Max(FMath::Abs(ToWorld.GetScale3D().X), UE_KINDA_SMALL_NUMBER);
+	const double ComponentQuads = FMath::Max(1, Info->ComponentSizeQuads);
+	// The ground as collision and Surface read it (not the edit layers: reading those can dirty the landscape), on a grid
+	// of at most about a million samples.
+	const int64 Vertices = static_cast<int64>(Whole.Width() + 1) * (Whole.Height() + 1);
+	const int32 Step = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt(Vertices / 1.0e6)));
+	const auto GroundAt = [&](double X, double Y) -> TOptional<float>
+	{
+		// Inside the component that owns the vertex: on a seam the engine reads the vertex before it.
+		const auto Inside = [ComponentQuads](double V, double Min, double Max)
+		{
+			const double Seam = FMath::RoundToDouble(V / ComponentQuads) * ComponentQuads;
+			return FMath::Clamp(FMath::Abs(V - Seam) < 1e-3 ? Seam + 1e-3 : V, Min, Max - 1e-3);
+		};
+		const auto Read = [Landscape](const FVector& At)
+		{
+			const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
+			return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(At, EHeightfieldSource::Complex);
+		};
+		const TOptional<float> Height = Read(ToWorld.TransformPosition(FVector(Inside(X, Whole.Min.X, Whole.Max.X), Inside(Y, Whole.Min.Y, Whole.Max.Y), 0.0)));
+		// No component past the seam (a landscape that is not a full rectangle): the one before it holds the vertex too.
+		return Height.IsSet() ? Height : Read(ToWorld.TransformPosition(FVector(FMath::Clamp(X - 1e-3, double(Whole.Min.X), double(Whole.Max.X)), FMath::Clamp(Y - 1e-3, double(Whole.Min.Y), double(Whole.Max.Y)), 0.0)));
+	};
+	// Sample I at vertex Min + I * Step, the last one on the far edge (Width need not be a multiple of Step).
+	const int32 GW = FMath::DivideAndRoundUp(Whole.Width(), Step) + 1, GH = FMath::DivideAndRoundUp(Whole.Height(), Step) + 1;
+	const auto VertexX = [&Whole, Step](int32 I) { return FMath::Min(Whole.Min.X + I * Step, Whole.Max.X); };
+	const auto VertexY = [&Whole, Step](int32 J) { return FMath::Min(Whole.Min.Y + J * Step, Whole.Max.Y); };
+	TArray<double> Z;
+	Z.SetNumZeroed(GW * GH);
+	TBitArray<> Valid(false, GW * GH);
+	for (int32 J = 0; J < GH; ++J)
+	{
+		for (int32 I = 0; I < GW; ++I)
+		{
+			if (const TOptional<float> H = GroundAt(VertexX(I), VertexY(J)))
+			{
+				Z[J * GW + I] = H.GetValue();
+				Valid[J * GW + I] = true;
+			}
+		}
+	}
+	// The plane that fits the ground within Scale around each sample (least squares over a box, from summed-area tables of
+	// 1, i, j, i^2, ij, j^2, z, iz, jz): the residual is how far the ground stands out of that plane. A slope, or a box cut
+	// off by the landscape's edge, then gives no residual; only a place that rises or sinks out of its surroundings does.
+	const int32 B = FMath::Max(1, FMath::RoundToInt(Scale / (Quad * Step)));
+	// Two passes: the second fits only the samples the first found ordinary, so a spike or pit does not tilt the plane of its
+	// own surroundings (which showed as a ghost pit beside a spike, a ghost bump on a pit's rim).
+	enum { C1, CI, CJ, CII, CIJ, CJJ, CZ, CIZ, CJZ, CN };
+	TArray<double> Residual;
+	Residual.SetNumZeroed(GW * GH);
+	TBitArray<> Fit = Valid;
+	for (int32 Pass = 0; Pass < 2; ++Pass)
+	{
+		if (Pass == 1)
+		{
+			for (int32 Index = 0; Index < GW * GH; ++Index)
+				Fit[Index] = Valid[Index] && FMath::Abs(Residual[Index]) < MinHeight;
+		}
+		TArray<double> Sat[CN];
+		for (TArray<double>& T : Sat)
+			T.SetNumZeroed((GW + 1) * (GH + 1));
+		for (int32 J = 0; J < GH; ++J)
+		{
+			for (int32 I = 0; I < GW; ++I)
+			{
+				const int32 K = (J + 1) * (GW + 1) + (I + 1);
+				const bool bFit = Fit[J * GW + I];
+				const double Zv = Z[J * GW + I];
+				const double Values[CN] = { 1.0, double(I), double(J), double(I) * I, double(I) * J, double(J) * J, Zv, I * Zv, J * Zv };
+				for (int32 C = 0; C < CN; ++C)
+					Sat[C][K] = (bFit ? Values[C] : 0.0) + Sat[C][K - 1] + Sat[C][K - (GW + 1)] - Sat[C][K - (GW + 1) - 1];
+			}
+		}
+		for (int32 J = 0; J < GH; ++J)
+		{
+			for (int32 I = 0; I < GW; ++I)
+			{
+				if (!Valid[J * GW + I])
+					continue;
+				const int32 I0 = FMath::Max(0, I - B), J0 = FMath::Max(0, J - B), I1 = FMath::Min(GW, I + B + 1), J1 = FMath::Min(GH, J + B + 1);
+				double S[CN];
+				for (int32 C = 0; C < CN; ++C)
+					S[C] = Sat[C][J1 * (GW + 1) + I1] - Sat[C][J0 * (GW + 1) + I1] - Sat[C][J1 * (GW + 1) + I0] + Sat[C][J0 * (GW + 1) + I0];
+				const double N = S[C1];
+				if (N < 3.0 || (Pass == 1 && N < 0.25 * (I1 - I0) * (J1 - J0)))
+					continue; // the second pass keeps the first's residual where too few ordinary samples remain
+				// Centred on this sample: u = i - I, v = j - J; fit z = A + Bu u + Bv v, the plane's height here is A.
+				const double Su = S[CI] - N * I, Sv = S[CJ] - N * J;
+				const double Suu = S[CII] - 2.0 * I * S[CI] + N * I * I, Svv = S[CJJ] - 2.0 * J * S[CJ] + N * J * J;
+				const double Suv = S[CIJ] - J * S[CI] - I * S[CJ] + N * I * J;
+				const double Sz = S[CZ], Suz = S[CIZ] - I * S[CZ], Svz = S[CJZ] - J * S[CZ];
+				double Plane[3];
+				FitPlane(N, Su, Sv, Suu, Suv, Svv, Sz, Suz, Svz, Plane);
+				Residual[J * GW + I] = Z[J * GW + I] - Plane[0];
+			}
+		}
+	}
+	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that plane, one result each.
+	FBumps Out;
+	TArray<TArray<int32>> RegionCells; // per result, its samples
+	TBitArray<> Seen(false, GW * GH);
+	TArray<int32> Stack;
+	for (int32 Start = 0; Start < GW * GH; ++Start)
+	{
+		if (Seen[Start] || FMath::Abs(Residual[Start]) < MinHeight)
+			continue;
+		const double Sign = Residual[Start] > 0.0 ? 1.0 : -1.0;
+		int32 Peak = Start;
+		TArray<int32> Cells;
+		Stack.Reset();
+		Stack.Add(Start);
+		Seen[Start] = true;
+		while (Stack.Num())
+		{
+			const int32 Cell = Stack.Pop(EAllowShrinking::No);
+			Cells.Add(Cell);
+			if (Residual[Cell] * Sign > Residual[Peak] * Sign)
+				Peak = Cell;
+			const int32 CI = Cell % GW, CJ = Cell / GW;
+			for (int32 DJ = -1; DJ <= 1; ++DJ)
+			{
+				for (int32 DI = -1; DI <= 1; ++DI)
+				{
+					const int32 NI = CI + DI, NJ = CJ + DJ;
+					if (NI < 0 || NJ < 0 || NI >= GW || NJ >= GH)
+						continue;
+					const int32 Next = NJ * GW + NI;
+					if (!Seen[Next] && Residual[Next] * Sign >= MinHeight)
+					{
+						Seen[Next] = true;
+						Stack.Add(Next);
+					}
+				}
+			}
+		}
+		const FVector2D PeakCell(Peak % GW, Peak / GW);
+		double Reach = 0.0;
+		for (const int32 Cell : Cells)
+			Reach = FMath::Max(Reach, FVector2D::Distance(PeakCell, FVector2D(Cell % GW, Cell / GW)));
+		// The extreme vertex near the coarse peak.
+		FVector2D Best(VertexX(Peak % GW), VertexY(Peak / GW));
+		double BestZ = Z[Peak];
+		for (int32 DJ = -Step; DJ <= Step; ++DJ)
+		{
+			for (int32 DI = -Step; DI <= Step; ++DI)
+			{
+				const FVector2D V(Best.X + DI, Best.Y + DJ);
+				if (V.X < Whole.Min.X || V.Y < Whole.Min.Y || V.X > Whole.Max.X || V.Y > Whole.Max.Y)
+					continue;
+				if (const TOptional<float> H = GroundAt(V.X, V.Y); H.IsSet() && (H.GetValue() - BestZ) * Sign > 0.0)
+				{
+					BestZ = H.GetValue();
+					Best = V;
+				}
+			}
+		}
+		RegionCells.Add(Cells);
+		FUnrealAILandscapeBump& Bump = Out.AddDefaulted_GetRef();
+		Bump.Kind = Sign > 0.0 ? TEXT("Bump") : TEXT("Pit");
+		const FVector World = ToWorld.TransformPosition(FVector(Best.X, Best.Y, 0.0));
+		Bump.Location = FVector(FMath::RoundToDouble(World.X), FMath::RoundToDouble(World.Y), FMath::RoundToDouble(BestZ * 10.0) / 10.0);
+		Bump.Height = FMath::RoundToDouble((Residual[Peak] + (BestZ - Z[Peak])) * 10.0) / 10.0;
+		Bump.Radius = FMath::RoundToDouble((Reach + 1.0) * Step * Quad);
+	}
+	TArray<int32> Order;
+	for (int32 Index = 0; Index < Out.Num(); ++Index)
+		Order.Add(Index);
+	Order.Sort([&Out](int32 A, int32 B) { return FMath::Abs(Out[A].Height) > FMath::Abs(Out[B].Height); });
+	// The plane fitted beside a big pit stands above it (and beside a big mound below it), so its rim can show as a low
+	// result of the opposite kind: one within the taller result's Radius of its samples and under a quarter of its height is
+	// that rim, not a place of its own (a real spike next to a pit of similar size stays).
+	TArray<int32> Kept;
+	for (const int32 Index : Order)
+	{
+		const FUnrealAILandscapeBump& Bump = Out[Index];
+		const bool bRim = Kept.ContainsByPredicate([&](int32 TallerIndex)
+		{
+			const FUnrealAILandscapeBump& Taller = Out[TallerIndex];
+			if (Taller.Kind == Bump.Kind || FMath::Abs(Bump.Height) >= 0.25 * FMath::Abs(Taller.Height))
+				return false;
+			const double Reach = Taller.Radius / (Quad * Step); // samples
+			for (const int32 Cell : RegionCells[Index])
+				for (const int32 Other : RegionCells[TallerIndex])
+					if (FMath::Square(Cell % GW - Other % GW) + FMath::Square(Cell / GW - Other / GW) <= Reach * Reach)
+						return true;
+			return false;
+		});
+		if (!bRim)
+			Kept.Add(Index);
+		if (Kept.Num() == 50)
+			break;
+	}
+	FBumps Result;
+	for (const int32 Index : Kept)
+		Result.Add(Out[Index]);
+	return Result;
+}
+
 UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, const FString& Layers)
 {
 	TArray<TPair<FName, FLinearColor>> Parsed;
@@ -651,19 +1079,35 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 		return Out;
 	// The full-resolution collision heightfield (the editor's copy; the physics one when it has none): what line traces and
 	// actors placed on the ground meet at the default collision mip 0, and what the editor renders up close. A point on the
-	// far edge is nudged inside: the engine looks it up in a component past the last one.
+	// far edge is nudged inside: the engine looks it up in a component past the last one. A point exactly on the line
+	// between two components (every ComponentSizeQuads vertices: on a 2 km landscape every 250 m, X or Y 0, 25000, ...) is
+	// nudged into the next one: the engine reads it from the one before and returns the height one vertex back.
 	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
-	const auto HeightAt = [Landscape, &ToWorld, &Whole](double X, double Y) -> TOptional<float>
+	const double ComponentQuads = FMath::Max(1, Landscape->ComponentSizeQuads);
+	// The world point the engine reads for X, Y (unset off the landscape).
+	const auto InsidePoint = [&ToWorld, &Whole, ComponentQuads](double X, double Y) -> TOptional<FVector>
 	{
 		FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
 		constexpr double Edge = 1e-3; // quads
 		if (Local.X < Whole.Min.X - Edge || Local.Y < Whole.Min.Y - Edge || Local.X > Whole.Max.X + Edge || Local.Y > Whole.Max.Y + Edge)
+			return TOptional<FVector>();
+		// Within Edge of a seam on either side (a world coordinate converts to 62.9999999 as easily as to 63): just past it.
+		const auto OffSeam = [ComponentQuads](double Value)
+		{
+			const double Seam = FMath::RoundToDouble(Value / ComponentQuads) * ComponentQuads;
+			return FMath::Abs(Value - Seam) < Edge ? Seam + Edge : Value;
+		};
+		Local.X = FMath::Clamp(OffSeam(Local.X), static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
+		Local.Y = FMath::Clamp(OffSeam(Local.Y), static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
+		return ToWorld.TransformPosition(Local);
+	};
+	const auto HeightAt = [Landscape, &InsidePoint](double X, double Y) -> TOptional<float>
+	{
+		const TOptional<FVector> Inside = InsidePoint(X, Y);
+		if (!Inside.IsSet())
 			return TOptional<float>();
-		Local.X = FMath::Clamp(Local.X, static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
-		Local.Y = FMath::Clamp(Local.Y, static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
-		const FVector Inside = ToWorld.TransformPosition(Local);
-		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Editor);
-		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Complex);
+		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside.GetValue(), EHeightfieldSource::Editor);
+		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside.GetValue(), EHeightfieldSource::Complex);
 	};
 	const TOptional<float> Height = HeightAt(Point.X, Point.Y);
 	if (!Height.IsSet())
@@ -684,6 +1128,18 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	Out.Location = FVector(Point.X, Point.Y, Out.Height);
 	Out.Normal = FVector(-SlopeX, -SlopeY, 1.0).GetSafeNormal();
 	Out.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Out.Normal.Z, -1.0, 1.0)));
+	// The paint layers' weights from the final (merged) weightmaps of the component under the point (the point inside it:
+	// the engine gives 0 for a point a hair outside, on the landscape's edge).
+	const FVector Inside = InsidePoint(Point.X, Point.Y).GetValue();
+	const FVector Local = ToWorld.InverseTransformPosition(Inside);
+	if (ULandscapeComponent* const* Component = Info->XYtoComponentMap.Find(FIntPoint(FMath::FloorToInt(Local.X / ComponentQuads), FMath::FloorToInt(Local.Y / ComponentQuads))))
+	{
+		for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
+		{
+			if (Layer.LayerInfoObj && Layer.LayerInfoObj != ALandscapeProxy::VisibilityLayer)
+				Out.Layers.Add(Layer.GetLayerName().ToString(), FMath::RoundToDouble((*Component)->GetLayerWeightAtLocation(Inside, Layer.LayerInfoObj, nullptr, false) * 100.0) / 100.0);
+		}
+	}
 	return Out;
 }
 

@@ -563,6 +563,109 @@ int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const
 	return Changed > 0 ? Changed : UnrealMcpRql::Failed<int32>(TEXT("nothing to carve: the points do not cross a loaded part of the landscape"));
 }
 
+int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff)
+{
+	using namespace UnrealAIWaterRqlLocal;
+	FHeightGrid Grid;
+	if (!ReadGrid(Landscape, Grid))
+		return 0;
+	const double Half = Width * 0.5 / Grid.QuadCm; // vertices
+	const double Band = Falloff / Grid.QuadCm;     // vertices
+	const double Reach = Half + Band + 2.0;
+	TArray<FVector2D> Path;
+	double Low = TNumericLimits<double>::Max(), High = TNumericLimits<double>::Lowest();
+	FBox2D Box(ForceInit);
+	for (const FVector& Point : Points)
+	{
+		const FVector2D P = Grid.ToLocal(Point);
+		if (P.X < Grid.Rect.Min.X - Reach || P.Y < Grid.Rect.Min.Y - Reach || P.X > Grid.Rect.Max.X + Reach || P.Y > Grid.Rect.Max.Y + Reach)
+			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("point [%.0f, %.0f] is off the landscape (its Bounds): keep the points on it or just past its edge"), Point.X, Point.Y));
+		Path.Add(P);
+		Box += P;
+		Low = FMath::Min(Low, Point.Z);
+		High = FMath::Max(High, Point.Z);
+	}
+	if (!FitsHeightRange(Landscape, Low, High))
+		return 0;
+	const FIntRect Area(
+		FMath::Max(Grid.Rect.Min.X, FMath::FloorToInt(Box.Min.X - Half - Band)), FMath::Max(Grid.Rect.Min.Y, FMath::FloorToInt(Box.Min.Y - Half - Band)),
+		FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(Box.Max.X + Half + Band)), FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(Box.Max.Y + Half + Band)));
+	if (Area.Min.X > Area.Max.X || Area.Min.Y > Area.Max.Y)
+		return UnrealMcpRql::Failed<int32>(TEXT("the points do not cross the landscape (its Bounds)"));
+	// Bounded work on the game thread: every stretch scans its own box (a long diagonal stretch is a big square).
+	int64 Work = 0;
+	for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
+	{
+		const FVector2D Size = (Path[Index] - Path[Index + 1]).GetAbs() + FVector2D(2.0 * (Half + Band) + 1.0);
+		Work += static_cast<int64>(Size.X) * static_cast<int64>(Size.Y);
+	}
+	if (Work > 200000000)
+		return UnrealMcpRql::Failed<int32>(TEXT("the path covers too much ground for one call (long diagonal stretches): give it more, shorter points or split it into several Ramp calls"));
+	// Each vertex takes the road height of its NEAREST point of the path (a bend's inside would otherwise get the far leg's height).
+	const int32 Width2 = Area.Width() + 1;
+	TArray<double> Nearest;
+	Nearest.Init(TNumericLimits<double>::Max(), Width2 * (Area.Height() + 1));
+	TArray<double> Road;
+	Road.SetNumZeroed(Nearest.Num());
+	for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
+	{
+		const FVector2D A = Path[Index], B = Path[Index + 1];
+		const FVector2D AB = B - A;
+		const double LengthSquared = FMath::Max(AB.SizeSquared(), UE_SMALL_NUMBER);
+		const int32 MinX = FMath::Max(Area.Min.X, FMath::FloorToInt(FMath::Min(A.X, B.X) - Half - Band));
+		const int32 MaxX = FMath::Min(Area.Max.X, FMath::CeilToInt(FMath::Max(A.X, B.X) + Half + Band));
+		const int32 MinY = FMath::Max(Area.Min.Y, FMath::FloorToInt(FMath::Min(A.Y, B.Y) - Half - Band));
+		const int32 MaxY = FMath::Min(Area.Max.Y, FMath::CeilToInt(FMath::Max(A.Y, B.Y) + Half + Band));
+		for (int32 Y = MinY; Y <= MaxY; ++Y)
+		{
+			for (int32 X = MinX; X <= MaxX; ++X)
+			{
+				const FVector2D P(X, Y);
+				const double T = FMath::Clamp(FVector2D::DotProduct(P - A, AB) / LengthSquared, 0.0, 1.0);
+				const double Distance = FVector2D::Distance(P, A + AB * T);
+				const int32 Cell = (Y - Area.Min.Y) * Width2 + (X - Area.Min.X);
+				if (Distance > Half + Band || Distance >= Nearest[Cell] || !Grid.Valid(X, Y))
+					continue;
+				Nearest[Cell] = Distance;
+				Road[Cell] = FMath::Lerp(Points[Index].Z, Points[Index + 1].Z, T);
+			}
+		}
+	}
+	// The change per vertex (height units), added to the edit layer: with several height layers the ground is their sum (the
+	// layer then holds only its own part, so a large cut can clamp at its bottom, as with Carve).
+	TArray<int32> Delta;
+	Delta.SetNumZeroed(Nearest.Num());
+	int32 Changed = 0;
+	for (int32 Y = Area.Min.Y; Y <= Area.Max.Y; ++Y)
+	{
+		for (int32 X = Area.Min.X; X <= Area.Max.X; ++X)
+		{
+			const int32 Cell = (Y - Area.Min.Y) * Width2 + (X - Area.Min.X);
+			if (Nearest[Cell] == TNumericLimits<double>::Max())
+				continue;
+			const double Distance = Nearest[Cell];
+			const double Weight = Distance <= Half ? 1.0 : Band > 0.0 ? 0.5 * (1.0 + FMath::Cos(PI * FMath::Min(1.0, (Distance - Half) / Band))) : 0.0;
+			const double Ground = Grid.At(X, Y);
+			Delta[Cell] = static_cast<int32>(Grid.Units(FMath::Lerp(Ground, Road[Cell], Weight))) - static_cast<int32>(Grid.Raw[Grid.Index(X, Y)]);
+			Changed += Delta[Cell] != 0 ? 1 : 0;
+		}
+	}
+	if (Changed == 0)
+		return UnrealMcpRql::Failed<int32>(TEXT("nothing to change: the ground along the points is already at their Z (or off the loaded landscape)"));
+	FHeightmapAccessor<false> Accessor(Grid.Info);
+	Accessor.SetEditLayer(Grid.EditLayer);
+	TArray<uint16> Block;
+	Block.SetNumZeroed(Delta.Num());
+	Accessor.GetDataFast(Area.Min.X, Area.Min.Y, Area.Max.X, Area.Max.Y, Block.GetData());
+	for (int32 Index = 0; Index < Block.Num(); ++Index)
+		Block[Index] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Block[Index]) + Delta[Index], 0, 65535));
+	Landscape->Modify();
+	Accessor.SetData(Area.Min.X, Area.Min.Y, Area.Max.X, Area.Max.Y, Block.GetData());
+	Accessor.Flush();
+	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	return Changed;
+}
+
 using namespace UnrealAIWaterRqlLocal;
 
 FString UUnrealAIWaterRqlApi::EnableWater()

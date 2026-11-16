@@ -38,6 +38,33 @@ struct FUnrealAILandscapeSurface
 	/** the ground's up-facing unit normal */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FVector Normal = FVector::UpVector;
+
+	/** each paint layer's weight there (0..1; e.g. {Grass: 0.2, Rock: 0.8}); empty when the landscape has no paint layers */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	TMap<FString, double> Layers;
+};
+
+/** One result of `landscape | call Bumps(landscape)`: a place where the ground stands out of its surroundings. */
+USTRUCT(BlueprintType)
+struct FUnrealAILandscapeBump
+{
+	GENERATED_BODY()
+
+	/** "Bump" (raised above its surroundings: a spike, mound or ridge) or "Pit" (sunk below them: a hole, crater or ditch) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Kind;
+
+	/** its highest (a bump) or lowest (a pit) point on the ground: [X, Y, Z] */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FVector Location = FVector::ZeroVector;
+
+	/** how far it stands above (+) or below (-) the ground around it there, cm */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Height = 0.0;
+
+	/** the radius (cm) that covers it: Smooth(landscape, Location, Radius * 1.5) blends it away */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Radius = 0.0;
 };
 
 /**
@@ -72,11 +99,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius = 0.0, double Strength = 1.0);
 
+	/** replace the ground within Radius (cm) of Center (world X and Y) by a smooth surface fitted to the ground around that circle, so a spike, pit, bump or hole disappears into its surroundings (a slope stays a slope); Strength 0..1 (1: all the way); fails without changing anything when the result leaves the height range; returns how many vertices changed */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength = 1.0);
+
+	/** level a strip Width cm wide (100 .. 20000) along Points (2 .. 1000 world points) to the points' Z, straight from point to point (raising or lowering the ground): a road bed, ramp, railway or path; Falloff cm (0 .. 20000) blends its sides back to the ground (0: a sharp edge); MaxSlope degrees (optional, 0: any): fails without changing anything when a stretch climbs more steeply, naming it and the length it needs; returns how many vertices changed */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0);
+
+	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 300.0, double Scale = 5000.0);
+
 	/** create a landscape material at Path ("/Game/Landscape/M_Terrain") that blends one paint layer per entry of Layers, each a name with an optional colour: "Grass #3a7d2c, Rock #808080"; assign it with Create or set LandscapeMaterial, then Paint the layers; returns the material (unsaved) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	UMaterial* CreateLayerMaterial(const FString& Path, const FString& Layers);
 
-	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground) and Normal; read-only; a point outside the landscape gives Inside false */
+	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground), Normal and Layers (each paint layer's weight 0..1); read-only (works in rql-query); a point outside the landscape gives Inside false */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAILandscapeSurface Surface(ALandscapeProxy* Landscape, FVector Point);
 

@@ -28,10 +28,11 @@
 
 namespace UnrealAILandscapeRqlLocal
 {
-	/** Every actor of class T in the editor world (the persistent level and loaded sublevels). */
+	/** Every actor of class T in the editor world (the persistent level and loaded sublevels), World Partition ones loaded first. */
 	template <typename T>
 	TArray<UObject*> EditorActors()
 	{
+		UnrealAILandscapeRqlApiLocal::LoadAll(T::StaticClass());
 		TArray<UObject*> Out;
 		UWorld* World = UnrealMcpRql::EditorWorld();
 		if (!World)
@@ -135,15 +136,18 @@ public:
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
 		using namespace UnrealAILandscapeRqlLocal;
-		Context.AddObjectListSource(TEXT("landscapes"), TEXT("the Landscape actors and streaming proxies of the editor world"),
+		// A reopened World Partition map loads only the region around the camera: each source loads its actors of the whole
+		// map first (as the World Partition window's region loading does; nothing is changed or dirtied), so a far lake or a
+		// streaming proxy left behind by a deleted landscape is listed too.
+		Context.AddObjectListSource(TEXT("landscapes"), TEXT("the Landscape actors and streaming proxies of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			ALandscapeProxy::StaticClass(), []() { return EditorActors<ALandscapeProxy>(); });
-		Context.AddObjectListSource(TEXT("waterBodies"), TEXT("the Water body actors (river, lake, ocean, custom) of the editor world"),
+		Context.AddObjectListSource(TEXT("waterBodies"), TEXT("the Water body actors (river, lake, ocean, custom) of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			AWaterBody::StaticClass(), []() { return EditorActors<AWaterBody>(); });
-		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world"),
+		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -331,12 +335,39 @@ landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain") 
 [[2000, 1500, 1200, 600], [-1800, -900, 1500, 900]] | call landscape.Sculpt(unreal.find("Terrain"), [$[0], $[1], 0], $[2], $[3])    hills: center X Y, radius, height (cm)
 landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)                   a level pad: radius 15 m at Z 400 cm, 8 m blend
 landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)              a channel 1.5 m deep, 6 m wide along the points
+landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)                                 blend a spike, pit or bump within 8 m away into the ground around it
+landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)   a road bed 8 m wide at the points' Z, at most 8 degrees steep
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
 [[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
 landscapes | select Label PaintLayers Sections
 ```
 
-Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z); a paint layer shows when the material
+Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
+hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius), largest first; `Smooth` replaces the
+ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
+stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
+radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
+points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
+stretch that climbs more steeply and says how long it needs to be. A steep climb needs a longer, winding path
+(switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z; on a tight bend
+give a point every few metres (each corner of the line tilts the road a little across).
+
+```
+landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius}, ...]
+landscape | call Smooth(unreal.find("Terrain"), [-3000, 3000, 0], 2500)                    a 15 m spike at [-3000, 3000] gone (radius 1.5 x its Radius)
+```
+
+Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z). How far each edit reaches:
+- `Sculpt(landscape, center, radius, height)`: the full Height at the centre, falling smoothly (a cosine) to 0 at Radius; nothing
+  changes beyond Radius. A hill 300 m high and 800 m across: radius 40000, height 30000.
+- `Flatten(landscape, center, radius, height, falloff)`: every vertex within Radius is set to Height (a flat disc); from Radius to
+  Radius + Falloff the ground blends (a cosine) from Height back to its own height; beyond Radius + Falloff nothing changes.
+  Falloff is optional, default 0: a sharp step at Radius (a cliff where the ground differs from Height). For a pad that
+  blends in, give Falloff about 1.6 x the height difference (its steepest part is then 45 degrees), more for a gentle one.
+- `Carve(landscape, points, width, depth)`: a bed Width wide along the points (Z ignored) Depth below the ground under the
+  path, then banks rising 1:1 back to the ground for at most 2 x Width (on steeper ground the bank ends in a step); it
+  only lowers ground, so it follows hills (a ditch, not a level road).
+A paint layer shows when the material
 blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Delete a whole
 landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition
 streaming proxies behind.
@@ -352,8 +383,11 @@ range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 
 ```
 
 `Height` is the world Z (cm) that traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the
-ground; off the landscape `Inside` is false. On a World Partition map these operations and `Bounds` load the regions of
-the landscape they touch (a reopened map loads only the region around the camera). Traces from above also hit your own actors (probes, roads, trees);
+ground, `Layers` each paint layer's weight there (`{Grass: 0.1, Rock: 0.9}`: where a layer is painted); off the landscape
+`Inside` is false. On a World Partition map these operations and `Bounds` load the regions of
+the landscape they touch, and `landscapes`, `waterBodies` and `waterZones` load and list every one of the map (a reopened
+map loads only the region around the camera; `actors` lists only what is loaded). A streaming proxy whose landscape was
+deleted is a leftover: `landscapes | where !IsPrimary and LandscapeActorRef == null | select Label Location`. Traces from above also hit your own actors (probes, roads, trees);
 `Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
 can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
 `call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
