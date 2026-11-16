@@ -38,6 +38,10 @@ struct FUnrealAILandscapeSurface
 	/** the ground's up-facing unit normal */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FVector Normal = FVector::UpVector;
+
+	/** each paint layer's weight there (0..1; e.g. {Grass: 0.2, Rock: 0.8}); empty when the landscape has no paint layers */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	TMap<FString, double> Layers;
 };
 
 /** One result of `landscape | call Bumps(landscape)`: a place where the ground stands out of its surroundings. */
@@ -111,7 +115,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	UMaterial* CreateLayerMaterial(const FString& Path, const FString& Layers);
 
-	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground) and Normal; read-only; a point outside the landscape gives Inside false */
+	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground), Normal and Layers (each paint layer's weight 0..1); read-only (works in rql-query); a point outside the landscape gives Inside false */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAILandscapeSurface Surface(ALandscapeProxy* Landscape, FVector Point);
 
