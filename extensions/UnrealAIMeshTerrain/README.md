@@ -44,7 +44,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete`; `meshTerrainBrush`: `Sculpt`, `Paint`, `Erase` |
 | Modifier operations (`call`) | `meshTerrainModifier`: `AddNoise`, `AddPatch`, `AddWeight`, `AddSpline`, `AddShape`, `AddLattice`, `AddTexturePatch`, `AddRemesh`, `Add`, `Edit`, `Move`, `SetSplinePoints`, `SetLatticePoints`, `SetOrder`, `Enable`, `Disable`, `Bind`, `Remove` |
 | Modifier members | `LatticeModifier.LatticePoints` |
-| Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
+| Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Label`, `ModifierComponent.Bounds`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
 
 ```
 meshTerrains | select Label Build Bounds PriorityLayers Channels

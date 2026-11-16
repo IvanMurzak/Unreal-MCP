@@ -160,7 +160,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 				TestTrue(*FString::Printf(TEXT("MeshPartition has %s"), Member), Terrain.Contains(FString(TEXT("\"")) + Member + TEXT("\"")) || Terrain.Contains(FString(Member) + TEXT(" ")));
 			const FString Modifier = UnrealMcpRqlTools::Schema(TEXT("NoiseModifier"), bOk);
 			TestTrue(TEXT("modifier schema ok"), bOk);
-			for (const TCHAR* Member : { TEXT("Terrain"), TEXT("Kind"), TEXT("Disabled"), TEXT("Modifier") })
+			for (const TCHAR* Member : { TEXT("Terrain"), TEXT("Kind"), TEXT("Label"), TEXT("Bounds"), TEXT("Disabled"), TEXT("Modifier") })
 				TestTrue(*FString::Printf(TEXT("modifiers have %s"), Member), Modifier.Contains(FString(TEXT("\"")) + Member + TEXT("\"")) || Modifier.Contains(FString(Member) + TEXT(" ")));
 		});
 	});
@@ -344,6 +344,10 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Ready with the modifier"), Build.IsValid() && Build->GetBoolField(TEXT("Ready")) && Build->GetIntegerField(TEXT("Modifiers")) == 1);
 			const TArray<UnrealAIMeshTerrain::UModifierComponent*> Listed = UnrealAIMeshTerrain::Modifiers(Terrain);
 			TestTrue(TEXT("Modifiers lists the noise"), Listed.Num() == 1 && Listed[0] == Noise && UnrealAIMeshTerrain::ModifierKind(Noise) == TEXT("Noise"));
+			// meshTerrainModifiers | where Owner.Label == "<label>_Noise" | select Label Bounds
+			TestTrue(TEXT("Label / Bounds query"), UnrealMcpRqlTools::RunPlan(Where + TEXT(R"RQL({"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}},{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &Result));
+			const FString Members = MeshTerrainSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("a modifier's Label and Bounds (%s)"), *Members.Left(400)), Members.Contains(FString::Printf(TEXT("\"%s_Noise\""), *Label)) && Members.Contains(TEXT("\"SizeMeters\":[60,60]")));
 
 			UWorld* World = Terrain->GetWorld();
 			double Relief = 0.0;

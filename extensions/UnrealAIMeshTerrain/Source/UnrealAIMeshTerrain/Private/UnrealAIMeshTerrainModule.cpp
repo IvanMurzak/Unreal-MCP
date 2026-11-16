@@ -276,6 +276,19 @@ public:
 			TerrainClass, [](UObject* Object) -> UObject* { return TerrainOf(Cast<UModifierComponent>(Object)); });
 		Context.AddJsonMember(ModifierClass, TEXT("Kind"), TEXT("the modifier kind: Noise, Spline, Boolean, Patch, TexturePatch, Lattice, Remesh, ProjectMeshLayers (sculpt), MeshProvider (a base mesh), ..."),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return MakeShared<FJsonValueString>(ModifierKind(Cast<UModifierComponent>(Object))); });
+		// Agents select these on a modifier as they do on a terrain (Modifier.Actor / Modifier.Bounds hold the same).
+		Context.AddJsonMember(ModifierClass, TEXT("Label"), TEXT("the label of the modifier's actor (what unreal.find takes)"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				const UModifierComponent* Modifier = Cast<UModifierComponent>(Object);
+				return MakeShared<FJsonValueString>(Modifier && Modifier->GetOwner() ? Modifier->GetOwner()->GetActorNameOrLabel() : FString());
+			});
+		Context.AddJsonMember(ModifierClass, TEXT("Bounds"), TEXT("where the modifier acts: its world box (cm) Min [X, Y, Z], Max [X, Y, Z], SizeMeters [X, Y]"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				const UModifierComponent* Modifier = Cast<UModifierComponent>(Object);
+				return BoxJson(Modifier ? Modifier->ComputeCombinedBounds() : FBox(ForceInit));
+			});
 		Context.AddJsonMember(ModifierClass, TEXT("Disabled"), TEXT("true when the modifier is switched off (its Disabled flag)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
@@ -299,7 +312,7 @@ public:
 modifier components (noise, splines, shapes, sculpt layers, ...) on top of its base meshes, built asynchronously into
 preview sections (the rendered mesh and its collision). `meshTerrains` lists the terrains, `meshTerrainModifiers` the
 modifiers of the level; `Build`, `Bounds`, `Sections`, `Modifiers`, `PriorityLayers`, `Channels` and `Definition`
-summarise a terrain, `Modifier` (Kind, PriorityLayer, SubPriority, Disabled, Bounds) a modifier. Read a terrain's structure
+summarise a terrain, `Label`, `Kind`, `Bounds` and `Modifier` (Kind, PriorityLayer, SubPriority, Disabled, Bounds) a modifier. Read a terrain's structure
 through these sources and members, not with Python: Mesh Partition keeps its actors' and modifiers' settings under engine
 names Python does not find ("Failed to find property"); `rql-schema NoiseModifier` (any modifier class) lists a modifier's
 properties for `select` and `set`. Members, `Surface`, `SurfacePoints` and `WaitForBuild` are read-only (rql-query);
@@ -310,6 +323,7 @@ meshTerrains | select Label Build Bounds PriorityLayers Channels
 meshTerrains | where Label == "Island" | select Bounds        Base.SizeMeters: its size; Highest / Lowest [X, Y, Z]: its highest and lowest ground
 meshTerrains | first | get Modifiers | select Modifier
 meshTerrainModifiers | where Kind == "Noise" | select $ref Modifier
+meshTerrainModifiers | select Label Kind Bounds Terrain.Label                 what each modifier is and where it acts
 meshTerrainModifiers | where Terrain == null | select $ref Modifier   leftovers (see Repairs)
 ```
 
