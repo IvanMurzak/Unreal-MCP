@@ -349,7 +349,8 @@ stays a slope (unlike Flatten, which makes it level); a curved surface comes bac
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
 points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
 stretch that climbs more steeply and says how long it needs to be. A steep climb needs a longer, winding path
-(switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z.
+(switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z; on a tight bend
+give a point every few metres (each corner of the line tilts the road a little across).
 
 ```
 landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius}, ...]
