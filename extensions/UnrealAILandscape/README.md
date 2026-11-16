@@ -65,8 +65,8 @@ ground between `Radius` and `Radius + Falloff` (`Falloff` defaults to 0: a sharp
 points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks at most 2 x `Width` long); `Smooth` replaces the ground within a radius by
 the smoothest surface meeting the ground around it (a spike, pit or bump blends away, a slope stays a slope); `Ramp` sets a
 strip along points to their Z (a road bed or ramp, cut and fill, sides blended over `Falloff`; `MaxSlope` refuses a stretch
-steeper than that); `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`, `Location`,
-`Height`, `Radius`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
+steeper than that); `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
+Channel / Ridge; `Location`, `Height`, `Radius`, `Length`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
 `Weight`); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
 coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the

@@ -50,7 +50,7 @@ struct FUnrealAILandscapeBump
 {
 	GENERATED_BODY()
 
-	/** "Bump" (raised above its surroundings: a spike, mound or ridge) or "Pit" (sunk below them: a hole, crater or ditch) */
+	/** "Bump" (raised above its surroundings: a spike or mound), "Ridge" (a long raised strip: a dyke or wall), "Pit" (sunk below them: a hole or crater) or "Channel" (a long sunk strip: a riverbed, ditch or road cut) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Kind;
 
@@ -62,9 +62,13 @@ struct FUnrealAILandscapeBump
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	double Height = 0.0;
 
-	/** the radius (cm) that covers it: Smooth(landscape, Location, Radius * 1.5) blends it away */
+	/** the radius (cm) that covers it: Smooth(landscape, Location, Radius * 1.5) blends it away (a Channel or Ridge: its reach from Location) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	double Radius = 0.0;
+
+	/** how long it is along its longest direction (cm); about 2 x Radius for a round place, much more than its width for a Channel or Ridge */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Length = 0.0;
 };
 
 /** One result of `landscape | call Coverage(landscape, layer)`: a connected area where a paint layer is painted. */
@@ -134,7 +138,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0);
 
-	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
+	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump, Pit, or Ridge / Channel when long and narrow), Location, Height, Radius, Length}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 300.0, double Scale = 5000.0);
 

@@ -343,7 +343,8 @@ landscapes | select Label PaintLayers Sections
 ```
 
 Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
-hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius), largest first; `Smooth` replaces the
+hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius, Length), largest first; a long narrow
+one is a `Channel` (a riverbed, ditch or road cut: Carve leaves one) or a `Ridge`, not a place to Smooth away; `Smooth` replaces the
 ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
 stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
@@ -353,7 +354,7 @@ stretch that climbs more steeply and says how long it needs to be. A steep climb
 give a point every few metres (each corner of the line tilts the road a little across).
 
 ```
-landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius}, ...]
+landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius, Length}, ...]
 landscape | call Smooth(unreal.find("Terrain"), [-3000, 3000, 0], 2500)                    a 15 m spike at [-3000, 3000] gone (radius 1.5 x its Radius)
 ```
 

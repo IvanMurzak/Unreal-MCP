@@ -976,6 +976,25 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		double Reach = 0.0;
 		for (const int32 Cell : Cells)
 			Reach = FMath::Max(Reach, FVector2D::Distance(PeakCell, FVector2D(Cell % GW, Cell / GW)));
+		// Its long and short extent from the spread of its samples (principal axes; a uniform strip of length L spreads L^2 / 12).
+		double MeanI = 0.0, MeanJ = 0.0;
+		for (const int32 Cell : Cells)
+		{
+			MeanI += Cell % GW;
+			MeanJ += Cell / GW;
+		}
+		MeanI /= Cells.Num();
+		MeanJ /= Cells.Num();
+		double Cii = 0.0, Cij = 0.0, Cjj = 0.0;
+		for (const int32 Cell : Cells)
+		{
+			const double DI = Cell % GW - MeanI, DJ = Cell / GW - MeanJ;
+			Cii += DI * DI; Cij += DI * DJ; Cjj += DJ * DJ;
+		}
+		Cii /= Cells.Num(); Cij /= Cells.Num(); Cjj /= Cells.Num();
+		const double Mid = (Cii + Cjj) * 0.5, Spread = FMath::Sqrt(FMath::Square((Cii - Cjj) * 0.5) + Cij * Cij);
+		const double Long = FMath::Sqrt(12.0 * (Mid + Spread)) + 1.0, Short = FMath::Sqrt(12.0 * FMath::Max(0.0, Mid - Spread)) + 1.0; // samples
+		const bool bLong = Long > 4.0 * Short;
 		// The extreme vertex near the coarse peak.
 		FVector2D Best(VertexX(Peak % GW), VertexY(Peak / GW));
 		double BestZ = Z[Peak];
@@ -995,7 +1014,8 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		}
 		RegionCells.Add(Cells);
 		FUnrealAILandscapeBump& Bump = Out.AddDefaulted_GetRef();
-		Bump.Kind = Sign > 0.0 ? TEXT("Bump") : TEXT("Pit");
+		Bump.Kind = Sign > 0.0 ? (bLong ? TEXT("Ridge") : TEXT("Bump")) : (bLong ? TEXT("Channel") : TEXT("Pit"));
+		Bump.Length = FMath::RoundToDouble(Long * Step * Quad);
 		const FVector World = ToWorld.TransformPosition(FVector(Best.X, Best.Y, 0.0));
 		Bump.Location = FVector(FMath::RoundToDouble(World.X), FMath::RoundToDouble(World.Y), FMath::RoundToDouble(BestZ * 10.0) / 10.0);
 		Bump.Height = FMath::RoundToDouble((Residual[Peak] + (BestZ - Z[Peak])) * 10.0) / 10.0;
@@ -1015,7 +1035,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		const bool bRim = Kept.ContainsByPredicate([&](int32 TallerIndex)
 		{
 			const FUnrealAILandscapeBump& Taller = Out[TallerIndex];
-			if (Taller.Kind == Bump.Kind || FMath::Abs(Bump.Height) >= 0.25 * FMath::Abs(Taller.Height))
+			if ((Taller.Height > 0.0) == (Bump.Height > 0.0) || FMath::Abs(Bump.Height) >= 0.25 * FMath::Abs(Taller.Height))
 				return false;
 			const double Reach = Taller.Radius / (Quad * Step); // samples
 			for (const int32 Cell : RegionCells[Index])
@@ -1083,7 +1103,11 @@ TArray<FUnrealAILandscapeCoverage> UUnrealAILandscapeRqlApi::Coverage(ALandscape
 			{
 				const FVector At = ToWorld.TransformPosition(FVector(Whole.Min.X + I * Step, Whole.Min.Y + J * Step, 0.0));
 				Weight[J * GW + I] = FMath::Max(Weight[J * GW + I], Component->GetLayerWeightAtLocation(At, LayerInfo, &Cache, false));
+				if (Cache.IsEmpty())
+					break; // the layer is not painted on this component: the engine leaves the cache empty and would read the texture per sample
 			}
+			if (Cache.IsEmpty())
+				break;
 		}
 	}
 	// Connected areas (8 neighbours) at MinWeight or more.
