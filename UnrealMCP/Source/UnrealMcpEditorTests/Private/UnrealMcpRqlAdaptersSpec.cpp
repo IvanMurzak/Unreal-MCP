@@ -851,6 +851,16 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 					Said.Contains(TEXT("mutation-limit")) || Said.Contains(TEXT("nothing was changed")) || Said.Contains(TEXT("max_targets")));
 			}
 			TestEqual(TEXT("and nothing ran"), Api->Probes, 634);
+			// range(0, 1000) | call rqlSpecApi.Probe([$ + 0.123456789, $ + 0.987654321, 123456.789012]): 1000 long rows overflow the
+			// 64 KB answer; a read is told to read the rest
+			const TSharedPtr<FJsonObject> Full = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1000}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"+","args":[{"path":[]},{"lit":0.123456789}]},{"op":"+","args":[{"path":[]},{"lit":0.987654321}]},{"lit":123456.789012}]}]}]})RQL"));
+			const FString FullSaid = UnrealMcpRqlSpecHelpers::Codes(Full) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Full);
+			const FString Shown = FString::FromInt(UnrealMcpRqlSpecHelpers::RowCount(Full));
+			TestTrue(*FString::Printf(TEXT("a cut read says to read the rest in batches of what fitted, not 'do not repeat it' (%s)"), *FullSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(Full) && UnrealMcpRqlSpecHelpers::RowCount(Full) < 1000 && FullSaid.Contains(TEXT("output-truncated"))
+				&& FullSaid.Contains(TEXT("a read, not a change")) && FullSaid.Contains(TEXT("| skip ") + Shown + TEXT(" | first ") + Shown + TEXT(" | call Probe("))
+				&& !FullSaid.Contains(TEXT("do not repeat")));
+			Api->Probes = 634;
 			TestEqual(TEXT("read-only calls open no undo step (rql-query and rql-mutate)"), Trans ? Trans->GetQueueLength() : 0, UndoSteps);
 			TestFalse(TEXT("and mark nothing unsaved"), Level && Level->IsDirty());
 

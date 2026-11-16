@@ -149,7 +149,8 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   64 KB answer (more could not be shown). Its answer is marked `"readOnly": true`: the sidecar renders it in both tools
   in the receipt's compact form (the method once) with every row, where a change's receipt shows 50 rows and a count.
   The 64 KB answer usually ends a big read first (a Landscape `Surface` row is about 220 characters rendered): RQL then
-  returns the rows that fit with an `output-truncated` warning, and the caller splits the input. `rql-schema` prefixes their description
+  returns the rows that fit with an `output-truncated` warning, whose hint for a read names the batches to read the rest
+  in (`skip N | first N`; RQL's receipt hint "do not repeat it" is for changes). `rql-schema` prefixes their description
   with `[read-only]`.
 - **Target limit**: `rql-mutate` changes at most 200 targets per statement by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit of each statement of one call up to the ceiling of 1000

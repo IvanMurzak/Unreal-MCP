@@ -242,6 +242,27 @@ namespace UnrealMcpRqlSessionLocal
 	}
 
 	/**
+	 * A read's answer cut by the 64 KB output limit gets RQL's receipt hint ("the receipt is shortened, not the change: all N
+	 * calls were made; do not repeat it"), the opposite of what a read needs: the rest is read in batches of what fitted.
+	 */
+	void RewordReadTruncation(rql::QueryResult& Result, const std::string& Method)
+	{
+		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.code != "output-truncated")
+				continue;
+			// "output limited to 65536 bytes; <shown> of <total> rows returned"
+			const size_t Of = Diagnostic.message.find(" of ");
+			const size_t Start = Diagnostic.message.rfind("; ", Of);
+			if (Of == std::string::npos || Start == std::string::npos)
+				continue;
+			const std::string Shown = Diagnostic.message.substr(Start + 2, Of - Start - 2);
+			Diagnostic.hint = "a read, not a change: the answer holds only the first " + Shown + " rows; read the rest in batches of " + Shown
+				+ ": ... | skip " + Shown + " | first " + Shown + " | call " + Method + "(...), and so on (fewer outputs per call fit more rows)";
+		}
+	}
+
+	/**
 	 * Items a list-valued call result shows. RQL encodes at most maxListItems (20) items of a list and appends "…+N", which
 	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and call is terminal, so
 	 * nothing can page them. A plan ending in call encodes up to this many instead; plain queries keep RQL's default.
@@ -1021,6 +1042,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
+	if (bReadOnlyCalls && !Plan.stages.empty())
+		UnrealMcpRqlSessionLocal::RewordReadTruncation(Result, Plan.stages.back().method);
 	bOutOk = Result.ok;
 	rql::Json Answer = Result.to_json(/*include_stats*/ false);
 	// The sidecar renders an rql-mutate answer as a receipt (its first 50 rows and a count): a read's rows are its answer
