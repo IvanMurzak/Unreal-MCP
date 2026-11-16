@@ -135,6 +135,36 @@ BEGIN_DEFINE_SPEC(FUnrealAILandscapeSpec, "UnrealAILandscape",
 	{
 		return UnrealMcpRqlTools::RunPlan(Plan.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@LAND@"), *Land), bMutate, Out);
 	}
+	/** Heights (world Z, cm) of the landscape's first edit layer at world X, Y (nearest vertex): the data the operations write, merged or not (-nullrhi). */
+	static double LandscapeSpecLayerHeight(ALandscape* Landscape, double X, double Y)
+	{
+		ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+		const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+		const FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
+		const int32 VX = FMath::RoundToInt(Local.X), VY = FMath::RoundToInt(Local.Y);
+		FHeightmapAccessor<false> Accessor(Info);
+		Accessor.SetEditLayer(Landscape->GetEditLayersConst()[0]->GetGuid());
+		uint16 Value = 0;
+		Accessor.GetDataFast(VX, VY, VX, VY, &Value);
+		return ToWorld.GetLocation().Z + (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
+	}
+
+	/** The weight (0..255) of paint layer @p Layer in the landscape's first edit layer at world X, Y (nearest vertex). */
+	static int32 LandscapeSpecLayerWeight(ALandscape* Landscape, const FName Layer, double X, double Y)
+	{
+		ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+		ULandscapeLayerInfoObject* LayerInfo = Info ? Info->GetLayerInfoByName(Layer) : nullptr;
+		if (!LayerInfo)
+			return -1;
+		const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+		const FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
+		const int32 VX = FMath::RoundToInt(Local.X), VY = FMath::RoundToInt(Local.Y);
+		TAlphamapAccessor<false> Accessor(Info, LayerInfo);
+		Accessor.SetEditLayer(Landscape->GetEditLayersConst()[0]->GetGuid());
+		uint8 Value = 0;
+		Accessor.GetDataFast(VX, VY, VX, VY, &Value);
+		return Value;
+	}
 END_DEFINE_SPEC(FUnrealAILandscapeSpec)
 
 void FUnrealAILandscapeSpec::Define()
@@ -438,6 +468,129 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("rebuilt"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Rebuild","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}]}]})RQL"), true, &Rebuilt));
 			const TOptional<float> After = Landscape->GetHeightAtLocation(Top, EHeightfieldSource::Complex);
 			TestTrue(*FString::Printf(TEXT("the hill survives a rebuild (%.1f cm; %s)"), After.Get(-1.0f), *LandscapeSpecJson(Rebuilt).Left(200)), After.IsSet() && FMath::IsNearlyEqual(After.GetValue(), 300.0f, 25.0f));
+		});
+	});
+
+	Describe("shaping", [this]()
+	{
+		// landscape | call Create("@LABEL@", [@X@, 0, 0], 20[, null, @MAX@]): a 20 m landscape away from the other specs' actors.
+		static const TCHAR* CreatePlan = TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":20}@MORE@]}]})RQL");
+		static const auto Create = [](const FString& Label, double X, const FString& More = FString()) -> ALandscape*
+		{
+			const FString Plan = FString(CreatePlan).Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@X@"), *FString::SanitizeFloat(X)).Replace(TEXT("@MORE@"), *More);
+			if (!UnrealMcpRqlTools::RunPlan(Plan, true))
+				return nullptr;
+			return LandscapeSpecFind<ALandscape>(Label);
+		};
+		// landscape | call @METHOD@(unreal.find("@LABEL@"), @ARGS@)
+		static const auto Call = [](const FString& Label, const FString& Method, const FString& Args, TSharedPtr<FJsonObject>* Out = nullptr)
+		{
+			const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"@METHOD@","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}@ARGS@]}]})RQL"))
+				.Replace(TEXT("@METHOD@"), *Method).Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@ARGS@"), *(Args.IsEmpty() ? Args : TEXT(",") + Args));
+			return UnrealMcpRqlTools::RunPlan(Plan, true, Out);
+		};
+		static const auto Point = [](double X, double Y) { return FString::Printf(TEXT(R"({"list":[{"lit":%.0f},{"lit":%.0f},{"lit":0}]})"), X, Y); };
+
+		It("refuses a Sculpt or Flatten that would leave the height range (never a silent flat top); Create's MaxHeightMeters gives room", [this]()
+		{
+			const FString Label = TEXT("RqlSpecRange_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 600000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// landscapes | where Label == "@LABEL@" | select Bounds
+			TSharedPtr<FJsonObject> Bounds;
+			LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), Label, FString(), false, &Bounds);
+			TestTrue(*FString::Printf(TEXT("Bounds.HeightRange is +-256 m by default (%s)"), *LandscapeSpecJson(Bounds).Left(300)), LandscapeSpecJson(Bounds).Contains(TEXT("\"HeightRange\":[-25600,25599")));
+
+			TSharedPtr<FJsonObject> Tall;
+			TestFalse(TEXT("a 300 m hill on a +-256 m landscape is refused"), Call(Label, TEXT("Sculpt"), Point(X0, 0) + TEXT(R"(,{"lit":800},{"lit":30000})"), &Tall));
+			const FString TallText = LandscapeSpecJson(Tall);
+			TestTrue(*FString::Printf(TEXT("the error names the range and MaxHeightMeters (%s)"), *TallText.Left(400)), TallText.Contains(TEXT("height range")) && TallText.Contains(TEXT("MaxHeightMeters")));
+			TestTrue(TEXT("nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0), 0.0, 1.0));
+			TestFalse(TEXT("a Flatten above the range is refused"), Call(Label, TEXT("Flatten"), Point(X0, 0) + TEXT(R"(,{"lit":500},{"lit":40000})")));
+
+			const FString TallLabel = Label + TEXT("_Tall");
+			ALandscape* Room = Create(TallLabel, X0 + 5000.0, TEXT(R"(,{"lit":null},{"lit":400})"));
+			if (!TestNotNull(TEXT("landscape with MaxHeightMeters 400 created"), Room))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Room); };
+			TestEqual(TEXT("Z scale ceil(400 / 2.56)"), Room->GetActorScale3D().Z, 157.0);
+			TestTrue(TEXT("the 300 m hill fits"), Call(TallLabel, TEXT("Sculpt"), Point(X0 + 5000.0, 0) + TEXT(R"(,{"lit":800},{"lit":30000})")));
+			const double Top = LandscapeSpecLayerHeight(Room, X0 + 5000.0, 0);
+			TestTrue(*FString::Printf(TEXT("its top is at about 300 m (%.1f cm; the nearest vertex)"), Top), FMath::IsNearlyEqual(Top, 30000.0, 150.0));
+		});
+
+		It("flattens a level pad at a world height with a blended edge", [this]()
+		{
+			const FString Label = TEXT("RqlSpecPad_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 610000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			TestTrue(TEXT("a hill to flatten into"), Call(Label, TEXT("Sculpt"), Point(X0, 0) + TEXT(R"(,{"lit":900},{"lit":600})")));
+			// landscape | call Flatten(unreal.find("@LABEL@"), [X0, 0, 0], 300, 200, 200)
+			TestTrue(TEXT("flattened"), Call(Label, TEXT("Flatten"), Point(X0, 0) + TEXT(R"(,{"lit":300},{"lit":200},{"lit":200})")));
+			for (const FVector2D& P : { FVector2D(0, 0), FVector2D(250, 0), FVector2D(0, -250), FVector2D(-170, 170) })
+			{
+				const double H = LandscapeSpecLayerHeight(Landscape, X0 + P.X, P.Y);
+				TestTrue(*FString::Printf(TEXT("level at 200 cm inside the radius at (%.0f, %.0f): %.2f"), P.X, P.Y, H), FMath::IsNearlyEqual(H, 200.0, 1.0));
+			}
+			const double Blend = LandscapeSpecLayerHeight(Landscape, X0 + 400.0, 0);
+			const double Outside = LandscapeSpecLayerHeight(Landscape, X0 + 950.0, 0);
+			TestTrue(*FString::Printf(TEXT("the blend band lies between the pad and the old ground (%.1f)"), Blend), Blend > 200.0 && Blend < 600.0);
+			TestTrue(*FString::Printf(TEXT("beyond radius + falloff the ground is unchanged (%.1f)"), Outside), FMath::IsNearlyEqual(Outside, 0.0, 1.0));
+		});
+
+		It("carves a channel along given points that follows the ground, and paints weight-blended layers", [this]()
+		{
+			const FString Label = TEXT("RqlSpecCarve_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 620000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			TestTrue(TEXT("a rise across the line"), Call(Label, TEXT("Sculpt"), Point(X0 + 500.0, 0) + TEXT(R"(,{"lit":400},{"lit":300})")));
+			// landscape | call Carve(unreal.find("@LABEL@"), [[X0 - 1000, 0, 0], [X0 + 1000, 0, 0]], 200, 100)
+			TestTrue(TEXT("carved"), Call(Label, TEXT("Carve"), FString::Printf(TEXT(R"({"list":[%s,%s]},{"lit":200},{"lit":100})"), *Point(X0 - 1000.0, 0), *Point(X0 + 1000.0, 0))));
+			const double Flat = LandscapeSpecLayerHeight(Landscape, X0 - 500.0, 0);
+			const double Rise = LandscapeSpecLayerHeight(Landscape, X0 + 500.0, 0);
+			const double Bank = LandscapeSpecLayerHeight(Landscape, X0 - 500.0, 600.0);
+			TestTrue(*FString::Printf(TEXT("1 m below the flat ground (%.1f)"), Flat), FMath::IsNearlyEqual(Flat, -100.0, 2.0));
+			TestTrue(*FString::Printf(TEXT("1 m below the rise's top, not a level cut through it (%.1f)"), Rise), FMath::IsNearlyEqual(Rise, 200.0, 2.0));
+			TestTrue(*FString::Printf(TEXT("6 m to the side the ground is unchanged (%.1f)"), Bank), FMath::IsNearlyEqual(Bank, 0.0, 1.0));
+			TestFalse(TEXT("one point is refused"), Call(Label, TEXT("Carve"), FString::Printf(TEXT(R"({"list":[%s]},{"lit":200},{"lit":100})"), *Point(X0, 0))));
+
+			// landscape | call Paint(..., "Grass", [X0, 0, 0], 0); Paint(..., "Rock", [X0, 0, 0], 300)
+			TestTrue(TEXT("grass everywhere"), Call(Label, TEXT("Paint"), FString(TEXT(R"({"lit":"Grass"},)")) + Point(X0, 0) + TEXT(R"(,{"lit":0})")));
+			TestTrue(TEXT("rock in the middle"), Call(Label, TEXT("Paint"), FString(TEXT(R"({"lit":"Rock"},)")) + Point(X0, 0) + TEXT(R"(,{"lit":300})")));
+			const ULandscapeLayerInfoObject* Rock = Landscape->GetLandscapeInfo()->GetLayerInfoByName(TEXT("Rock"));
+			TestTrue(TEXT("the created layer info is weight-blended"), Rock && Rock->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::FinalWeightBlending);
+			const int32 RockAt = LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, 0);
+			const int32 GrassAt = LandscapeSpecLayerWeight(Landscape, TEXT("Grass"), X0, 0);
+			TestTrue(*FString::Printf(TEXT("rock takes its weight from grass at the centre: rock nearly full, the two sum to 255 (rock %d, grass %d)"), RockAt, GrassAt), RockAt >= 240 && FMath::Abs(RockAt + GrassAt - 255) <= 1);
+			TestEqual(TEXT("grass stays away from the rock"), LandscapeSpecLayerWeight(Landscape, TEXT("Grass"), X0 - 900.0, 900.0), 255);
+		});
+
+		It("deletes a whole landscape with Delete", [this]()
+		{
+			const FString Label = TEXT("RqlSpecDelete_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			ALandscape* Landscape = Create(Label, 630000.0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			int32 Proxies = 0;
+			Landscape->GetLandscapeInfo()->ForEachLandscapeProxy([&Proxies](ALandscapeProxy*) { ++Proxies; return true; });
+			const FGuid Guid = Landscape->GetLandscapeGuid();
+			// landscape | call Delete(unreal.find("@LABEL@"))
+			if (!TestTrue(TEXT("deleted"), Call(Label, TEXT("Delete"), FString())))
+				LandscapeSpecDestroy(Landscape);
+			TestNull(TEXT("the landscape actor is gone"), LandscapeSpecFind<ALandscape>(Label));
+			int32 Left = 0;
+			for (TActorIterator<ALandscapeProxy> It(UnrealMcpRql::EditorWorld()); It; ++It)
+				Left += IsValid(*It) && It->GetLandscapeGuid() == Guid ? 1 : 0;
+			TestEqual(*FString::Printf(TEXT("none of its %d actors remain"), Proxies), Left, 0);
 		});
 	});
 

@@ -17,6 +17,7 @@
 #include "LandscapeInfo.h"
 #include "LandscapeLayerInfoObject.h"
 #include "LandscapeProxy.h"
+#include "LandscapeStreamingProxy.h"
 #include "LandscapeSubsystem.h"
 #include "LandscapeUtils.h"
 #include "MaterialEditingLibrary.h"
@@ -26,6 +27,10 @@
 #include "Containers/Ticker.h"
 #include "Misc/App.h"
 #include "Misc/Paths.h"
+#include "WorldPartition/ActorPartition/PartitionActorDesc.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionActorDescInstance.h"
+#include "WorldPartition/WorldPartitionHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAILandscape, Log, All);
 
@@ -55,6 +60,60 @@ namespace UnrealAILandscapeRqlApiLocal
 		return FComponentLayout{ 2, 127 };
 	}
 
+	FVector2D HeightRange(const ALandscapeProxy* Landscape)
+	{
+		const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+		const double UnitCm = ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
+		const double Low = ToWorld.GetLocation().Z + (0.0 - LandscapeDataAccess::MidValue) * UnitCm;
+		const double High = ToWorld.GetLocation().Z + (static_cast<double>(LandscapeDataAccess::MaxValue) - LandscapeDataAccess::MidValue) * UnitCm;
+		return FVector2D(FMath::Min(Low, High), FMath::Max(Low, High));
+	}
+
+	bool FitsHeightRange(const ALandscapeProxy* Landscape, double LowCm, double HighCm)
+	{
+		const FVector2D Range = HeightRange(Landscape);
+		if (LowCm >= Range.X && HighCm <= Range.Y)
+			return true;
+		const double Origin = Landscape->LandscapeActorToWorld().GetLocation().Z;
+		const double Needed = FMath::Max(FMath::Abs(HighCm - Origin), FMath::Abs(LowCm - Origin)) / 100.0;
+		const int32 Suggested = FMath::CeilToInt(Needed * 1.1 / 50.0) * 50;
+		return UnrealMcpRql::Failed<bool>(FString::Printf(
+			TEXT("the ground would reach %.0f .. %.0f cm, outside %s's height range %.0f .. %.0f cm (%.0f m around its Z %.0f cm): nothing was changed. ")
+			TEXT("Its range is fixed when it is created: recreate it with landscape | call Create(\"%s\", <location>, <size>, <material>, %d) (MaxHeightMeters %d), or keep the edit within the range"),
+			LowCm, HighCm, *Landscape->GetActorNameOrLabel(), Range.X, Range.Y, (Range.Y - Range.X) / 200.0, Origin,
+			*Landscape->GetActorNameOrLabel(), Suggested, Suggested));
+	}
+
+	void LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	{
+		UWorld* World = Landscape ? Landscape->GetWorld() : nullptr;
+		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
+		if (!Partition)
+			return;
+		const FGuid Guid = Landscape->GetLandscapeGuid();
+		TArray<FGuid> ToLoad;
+		FWorldPartitionHelpers::ForEachActorDescInstance<ALandscapeStreamingProxy>(Partition, [&](const FWorldPartitionActorDescInstance* Instance)
+		{
+			const FPartitionActorDesc* Desc = static_cast<const FPartitionActorDesc*>(Instance->GetActorDesc());
+			if (Desc->GridGuid != Guid || Instance->IsLoaded())
+				return true;
+			const FBox Box = Instance->GetEditorBounds();
+			if (!Area || FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(*Area))
+				ToLoad.Add(Instance->GetGuid());
+			return true;
+		});
+		if (ToLoad.IsEmpty())
+			return;
+		// UWorldPartitionBlueprintLibrary::LoadActors (the editor's pinned actor list; UnloadActors releases them) is not
+		// exported from the Engine module: call it through reflection.
+		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
+		UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
+		if (!Load)
+			return UnrealMcpRql::Fail(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
+		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
+		Library->GetDefaultObject()->ProcessEvent(Load, &Params);
+	}
+
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
 	struct FCircle
 	{
@@ -67,7 +126,13 @@ namespace UnrealAILandscapeRqlApiLocal
 	/** The vertices a circle around @p Center (world X, Y) with @p Radius (cm; <= 0 the whole landscape) covers; false after Fail. */
 	bool Circle(ALandscapeProxy* Landscape, const FVector& Center, double Radius, FCircle& Out)
 	{
-		Out.Info = Landscape ? Landscape->GetLandscapeInfo() : nullptr;
+		if (!Landscape)
+			return UnrealMcpRql::Failed<bool>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+		if (Center.ContainsNaN() || !FMath::IsFinite(Radius))
+			return UnrealMcpRql::Failed<bool>(TEXT("Center and Radius must be finite numbers"));
+		const FBox2D Area(FVector2D(Center.X - Radius, Center.Y - Radius), FVector2D(Center.X + Radius, Center.Y + Radius));
+		LoadLandscape(Landscape, Radius > 0.0 ? &Area : nullptr);
+		Out.Info = Landscape->GetLandscapeInfo();
 		FIntRect Whole;
 		if (!Out.Info || !Out.Info->GetLandscapeExtent(Whole))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no landscape components to edit"), Landscape ? *Landscape->GetActorNameOrLabel() : TEXT("null")));
@@ -87,13 +152,16 @@ namespace UnrealAILandscapeRqlApiLocal
 		return true;
 	}
 
-	/** 1 at the centre, a smooth (cosine) fall to 0 at the radius; 1 everywhere for a whole-landscape edit. */
-	double Falloff(int32 X, int32 Y, const FCircle& Circle)
+	/** 1 at @p T = 0, a smooth (cosine) fall to 0 at @p T = 1 and beyond. */
+	double Cosine(double T)
 	{
-		if (Circle.Radius <= 0.0)
-			return 1.0;
-		const double Distance = FVector2D::Distance(FVector2D(X, Y), Circle.Center) / Circle.Radius;
-		return Distance >= 1.0 ? 0.0 : 0.5 * (1.0 + FMath::Cos(PI * Distance));
+		return T >= 1.0 ? 0.0 : T <= 0.0 ? 1.0 : 0.5 * (1.0 + FMath::Cos(PI * T));
+	}
+
+	/** 1 at the centre, a smooth fall to 0 at the circle's radius (@p Distance in vertices); 1 everywhere for a whole-landscape edit. */
+	double Falloff(double Distance, const FCircle& Circle)
+	{
+		return Circle.Radius <= 0.0 ? 1.0 : Cosine(Distance / Circle.Radius);
 	}
 
 	/**
@@ -204,10 +272,13 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/**
 	 * Read the circle's vertices through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
-	 * change each one with its falloff weight (true when it changed), write them back and refresh; how many changed.
+	 * change each one given its distance from the centre in vertices (true when it changed), let @p BeforeWrite check the
+	 * new values of the rectangle (false after Fail: nothing is written) or adjust what goes with them, write them back and
+	 * refresh; how many changed.
 	 */
 	template <typename T, typename TAccessor>
-	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit)
+	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit,
+		TFunctionRef<bool(const FGuid&, const FIntRect&, const TArray<T>&)> BeforeWrite = [](const FGuid&, const FIntRect&, const TArray<T>&) { return true; })
 	{
 		const FGuid EditLayer = EditLayerGuid(Landscape, std::is_same_v<T, uint16> ? ELandscapeToolTargetType::Heightmap : ELandscapeToolTargetType::Weightmap);
 		if (!EditLayer.IsValid())
@@ -222,15 +293,65 @@ namespace UnrealAILandscapeRqlApiLocal
 		for (int32 Y = R.Min.Y; Y <= R.Max.Y; ++Y)
 		{
 			for (int32 X = R.Min.X; X <= R.Max.X; ++X)
-				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], Falloff(X, Y, Circle)) ? 1 : 0;
+				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], FVector2D::Distance(FVector2D(X, Y), Circle.Center)) ? 1 : 0;
 		}
-		if (Changed == 0)
+		if (Changed == 0 || !BeforeWrite(EditLayer, R, Data))
 			return 0;
 		Landscape->Modify();
 		WriteData(Accessor, R, Data.GetData()); // requests the in-stroke merge of the components it touched
 		Accessor.Flush();
 		MergeNow(Landscape, std::is_same_v<T, uint16> ? ELandscapeLayerUpdateMode::Update_Heightmap_All : ELandscapeLayerUpdateMode::Update_Weightmap_All);
 		return Changed;
+	}
+
+	/**
+	 * A weight-blended layer painted to @p Weights over @p R takes its weight from the landscape's other weight-blended layers
+	 * there, in proportion, so the layers sum to at most 1 (255). Landscape mode's paint does this; the engine's alphamap
+	 * accessor writes one layer only (UE 5.7+ normalises weights only at the final merge, which then mixed Rock painted at
+	 * full strength half and half with the Grass under it).
+	 */
+	void TakeWeightFromOthers(ULandscapeInfo* Info, const ULandscapeLayerInfoObject* Painted, const FGuid& EditLayer, const FIntRect& R, const TArray<uint8>& Weights)
+	{
+		if (Painted->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::None)
+			return;
+		TArray<ULandscapeLayerInfoObject*> Others;
+		for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
+		{
+			ULandscapeLayerInfoObject* Other = Layer.LayerInfoObj;
+			if (Other && Other != Painted && Other != ALandscapeProxy::VisibilityLayer && Other->GetBlendMethod() != ELandscapeTargetLayerBlendMethod::None)
+				Others.AddUnique(Other);
+		}
+		TArray<TArray<uint8>> Data;
+		TArray<int32> Sum;
+		Sum.SetNumZeroed(Weights.Num());
+		for (ULandscapeLayerInfoObject* Other : Others)
+		{
+			TAlphamapAccessor<false> Accessor(Info, Other);
+			Accessor.SetEditLayer(EditLayer);
+			TArray<uint8>& Values = Data.AddDefaulted_GetRef();
+			Values.SetNumZeroed(Weights.Num());
+			Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Values.GetData());
+			for (int32 Index = 0; Index < Values.Num(); ++Index)
+				Sum[Index] += Values[Index];
+		}
+		for (int32 Layer = 0; Layer < Others.Num(); ++Layer)
+		{
+			bool bChanged = false;
+			for (int32 Index = 0; Index < Weights.Num(); ++Index)
+			{
+				const int32 Room = 255 - Weights[Index];
+				if (Sum[Index] <= Room || Data[Layer][Index] == 0)
+					continue;
+				Data[Layer][Index] = static_cast<uint8>(FMath::Clamp(FMath::FloorToInt(static_cast<double>(Data[Layer][Index]) * Room / Sum[Index]), 0, 255));
+				bChanged = true;
+			}
+			if (!bChanged)
+				continue;
+			TAlphamapAccessor<false> Accessor(Info, Others[Layer]);
+			Accessor.SetEditLayer(EditLayer);
+			WriteData(Accessor, R, Data[Layer].GetData());
+			Accessor.Flush();
+		}
 	}
 
 	/** A paint layer name is one word ("Grass"); false after Fail naming @p Entry (the text it came from). */
@@ -298,7 +419,14 @@ namespace UnrealAILandscapeRqlApiLocal
 		if (LayerInfo && LayerInfo->GetLayerName() != Layer)
 			LayerInfo = nullptr; // a different layer's asset took the name: let the engine pick a unique one
 		if (!LayerInfo)
+		{
+			// Weight-blended, as Landscape mode's default "Weight-Blended Layer (normal)": painting one layer takes the weight
+			// from the others, so the layers sum to 1 and a LB_WeightBlend material (CreateLayerMaterial) shows one of them.
+			// The engine's default layer info blends nothing: Rock painted over Grass then rendered both added together.
 			LayerInfo = UE::Landscape::CreateTargetLayerInfo(Layer, Folder);
+			if (LayerInfo)
+				LayerInfo->SetBlendMethod(ELandscapeTargetLayerBlendMethod::FinalWeightBlending, /*bInModify*/ false);
+		}
 		if (!LayerInfo)
 			return UnrealMcpRql::Failed<ULandscapeLayerInfoObject*>(FString::Printf(TEXT("could not create the layer info of %s"), *Layer.ToString()));
 		Primary->Modify();
@@ -316,10 +444,16 @@ namespace UnrealAILandscapeRqlApiLocal
 
 using namespace UnrealAILandscapeRqlApiLocal;
 
-ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Location, double SizeMeters, UMaterialInterface* Material)
+ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Location, double SizeMeters, UMaterialInterface* Material, double MaxHeightMeters)
 {
 	if (!(SizeMeters >= 8.0 && SizeMeters <= 2000.0))
 		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("SizeMeters %g is outside 8 .. 2000"), SizeMeters));
+	if (!(MaxHeightMeters >= 1.0 && MaxHeightMeters <= 10000.0))
+		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("MaxHeightMeters %g is outside 1 .. 10000"), MaxHeightMeters));
+	if (Location.ContainsNaN())
+		return UnrealMcpRql::Failed<ALandscape*>(TEXT("Location must be finite numbers"));
+	// Z scale 100 (Landscape mode's default) holds +-256 m in 0.78 cm steps; more room needs a larger scale, coarser steps.
+	const double ZScale = FMath::Max(100.0, FMath::CeilToDouble(MaxHeightMeters / 2.56));
 	// Whole components (at most 8 per side), then a horizontal scale that makes the side exactly SizeMeters.
 	const FComponentLayout Layout = LayoutFor(SizeMeters);
 	const int32 Quads = FMath::CeilToInt(SizeMeters / Layout.Quads()) * Layout.Quads();
@@ -329,7 +463,7 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 	ALandscape* Landscape = Cast<ALandscape>(UnrealMcpRql::SpawnActor(ALandscape::StaticClass(), Corner, FRotator::ZeroRotator, Label));
 	if (!Landscape)
 		return nullptr; // SpawnActor failed with the reason
-	Landscape->SetActorRelativeScale3D(FVector(Scale, Scale, 100.0));
+	Landscape->SetActorRelativeScale3D(FVector(Scale, Scale, ZScale));
 	Landscape->LandscapeMaterial = Material;
 	Landscape->StaticLightingLOD = 0;
 
@@ -369,13 +503,67 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 	const double ZScale = FMath::Max(FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().Z), UE_KINDA_SMALL_NUMBER);
 	const double Units = Height / (ZScale * LANDSCAPE_ZSCALE);
 	FHeightmapAccessor<false> Accessor(Area.Info);
-	return EditCircle<uint16>(Landscape, Accessor, Area, [Units](uint16& Value, double Weight)
+	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest(); // the unclamped result, height units
+	const int32 Changed = EditCircle<uint16>(Landscape, Accessor, Area, [Units, &Area, &Low, &High](uint16& Value, double Distance)
 	{
-		const uint16 New = static_cast<uint16>(FMath::Clamp(FMath::RoundToInt(Value + Units * Weight), 0, 65535));
+		const int32 Raw = FMath::RoundToInt(Value + Units * Falloff(Distance, Area));
+		if (Raw == Value)
+			return false;
+		Low = FMath::Min(Low, Raw);
+		High = FMath::Max(High, Raw);
+		Value = static_cast<uint16>(FMath::Clamp(Raw, 0, 65535));
+		return true;
+	}, [Landscape, ZScale, &Low, &High](const FGuid&, const FIntRect&, const TArray<uint16>&)
+	{
+		const double Origin = Landscape->LandscapeActorToWorld().GetLocation().Z;
+		const auto Cm = [Origin, ZScale](int32 Units) { return Origin + (Units - LandscapeDataAccess::MidValue) * ZScale * LANDSCAPE_ZSCALE; };
+		return FitsHeightRange(Landscape, Cm(Low), Cm(High));
+	});
+	return Changed;
+}
+
+int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff)
+{
+	if (!(Radius > 0.0) || !(Falloff >= 0.0) || !FMath::IsFinite(Radius + Falloff))
+		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be greater than 0 and Falloff 0 or more (cm)"));
+	if (!FMath::IsFinite(Height))
+		return UnrealMcpRql::Failed<int32>(TEXT("Height must be a finite world Z (cm)"));
+	if (!Landscape)
+		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (!FitsHeightRange(Landscape, Height, Height))
+		return 0;
+	FCircle Area;
+	if (!Circle(Landscape, Center, Radius + Falloff, Area))
+		return 0;
+	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+	const double UnitCm = FMath::Max(FMath::Abs(ToWorld.GetScale3D().Z), UE_KINDA_SMALL_NUMBER) * LANDSCAPE_ZSCALE;
+	const double Target = LandscapeDataAccess::MidValue + (Height - ToWorld.GetLocation().Z) / UnitCm;
+	const double Inner = Area.Radius * Radius / (Radius + Falloff); // vertices
+	const double Band = Area.Radius - Inner;
+	FHeightmapAccessor<false> Accessor(Area.Info);
+	return EditCircle<uint16>(Landscape, Accessor, Area, [Target, Inner, Band](uint16& Value, double Distance)
+	{
+		const double Weight = Distance <= Inner ? 1.0 : Band > 0.0 ? Cosine((Distance - Inner) / Band) : 0.0;
+		const uint16 New = static_cast<uint16>(FMath::Clamp(FMath::RoundToInt(FMath::Lerp(static_cast<double>(Value), Target, Weight)), 0, 65535));
 		const bool bChanged = New != Value;
 		Value = New;
 		return bChanged;
 	});
+}
+
+int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth)
+{
+	if (!Landscape)
+		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (Points.Num() < 2 || Points.Num() > 1000)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Carve needs 2 .. 1000 points, got %d"), Points.Num()));
+	if (Points.ContainsByPredicate([](const FVector& Point) { return Point.ContainsNaN(); }))
+		return UnrealMcpRql::Failed<int32>(TEXT("Points must be finite numbers"));
+	if (!(Width >= 100.0 && Width <= 20000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	if (!(Depth >= 1.0 && Depth <= 10000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Depth %g is outside 1 .. 10000 cm"), Depth));
+	return CarveAlong(Landscape, Points, Width, Depth);
 }
 
 int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius, double Strength)
@@ -394,12 +582,16 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	if (!LayerInfo)
 		return 0;
 	TAlphamapAccessor<false> Accessor(Area.Info, LayerInfo);
-	return EditCircle<uint8>(Landscape, Accessor, Area, [Strength](uint8& Value, double Weight)
+	return EditCircle<uint8>(Landscape, Accessor, Area, [Strength, &Area](uint8& Value, double Distance)
 	{
-		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Strength * Weight), 0, 255));
+		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Strength * Falloff(Distance, Area)), 0, 255));
 		if (Target <= Value)
 			return false;
 		Value = Target;
+		return true;
+	}, [&Area, LayerInfo](const FGuid& EditLayer, const FIntRect& R, const TArray<uint8>& Weights)
+	{
+		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, R, Weights);
 		return true;
 	});
 }
@@ -437,6 +629,10 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	if (!Landscape)
 		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
 	FUnrealAILandscapeSurface Out;
+	if (Point.ContainsNaN())
+		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Point must be finite numbers"));
+	const FBox2D Near(FVector2D(Point) - FVector2D(1000.0), FVector2D(Point) + FVector2D(1000.0));
+	LoadLandscape(Landscape, &Near);
 	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
 	FIntRect Whole;
 	if (!Info || !Info->GetLandscapeExtent(Whole))
@@ -479,6 +675,30 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	return Out;
 }
 
+int32 UUnrealAILandscapeRqlApi::Delete(ALandscapeProxy* Landscape)
+{
+	ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
+	if (!Primary)
+		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null or its landscape actor is not loaded: pass unreal.find(\"<label>\")"));
+	UWorld* World = Primary->GetWorld();
+	LoadLandscape(Primary); // the proxies of unloaded regions too: deleting only the loaded ones would orphan the rest
+	TArray<ALandscapeProxy*> Proxies;
+	if (ULandscapeInfo* Info = Primary->GetLandscapeInfo())
+	{
+		Info->ForEachLandscapeProxy([Primary, &Proxies](ALandscapeProxy* Proxy)
+		{
+			if (Proxy != Primary)
+				Proxies.Add(Proxy);
+			return true;
+		});
+	}
+	Proxies.Add(Primary); // last: the engine refuses a landscape actor whose proxies remain
+	int32 Deleted = 0;
+	for (ALandscapeProxy* Proxy : Proxies)
+		Deleted += World && World->EditorDestroyActor(Proxy, /*bShouldModifyLevel*/ true) ? 1 : 0;
+	return Deleted;
+}
+
 int32 UUnrealAILandscapeRqlApi::Rebuild(ALandscapeProxy* Landscape)
 {
 	ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
@@ -487,6 +707,7 @@ int32 UUnrealAILandscapeRqlApi::Rebuild(ALandscapeProxy* Landscape)
 		return UnrealMcpRql::Failed<int32>(TEXT("the landscape has no primary landscape actor to rebuild"));
 	if (!FApp::CanEverRender())
 		return UnrealMcpRql::Failed<int32>(TEXT("this editor does not render (-nullrhi): a landscape merges its edit layers only in a rendering editor"));
+	LoadLandscape(Primary);
 	Primary->ForceLayersFullUpdate(); // every edit layer merged again, collision recreated
 	if (Primary->IsNaniteEnabled())
 	{

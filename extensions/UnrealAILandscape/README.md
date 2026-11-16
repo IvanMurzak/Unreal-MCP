@@ -1,6 +1,6 @@
 # Landscape RQL module
 
-RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; create oceans, lakes and rivers (a river routed downhill between two points, its bed carved); query landscapes (sections, paint layers), water bodies (with a render status) and water zones.
+RQL module for Unreal's Landscape and Water systems: create, sculpt, flatten, carve, paint and delete landscapes; create oceans, lakes and rivers (a river routed downhill between two points, its bed carved); query landscapes (sections, paint layers), water bodies (with a render status) and water zones.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape`, `water` |
-| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Paint`, `CreateLayerMaterial`, `Surface`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
+| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
 | Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
 
 ```
@@ -42,9 +42,12 @@ waterZones | select Label ZoneExtent
 landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")
 landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")
 landscape | call Sculpt(unreal.find("Terrain"), [2000, 1500, 0], 1200, 600)
+landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)
+landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
 landscapes | where IsPrimary | select Label Bounds
+landscape | call Delete(unreal.find("Terrain"))
 water | call CreateOcean("Ocean", 0)
 water | call CreateRiverBetween("River", unreal.find("Terrain"), [-20000, 30000, 0], [60000, -90000, 0], 1500, 300)
 waterBodies | select Label Water Path
@@ -52,9 +55,22 @@ waterBodies | select Label Water Path
 
 `Create` makes a flat landscape of about one vertex per metre in at most 8 x 8 components (63-quad sections, 2 x 2
 per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape takes seconds), scaled to the requested
-size; `Sculpt` raises or lowers a smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info
-asset) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
-coloured layer per name.
+size; `Sculpt` raises or lowers a smooth circular area (cm); `Flatten` levels a circle to a world height (a building pad),
+blending its edge back to the old ground over `Falloff`; `Carve` digs a channel a given depth below the ground along your
+points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks); `Paint` adds a paint layer by name (creating
+a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
+coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the
+landscape actor alone leaves the proxies behind).
+
+A landscape holds ground within a fixed height range around its Z, `Bounds.HeightRange`: +-256 m by default, in 0.78 cm
+steps. `Create`'s optional last argument `MaxHeightMeters` (1 to 10000) makes more room by raising the actor's Z scale to
+`max(100, ceil(MaxHeightMeters / 2.56))`, so the height steps grow to Z scale / 128 cm (1024 m: Z scale 400, 3.1 cm).
+`Sculpt`, `Flatten` and `Carve` refuse an edit that would leave the range and change nothing (the error names the range and
+the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the limit silently.
+
+On a World Partition map, an editor that opens the map loads only the region around the camera. The operations and
+`Bounds` load the landscape's streaming proxies they need first (as the World Partition window's region loading does), so
+they see the whole landscape and not only the loaded part.
 
 `Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
 traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without
