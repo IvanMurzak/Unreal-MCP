@@ -541,8 +541,11 @@ void FUnrealAILandscapeSpec::Define()
 			// landscape | call Create("@LABEL@_Far", [1e30, 0, 0], 20): the renderer cannot place it (an ensure every frame)
 			TSharedPtr<FJsonObject> Far;
 			TestFalse(TEXT("a landscape beyond the engine's world bound is refused"), UnrealMcpRqlTools::RunPlan(FString(CreatePlan).Replace(TEXT("@LABEL@"), *(Label + TEXT("_Far"))).Replace(TEXT("@X@"), TEXT("1e30")).Replace(TEXT("@MORE@"), TEXT("")), true, &Far));
+			TestTrue(*FString::Printf(TEXT("for the world bound (%s)"), *LandscapeSpecJson(Far).Left(300)), LandscapeSpecJson(Far).Contains(TEXT("world bound")));
 			TestNull(TEXT("and not created"), LandscapeSpecFind<ALandscape>(Label + TEXT("_Far")));
-			TestTrue(TEXT("a Sculpt with a huge radius edits the whole landscape safely"), Call(Label, TEXT("Sculpt"), Point(X0, 0) + TEXT(R"(,{"lit":1e30},{"lit":10})")));
+			TestTrue(TEXT("a Sculpt with a huge radius runs"), Call(Label, TEXT("Sculpt"), Point(X0, 0) + TEXT(R"(,{"lit":1e30},{"lit":10})")));
+			const double Corner = LandscapeSpecLayerHeight(Landscape, X0 + 900.0, 900.0);
+			TestTrue(*FString::Printf(TEXT("and raises the whole landscape, the corners too (%.2f cm)"), Corner), FMath::IsNearlyEqual(Corner, 10.0, 1.0));
 			TestFalse(TEXT("a Carve with a point 10 km off the landscape is refused"), Call(Label, TEXT("Carve"), FString::Printf(TEXT(R"({"list":[%s,%s]},{"lit":200},{"lit":100})"), *Point(X0, 0), *Point(X0 + 1000000.0, 0))));
 
 			const FString TallLabel = Label + TEXT("_Tall");
