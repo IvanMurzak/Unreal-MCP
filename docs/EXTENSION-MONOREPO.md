@@ -25,6 +25,10 @@ modules use non-unity compilation with no PCH in these isolated copies. It then 
 host and starts **one** UnrealEditor-Cmd process for all core/extension Automation tests. All
 preserved extension E2E checks run against that same process, local sidecar and local server.
 The CLI itself runs from this checkout's compiled `cli/dist/index.js`.
+The E2E uses the published bridge and the pinned server of this core version, fetched into `--output`; `--bridge <path>`
+(a bridge built from this checkout, `python bridge/publish.py --no-zip`) and `--server <path>` replace either one, the
+other is still fetched. A plugin with RQL renderer changes the release does not have needs `--bridge`: the published
+one answers it with `bridge-outdated`. `--mode automation` runs the E2E only when `--server` is given.
 
 Each E2E check is a declarative `extensions/<plugin>/Tests/e2e/tools/<name>.e2e.json`, run by
 `scripts/run_extension_e2e.py` (`--project-dir`, `--url`, `--plugins`; the suite calls it in-process):

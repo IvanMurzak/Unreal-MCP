@@ -310,8 +310,11 @@ def main() -> int:
         if args.result_file:
             write_json(args.result_file, {"status": "running"})
         if args.mode == "full" and (not args.server or not args.bridge):
+            # Keep what the caller passed (a bridge built from this commit) and fetch only the missing binary.
             from suite_dependencies import resolve
-            args.server, args.bridge = resolve(output)
+            args.server, args.bridge = resolve(output, args.server, args.bridge)
+        elif args.bridge and not args.server:
+            parser.error("--bridge runs the live E2E only with a server: pass --server too, or use --mode full (it fetches the pinned server)")
         if args.mode in ("full", "verification", "isolated"):
             # No siblings are present in these copies, including their headers and DLLs.
             for name in [None, *selected]:
