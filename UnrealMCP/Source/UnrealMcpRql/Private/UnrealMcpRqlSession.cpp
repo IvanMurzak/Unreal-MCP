@@ -582,6 +582,14 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// The checks that need the planned changes (dry runs report them too): the core one, then the modules' validators.
 	Policy.validate_batch = [this, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records) -> std::string
 	{
+		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
+		// through); anything else is refused like any call in rql-query, before it runs (first: the
+		// refusal is rql-query's permission-denied, whatever else the batch would fail on).
+		if (bReadOnlyCallRequest && !AllReadOnlyCalls(Records))
+		{
+			bRefusedReadOnlyCall = true;
+			return std::string("not a read-only operation");
+		}
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
 		// extensions' operations) are class defaults by design and stay callable.
@@ -593,13 +601,6 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 					return UnrealMcpRqlToStd(FString::Printf(
 						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName()));
 			}
-		}
-		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
-		// through); anything else is refused like any call in rql-query, before it runs.
-		if (bReadOnlyCallRequest && !AllReadOnlyCalls(Records))
-		{
-			bRefusedReadOnlyCall = true;
-			return std::string("not a read-only operation");
 		}
 		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
 		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
@@ -636,8 +637,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 				const FString Method = UnrealMcpRqlFromStd(Record.method->name);
 				// An operation: two stream items gave it the same arguments.
 				if (bOperation)
-					return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice with the same arguments (calls %d and %d, "
-						"counting from 1: remove the repeated item, or add | distinct before call)"), *Method, *First + 1, Index + 1));
+					return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice with the same arguments (calls %d and %d of this "
+						"stage, counting from 1): give each item its own arguments ($, $[0]), or drop repeated items with | distinct before call"), *Method, *First + 1, Index + 1));
 				const AActor* Actor = Cast<AActor>(Receiver);
 				const FString Name = Actor ? Actor->GetActorLabel() : Receiver ? Receiver->GetName() : FString(TEXT("one object"));
 				return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice on %s (it is in the stream more than once: "
@@ -810,8 +811,12 @@ bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) con
 {
 	if (!Record.method)
 		return false;
+	// The chosen method must be the flagged UFUNCTION's own descriptor (marked by AddFunctionMethod), not a hand-written
+	// method or overload of the same name on that class.
+	static const std::string Mark = UnrealMcpRqlToStd(FUnrealMcpRqlTypes::ReadOnlyMark);
 	const UObject* Receiver = TypesPtr->AsObject(Record.item);
-	return Receiver && TypesPtr->IsReadOnlyOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
+	return Receiver && Record.method->description.rfind(Mark, 0) == 0
+		&& TypesPtr->IsReadOnlyOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
 }
 
 bool FUnrealMcpRqlSession::AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const

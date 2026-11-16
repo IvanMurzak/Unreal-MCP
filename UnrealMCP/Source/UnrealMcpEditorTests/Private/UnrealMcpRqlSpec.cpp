@@ -262,7 +262,7 @@ void FUnrealMcpRqlSpec::Define()
 				ToolCall.SidecarBridgeVersion = BridgeVersion;
 				return Registry.Execute(TEXT("rql-schema"), ToolCall);
 			};
-			// A 0.32.0 bridge sends no rqlRenderer (0): it would render the guide as an empty success.
+			// The released 0.32.0 bridge sends no rqlRenderer (0): it would render the guide as an empty success.
 			const FUnrealMcpToolResult Old = Call(0, TEXT("0.32.0"));
 			TestFalse(TEXT("an old bridge gets an error"), Old.bSuccess);
 			TestTrue(*FString::Printf(TEXT("naming both versions and the fix (%s)"), *Old.Message), Old.Message.StartsWith(TEXT("error bridge-outdated: the Unreal MCP bridge 0.32.0 is older than the plugin: it renders RQL answers at level 0"))

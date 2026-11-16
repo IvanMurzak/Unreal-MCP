@@ -950,7 +950,7 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 	ToolTip.ReplaceInline(TEXT("\r"), TEXT(" "));
 	ToolTip.ReplaceInline(TEXT("\n"), TEXT(" "));
 	// rql-schema prints the description after the signature: a read-only operation says so first.
-	Method.description = UnrealMcpRqlToStd((bReadOnly ? TEXT("[read-only] ") : TEXT("")) + ToolTip.TrimStartAndEnd());
+	Method.description = UnrealMcpRqlToStd((bReadOnly ? ReadOnlyMark : TEXT("")) + ToolTip.TrimStartAndEnd());
 
 	TArray<FProperty*> Inputs;
 	TArray<FProperty*> Outputs;

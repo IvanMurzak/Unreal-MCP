@@ -135,7 +135,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Read-only operations**: an operation that changes nothing declares `meta = (RqlReadOnly)` on its UFUNCTION (an
   operations class, `AddApiClass`; e.g. the Landscape and Mesh Terrain `Surface` reads). `rql-query` may `call` it: the
   session lets the call stage through when an operations class has a read-only operation of that name, and its batch
-  check refuses every planned call that is not one with `rql-query`'s usual `permission-denied` before any runs.
+  check refuses every planned call that is not one with `rql-query`'s usual `permission-denied` before any runs (a
+  same-named call on another type may fail earlier with the engine's own error: unknown method, coercion). Read-only
+  means it changes no saved data and no undo history; a read may still load World Partition actors it needs.
   Read-only calls (in `rql-query` or `rql-mutate`) open no undo step, mark nothing unsaved, skip the modules' committed
   hooks and the duplicate check; in `rql-query` up to the 1000-target ceiling (it has no `max_targets`). `rql-schema`
   prefixes their description with `[read-only]`.
@@ -484,7 +486,7 @@ Reflection already exposes every type the extension's engine plugin defines, so 
   `meta = (RqlReadOnly)` (see Read-only operations).
 - The sidecar renders these answers: its handshake sends `rqlRenderer` (what its renderer understands) and
   `bridgeVersion`. `rql-schema` through a bridge whose renderer is older than `UnrealMcpRqlTools::RequiredRqlRenderer`
-  (a bridge that sends no `rqlRenderer`, e.g. 0.32.0) answers with a plain-text `error bridge-outdated` naming both
+  (a bridge that sends no `rqlRenderer`, e.g. the 0.32.0 release) answers with a plain-text `error bridge-outdated` naming both
   versions, which an old bridge passes through, instead of a guide rendered as an empty success.
 
 `IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's

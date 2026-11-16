@@ -159,6 +159,8 @@ public:
 	void AddApiClass(UClass* Class, const FString& TypeName);
 	/** Whether @p Class was registered with AddApiClass (its class default object is an operations object). */
 	bool IsApiClass(const UClass* Class) const { return Class && ApiClasses.Contains(const_cast<UClass*>(Class)); }
+	/** What a read-only operation's description starts with (rql-schema shows it after the signature). */
+	static constexpr const TCHAR* ReadOnlyMark = TEXT("[read-only] ");
 	/** An operation of an operations class that declares `meta = (RqlReadOnly)` (IUnrealMcpRqlModule::AddApiClass). */
 	bool IsReadOnlyOperation(const UClass* Class, const UFunction* Function) const;
 	/** The operation @p Method (case-insensitive; K2_ prefix dropped, as `call` names it) of @p Class is read-only. */

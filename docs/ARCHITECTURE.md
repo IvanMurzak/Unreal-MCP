@@ -229,7 +229,7 @@ Envelope: every message is a JSON object with a `type` field. `requestId` correl
 
 | Direction | `type` | Purpose |
 |---|---|---|
-| sidecar → plugin | `handshake` | first message after connect: `ipcVersion`, `sidecarVersion`, `token`; `bridgeVersion` (release) and `rqlRenderer` (RQL renderer level, docs/rql.md; absent in bridges ≤ 0.32.0) |
+| sidecar → plugin | `handshake` | first message after connect: `ipcVersion`, `sidecarVersion`, `token`; `bridgeVersion` (release) and `rqlRenderer` (RQL renderer level, docs/rql.md; absent in bridges built before it, e.g. the 0.32.0 release) |
 | plugin → sidecar | `handshake-ack` | `ipcVersion`, `pluginVersion`, `engineVersion`, `projectPath`, effective connection config (§8) |
 | plugin → sidecar | `tool-manifest` | full snapshot: `revision` (monotonic int) + array of tool descriptors (§2.2) |
 | sidecar → plugin | `tool-call` | `requestId`, `tool`, `arguments` (raw JSON object), `timeoutMs` |

@@ -57,7 +57,7 @@ public:
 	 * Make every UFUNCTION declared on @p Class callable with `call` (an operations class — its parameters and return value
 	 * are converted like members). Usually the class default object is a source (AddObjectSource). @p TypeName renames
 	 * the type for agents (default: the class name). A function reports a failure with UnrealMcpRql::Fail.
-	 * A function that changes nothing (a ground read, a lookup) declares `meta = (RqlReadOnly)` on its UFUNCTION: rql-query
+	 * A function that changes no saved data (a ground read, a lookup) declares `meta = (RqlReadOnly)` on its UFUNCTION: rql-query
 	 * may then call it (every other call needs rql-mutate), it opens no undo step, marks nothing unsaved, may run on the
 	 * same arguments more than once, and rql-schema marks it read-only.
 	 */
