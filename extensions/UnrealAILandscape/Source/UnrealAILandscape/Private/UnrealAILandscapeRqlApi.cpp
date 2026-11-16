@@ -502,6 +502,45 @@ namespace UnrealAILandscapeRqlApiLocal
 			C[Col] = Det(Mc) / D;
 		}
 	}
+
+	/**
+	 * The connected regions (8 neighbours) of a W x H sample grid: each starts at a sample @p Starts accepts and grows over the
+	 * neighbours @p Joins accepts for that start; @p Visit gets each region's samples once.
+	 */
+	void ForEachRegion(int32 W, int32 H, TFunctionRef<bool(int32)> Starts, TFunctionRef<bool(int32 Start, int32 Next)> Joins, TFunctionRef<void(const TArray<int32>&)> Visit)
+	{
+		TBitArray<> Seen(false, W * H);
+		TArray<int32> Stack, Cells;
+		for (int32 Start = 0; Start < W * H; ++Start)
+		{
+			if (Seen[Start] || !Starts(Start))
+				continue;
+			Cells.Reset();
+			Stack.Reset();
+			Stack.Add(Start);
+			Seen[Start] = true;
+			while (Stack.Num())
+			{
+				const int32 Cell = Stack.Pop(EAllowShrinking::No);
+				Cells.Add(Cell);
+				const int32 CI = Cell % W, CJ = Cell / W;
+				for (int32 DJ = -1; DJ <= 1; ++DJ)
+				{
+					for (int32 DI = -1; DI <= 1; ++DI)
+					{
+						const int32 NI = CI + DI, NJ = CJ + DJ;
+						const int32 Next = NJ * W + NI;
+						if (NI >= 0 && NJ >= 0 && NI < W && NJ < H && !Seen[Next] && Joins(Start, Next))
+						{
+							Seen[Next] = true;
+							Stack.Add(Next);
+						}
+					}
+				}
+			}
+			Visit(Cells);
+		}
+	}
 }
 
 using namespace UnrealAILandscapeRqlApiLocal;
@@ -937,41 +976,14 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that plane, one result each.
 	FBumps Out;
 	TArray<TArray<int32>> RegionCells; // per result, its samples
-	TBitArray<> Seen(false, GW * GH);
-	TArray<int32> Stack;
-	for (int32 Start = 0; Start < GW * GH; ++Start)
+	ForEachRegion(GW, GH, [&](int32 Start) { return FMath::Abs(Residual[Start]) >= MinHeight; },
+		[&](int32 Start, int32 Next) { return Residual[Next] * (Residual[Start] > 0.0 ? 1.0 : -1.0) >= MinHeight; },
+		[&](const TArray<int32>& Cells)
 	{
-		if (Seen[Start] || FMath::Abs(Residual[Start]) < MinHeight)
-			continue;
-		const double Sign = Residual[Start] > 0.0 ? 1.0 : -1.0;
-		int32 Peak = Start;
-		TArray<int32> Cells;
-		Stack.Reset();
-		Stack.Add(Start);
-		Seen[Start] = true;
-		while (Stack.Num())
-		{
-			const int32 Cell = Stack.Pop(EAllowShrinking::No);
-			Cells.Add(Cell);
-			if (Residual[Cell] * Sign > Residual[Peak] * Sign)
-				Peak = Cell;
-			const int32 CI = Cell % GW, CJ = Cell / GW;
-			for (int32 DJ = -1; DJ <= 1; ++DJ)
-			{
-				for (int32 DI = -1; DI <= 1; ++DI)
-				{
-					const int32 NI = CI + DI, NJ = CJ + DJ;
-					if (NI < 0 || NJ < 0 || NI >= GW || NJ >= GH)
-						continue;
-					const int32 Next = NJ * GW + NI;
-					if (!Seen[Next] && Residual[Next] * Sign >= MinHeight)
-					{
-						Seen[Next] = true;
-						Stack.Add(Next);
-					}
-				}
-			}
-		}
+		const double Sign = Residual[Cells[0]] > 0.0 ? 1.0 : -1.0;
+		int32 Peak = Cells[0];
+		for (const int32 Cell : Cells)
+			Peak = Residual[Cell] * Sign > Residual[Peak] * Sign ? Cell : Peak;
 		const FVector2D PeakCell(Peak % GW, Peak / GW);
 		double Reach = 0.0;
 		for (const int32 Cell : Cells)
@@ -1020,7 +1032,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		Bump.Location = FVector(FMath::RoundToDouble(World.X), FMath::RoundToDouble(World.Y), FMath::RoundToDouble(BestZ * 10.0) / 10.0);
 		Bump.Height = FMath::RoundToDouble((Residual[Peak] + (BestZ - Z[Peak])) * 10.0) / 10.0;
 		Bump.Radius = FMath::RoundToDouble((Reach + 1.0) * Step * Quad);
-	}
+	});
 	TArray<int32> Order;
 	for (int32 Index = 0; Index < Out.Num(); ++Index)
 		Order.Add(Index);
@@ -1112,39 +1124,18 @@ TArray<FUnrealAILandscapeCoverage> UUnrealAILandscapeRqlApi::Coverage(ALandscape
 	}
 	// Connected areas (8 neighbours) at MinWeight or more.
 	FAreas Out;
-	TBitArray<> Seen(false, GW * GH);
-	TArray<int32> Stack;
-	for (int32 Start = 0; Start < GW * GH; ++Start)
+	ForEachRegion(GW, GH, [&](int32 Start) { return Weight[Start] >= MinWeight; }, [&](int32, int32 Next) { return Weight[Next] >= MinWeight; },
+		[&](const TArray<int32>& Cells)
 	{
-		if (Seen[Start] || Weight[Start] < MinWeight)
-			continue;
 		double SumX = 0.0, SumY = 0.0, SumW = 0.0;
-		int32 Count = 0, MinI = GW, MinJ = GH, MaxI = -1, MaxJ = -1;
-		Stack.Reset();
-		Stack.Add(Start);
-		Seen[Start] = true;
-		while (Stack.Num())
+		int32 MinI = GW, MinJ = GH, MaxI = -1, MaxJ = -1;
+		for (const int32 Cell : Cells)
 		{
-			const int32 Cell = Stack.Pop(EAllowShrinking::No);
 			const int32 CI = Cell % GW, CJ = Cell / GW;
-			SumX += CI; SumY += CJ; SumW += Weight[Cell]; ++Count;
+			SumX += CI; SumY += CJ; SumW += Weight[Cell];
 			MinI = FMath::Min(MinI, CI); MinJ = FMath::Min(MinJ, CJ); MaxI = FMath::Max(MaxI, CI); MaxJ = FMath::Max(MaxJ, CJ);
-			for (int32 DJ = -1; DJ <= 1; ++DJ)
-			{
-				for (int32 DI = -1; DI <= 1; ++DI)
-				{
-					const int32 NI = CI + DI, NJ = CJ + DJ;
-					if (NI < 0 || NJ < 0 || NI >= GW || NJ >= GH)
-						continue;
-					const int32 Next = NJ * GW + NI;
-					if (!Seen[Next] && Weight[Next] >= MinWeight)
-					{
-						Seen[Next] = true;
-						Stack.Add(Next);
-					}
-				}
-			}
 		}
+		const int32 Count = Cells.Num();
 		const auto World = [&](double I, double J) { return ToWorld.TransformPosition(FVector(Whole.Min.X + I * Step, Whole.Min.Y + J * Step, 0.0)); };
 		FUnrealAILandscapeCoverage& Area = Out.AddDefaulted_GetRef();
 		const FVector Middle = World(SumX / Count, SumY / Count);
@@ -1155,7 +1146,7 @@ TArray<FUnrealAILandscapeCoverage> UUnrealAILandscapeRqlApi::Coverage(ALandscape
 		Area.Max = FVector(FMath::RoundToDouble(FMath::Max(A.X, B.X)), FMath::RoundToDouble(FMath::Max(A.Y, B.Y)), 0.0);
 		Area.Area = FMath::RoundToDouble(Count * FMath::Square(Step * Quad / 100.0));
 		Area.Weight = FMath::RoundToDouble(SumW / Count * 100.0) / 100.0;
-	}
+	});
 	Out.Sort([](const FUnrealAILandscapeCoverage& A, const FUnrealAILandscapeCoverage& B) { return A.Area > B.Area; });
 	if (Out.Num() > 50)
 		Out.SetNum(50);
