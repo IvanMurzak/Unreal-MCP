@@ -410,6 +410,8 @@ void FUnrealAILandscapeSpec::Define()
 			const FString BoundsText = LandscapeSpecJson(Bounds);
 			TestTrue(*FString::Printf(TEXT("Bounds: 20 x 20 m around X 400000, flat at Z 0 (%s)"), *BoundsText.Left(300)),
 				BoundsText.Contains(TEXT("\"SizeMeters\":[20,20]")) && BoundsText.Contains(TEXT("\"Min\":[399000,-1000,0]")) && BoundsText.Contains(TEXT("\"Max\":[401000,1000,0]")));
+			TestTrue(*FString::Printf(TEXT("Bounds: Highest and Lowest are points on the flat ground (%s)"), *BoundsText.Left(400)),
+				BoundsText.Contains(TEXT("\"Highest\":[")) && BoundsText.Contains(TEXT("\"Lowest\":[")) && BoundsText.Contains(TEXT(",0],\"Lowest\"")) && BoundsText.Contains(TEXT(",0],\"HeightRange\"")));
 
 			const TSharedRef<FJsonObject> Flat = Surface(OriginX, 0.0);
 			TestTrue(*FString::Printf(TEXT("flat ground: inside, height 0, slope 0 (%s)"), *Text(Flat)), Flat->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Flat->GetBoolField(TEXT("Inside"))
@@ -449,6 +451,18 @@ void FUnrealAILandscapeSpec::Define()
 					const double Cm = (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
 					TestTrue(*FString::Printf(TEXT("the rendered (merged) heightmap has the hill (%.1f cm)"), Cm), FMath::IsNearlyEqual(Cm, 300.0, 25.0));
 				}
+			}
+			// landscapes | where Label == "@LABEL@" | select Bounds: Highest is the hill top
+			TSharedPtr<FJsonObject> HillBounds;
+			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &HillBounds);
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+				const TArray<TSharedPtr<FJsonValue>>* Highest = nullptr;
+				const bool bHighest = HillBounds.IsValid() && HillBounds->TryGetArrayField(TEXT("rows"), Rows) && Rows->Num() == 1
+					&& (*Rows)[0]->AsArray()[0]->AsObject()->TryGetArrayField(TEXT("Highest"), Highest) && Highest->Num() == 3;
+				TestTrue(*FString::Printf(TEXT("Bounds.Highest is the hill top: within 2 m of its centre, 3 m up (%s)"), *LandscapeSpecJson(HillBounds).Left(400)),
+					bHighest && FVector2D::Distance(FVector2D((*Highest)[0]->AsNumber(), (*Highest)[1]->AsNumber()), FVector2D(OriginX, 0.0)) <= 200.0
+					&& FMath::IsNearlyEqual((*Highest)[2]->AsNumber(), 300.0, 25.0));
 			}
 			const TSharedRef<FJsonObject> Hill = Surface(OriginX, 0.0);
 			TestTrue(*FString::Printf(TEXT("Surface reads the hill top, flat on top (%s)"), *Text(Hill)),

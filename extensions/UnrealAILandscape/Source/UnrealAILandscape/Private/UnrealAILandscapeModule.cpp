@@ -75,6 +75,31 @@ namespace UnrealAILandscapeRqlLocal
 		return FString();
 	}
 
+	/**
+	 * The highest (or lowest) ground point of one collision component: its vertices read like Surface reads the ground (the
+	 * editor heightfield, else the physics one), so Bounds' Highest / Lowest agree with Surface and line traces.
+	 */
+	FVector ExtremeGround(ULandscapeHeightfieldCollisionComponent* Component, bool bHighest)
+	{
+		ALandscapeProxy* Owner = Component->GetLandscapeProxy();
+		const FBox Box = Component->Bounds.GetBox();
+		const double Step = FMath::Max(Owner ? Owner->LandscapeActorToWorld().GetScale3D().X : 100.0, 1.0);
+		FVector Best(Box.GetCenter().X, Box.GetCenter().Y, bHighest ? TNumericLimits<double>::Lowest() : TNumericLimits<double>::Max());
+		for (double Y = Box.Min.Y; Owner && Y <= Box.Max.Y + 0.5 * Step; Y += Step)
+		{
+			for (double X = Box.Min.X; X <= Box.Max.X + 0.5 * Step; X += Step)
+			{
+				const FVector At(FMath::Min(X, Box.Max.X - 1.0), FMath::Min(Y, Box.Max.Y - 1.0), 0.0);
+				TOptional<float> Height = Owner->GetHeightAtLocation(At, EHeightfieldSource::Editor);
+				if (!Height.IsSet())
+					Height = Owner->GetHeightAtLocation(At, EHeightfieldSource::Complex);
+				if (Height.IsSet() && (bHighest ? Height.GetValue() > Best.Z : Height.GetValue() < Best.Z))
+					Best = FVector(At.X, At.Y, Height.GetValue());
+			}
+		}
+		return Best;
+	}
+
 	const TCHAR* WaterBodyTypeName(EWaterBodyType Type)
 	{
 		switch (Type)
@@ -145,7 +170,7 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Bounds"),
-			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y], HeightRange [MinZ, MaxZ] (the lowest and highest ground it can hold: Sculpt, Flatten and Carve stay within it; set by Create's MaxHeightMeters)"),
+			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y], Highest and Lowest [X, Y, Z] (where the highest and lowest ground is, to a vertex), HeightRange [MinZ, MaxZ] (the lowest and highest ground it can hold: Sculpt, Flatten and Carve stay within it; set by Create's MaxHeightMeters)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				// A World Partition map loads only the region around the camera: load the rest so the box is the whole landscape.
@@ -154,6 +179,9 @@ public:
 				// landscape created in the session; on a World Partition map the primary actor has no components of its own). The
 				// engine pads a flat component's box by one unit up and down: undo it, so Z is the real lowest and highest ground.
 				FBox Box(ForceInit);
+				ULandscapeHeightfieldCollisionComponent* Top = nullptr;
+				ULandscapeHeightfieldCollisionComponent* Bottom = nullptr;
+				double TopZ = TNumericLimits<double>::Lowest(), BottomZ = TNumericLimits<double>::Max();
 				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
 				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
@@ -164,7 +192,18 @@ public:
 						FBox Local = Pair.Value->CachedLocalBox;
 						if (FMath::IsNearlyEqual(Local.GetExtent().Z, 1.0))
 							Local.Min.Z = Local.Max.Z = Local.GetCenter().Z;
-						Box += Local.TransformBy(Pair.Value->GetComponentTransform());
+						const FBox World = Local.TransformBy(Pair.Value->GetComponentTransform());
+						Box += World;
+						if (World.Max.Z > TopZ)
+						{
+							TopZ = World.Max.Z;
+							Top = Pair.Value;
+						}
+						if (World.Min.Z < BottomZ)
+						{
+							BottomZ = World.Min.Z;
+							Bottom = Pair.Value;
+						}
 					}
 				}
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -180,6 +219,10 @@ public:
 				Out->SetArrayField(TEXT("Min"), Vector({ Box.Min.X, Box.Min.Y, Box.Min.Z }));
 				Out->SetArrayField(TEXT("Max"), Vector({ Box.Max.X, Box.Max.Y, Box.Max.Z }));
 				Out->SetArrayField(TEXT("SizeMeters"), Vector({ (Box.Max.X - Box.Min.X) / 100.0, (Box.Max.Y - Box.Min.Y) / 100.0 }));
+				// Only the components holding the extremes are read vertex by vertex (a 2 km landscape: 2 of 64).
+				const FVector High = ExtremeGround(Top, true), Low = ExtremeGround(Bottom, false);
+				Out->SetArrayField(TEXT("Highest"), Vector({ High.X, High.Y, High.Z }));
+				Out->SetArrayField(TEXT("Lowest"), Vector({ Low.X, Low.Y, Low.Z }));
 				const FVector2D Range = UnrealAILandscapeRqlApiLocal::HeightRange(Proxy);
 				Out->SetArrayField(TEXT("HeightRange"), Vector({ Range.X, Range.Y }));
 				return MakeShared<FJsonValueObject>(Out);
@@ -298,7 +341,7 @@ Read the ground back with `Surface` (rql-mutate, read-only) and `Bounds` instead
 Paint return with the landscape merged, so its collision, `Surface` and the rendered surface agree at once.
 
 ```
-landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters
+landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters, Highest/Lowest [X, Y, Z]
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])                                   {Inside, Height, Slope, Location, Normal}
 range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 - 4500, floor($ / 10) * 1000 - 4500, 0])   a 10 x 10 grid
 ```

@@ -77,7 +77,8 @@ traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface
 that the engine merges on the GPU over the next editor frames, and a caller that sculpts and then traces or places actors
 in the same step reads the old ground. `Surface` reads the ground back at a world X, Y (`Inside`, `Height` in cm,
 `Slope` in degrees, `Location` on the ground, `Normal`; read-only, run it through `rql-mutate` like every `call`) and
-`Bounds` gives the landscape's world box with its lowest and highest ground. `Rebuild` merges every edit layer of a
+`Bounds` gives the landscape's world box with its lowest and highest ground, and where they are (`Highest`,
+`Lowest`: [X, Y, Z], to a vertex). `Rebuild` merges every edit layer of a
 landscape edited elsewhere (Landscape mode, Python) again and rebuilds its collision and, when enabled, its Nanite mesh.
 An editor without rendering (`-nullrhi`, commandlets) cannot merge: the edits stay in their edit layer until a rendering
 editor opens the landscape, and `Rebuild` fails there.
