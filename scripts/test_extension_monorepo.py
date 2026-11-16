@@ -363,5 +363,51 @@ class MonorepoTests(unittest.TestCase):
             self.assertTrue(built[0].parent.name.startswith('all-'), 'every extension this engine builds is an "all" profile')
             self.assertNotEqual(built[0].parent.name, built[1].parent.name, 'profiles of different plugin sets never share a folder')
 
+    def test_full_mode_keeps_a_given_bridge_and_fetches_only_the_missing_server(self):
+        import suite_dependencies
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 8})
+            bridge = root / 'my-bridge'
+            bridge.write_text('built from this commit')
+            fetched, ran = [], []
+            published = root / 'published-server'
+
+            def published_server(smoke, folder):
+                fetched.append('server')
+                return published
+
+            def published_bridge(*a):
+                fetched.append('bridge')
+                return root / 'published-bridge'
+
+            argv = ['extension_suite.py', '--engine', str(engine), '--output', str(root / 'out'), '--mode', 'full',
+                    '--extensions', 'UnrealAILandscape', '--bridge', str(bridge)]
+            with patch.object(suite, 'machine_lock'), patch.object(suite, 'build', lambda engine, project: None), \
+                    patch.object(suite, 'automation', lambda engine, project, selected, timeout, server, bridge_path, *a: ran.append((server, bridge_path)) or {}), \
+                    patch.object(suite_dependencies, 'published_server', published_server), \
+                    patch.object(suite_dependencies, 'published_bridge', published_bridge), \
+                    patch.object(suite.sys, 'argv', argv):
+                self.assertEqual(suite.main(), 0)
+            self.assertEqual(fetched, ['server'], 'only the missing server is fetched')
+            self.assertEqual(ran, [(published, bridge.resolve())], 'the given bridge reaches the live E2E')
+
+            missing = argv[:-1] + [str(root / 'nope')]
+            with patch.object(suite, 'machine_lock'), patch.object(suite.sys, 'argv', missing):
+                with self.assertRaisesRegex(ValueError, '--bridge .* is not a file'):
+                    suite.main()
+
+    def test_bridge_without_server_outside_full_mode_is_an_error_not_ignored(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 8})
+            argv = ['extension_suite.py', '--engine', str(engine), '--output', str(root / 'out'), '--mode', 'automation',
+                    '--bridge', str(root / 'b')]
+            with patch.object(suite, 'machine_lock'), patch.object(suite.sys, 'argv', argv), \
+                    patch('sys.stderr'), self.assertRaises(SystemExit):
+                suite.main()
+
 if __name__ == '__main__':
     unittest.main()

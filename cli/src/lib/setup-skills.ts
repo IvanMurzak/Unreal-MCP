@@ -188,8 +188,16 @@ function foreignSkills(skillsDir: string): { file: string; content: string }[] {
 }
 
 /**
- * Ask the project's editor (when one answers the ping) to write its skills into the agent's folder through the
- * `unreal-skill-generate` system tool. Never throws: no editor is an outcome, not an error.
+ * Where the editor writes its skills before this CLI copies them into the project's agent folder: inside the editor's own
+ * project (`unreal-skill-generate` takes only a folder relative to it), under `Saved/` (never committed), unique per run.
+ */
+export const EDITOR_SKILLS_STAGING = 'Saved/UnrealMcp/skills-staging';
+
+/**
+ * Ask the project's editor (when one answers the ping) for its skills through the `unreal-skill-generate` system tool,
+ * then copy them into `<projectDir>/<skillsPath>`. The tool writes only below the editor's own project root, which is not
+ * `projectDir` when `--url` names another project's editor (or the project's connection reaches a different editor), so
+ * it writes into a staging folder there and this CLI moves the files. Never throws: no editor is an outcome, not an error.
  */
 async function generateEditorSkills(projectDir: string, skillsPath: string, opts: SetupSkillsOptions): Promise<EditorSkillsOutcome> {
   let url: string;
@@ -204,25 +212,87 @@ async function generateEditorSkills(projectDir: string, skillsPath: string, opts
   const probe = await probePing(url, { token, timeoutMs: opts.probeTimeoutMs ?? 3000, fetchImpl: opts.fetchImpl });
   if (!probe.ok) return { generated: false, reachable: false, reason: `no editor answered at ${url} (${probe.reason})` };
   emitProgress(opts.onProgress, { phase: 'info', message: 'Asking the editor for its skills (unreal-rql, tools)' });
+  const staging = `${EDITOR_SKILLS_STAGING}/${process.pid}-${Date.now()}`;
   const result = await runSystemTool({
     toolName: 'unreal-skill-generate',
     url,
     token,
-    input: { path: skillsPath.replace(/\\/g, '/') },
+    input: { path: staging },
     timeoutMs: 60_000,
     fetchImpl: opts.fetchImpl,
   });
   if (result.kind === 'failure') return { generated: false, reachable: true, reason: toolErrorText(result) };
   if (!isToolSuccess(result.data)) return { generated: false, reachable: true, reason: toolResponseText(result.data) ?? JSON.stringify(result.data) };
-  return { generated: true, message: generatedText(result.data) };
+  const written = (result.data as { structured?: { skillsPath?: unknown } } | null)?.structured?.skillsPath;
+  // Only the staging folder this run asked for is copied from and removed: never another path an answer names.
+  const isStaging = typeof written === 'string' && path.resolve(written).split(path.sep).join('/').endsWith(`/${staging}`);
+  if (typeof written === 'string' && fs.existsSync(written) && !isStaging) {
+    return { generated: false, reachable: true, reason: `the editor wrote its skills to ${written}, not to the staging folder ${staging} it was asked for: left as is` };
+  }
+  if (typeof written !== 'string' || !fs.existsSync(written)) {
+    return {
+      generated: false,
+      reachable: true,
+      reason: typeof written === 'string'
+        ? `the editor wrote its skills to ${written}, which is not on this machine: run setup-skills where the editor runs`
+        : `the editor did not say where it wrote its skills: ${toolResponseText(result.data) ?? JSON.stringify(result.data)}`,
+    };
+  }
+  try {
+    const target = path.join(projectDir, skillsPath);
+    const { files, pruned } = moveEditorSkills(written, target);
+    return { generated: true, message: `${files} file(s) written${pruned > 0 ? `, ${pruned} stale pruned` : ''} in ${target}` };
+  } catch (err) {
+    return { generated: false, reachable: true, reason: `could not copy the editor's skills from ${written}: ${asError(err).message}` };
+  } finally {
+    removeStaging(written);
+  }
 }
 
-/** "N file(s) written (M stale pruned) in <folder>" from the tool's structured answer, else its text. */
-function generatedText(data: unknown): string {
-  const structured = (data as { structured?: { filesWritten?: unknown; filesPruned?: unknown; skillsPath?: unknown } } | null)?.structured;
-  if (structured && typeof structured.filesWritten === 'number') {
-    const pruned = typeof structured.filesPruned === 'number' && structured.filesPruned > 0 ? `, ${structured.filesPruned} stale pruned` : '';
-    return `${structured.filesWritten} file(s) written${pruned}${typeof structured.skillsPath === 'string' ? ` in ${structured.skillsPath}` : ''}`;
+/**
+ * Copy the editor's generated skill folders from @p staging into @p target and prune the folders in @p target that the
+ * editor generated earlier but no longer does (its `generated-by` marker, not one of this CLI's own skills, which the
+ * offline step writes next): what `unreal-skill-generate` does when it writes in place.
+ */
+function moveEditorSkills(staging: string, target: string): { files: number; pruned: number } {
+  const current = new Set(fs.readdirSync(staging, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name));
+  const own = new Set(buildGuideFiles().map((f) => f.relativePath.split('/')[0]));
+  let pruned = 0;
+  if (fs.existsSync(target)) {
+    for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+      if (!entry.isDirectory() || current.has(entry.name) || own.has(entry.name)) continue;
+      if (!isGenerated(path.join(target, entry.name, 'SKILL.md'))) continue;
+      fs.rmSync(path.join(target, entry.name), { recursive: true, force: true });
+      pruned++;
+    }
   }
-  return toolResponseText(data) ?? 'generated';
+  let files = 0;
+  const copy = (from: string, to: string) => {
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      const source = path.join(from, entry.name);
+      const destination = path.join(to, entry.name);
+      if (entry.isDirectory()) {
+        copy(source, destination);
+        continue;
+      }
+      const content = fs.readFileSync(source);
+      if (fs.existsSync(destination) && fs.readFileSync(destination).equals(content)) continue;
+      fs.mkdirSync(to, { recursive: true });
+      fs.writeFileSync(destination, content);
+      files++;
+    }
+  };
+  copy(staging, target);
+  return { files, pruned };
+}
+
+/** Remove a staging folder and the empty `skills-staging` folder above it; a failure leaves them (under Saved/). */
+function removeStaging(staging: string): void {
+  try {
+    fs.rmSync(staging, { recursive: true, force: true });
+    const parent = path.dirname(staging);
+    if (fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
+  } catch {
+    /* best effort */
+  }
 }

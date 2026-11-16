@@ -77,7 +77,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible` (writable: the Levels panel's eye), `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
   maps, writable on material instances).
-- **Methods** (`call`): Actor `Destroy()`, `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
+- **Methods** (`call`): Actor `Destroy()` (refused, with the actor's reason and nothing destroyed, where the editor's Delete
+  refuses it: `AActor::CanDeleteSelectedActor`, e.g. a World Partition landscape whose streaming proxies are left, which
+  a delete would orphan; checked for every planned Destroy before the first runs), `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
   `Destroy()`; every parameterless `CallInEditor` function (the Details panel's buttons); every UFUNCTION of an API class (the `editor` operations, extension
   operations). Parameters and results convert like members; UHT's recorded C++ defaults become RQL defaults.
   A by-reference result (`FFoo& F()`) is reported as a copy; a `UPARAM(ref)` parameter is passed in and reported
@@ -139,8 +141,17 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   same-named call on another type may fail earlier with the engine's own error: unknown method, coercion). Read-only
   means it changes no saved data and no undo history; a read may still load World Partition actors it needs.
   Read-only calls (in `rql-query` or `rql-mutate`) open no undo step, mark nothing unsaved, skip the modules' committed
-  hooks and the duplicate check; in `rql-query` up to the 1000-target ceiling (it has no `max_targets`). `rql-schema`
-  prefixes their description with `[read-only]`.
+  hooks and the duplicate check. A read is not a change, so the 200-target limit of mutations does not apply: without
+  `max_targets` it runs up to the 1000-target ceiling in both tools (in `rql-mutate` a same-named operation that changes
+  something is held to the 200 again by the batch check). Over 1000 it fails with `read-limit` ("N items reach the
+  read-only 'Surface' call: at most 1000 per call"; hint: `first 1000` / `skip 1000` batches), never with `mutation-limit`'s
+  "nothing was changed". The ceiling stays 1000 for reads: every item is one result row, and 1000 rows already fill the
+  64 KB answer (more could not be shown). Its answer is marked `"readOnly": true`: the sidecar renders it in both tools
+  in the receipt's compact form (the method once) with every row, where a change's receipt shows 50 rows and a count.
+  The 64 KB answer usually ends a big read first (a Landscape `Surface` row is about 220 characters rendered): RQL then
+  returns the rows that fit with an `output-truncated` warning, whose hint for a read names the batches to read the rest
+  in (`skip N | first N`; RQL's receipt hint "do not repeat it" is for changes). `rql-schema` prefixes their description
+  with `[read-only]`.
 - **Target limit**: `rql-mutate` changes at most 200 targets per statement by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit of each statement of one call up to the ceiling of 1000
   (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`; passed only when the caller gives it, and
@@ -158,6 +169,11 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   the old value is left out and counted in the result's `unchanged` (the sidecar prints "(N unchanged assignment(s) not
   listed)"); outside a dry run the write still runs and the commit hooks see every record, and a write the editor
   refused or clamped back to the old value stays listed.
+- **Lists in reads, one rule**: a read never drops items silently. A call result shows up to 1000 items per list and a
+  read-only call every row (below, and Read-only operations); a list member in a plain query (`select Edits`,
+  `select Components`) shows RQL's first 20 items, then `…+N`, and the answer gets a `list-truncated` warning naming the
+  cut columns and `… | get Edits | select …`, which streams every item as rows (paged with `first` / `skip`; rows of a
+  plain query stop at 50 with RQL's own note). Twenty keeps browsing many objects short; `get` is the full read.
 - **Call results** list every item of their lists and maps, up to 1000 per list (the session raises RQL's
   `maxListItems` to 1000 for a plan ending in `call`; lists in plain queries still show 20 items, then `…+N`). `call`
   is terminal, so nothing can page its result: past 1000 a list shows its first 1000 items, then `…+N`, and a
@@ -183,9 +199,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 |---|---|
 | `actors` | every actor of the level open in the editor and its loaded sublevels; another map's actors only after `editor \| call OpenLevel("/Game/Maps/Other")`. An empty read of `actors` warns `open-level-only`, naming the open level and how to open another |
 | `levels`, `world` | the loaded levels, the editor world |
+| `unloadedActors` | the World Partition actors of the open level that are not loaded (see [World Partition](#world-partition)) |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
 | `playActors` | every actor of the running Play In Editor world (empty when not playing) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole` |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole`, `Undo(Steps = 1)` / `Redo(Steps = 1)` (as Ctrl+Z / Ctrl+Y: return the titles of the steps they took, refuse with nothing done when fewer steps exist, add no undo step of their own: `meta = (RqlOwnUndo)` keeps the session's transaction out), `LoadActors` / `LoadRegion` ([World Partition](#world-partition)) |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `diagnostics` | the editor's current warnings and errors (`Sequence`, `Source`, `Severity`, `Message`, `Count`, `FirstSeen`, `LastSeen`; see [Editor diagnostics](#editor-diagnostics)) |
 | `unreal.find(label)` | an actor by label, name or path |
@@ -233,6 +250,30 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
   `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
+
+### World Partition
+
+A World Partition level holds only the actors of its loaded regions in the editor; `actors` (and `levels`, `world`) see
+those. Agents never found a lake or orphaned landscape proxies outside the loaded regions and spent dozens of Python calls
+loading them, so the core module (`UnrealMcpRqlWorldPartition.cpp`) makes the rest visible:
+
+- While some actors are not loaded, every successful query whose source is `actors`, `levels` or `world` gets the warning
+  `world-partition-unloaded`: "N World Partition actor(s) are not loaded (only loaded actors are listed): Lake
+  (WaterBodyLake), ... +K more", whose hint names `unloadedActors` and the load operations. `unreal.find("Lake")` of an
+  unloaded actor fails with `not-loaded` and the `LoadActors` call that loads it.
+- `unloadedActors` lists them from the level's actor descriptors (`FUnrealMcpUnloadedActor`): `Label`, `Name`, `Class`
+  (the outliner's: `BP_Door_C` for a Blueprint), `Guid`, `Package` (its external actor package), `Folder`, `Location`,
+  `Bounds` (editor bounds: `Bounds.Min`, `Bounds.Max`), `SpatiallyLoaded`, `DataLayers`. Runtime-only descriptors (HLODs)
+  and actors deleted in this session (their descriptor stays until the level is saved) are left out. Empty without World
+  Partition.
+- `editor | call LoadActors(["Lake", "<guid>", ...])` loads actors by label, name, GUID or package (every name must
+  match, else nothing loads and the error names similar ones; a name of an actor that is already loaded returns it);
+  `editor | call LoadRegion([minX, minY], [maxX, maxY])` loads every actor whose bounds overlap the XY rectangle (cm; Z
+  ignored, as region loading in the World Partition window). Both return the loaded actors. They load through
+  `UWorldPartitionBlueprintLibrary::LoadActors` (the editor's actor-list loader, what Python's `load_actors` calls;
+  called through reflection, since the Engine module does not export it), so the actors stay loaded until the level
+  closes, nothing is marked unsaved and no undo step is added: they are read-only operations (`meta = (RqlReadOnly)`),
+  callable from `rql-query`.
 
 ### Editor diagnostics
 
@@ -452,8 +493,10 @@ markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL
 The editor's skills (`unreal-rql`, one per tool) are written by its sidecar only: the panel's **Generate skill files**
 button, the per-agent **auto-generate** setting (on each connection and after the tool / module set or tool visibility
 changes, debounced; `UnrealMcpEditor/Private/Skills/UnrealMcpSkillAutoGenerator`), `unreal-skill-generate`, and
-`unreal-mcp-cli setup-skills` while the editor answers (it calls `unreal-skill-generate`, keeping a same-named skill
-someone else wrote unless `--force`; offline it writes only its own skills).
+`unreal-mcp-cli setup-skills` while the editor answers (it calls `unreal-skill-generate` into a staging folder under the
+editor's project `Saved/UnrealMcp/skills-staging/` and copies the skills into `<path>`'s agent folder, so an editor of
+another project never writes into its own; a same-named skill someone else wrote is kept unless `--force`; offline it
+writes only its own skills).
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
 The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` from `rql/guide.hpp`,
 with `editor.SpawnActor` examples; the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline,
@@ -522,6 +565,9 @@ of that domain. A new first-party extension adds its entry to the bundled list
   mutations (set, dry run, read-only, permission), components, calls (spawn, add component, duplicate, destroy), refs,
   selection, levels, console, assets, schema. The C++ runtime has no parser, so each case carries the plan Rql.Parser
   produces for its query (in the comment above it).
+- `UnrealMcpRqlWorldPartitionSpec.cpp` (`UnrealMcp.Tools.Rql.WorldPartition`): a World Partition level from the Open
+  World template with a cube far outside every loaded region, saved and reopened: the warning, `unloadedActors`,
+  `unreal.find`'s not-loaded, `LoadActors` / `LoadRegion` (no unsaved package, no undo step), and a plain level.
 - `bridge/tests/RqlBridgeTests.cs`: plans, result and schema rendering, the descriptor fields, the proxy wiring, the
   shipped skill file.
 - `UnrealMcpExtensionsSpec.cpp` (`UnrealMcp.Extensions`): the module pass (records, disabled set, enabled ids).

@@ -700,6 +700,13 @@ bool FUnrealMcpRqlTypes::IsReadOnlyOperation(const UClass* Class, const FString&
 	return Class && IsReadOnlyOperation(Class, UnrealMcpRqlTypesLocal::FindOperation(Class, Method));
 }
 
+bool FUnrealMcpRqlTypes::IsOwnUndoOperation(const UClass* Class, const FString& Method) const
+{
+	static const FName OwnUndoMeta(TEXT("RqlOwnUndo"));
+	const UFunction* Function = Class ? UnrealMcpRqlTypesLocal::FindOperation(Class, Method) : nullptr;
+	return Function && IsApiClass(Class) && Function->HasMetaData(OwnUndoMeta);
+}
+
 bool FUnrealMcpRqlTypes::HasReadOnlyOperation(const FString& Method) const
 {
 	for (const TPair<UClass*, FString>& Api : ApiClasses)

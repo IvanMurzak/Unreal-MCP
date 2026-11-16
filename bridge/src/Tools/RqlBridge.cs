@@ -105,6 +105,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             // Each statement's plan, to find the statement of a plan RqlScript runs: its text is the call's query (the undo step's title).
             var plans = statements.Select(st => RqlParser.TryParse(st.Text, out var p, out _) ? PlanCodec.Serialize(p!) : null).ToList();
             int next = 0, calls = 0;
+            var allReadOnly = true;
 
             QueryResult Execute(QueryPlan plan)
             {
@@ -134,12 +135,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 var json = ParseObject(first?.Text);
                 if (json == null || !json.ContainsKey("ok"))
                     return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", string.IsNullOrEmpty(first?.Text) ? "the editor sent no RQL result" : first!.Text!) });
-                return ToResult(role, json);
+                var statement = ToResult(role, json, out var readOnly);
+                // The row budget only shortens receipts: a statement that is not one (a plain read, a failure) leaves it.
+                if (statement.Receipt && !readOnly)
+                    allReadOnly = false;
+                return statement;
             }
 
             // RqlScript runs the statements synchronously, one after another: off the caller's thread, each IPC call awaited in turn.
             var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = role == MutateRole }, Execute)).ConfigureAwait(false);
-            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result) } };
+            // One receipt row budget for the whole script: every row unless a statement's receipt is a change's.
+            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result, allReadOnly) } };
             content.AddRange(notes);
             return new ResponseCallTool { Status = result.Ok ? ResponseStatus.Success : ResponseStatus.Error, Content = content };
         }
@@ -159,7 +165,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             if (role == SchemaRole)
                 rendered = RenderSchema(json);
             else if (json.ContainsKey("ok"))
-                rendered = RenderResult(ToResult(role, json));
+                rendered = RenderResult(ToResult(role, json, out var readOnly), readOnly);
             else
                 return response;
 
@@ -182,17 +188,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// <summary>
         /// A query / mutate answer as RQL's result. rql-mutate answers with a set / call receipt: the table format compacts it
         /// (one method: line, no $ref column for created objects, the first 50 rows and a count). The flag is not part of the JSON.
+        /// A call of read-only operations only (the plugin adds <c>"readOnly": true</c>, in either tool) changed nothing: its
+        /// rows are the answer (sampled heights), so it keeps the compact form (the method once) and lists every row
+        /// (<see cref="ReadOnlyRows"/>).
         /// </summary>
-        private static QueryResult ToResult(string role, JsonObject json)
+        private static QueryResult ToResult(string role, JsonObject json, out bool readOnly)
         {
+            readOnly = json["readOnly"] is JsonValue flag && flag.TryGetValue<bool>(out var b) && b;
             var result = ParseResult(json);
-            result.Receipt = role == MutateRole && result.Ok;
+            result.Receipt = result.Ok && (role == MutateRole || readOnly);
             return result;
         }
 
+        /// <summary>Rows a read-only call's answer lists: the plugin's read ceiling (its 64 KB answer usually ends first).</summary>
+        public const int ReadOnlyRows = 1000;
+
         // The rql tools have no json format, so a receipt's count carries no "(the json format lists every row)" pointer.
-        private static string RenderResult(QueryResult result) =>
-            AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, moreRowsNote: "");
+        private static string RenderResult(QueryResult result, bool readOnly) =>
+            AgentFormat.Render(result, OutputFormat.Table, readOnly ? ReadOnlyRows : AgentFormat.DefaultReceiptRows, moreRowsNote: "");
 
         private static string JsonKindName(JsonNode node) =>
             node.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? "boolean" : node.GetValueKind().ToString().ToLowerInvariant();
