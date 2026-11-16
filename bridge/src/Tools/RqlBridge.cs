@@ -136,14 +136,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 if (json == null || !json.ContainsKey("ok"))
                     return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", string.IsNullOrEmpty(first?.Text) ? "the editor sent no RQL result" : first!.Text!) });
                 var statement = ToResult(role, json, out var readOnly);
-                allReadOnly &= readOnly;
+                // The row budget only shortens receipts: a statement that is not one (a plain read, a failure) leaves it.
+                if (statement.Receipt && !readOnly)
+                    allReadOnly = false;
                 return statement;
             }
 
             // RqlScript runs the statements synchronously, one after another: off the caller's thread, each IPC call awaited in turn.
             var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = role == MutateRole }, Execute)).ConfigureAwait(false);
-            // One receipt row budget for the whole script: every row only when every statement was a read.
-            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result, allReadOnly && calls > 0) } };
+            // One receipt row budget for the whole script: every row unless a statement's receipt is a change's.
+            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result, allReadOnly) } };
             content.AddRange(notes);
             return new ResponseCallTool { Status = result.Ok ? ResponseStatus.Success : ResponseStatus.Error, Content = content };
         }

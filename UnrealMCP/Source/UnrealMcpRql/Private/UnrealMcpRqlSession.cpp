@@ -339,33 +339,68 @@ namespace UnrealMcpRqlSessionLocal
 	 * actors stays short). Reads must not lose items silently: the warning names the cut columns and how to read every
 	 * item, `get <member>` streaming them as rows (paged with first / skip). Call results show 1000 (AddCallResultListNote).
 	 */
-	void AddListMemberNote(rql::QueryResult& Result)
+	void AddListMemberNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
 	{
 		constexpr int32 PlainListItems = 20; // RQL's EngineDefaults::max_list_items, which plain queries keep
-		if (!Result.ok || !Result.rows || !Result.columns)
+		if (!Result.ok)
 			return;
-		const std::vector<std::string>& Columns = *Result.columns;
-		TArray<FString> Cut;
+		TArray<FString> Cut; // the cut columns (rows) or members (items)
 		int64 LeftOut = 0;
-		for (size_t Column = 0; Column < Columns.size(); ++Column)
+		auto Count = [&](const std::string& Name, const rql::Json& Value)
 		{
 			int32 Lists = 0;
+			CountCutLists(Value, Lists, LeftOut, PlainListItems);
+			if (Lists > 0)
+				Cut.AddUnique(UnrealMcpRqlFromStd(Name));
+		};
+		if (Result.rows && Result.columns)
+		{
 			for (const std::vector<rql::Json>& Row : *Result.rows)
 			{
-				if (Column < Row.size())
-					CountCutLists(Row[Column], Lists, LeftOut, PlainListItems);
+				for (size_t Column = 0; Column < Row.size() && Column < Result.columns->size(); ++Column)
+					Count((*Result.columns)[Column], Row[Column]);
 			}
-			if (Lists > 0)
-				Cut.Add(UnrealMcpRqlFromStd(Columns[Column]));
+		}
+		if (Result.items)
+		{
+			for (const rql::Json& Item : *Result.items)
+			{
+				for (size_t Index = 0; Item.is_object() && Index < Item.size(); ++Index)
+					Count(Item.key(Index), Item.at(Index));
+			}
 		}
 		if (Cut.IsEmpty())
 			return;
-		const FString Member = Cut[0];
-		Result.diagnostics.push_back(rql::Diagnostic::warning("list-truncated",
-			UnrealMcpRqlToStd(FString::Printf(TEXT("list members show their first %d items in a query: %s (%lld item(s) not shown)"),
-				PlainListItems, *FString::Join(Cut, TEXT(", ")), LeftOut)),
-			UnrealMcpRqlToStd(FString::Printf(TEXT("every item: ... | get %s | select ... streams them as rows (page with first / skip); "
-				"count them with %s.count()"), *Member, *Member))));
+		// The member a cut column reads: a select field's plain path (an alias or a computed column names none), or the
+		// column itself when the query selects nothing.
+		FString Member = Cut[0];
+		for (const rql::Stage& Stage : Plan.stages)
+		{
+			for (const rql::SelectField& Field : Stage.fields)
+			{
+				if (UnrealMcpRqlFromStd(Field.name) != Cut[0])
+					continue;
+				Member.Reset();
+				if (Field.expr && Field.expr->kind == rql::ExprKind::Path && !Field.expr->on)
+				{
+					for (const rql::Segment& Segment : Field.expr->segments)
+					{
+						if (Segment.kind != rql::SegmentKind::Member)
+						{
+							Member.Reset();
+							break;
+						}
+						Member += (Member.IsEmpty() ? TEXT("") : TEXT(".")) + UnrealMcpRqlFromStd(Segment.name);
+					}
+				}
+			}
+		}
+		const FString Message = FString::Printf(TEXT("list members show their first %d items in a query: %s (%lld item(s) not shown)"),
+			PlainListItems, *FString::Join(Cut, TEXT(", ")), LeftOut);
+		const FString Hint = Member.IsEmpty()
+			? FString(TEXT("every item: get <the list member> streams them as rows (page with first / skip)"))
+			: FString::Printf(TEXT("every item: ... | get %s | select ... streams them as rows (page with first / skip); count them with %s.count()"), *Member, *Member);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("list-truncated", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -1076,8 +1111,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
 		else if (bCall)
 			AddCallResultListNote(Result);
-		else
-			UnrealMcpRqlSessionLocal::AddListMemberNote(Result);
+		else if (!bAllowMutation) // a set receipt's old / new columns are no members to get
+			UnrealMcpRqlSessionLocal::AddListMemberNote(Result, Plan);
 		if (bReadOnlyLimit)
 			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
 	}

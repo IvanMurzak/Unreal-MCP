@@ -224,6 +224,11 @@ async function generateEditorSkills(projectDir: string, skillsPath: string, opts
   if (result.kind === 'failure') return { generated: false, reachable: true, reason: toolErrorText(result) };
   if (!isToolSuccess(result.data)) return { generated: false, reachable: true, reason: toolResponseText(result.data) ?? JSON.stringify(result.data) };
   const written = (result.data as { structured?: { skillsPath?: unknown } } | null)?.structured?.skillsPath;
+  // Only the staging folder this run asked for is copied from and removed: never another path an answer names.
+  const isStaging = typeof written === 'string' && path.resolve(written).split(path.sep).join('/').endsWith(`/${staging}`);
+  if (typeof written === 'string' && fs.existsSync(written) && !isStaging) {
+    return { generated: false, reachable: true, reason: `the editor wrote its skills to ${written}, not to the staging folder ${staging} it was asked for: left as is` };
+  }
   if (typeof written !== 'string' || !fs.existsSync(written)) {
     return {
       generated: false,

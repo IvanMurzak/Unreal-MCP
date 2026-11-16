@@ -435,6 +435,8 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> TooMany = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[{"lit":1000}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("too many steps are refused (%s)"), *Codes(TooMany)), !IsOk(TooMany) && Codes(TooMany).Contains(TEXT("can be undone now")));
 			TestEqual(TEXT("and nothing was undone"), CountLamps(), 1);
+			const TSharedPtr<FJsonObject> DryRun = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[{"lit":1000}]}]})RQL"), true, true);
+			TestTrue(*FString::Printf(TEXT("a dry run refuses it too (%s)"), *Codes(DryRun)), !IsOk(DryRun) && Codes(DryRun).Contains(TEXT("can be undone now")));
 			// editor | call Undo()
 			const TSharedPtr<FJsonObject> Undone = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("undo returns the undone step's title '%s' (%s)"), *Title, *Text(Undone)), IsOk(Undone) && Text(Undone).Contains(Title));

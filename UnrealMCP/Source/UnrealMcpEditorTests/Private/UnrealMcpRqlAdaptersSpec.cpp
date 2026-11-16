@@ -453,6 +453,20 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			// ref("UnrealMcpRqlSpecFixture#@F@") | get Numbers | count: every item streams
 			const TSharedPtr<FJsonObject> All = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Numbers"]}},{"op":"count"}]})RQL"));
 			TestEqual(TEXT("get streams all 30"), UnrealMcpRqlSpecHelpers::Number(All), 30.0);
+			// [{Values: [0, 1, ..., 29]}]: items (no select) name their cut member too
+			TArray<FString> Thirty;
+			for (int32 I = 0; I < 30; ++I)
+				Thirty.Add(FString::Printf(TEXT("{\"lit\":%d}"), I));
+			const TSharedPtr<FJsonObject> Items = Run(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"list":[{"object":[{"key":"Values","value":{"list":[%s]}}]}]},"stages":[]})RQL"),
+				*FString::Join(Thirty, TEXT(","))));
+			TestTrue(*FString::Printf(TEXT("an item's cut list member is named (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Items)),
+				UnrealMcpRqlSpecHelpers::Codes(Items).Contains(TEXT("list-truncated")) && UnrealMcpRqlSpecHelpers::Codes(Items).Contains(TEXT("Values (10 item(s) not shown)")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select n = (Numbers): an alias is no member to get
+			const TSharedPtr<FJsonObject> Alias = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"n","expr":{"op":"+","args":[{"path":["Numbers"]},{"list":[]}]}}]}]})RQL"));
+			TestFalse(*FString::Printf(TEXT("a computed column gets no 'get n' hint (%s)"), *UnrealMcpRqlSpecHelpers::Hints(Alias)), UnrealMcpRqlSpecHelpers::Hints(Alias).Contains(TEXT("get n ")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Numbers = append(Numbers, 30): a set receipt's old / new columns get no note
+			const TSharedPtr<FJsonObject> Receipt = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Numbers"]},"value":{"call":"append","args":[{"path":["Numbers"]},{"lit":30}]}}]}]})RQL"), true);
+			TestFalse(*FString::Printf(TEXT("no list-truncated on a set receipt (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Receipt)), UnrealMcpRqlSpecHelpers::Codes(Receipt).Contains(TEXT("list-truncated")));
 			Fixture->Numbers.SetNum(20);
 			const TSharedPtr<FJsonObject> Whole = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
 			TestFalse(TEXT("no warning for a list shown whole"), UnrealMcpRqlSpecHelpers::Codes(Whole).Contains(TEXT("list-truncated")));

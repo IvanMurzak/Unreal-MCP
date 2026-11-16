@@ -608,6 +608,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task Proxy_AScriptWithAPlainReadKeepsEveryRowOfItsReadOnlyCall()
+        {
+            // rql-query "actors | count; range(0, 120) | call api.Probe(...)": the plain read is no receipt, so it does not cut
+            // the read-only call's 120 rows to a change receipt's 50.
+            var rows = string.Join(",", Enumerable.Range(0, 120).Select(i => $"[\"Api#1\",\"Probe(Vector Point)\",\"({i}, 0, 0)\"]"));
+            var probe = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"method\",\"result\"],\"rows\":[" + rows + "],\"readOnly\":true}";
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole },
+                Plugin(calls, query => query.Contains("Probe") ? probe : Count1));
+            var response = await proxy.Run("req", Args(JsonSerializer.Serialize(new { query = "actors | count; range(0, 120) | call api.Probe([$, 0, 0])" })));
+            var text = response.Content!.First().Text!;
+            Assert.Contains("(119, 0, 0)", text);
+            Assert.DoesNotContain("more row(s) not shown", text);
+        }
+
+        [Fact]
         public async Task Proxy_MoreThanTenStatementsSendNothing()
         {
             var calls = new List<JsonObject>();

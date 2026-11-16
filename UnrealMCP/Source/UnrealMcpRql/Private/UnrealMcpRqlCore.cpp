@@ -817,10 +817,23 @@ namespace UnrealMcpRqlCoreLocal
 	 * Spawn checks before the first spawn (RQL call validation, dry runs too): range(0, 300) | call editor.SpawnActor("Typo", ...)
 	 * fails as a whole instead of after 0 spawns or, worse, failing half-way. One resolution per distinct name and call.
 	 */
+	FString UndoRefusal(bool bRedo, int32 Steps);
+
 	void EditorCallChecks(FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
 	{
 		for (rql::MethodDescriptor& Method : D.methods)
 		{
+			// Undo / Redo refuse before anything runs, so a dry run reports the refusal too.
+			if (Method.name == "Undo" || Method.name == "Redo")
+			{
+				const bool bRedo = Method.name == "Redo";
+				Method.validate = [bRedo](void*, const std::vector<rql::Value>& Args) -> std::string
+				{
+					const int32 Steps = !Args.empty() && Args[0].is_number() ? static_cast<int32>(Args[0].as_number()) : 1;
+					return UnrealMcpRqlToStd(UndoRefusal(bRedo, Steps));
+				};
+				continue;
+			}
 			const bool bAssetOnly = Method.name == "SpawnActorFromAsset";
 			if (!bAssetOnly && Method.name != "SpawnActor")
 				continue;
@@ -1368,29 +1381,40 @@ UActorComponent* UnrealMcpRql::AddComponent(AActor* Actor, UClass* Class, const 
 
 namespace UnrealMcpRqlCoreLocal
 {
+	/** Why Undo (@p bRedo false) / Redo cannot take @p Steps steps now ("" when it can): run before the call, dry runs too. */
+	FString UndoRefusal(bool bRedo, int32 Steps)
+	{
+		const TCHAR* Verb = bRedo ? TEXT("redo") : TEXT("undo");
+		const TCHAR* Done = bRedo ? TEXT("redone") : TEXT("undone");
+		if (!GEditor || !Transactor())
+			return TEXT("no editor");
+		if (Steps < 1)
+			return FString::Printf(TEXT("Steps must be at least 1 (got %d)"), Steps);
+		if (GEditor->IsTransactionActive())
+			return FString::Printf(TEXT("cannot %s while an editor transaction is open (run it in its own query)"), Verb);
+		// A partial undo would leave the editor somewhere the caller did not ask for.
+		const int32 Available = UndoSteps(bRedo);
+		if (Steps > Available)
+			return FString::Printf(TEXT("only %d step(s) can be %s now%s; nothing was %s"), Available, Done,
+				Available > 0 ? *(TEXT(": ") + FString::Join(UndoTitles(bRedo, Available), TEXT(", "))) : TEXT(""), Done);
+		return FString();
+	}
+
 	/** Undo (@p bRedo false) or redo @p Steps transactions as Ctrl+Z / Ctrl+Y do; their titles, or empty after Fail. */
 	TArray<FString> UndoOrRedo(bool bRedo, int32 Steps)
 	{
 		const TCHAR* Verb = bRedo ? TEXT("redo") : TEXT("undo");
-		if (!GEditor || !Transactor())
-			return UnrealMcpRql::Failed<TArray<FString>>(TEXT("no editor"));
-		if (Steps < 1)
-			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("Steps must be at least 1 (got %d)"), Steps));
-		if (GEditor->IsTransactionActive())
-			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("cannot %s while an editor transaction is open (run it in its own query)"), Verb));
-		const int32 Available = UndoSteps(bRedo);
-		// Check first: a partial undo would leave the editor somewhere the caller did not ask for.
-		if (Steps > Available)
-			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("only %d step(s) can be %s now%s; nothing was %s"), Available,
-				bRedo ? TEXT("redone") : TEXT("undone"),
-				Available > 0 ? *(TEXT(": ") + FString::Join(UndoTitles(bRedo, Available), TEXT(", "))) : TEXT(""), bRedo ? TEXT("redone") : TEXT("undone")));
+		const FString Refusal = UndoRefusal(bRedo, Steps);
+		if (!Refusal.IsEmpty())
+			return UnrealMcpRql::Failed<TArray<FString>>(Refusal);
 		TArray<FString> Titles = UndoTitles(bRedo, Steps);
 		for (int32 Step = 0; Step < Steps; ++Step)
 		{
 			if (!(bRedo ? GEditor->RedoTransaction() : GEditor->UndoTransaction()))
 			{
+				const FString Refused = Titles[Step];
 				Titles.SetNum(Step);
-				UnrealMcpRql::Fail(FString::Printf(TEXT("the editor refused to %s \"%s\" after %d step(s)"), Verb, *Titles[Step], Step));
+				UnrealMcpRql::Fail(FString::Printf(TEXT("the editor refused to %s \"%s\" after %d step(s)"), Verb, *Refused, Step));
 				return Titles;
 			}
 		}

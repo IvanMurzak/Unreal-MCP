@@ -206,6 +206,20 @@ describe('the unreal-mcp-cli skill', () => {
     expect(second.kind === 'success' && second.written).toBe(false);
   });
 
+  it('never copies from or removes a folder other than the staging folder it asked for', async () => {
+    const dir = tmp();
+    const elsewhere = path.join(tmp(), '.claude', 'skills');
+    fs.mkdirSync(path.join(elsewhere, 'keep-me'), { recursive: true });
+    fs.writeFileSync(path.join(elsewhere, 'keep-me', 'SKILL.md'), 'mine\n');
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    systemToolMock.mockResolvedValue({ kind: 'success', success: true, endpoint: 'x', httpStatus: 200,
+      data: { status: 'success', structured: { skillsPath: elsewhere, filesWritten: 1 } } });
+    const r = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(r.kind === 'success' && r.editorSkills).toMatchObject({ generated: false, reason: expect.stringContaining('not to the staging folder') });
+    expect(read(path.join(elsewhere, 'keep-me', 'SKILL.md'))).toBe('mine\n');
+    expect(fs.existsSync(skillsOf(dir, 'keep-me'))).toBe(false);
+  });
+
   it('says so when the editor wrote its skills on another machine', async () => {
     const dir = tmp();
     probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
