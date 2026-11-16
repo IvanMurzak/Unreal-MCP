@@ -919,7 +919,7 @@ int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FV
 		}
 	}
 	const int32 Changed = RampAlong(Landscape, Points, Width, Falloff);
-	return Logged(Changed, Landscape, TEXT("Ramp"), Label, Points, 0.0, Width, 0.0);
+	return Logged(Changed, Landscape, TEXT("Ramp"), Label, Points, Falloff, Width, 0.0);
 }
 
 TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
@@ -1135,14 +1135,18 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 			if (Edit.Op == TEXT("Paint") || Edit.Points.IsEmpty())
 				continue;
 			double Distance = TNumericLimits<double>::Max();
-			if (Edit.Points.Num() == 1)
+			// A circle edit made the place only when it is about its size: a 800 m hill's Sculpt covers a spike in it but did
+			// not make it.
+			if (Edit.Points.Num() == 1 && Edit.Radius > 0.0 && Edit.Radius <= 3.0 * Bump.Radius)
 				Distance = FVector2D::Distance(At, FVector2D(Edit.Points[0])) - Edit.Radius;
+			// A path reaches Width / 2 plus its sides: Ramp's falloff (Radius), a carved bed's 1:1 banks (Depth, Height).
+			const double Sides = Edit.Radius + ((Edit.Op == TEXT("Carve") || Edit.Op == TEXT("CreateRiverBetween")) ? FMath::Min(Edit.Height, 2.0 * Edit.Width) : 0.0);
 			for (int32 P = 0; P + 1 < Edit.Points.Num(); ++P)
 			{
 				const FVector2D From(Edit.Points[P]), To(Edit.Points[P + 1]);
 				const FVector2D Along = To - From;
 				const double T = FMath::Clamp(FVector2D::DotProduct(At - From, Along) / FMath::Max(Along.SizeSquared(), UE_SMALL_NUMBER), 0.0, 1.0);
-				Distance = FMath::Min(Distance, FVector2D::Distance(At, From + Along * T) - Edit.Width * 0.5);
+				Distance = FMath::Min(Distance, FVector2D::Distance(At, From + Along * T) - Edit.Width * 0.5 - Sides);
 			}
 			if (Distance <= Bump.Radius)
 				Bump.Edit = Edit.Label.IsEmpty() ? FString::Printf(TEXT("%s #%d"), *Edit.Op, Index) : FString::Printf(TEXT("%s '%s' #%d"), *Edit.Op, *Edit.Label, Index);

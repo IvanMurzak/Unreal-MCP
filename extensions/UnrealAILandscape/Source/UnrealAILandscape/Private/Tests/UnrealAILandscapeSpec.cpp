@@ -803,9 +803,9 @@ void FUnrealAILandscapeSpec::Define()
 			TSharedPtr<FJsonObject> Rows;
 			LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Edits","expr":{"path":["Edits"]}}]}]})RQL"), Label, FString(), false, &Rows);
 			const FString Text = LandscapeSpecJson(Rows);
-			TestTrue(*FString::Printf(TEXT("Edits lists Sculpt 'spec-hill' then Flatten (%s)"), *Text.Left(600)),
+			TestTrue(*FString::Printf(TEXT("Edits lists the Flatten (Index 1) before Sculpt 'spec-hill' (Index 0): newest first (%s)"), *Text.Left(600)),
 				Text.Contains(TEXT("\"Op\":\"Sculpt\"")) && Text.Contains(TEXT("\"Label\":\"spec-hill\"")) && Text.Contains(TEXT("\"Op\":\"Flatten\""))
-				&& Text.Find(TEXT("Sculpt")) < Text.Find(TEXT("Flatten")));
+				&& Text.Find(TEXT("Flatten")) < Text.Find(TEXT("Sculpt")) && Text.Contains(TEXT("\"Index\":1")));
 			TestEqual(TEXT("two records"), Count(), 2);
 			GEditor->UndoTransaction();
 			TestEqual(TEXT("undo takes the Flatten's record with it"), Count(), 1);

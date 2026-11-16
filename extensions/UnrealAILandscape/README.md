@@ -80,9 +80,9 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 
 ### Edit log
 
-Every shaping and paint call of these operations (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Paint`, and
+Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Paint`, and
 `CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | select Edits`
-(the last 1000 records, oldest first: `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Time`). Each of these
+(the last 1000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Time`). Each of these
 operations takes an optional last argument `Label` that names the edit. The log is an editor-only component of the landscape
 actor (`AIEditLog`): saved with the level, changed in the operation's own undo step (undo / redo take the record with the
 edit), stripped from cooked games. `Bumps` names the logged edit that made each place (`Edit`). Edits made any other way

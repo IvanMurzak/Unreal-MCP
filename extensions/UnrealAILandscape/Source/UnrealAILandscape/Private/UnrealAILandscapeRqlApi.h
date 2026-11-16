@@ -63,7 +63,7 @@ struct FUnrealAILandscapeEdit
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	TArray<FVector> Points;
 
-	/** a circle edit's radius, cm (Flatten: plus its falloff; Paint: 0 = the whole landscape) */
+	/** a circle edit's radius, cm (Flatten: plus its falloff; Paint: 0 = the whole landscape); Ramp: its side falloff */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	double Radius = 0.0;
 
@@ -200,7 +200,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0, const FString& Label = TEXT(""));
 
-	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump, Pit, or Ridge / Channel when long and narrow), Location, Height, Radius, Length}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
+	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump, Pit, or Ridge / Channel when long and narrow), Location, Height, Radius, Length, Edit (the logged edit that made it)}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 300.0, double Scale = 5000.0);
 
