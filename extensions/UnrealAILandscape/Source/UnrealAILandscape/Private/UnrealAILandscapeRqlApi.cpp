@@ -827,8 +827,8 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		// Inside the component that owns the vertex: on a seam the engine reads the vertex before it.
 		const auto Inside = [ComponentQuads](double V, double Min, double Max)
 		{
-			const double Into = V - FMath::FloorToDouble(V / ComponentQuads) * ComponentQuads;
-			return FMath::Clamp(Into < 1e-3 ? V + 1e-3 : V, Min, Max - 1e-3);
+			const double Seam = FMath::RoundToDouble(V / ComponentQuads) * ComponentQuads;
+			return FMath::Clamp(FMath::Abs(V - Seam) < 1e-3 ? Seam + 1e-3 : V, Min, Max - 1e-3);
 		};
 		const FVector At = ToWorld.TransformPosition(FVector(Inside(X, Whole.Min.X, Whole.Max.X), Inside(Y, Whole.Min.Y, Whole.Max.Y), 0.0));
 		const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
