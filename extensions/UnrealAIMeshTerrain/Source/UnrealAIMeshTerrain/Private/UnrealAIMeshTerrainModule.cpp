@@ -87,7 +87,10 @@ namespace UnrealAIMeshTerrainModuleLocal
 		return Out;
 	}
 
-	/** Every modifier component of the editor world (base meshes left out unless @p bBases), bound to a terrain or not. */
+	/**
+	 * Every modifier component of the editor world, bound to a terrain or not; base meshes left out unless @p bBases, except
+	 * the ones a deleted terrain left behind (bound to none: leftovers to Remove).
+	 */
 	TArray<UObject*> WorldModifiers(bool bBases)
 	{
 		LoadForListing(Terrains());
@@ -95,8 +98,27 @@ namespace UnrealAIMeshTerrainModuleLocal
 		const UWorld* World = UnrealMcpRql::EditorWorld();
 		for (TObjectIterator<UModifierComponent> It; It && World; ++It)
 		{
-			if (IsValid(*It) && It->GetWorld() == World && (bBases || !It->IsBase()))
+			if (IsValid(*It) && It->GetWorld() == World && (bBases || !It->IsBase() || !IsValid(TerrainOf(*It))))
 				Out.Add(*It);
+		}
+		return Out;
+	}
+
+	/** The Bounds member: the built ground's box, the terrain's own (Base) box, and where the ground is highest and lowest. */
+	TSharedPtr<FJsonValue> BoundsJson(UObject* Object)
+	{
+		const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
+		const TSharedPtr<FJsonValue> Out = BoxJson(BuiltBounds(Terrain));
+		const TSharedPtr<FJsonObject>& Fields = Out->AsObject();
+		if (!Fields->Values.IsEmpty())
+		{
+			Fields->SetField(TEXT("Base"), BoxJson(BaseBounds(Terrain)));
+			FVector Highest, Lowest;
+			if (GroundExtremes(Terrain, Highest, Lowest))
+			{
+				Fields->SetArrayField(TEXT("Highest"), Vector({ Highest.X, Highest.Y, Highest.Z }));
+				Fields->SetArrayField(TEXT("Lowest"), Vector({ Lowest.X, Lowest.Y, Lowest.Z }));
+			}
 		}
 		return Out;
 	}
@@ -184,7 +206,7 @@ public:
 				return Out;
 			});
 		Context.AddObjectListSource(TEXT("meshTerrainModifiers"),
-			TEXT("the Mesh Terrain modifier components of the editor world (noise, splines, shapes, sculpt layers, ...; not the base meshes); loads the terrains' World Partition actors"),
+			TEXT("the Mesh Terrain modifier components of the editor world (noise, splines, shapes, sculpt layers, ...; not the base meshes, except those a deleted terrain left behind); loads the terrains' World Partition actors"),
 			ModifierClass, []() { return WorldModifiers(/*bBases*/ false); });
 
 		Context.AddApiSource(TEXT("meshTerrain"),
@@ -222,8 +244,8 @@ public:
 				return MakeShared<FJsonValueArray>(Definition ? Names(Definition->GetChannelNames()) : TArray<TSharedPtr<FJsonValue>>());
 			});
 		Context.AddJsonMember(TerrainClass, TEXT("Bounds"),
-			TEXT("the built terrain's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
-			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BoxJson(BuiltBounds(Cast<AMeshPartition>(Object))); });
+			TEXT("the built ground's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]; Base {Min, Max, SizeMeters}: the terrain's own extent (its base meshes: the size Create / ImportHeightmap gave it; the built box is larger where a Union shape reaches past the edge); Highest and Lowest [X, Y, Z]: where the ground within Base is highest and lowest (to a vertex of its collision)"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BoundsJson(Object); });
 		Context.AddJsonMember(TerrainClass, TEXT("Build"),
 			TEXT("the asynchronous build: Ready (mesh, collision and rendering match the modifiers), Sections, Triangles (of the mesh shown now; the final Nanite mesh counts its fallback LOD), Building, Cooking (collision), Finishing (final mesh not made), CompilingMeshes, Actors / LoadedActors (World Partition), State"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return BuildJson(Object); });
@@ -276,13 +298,22 @@ public:
 modifier components (noise, splines, shapes, sculpt layers, ...) on top of its base meshes, built asynchronously into
 preview sections (the rendered mesh and its collision). `meshTerrains` lists the terrains, `meshTerrainModifiers` the
 modifiers of the level; `Build`, `Bounds`, `Sections`, `Modifiers`, `PriorityLayers`, `Channels` and `Definition`
-summarise a terrain, `Modifier` (Kind, PriorityLayer, SubPriority, Disabled, Bounds) a modifier.
+summarise a terrain, `Modifier` (Kind, PriorityLayer, SubPriority, Disabled, Bounds) a modifier. Read a terrain's structure
+through these sources and members, not with Python: Mesh Partition keeps its actors' and modifiers' settings under engine
+names Python does not find ("Failed to find property"); `rql-schema NoiseModifier` (any modifier class) lists a modifier's
+properties for `select` and `set`. Members, `Surface`, `SurfacePoints` and `WaitForBuild` are read-only (rql-query);
+every other operation changes the level (rql-mutate).
 
 ```
 meshTerrains | select Label Build Bounds PriorityLayers Channels
+meshTerrains | where Label == "Island" | select Bounds        Base.SizeMeters: its size; Highest / Lowest [X, Y, Z]: its highest and lowest ground
 meshTerrains | first | get Modifiers | select Modifier
 meshTerrainModifiers | where Kind == "Noise" | select $ref Modifier
+meshTerrainModifiers | where Terrain == null | select $ref Modifier   leftovers bound to no terrain (a deleted terrain's modifiers and base meshes)
 ```
+
+`Bounds` is the built ground's box: where a Union shape reaches past the terrain's edge it is larger than the terrain
+itself, whose extent is `Bounds.Base` (the base meshes: the size Create or ImportHeightmap gave it).
 
 Modifiers apply layer by layer (the definition's `PriorityLayers`, first to last), then by `Priority` (sub-priority,
 higher later) within a layer. A terrain rebuilds after every change in the background: read heights with `Surface`, which
@@ -324,7 +355,8 @@ meshTerrainBrush | call Erase(unreal.find("Terrain"), "Red", [0, 0, 0], 500)
 
 `Before` / `After` are the full-resolution ground height (or channel weight) at the vertex nearest the point; `Surface`
 reads the rendered collision, which on rough ground can differ by some cm. The operations load a terrain's base and modifier
-actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. After the level is reopened its
+actors (World Partition) before they work; `Build.LoadedActors` shows how many are loaded. While Play In Editor runs the
+editor hides the built sections: `Surface`, `SurfacePoints` and `WaitForBuild` refuse until play stops. After the level is reopened its
 modifiers are unloaded and `unreal.find("<modifier label>")` finds nothing: list `meshTerrainModifiers` (or a terrain's
 `Modifiers`) first, which loads them. Mesh Terrain needs Unreal Engine 5.8+, the MeshTerrainMode plugin and a World
 Partition level.)MD"));
@@ -358,7 +390,14 @@ WeightUtility's InnerValue (Edit Strength; the engine caches the old weights) an
 points would no longer match, an engine ensure). Where two modifiers overlap the later one in build order wins (`Modifiers` lists
 them in order); the Boolean modifier may log "reported errors ... cracks" for box shapes: an engine warning, check
 `Surface`. A Patch and brush strokes move the vertices within their radius: a Boolean shape's surface keeps the shape's
-own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller than those changes nothing there.)MD"));
+own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller than those changes nothing there (`AddRemesh`
+over the shape first gives it finer triangles).
+
+Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` them to a
+terrain or `Remove` them (a deleted terrain's base meshes too); `meshTerrainCreate | call Delete(terrain)` deletes a whole
+terrain with its modifiers. A pad at the wrong height: `Move` it (its location Z). A stray brush stroke: the opposite stroke
+(Raise / Lower) at the same point with the same radius, height and falloff cancels it exactly (the brush stores offsets), or
+`Remove` its brush when it holds no other stroke.)MD"));
 
 		Context.AddGuide(TEXT("Mesh Terrain: create, import a heightmap, delete"), TEXT(R"MD(`meshTerrainCreate` makes Mesh Terrains the way
 Mesh Terrain Mode's Create palette does; each call is one undo step and returns when the terrain is built.

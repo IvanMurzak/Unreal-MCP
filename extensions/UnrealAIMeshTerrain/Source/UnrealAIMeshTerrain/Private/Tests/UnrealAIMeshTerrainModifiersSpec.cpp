@@ -474,6 +474,38 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecExpectHeight(TEXT("the bump moved with it"), Terrain, X0 - 1000.0, 0.0, 600.0, 5.0);
 		});
 
+		It("list the base meshes and modifiers a deleted terrain left behind as bound to no terrain, and Remove them", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModOrphan"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-1400000.0, 0.0, 0.0), 4000.0, 4000.0, 40, 40);
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
+			{
+				UnrealAIMeshTerrain::DestroyTerrain(Terrain);
+				return;
+			}
+			const TArray<UModifierComponent*> Bases = UnrealAIMeshTerrain::Modifiers(Terrain, /*bBases*/ true);
+			if (!TestEqual(TEXT("one base mesh"), Bases.Num(), 1))
+			{
+				UnrealAIMeshTerrain::DestroyTerrain(Terrain);
+				return;
+			}
+			TWeakObjectPtr<AActor> BaseActor = Bases[0]->GetOwner();
+			const FString BaseLabel = BaseActor->GetActorLabel();
+			ON_SCOPE_EXIT { if (BaseActor.IsValid()) BaseActor->GetWorld()->EditorDestroyActor(BaseActor.Get(), true); };
+			// The terrain actor deleted alone (the Outliner's Delete): its base mesh stays, bound to nothing.
+			Terrain->GetWorld()->EditorDestroyActor(Terrain, /*bShouldModifyLevel*/ true);
+
+			// meshTerrainModifiers | where Terrain == null | select Modifier
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("orphans query"), UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifiers"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Terrain"]},{"lit":null}]}},{"op":"select","fields":[{"name":"Modifier","expr":{"path":["Modifier"]}}]}]})RQL"), false, &Result));
+			const FString Json = ModSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("the left-behind base mesh is listed (%s)"), *Json.Left(800)), Json.Contains(FString::Printf(TEXT("\"Actor\":\"%s\""), *BaseLabel)) && Json.Contains(TEXT("\"IsBase\":true")));
+
+			// meshTerrainModifiers | where Terrain == null and Modifier.Actor == "<base label>" | call meshTerrainModifier.Remove($)
+			TestTrue(*FString::Printf(TEXT("Remove takes the left-behind base mesh (%s)"), *ModSpecJson(Result).Left(600)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifiers"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Terrain"]},{"lit":null}]},{"op":"==","args":[{"path":["Modifier","Actor"]},{"lit":"%s"}]}]}},{"op":"call","method":"Remove","on":{"path":["meshTerrainModifier"]},"args":[{"path":[]}]}]})RQL"), *BaseLabel), true, &Result));
+			TestTrue(TEXT("its actor is gone, not left empty"), !BaseActor.IsValid() || BaseActor->IsActorBeingDestroyed() || !IsValid(BaseActor.Get()));
+		});
+
 		It("bind to the terrain they name, not the nearest one, and move between two terrains with Bind", [this]()
 		{
 			const FString First = ModSpecLabel(TEXT("ModFirst"));

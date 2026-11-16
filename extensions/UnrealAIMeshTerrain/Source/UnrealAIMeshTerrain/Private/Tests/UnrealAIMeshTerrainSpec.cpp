@@ -252,6 +252,38 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Sections member"), Json.Contains(TEXT("PreviewSection")));
 		});
 
+		It("reports in Bounds the built box past the edge, the terrain's own Base box and its highest and lowest ground", [this]()
+		{
+			const FString Label = MeshTerrainSpecLabel(TEXT("SpecBounds"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-900000.0, 0.0, 0.0), 4000.0, 4000.0, 40, 40);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
+				return;
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Sphere", [-898500, 0, 0], [2000, 2000, 1000], "Union"):
+			// a dome whose half reaches 5 m past the terrain's +X edge (-898000).
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(*FString::Printf(TEXT("AddShape (%s)"), *MeshTerrainSpecJson(Result)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Sphere"},{"list":[{"lit":-898500},{"lit":0},{"lit":0}]},{"list":[{"lit":2000},{"lit":2000},{"lit":1000}]},{"lit":"Union"}]}]})RQL"), *Label), true, &Result));
+
+			FVector Highest, Lowest;
+			TestTrue(TEXT("the built ground has extremes"), UnrealAIMeshTerrain::GroundExtremes(Terrain, Highest, Lowest));
+			TestTrue(*FString::Printf(TEXT("highest ground on the dome's top (%s)"), *Highest.ToString()), FMath::IsNearlyEqual(Highest.Z, 500.0, 5.0)
+				&& FVector2D::Distance(FVector2D(Highest), FVector2D(-898500.0, 0.0)) <= 300.0);
+			const FBox Base = UnrealAIMeshTerrain::BaseBounds(Terrain);
+			const FBox Built = UnrealAIMeshTerrain::BuiltBounds(Terrain);
+			// Past the edge the dome's lower half is built too, under it: the lowest GROUND (a trace from above) is the flat terrain.
+			TestTrue(*FString::Printf(TEXT("lowest ground on the flat terrain, not under the overhang (%s, %s)"), *Lowest.ToString(), *Built.ToString()), FMath::IsNearlyEqual(Lowest.Z, 0.0, 1.0));
+			TestTrue(*FString::Printf(TEXT("Base is the terrain as created (%s)"), *Base.ToString()), Base.IsValid
+				&& FMath::IsNearlyEqual(Base.Min.X, -902000.0, 1.0) && FMath::IsNearlyEqual(Base.Max.X, -898000.0, 1.0)
+				&& FMath::IsNearlyEqual(Base.Min.Y, -2000.0, 1.0) && FMath::IsNearlyEqual(Base.Max.Y, 2000.0, 1.0));
+			TestTrue(*FString::Printf(TEXT("the built box reaches past the edge (%s)"), *Built.ToString()), Built.IsValid && Built.Max.X > -898000.0 + 100.0);
+
+			// meshTerrains | where Label == "<label>" | select Bounds
+			TestTrue(TEXT("Bounds query"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrains"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"%s"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), *Label), false, &Result));
+			const FString Json = MeshTerrainSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("Bounds.Base in metres (%s)"), *Json), Json.Contains(TEXT("\"Base\":{\"Min\":[-902000,-2000,")) && Json.Contains(TEXT("\"SizeMeters\":[40,40]}")));
+			TestTrue(TEXT("Bounds.Highest and Lowest"), Json.Contains(TEXT("\"Highest\":[")) && Json.Contains(TEXT("\"Lowest\":[")));
+		});
+
 		It("reads the flat ground with Surface: height, slope, location; off the terrain Inside is false", [this]()
 		{
 			const FString Label = MeshTerrainSpecLabel(TEXT("SpecSurface"));

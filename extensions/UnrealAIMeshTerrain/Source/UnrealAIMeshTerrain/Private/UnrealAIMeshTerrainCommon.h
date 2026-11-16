@@ -111,8 +111,21 @@ namespace UnrealAIMeshTerrain
 	/** The triangles @p Section renders now: its intermediate preview mesh, or its final static mesh(es) once compiled. */
 	int32 RenderedTriangles(const APreviewSection* Section);
 
-	/** The world box of @p Terrain's built mesh (the preview sections), invalid when nothing is built. */
+	/**
+	 * The world box of @p Terrain's built mesh (the preview sections), invalid when nothing is built. Larger than BaseBounds
+	 * where a Boolean Union shape reaches past the terrain's edge.
+	 */
 	FBox BuiltBounds(const AMeshPartition* Terrain);
+
+	/** The world box of @p Terrain's base meshes (the terrain as Create / ImportHeightmap made it), invalid without one. */
+	FBox BaseBounds(const AMeshPartition* Terrain);
+
+	/**
+	 * Where @p Terrain's built ground is highest and lowest within its own area (BaseBounds): a vertex of the rendered sections'
+	 * collision that a vertical trace from above lands on (what traces and physics hit; not the underside of an overhang).
+	 * False when nothing is built (or no section has cooked collision yet).
+	 */
+	bool GroundExtremes(const AMeshPartition* Terrain, FVector& OutHighest, FVector& OutLowest);
 
 	// ---- Build -------------------------------------------------------------------------------------------------------
 

@@ -74,6 +74,12 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   the evaluated ground's under the point (a trace on a collision edge, such as a seam between sections, reports the edge's
   normal instead); the stack is evaluated in regions widened until one holds the triangle under the point (a Boolean
   shape's triangles can be 100+ m across).
+- `Bounds` (member): the built ground's world box, `Min` / `Max` [X, Y, Z] (Z: the lowest and highest ground) and
+  `SizeMeters`; `Base` {Min, Max, SizeMeters}: the terrain's own extent (its base meshes, the size Create or ImportHeightmap
+  gave it: the built box is larger where a Boolean Union shape reaches past the edge); `Highest` / `Lowest` [X, Y, Z]:
+  where the ground within `Base` is highest and lowest, to a vertex of the sections' collision.
+- `Surface`, `SurfacePoints`, `WaitForBuild` and the members are read-only: they work in `rql-query`. They read the
+  editor's built sections, which Play In Editor hides: during play they refuse (stop play first).
 - `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
 - `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 120)`:
@@ -157,13 +163,18 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | `Edit(modifier, size, radius, width, strength, falloff)` | the common parameters; a negative value keeps the current one (a negative noise or texture height: `set` it) |
 | `Move(modifier, location)`, `SetSplinePoints(modifier, points, closed)`, `SetLatticePoints(modifier, points)` | placement (Z moves every kind) and paths (closed 1 / 0 / -1 keep) |
 | `SetOrder(modifier, priority, priorityLayer)` | build order: the definition's priority layer, then Priority (higher is applied later, on top) |
-| `Enable`, `Disable`, `Remove(modifier)`, `Bind(modifier, terrain)` | switch, delete, re-bind to another terrain |
+| `Enable`, `Disable`, `Remove(modifier)`, `Bind(modifier, terrain)` | switch, delete (also a base mesh a deleted terrain left behind), re-bind to another terrain |
 
 A Patch or WeightUtility reaches the ground only within `MaxZDistance / 2` above and below its location (the engine's
 default, 200 m in all, would miss the top of a 300 m hill): AddPatch and AddWeight widen it to the terrain's built heights
 with 100 m to spare. A terrain raised later beyond that needs a larger `MaxZDistance` (`set` it). A Patch and brush strokes
 move the terrain's vertices within their radius; a Boolean shape's surface is made of the shape's own triangles (a 1 km
 Sphere's are 100+ m across), so a pad or stroke smaller than those finds no vertex to move there.
+
+Leftovers: `meshTerrainModifiers | where Terrain == null` lists the modifiers bound to no terrain and the base meshes a
+deleted terrain left behind (the terrain actor deleted alone, e.g. in the Outliner); `Bind` or `Remove` them. A stray brush
+stroke is cancelled exactly by the opposite stroke (Raise / Lower) at the same point with the same radius, height and
+falloff: a brush stores offsets.
 
 Not offered: MeshProvider (the base meshes, made by the terrain's create / import), InstancedProjection and
 InstancedTexturePatch (their instances are filled by other tools and read-only), SimpleWrite, LevelInstanceAdapter and

@@ -1,0 +1,10 @@
+{
+  "description": "the Bounds member of a mesh terrain names its base extent and its highest / lowest ground",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshPartition"
+  },
+  "assert": {
+    "pattern": "Base \\{Min, Max, SizeMeters\\}[\\s\\S]*Highest and Lowest"
+  }
+}

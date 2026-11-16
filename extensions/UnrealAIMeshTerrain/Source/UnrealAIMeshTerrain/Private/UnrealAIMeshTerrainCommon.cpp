@@ -11,6 +11,8 @@
 #include "Algo/AnyOf.h"
 #include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
+#include "Chaos/TriangleMeshImplicitObject.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Editor.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -346,6 +348,81 @@ namespace UnrealAIMeshTerrain
 				Box += Built;
 		}
 		return Box;
+	}
+
+	FBox BaseBounds(const AMeshPartition* Terrain)
+	{
+		FBox Box(ForceInit);
+		for (const UModifierComponent* Modifier : Modifiers(Terrain, /*bBases*/ true))
+		{
+			if (Modifier->IsBase())
+				Box += Modifier->ComputeCombinedBounds();
+		}
+		return Box;
+	}
+
+	bool GroundExtremes(const AMeshPartition* Terrain, FVector& OutHighest, FVector& OutLowest)
+	{
+		// The highest and lowest vertices of the sections' collision, a few candidates each way: a vertex can lie under an
+		// overhang (the underside of a Union shape past the terrain's edge), which no vertical trace reaches, so the first
+		// candidate the trace from above lands on is the ground's extreme.
+		constexpr int32 Candidates = 64;
+		TArray<FVector> High, Low;
+		auto Keep = [](TArray<FVector>& Best, const FVector& Point, bool bHighest)
+		{
+			Best.Add(Point);
+			if (Best.Num() >= Candidates * 2)
+			{
+				Best.Sort([bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; });
+				Best.SetNum(Candidates);
+			}
+		};
+		// Within the terrain's own area: the collision also has a skirt a few cm outside and below its edges.
+		const FBox Base = BaseBounds(Terrain);
+		if (!Base.IsValid)
+			return false;
+		const FBox2D Area(FVector2D(Base.Min) - FVector2D(1.0), FVector2D(Base.Max) + FVector2D(1.0));
+		TArray<UPrimitiveComponent*> Components;
+		for (const APreviewSection* Section : PreviewSections(Terrain))
+		{
+			Section->GetComponents(Components);
+			for (UPrimitiveComponent* Component : Components)
+			{
+				const UBodySetup* Body = Component ? Component->GetBodySetup() : nullptr;
+				if (!Body || !Component->IsCollisionEnabled())
+					continue;
+				const FTransform& Transform = Component->GetComponentTransform();
+				for (const Chaos::FTriangleMeshImplicitObjectPtr& Mesh : Body->TriMeshGeometries)
+				{
+					if (!Mesh)
+						continue;
+					const auto& Points = Mesh->Particles();
+					for (int32 Index = 0; Index < static_cast<int32>(Points.Size()); ++Index)
+					{
+						const FVector World = Transform.TransformPosition(FVector(Points.GetX(Index)));
+						if (!Area.IsInside(FVector2D(World)))
+							continue;
+						Keep(High, World, true);
+						Keep(Low, World, false);
+					}
+				}
+			}
+		}
+		auto FirstOnGround = [Terrain](TArray<FVector>& Best, bool bHighest, FVector& Out)
+		{
+			Best.Sort([bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; });
+			for (const FVector& Point : Best)
+			{
+				const FSurfaceSample Ground = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false);
+				if (Ground.bInside && FMath::IsNearlyEqual(Ground.Height, Point.Z, 2.0))
+				{
+					Out = FVector(Point.X, Point.Y, Ground.Height);
+					return true;
+				}
+			}
+			return false;
+		};
+		return FirstOnGround(High, true, OutHighest) && FirstOnGround(Low, false, OutLowest);
 	}
 
 	FString FBuildState::Describe() const

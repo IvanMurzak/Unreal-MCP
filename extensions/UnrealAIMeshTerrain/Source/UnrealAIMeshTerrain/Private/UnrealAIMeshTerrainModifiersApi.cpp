@@ -172,8 +172,11 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return FBox2D(FVector2D(Center.X - HalfX, Center.Y - HalfY), FVector2D(Center.X + HalfX, Center.Y + HalfY));
 	}
 
-	/** The guards every operation on an existing modifier runs: available, a live modifier of the editor world, not a base mesh. */
-	bool CheckModifier(const UModifierComponent* Modifier, bool bNeedsTerrain = true)
+	/**
+	 * The guards every operation on an existing modifier runs: available, a live modifier of the editor world, not a base mesh
+	 * (with @p bOrphanBase, Remove's: a base mesh left behind by a deleted terrain, which shapes nothing, may go).
+	 */
+	bool CheckModifier(const UModifierComponent* Modifier, bool bNeedsTerrain = true, bool bOrphanBase = false)
 	{
 		if (!CheckAvailable())
 			return false;
@@ -181,7 +184,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			return UnrealMcpRql::Failed<bool>(TEXT("Modifier is null: pass one from meshTerrainModifiers (meshTerrainModifiers | select $ref Modifier)"));
 		if (!IsValid(Modifier) || Modifier->GetWorld() != UnrealMcpRql::EditorWorld())
 			return UnrealMcpRql::Failed<bool>(TEXT("the modifier is not in the open level (deleted, or another world)"));
-		if (Modifier->IsBase())
+		if (Modifier->IsBase() && !(bOrphanBase && !IsValid(TerrainOf(Modifier))))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is a base mesh (a section of the terrain itself), not a modifier: only the terrain's create / import operations make or replace those"),
 				*Modifier->GetOwner()->GetActorNameOrLabel()));
 		AMeshPartition* Terrain = TerrainOf(Modifier);
@@ -1187,19 +1190,20 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::MeshPartition::UModifierComponent* Modifier)
 {
-	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false))
+	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false, /*bOrphanBase*/ true))
 		return FModifierOpResult();
-	AMeshPartition* Terrain = TerrainOf(Modifier);
+	// A deleted terrain the modifier still points at counts as none (it may not be garbage collected yet).
+	AMeshPartition* Terrain = IsValid(TerrainOf(Modifier)) ? TerrainOf(Modifier) : nullptr;
 	AActor* Owner = Modifier->GetOwner();
 	const FString Label = Owner->GetActorNameOrLabel();
 	const FString Kind = ModifierKind(Modifier);
 	FTerrainTransaction Transaction(LOCTEXT("RemoveModifier", "Remove Mesh Terrain Modifier"));
-	// A modifier actor holding only this modifier (what the palette and these operations place) goes as a whole; a
-	// modifier component on any other actor (the terrain itself, a Blueprint, a second modifier) goes alone, with the
-	// shape mesh AddShape gave it.
+	// A modifier actor holding only this modifier (what the palette and these operations place), or the actor of a base mesh
+	// left behind by a deleted terrain, goes as a whole; a modifier component on any other actor (the terrain itself, a
+	// Blueprint, a second modifier) goes alone, with the shape mesh AddShape gave it.
 	TArray<UModifierComponent*> Siblings;
 	Owner->GetComponents(Siblings);
-	if (Cast<UE::MeshPartition::AModifierActor>(Owner) && Siblings.Num() == 1)
+	if ((Cast<UE::MeshPartition::AModifierActor>(Owner) || Modifier->IsBase()) && Siblings.Num() == 1)
 	{
 		if (!Owner->GetWorld()->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true))
 			return Fail(FString::Printf(TEXT("could not delete %s"), *Label));
