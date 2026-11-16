@@ -592,6 +592,15 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 		FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(Box.Max.X + Half + Band)), FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(Box.Max.Y + Half + Band)));
 	if (Area.Min.X > Area.Max.X || Area.Min.Y > Area.Max.Y)
 		return UnrealMcpRql::Failed<int32>(TEXT("the points do not cross the landscape (its Bounds)"));
+	// Bounded work on the game thread: every stretch scans its own box (a long diagonal stretch is a big square).
+	int64 Work = 0;
+	for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
+	{
+		const FVector2D Size = (Path[Index] - Path[Index + 1]).GetAbs() + FVector2D(2.0 * (Half + Band) + 1.0);
+		Work += static_cast<int64>(Size.X) * static_cast<int64>(Size.Y);
+	}
+	if (Work > 200000000)
+		return UnrealMcpRql::Failed<int32>(TEXT("the path covers too much ground for one call (long diagonal stretches): give it more, shorter points or split it into several Ramp calls"));
 	// Each vertex takes the road height of its NEAREST point of the path (a bend's inside would otherwise get the far leg's height).
 	const int32 Width2 = Area.Width() + 1;
 	TArray<double> Nearest;
@@ -622,7 +631,8 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 			}
 		}
 	}
-	// The change per vertex (height units), added to the edit layer: with several height layers the ground is their sum.
+	// The change per vertex (height units), added to the edit layer: with several height layers the ground is their sum (the
+	// layer then holds only its own part, so a large cut can clamp at its bottom, as with Carve).
 	TArray<int32> Delta;
 	Delta.SetNumZeroed(Nearest.Num());
 	int32 Changed = 0;

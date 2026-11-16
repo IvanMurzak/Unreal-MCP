@@ -103,7 +103,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0);
 
-	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 200) above or below the mean ground within Scale cm (default 5000) around them; read-only (works in rql-query); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; a smooth hill or valley wider than Scale is not one */
+	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 200) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 200.0, double Scale = 5000.0);
 

@@ -615,6 +615,9 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
 	// The circle plus a ring of 3 vertices around it: the ground the new surface is fitted to.
 	const double Quad = FMath::Max(Landscape ? FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X) : 1.0, UE_KINDA_SMALL_NUMBER);
+	constexpr double MaxInner = 512.0; // vertices: the fill converges within the time limit up to here
+	if (Radius / Quad > MaxInner)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Quad, MaxInner, MaxInner * Quad));
 	FCircle Area;
 	if (!Circle(Landscape, Center, Radius + 3.0 * Quad, Area))
 		return 0;
@@ -622,18 +625,44 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 	const FGuid EditLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
 	if (!EditLayer.IsValid())
 		return 0;
-	FHeightmapAccessor<false> Accessor(Area.Info);
-	Accessor.SetEditLayer(EditLayer);
 	const FIntRect& R = Area.Rect;
 	const int32 W = R.Width() + 1, H = R.Height() + 1;
-	TArray<uint16> Data;
-	Data.SetNumZeroed(W * H);
-	Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
+	// The ground: with one height layer that layer, with several their sum (the merged heights); the change is then added to
+	// the layer edits are written to, as Carve and Ramp do.
+	int32 HeightLayers = 0;
+	if (const ALandscape* Primary = Landscape->GetLandscapeActor())
+	{
+		for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+			HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
+	}
+	TArray<uint16> Ground;
+	Ground.SetNumZeroed(W * H);
+	{
+		FHeightmapAccessor<false> Reader(Area.Info);
+		if (HeightLayers <= 1)
+			Reader.SetEditLayer(EditLayer);
+		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
+	}
+	// Vertices with a loaded component under them (the rest of the rectangle reads as 0, not ground).
+	TBitArray<> Valid(false, W * H);
+	const int32 ComponentQuads = Area.Info->ComponentSizeQuads;
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
+			const auto Has = [&Area, ComponentQuads](int32 CX, int32 CY) { return Area.Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
+			const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
+			// A vertex on a seam belongs to the components on both sides: any of them will do.
+			Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
+				|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
+		}
+	}
 	// Inside the circle the ground is unknown; around it, fixed. The fill is the smoothest surface (Laplace's equation, solved by
 	// over-relaxation) that meets the ground at the circle's edge: a plane or a hill's flank stays one, a spike or pit is gone.
 	TArray<double> Fill;
-	TBitArray<> Free(false, W * H);
 	Fill.SetNumUninitialized(W * H);
+	TBitArray<> Free(false, W * H);
 	// Start from the plane through the ring (fewer iterations than from a constant).
 	double Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0, Sz = 0, Sxz = 0, Syz = 0, N = 0;
 	for (int32 Y = 0; Y < H; ++Y)
@@ -641,14 +670,18 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		for (int32 X = 0; X < W; ++X)
 		{
 			const int32 I = Y * W + X;
-			Fill[I] = Data[I];
+			Fill[I] = Ground[I];
+			if (!Valid[I])
+				continue;
 			const double Dx = R.Min.X + X - Area.Center.X, Dy = R.Min.Y + Y - Area.Center.Y;
 			const double D = FMath::Sqrt(Dx * Dx + Dy * Dy);
-			const bool bInside = D <= Inner && X > 0 && Y > 0 && X < W - 1 && Y < H - 1;
+			// Free: inside, not on the rectangle's border, and all four neighbours on loaded ground.
+			const bool bInside = D <= Inner && X > 0 && Y > 0 && X < W - 1 && Y < H - 1
+				&& Valid[I - 1] && Valid[I + 1] && Valid[I - W] && Valid[I + W];
 			Free[I] = bInside;
 			if (!bInside && D <= Inner + 3.0)
 			{
-				Sxx += Dx * Dx; Sxy += Dx * Dy; Syy += Dy * Dy; Sx += Dx; Sy += Dy; Sz += Data[I]; Sxz += Dx * Data[I]; Syz += Dy * Data[I]; N += 1;
+				Sxx += Dx * Dx; Sxy += Dx * Dy; Syy += Dy * Dy; Sx += Dx; Sy += Dy; Sz += Ground[I]; Sxz += Dx * Ground[I]; Syz += Dy * Ground[I]; N += 1;
 			}
 		}
 	}
@@ -678,8 +711,9 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 					Fill[Y * W + X] = Coef[0] + Coef[1] * (R.Min.X + X - Area.Center.X) + Coef[2] * (R.Min.Y + Y - Area.Center.Y);
 	}
 	const double Omega = 2.0 / (1.0 + PI / FMath::Max(W, H)); // near-optimal over-relaxation for the square
-	const double Deadline = FPlatformTime::Seconds() + 10.0;
-	for (int32 Iteration = 0; Iteration < 20000 && FPlatformTime::Seconds() < Deadline; ++Iteration)
+	const double Deadline = FPlatformTime::Seconds() + 20.0;
+	bool bConverged = false;
+	while (!bConverged && FPlatformTime::Seconds() < Deadline)
 	{
 		double MaxStep = 0.0;
 		for (int32 Y = 1; Y < H - 1; ++Y)
@@ -694,28 +728,35 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 				MaxStep = FMath::Max(MaxStep, FMath::Abs(Step));
 			}
 		}
-		if (MaxStep < 0.02) // height units (~0.02 cm at the default Z scale)
-			break;
+		bConverged = MaxStep < 0.02; // height units (~0.02 cm at the default Z scale)
 	}
+	if (!bConverged)
+		return UnrealMcpRql::Failed<int32>(TEXT("the smooth surface did not settle in time: nothing was changed; smooth a smaller Radius"));
+	TArray<int32> Delta;
+	Delta.SetNumZeroed(W * H);
 	int32 Changed = 0;
 	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest();
-	for (int32 I = 0; I < Data.Num(); ++I)
+	for (int32 I = 0; I < Ground.Num(); ++I)
 	{
 		if (!Free[I])
 			continue;
-		const int32 New = FMath::RoundToInt(FMath::Lerp(static_cast<double>(Data[I]), Fill[I], Strength));
+		const int32 New = FMath::RoundToInt(FMath::Lerp(static_cast<double>(Ground[I]), Fill[I], Strength));
 		Low = FMath::Min(Low, New);
 		High = FMath::Max(High, New);
-		if (New != Data[I])
-		{
-			Data[I] = static_cast<uint16>(FMath::Clamp(New, 0, 65535));
-			++Changed;
-		}
+		Delta[I] = New - Ground[I];
+		Changed += Delta[I] != 0 ? 1 : 0;
 	}
 	if (Changed == 0)
 		return 0;
 	if (!FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High)))
 		return 0;
+	FHeightmapAccessor<false> Accessor(Area.Info);
+	Accessor.SetEditLayer(EditLayer);
+	TArray<uint16> Data;
+	Data.SetNumZeroed(W * H);
+	Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
+	for (int32 I = 0; I < Data.Num(); ++I)
+		Data[I] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Data[I]) + Delta[I], 0, 65535));
 	Landscape->Modify();
 	WriteData(Accessor, R, Data.GetData());
 	Accessor.Flush();
@@ -787,7 +828,10 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
 		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(At, EHeightfieldSource::Complex);
 	};
-	const int32 GW = Whole.Width() / Step + 1, GH = Whole.Height() / Step + 1;
+	// Sample I at vertex Min + I * Step, the last one on the far edge (Width need not be a multiple of Step).
+	const int32 GW = FMath::DivideAndRoundUp(Whole.Width(), Step) + 1, GH = FMath::DivideAndRoundUp(Whole.Height(), Step) + 1;
+	const auto VertexX = [&Whole, Step](int32 I) { return FMath::Min(Whole.Min.X + I * Step, Whole.Max.X); };
+	const auto VertexY = [&Whole, Step](int32 J) { return FMath::Min(Whole.Min.Y + J * Step, Whole.Max.Y); };
 	TArray<double> Z;
 	Z.SetNumZeroed(GW * GH);
 	TBitArray<> Valid(false, GW * GH);
@@ -795,45 +839,65 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 	{
 		for (int32 I = 0; I < GW; ++I)
 		{
-			if (const TOptional<float> H = GroundAt(Whole.Min.X + I * Step, Whole.Min.Y + J * Step))
+			if (const TOptional<float> H = GroundAt(VertexX(I), VertexY(J)))
 			{
 				Z[J * GW + I] = H.GetValue();
 				Valid[J * GW + I] = true;
 			}
 		}
 	}
-	// Mean ground within Scale (a box, summed-area tables), the sample's own value left out.
+	// The plane that fits the ground within Scale around each sample (least squares over a box, from summed-area tables of
+	// 1, i, j, i^2, ij, j^2, z, iz, jz): the residual is how far the ground stands out of that plane. A slope, or a box cut
+	// off by the landscape's edge, then gives no residual; only a place that rises or sinks out of its surroundings does.
 	const int32 B = FMath::Max(1, FMath::RoundToInt(Scale / (Quad * Step)));
-	TArray<double> Sum, Count;
-	Sum.SetNumZeroed((GW + 1) * (GH + 1));
-	Count.SetNumZeroed((GW + 1) * (GH + 1));
+	enum { C1, CI, CJ, CII, CIJ, CJJ, CZ, CIZ, CJZ, CN };
+	TArray<double> Sat[CN];
+	for (TArray<double>& T : Sat)
+		T.SetNumZeroed((GW + 1) * (GH + 1));
 	for (int32 J = 0; J < GH; ++J)
 	{
 		for (int32 I = 0; I < GW; ++I)
 		{
 			const int32 K = (J + 1) * (GW + 1) + (I + 1);
 			const bool bValid = Valid[J * GW + I];
-			Sum[K] = (bValid ? Z[J * GW + I] : 0.0) + Sum[K - 1] + Sum[K - (GW + 1)] - Sum[K - (GW + 1) - 1];
-			Count[K] = (bValid ? 1.0 : 0.0) + Count[K - 1] + Count[K - (GW + 1)] - Count[K - (GW + 1) - 1];
+			const double Zv = Z[J * GW + I];
+			const double Values[CN] = { 1.0, double(I), double(J), double(I) * I, double(I) * J, double(J) * J, Zv, I * Zv, J * Zv };
+			for (int32 C = 0; C < CN; ++C)
+				Sat[C][K] = (bValid ? Values[C] : 0.0) + Sat[C][K - 1] + Sat[C][K - (GW + 1)] - Sat[C][K - (GW + 1) - 1];
 		}
 	}
-	const auto BoxOf = [&](const TArray<double>& T, int32 I0, int32 J0, int32 I1, int32 J1)
-	{
-		return T[J1 * (GW + 1) + I1] - T[J0 * (GW + 1) + I1] - T[J1 * (GW + 1) + I0] + T[J0 * (GW + 1) + I0];
-	};
 	TArray<double> Residual;
 	Residual.SetNumZeroed(GW * GH);
 	for (int32 J = 0; J < GH; ++J)
 	{
 		for (int32 I = 0; I < GW; ++I)
 		{
+			if (!Valid[J * GW + I])
+				continue;
 			const int32 I0 = FMath::Max(0, I - B), J0 = FMath::Max(0, J - B), I1 = FMath::Min(GW, I + B + 1), J1 = FMath::Min(GH, J + B + 1);
-			const double C = BoxOf(Count, I0, J0, I1, J1) - 1.0;
-			if (Valid[J * GW + I] && C > 0.0)
-				Residual[J * GW + I] = Z[J * GW + I] - (BoxOf(Sum, I0, J0, I1, J1) - Z[J * GW + I]) / C;
+			double S[CN];
+			for (int32 C = 0; C < CN; ++C)
+				S[C] = Sat[C][J1 * (GW + 1) + I1] - Sat[C][J0 * (GW + 1) + I1] - Sat[C][J1 * (GW + 1) + I0] + Sat[C][J0 * (GW + 1) + I0];
+			const double N = S[C1];
+			if (N < 3.0)
+				continue;
+			// Centred on this sample: u = i - I, v = j - J; fit z = A + Bu u + Bv v, the plane's height here is A.
+			const double Su = S[CI] - N * I, Sv = S[CJ] - N * J;
+			const double Suu = S[CII] - 2.0 * I * S[CI] + N * I * I, Svv = S[CJJ] - 2.0 * J * S[CJ] + N * J * J;
+			const double Suv = S[CIJ] - J * S[CI] - I * S[CJ] + N * I * J;
+			const double Sz = S[CZ], Suz = S[CIZ] - I * S[CZ], Svz = S[CJZ] - J * S[CZ];
+			const double M[3][3] = { { N, Su, Sv }, { Su, Suu, Suv }, { Sv, Suv, Svv } };
+			const double Det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+			double A = Sz / N;
+			if (FMath::Abs(Det) > UE_SMALL_NUMBER)
+			{
+				const double DetA = Sz * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (Suz * M[2][2] - M[1][2] * Svz) + M[0][2] * (Suz * M[2][1] - M[1][1] * Svz);
+				A = DetA / Det;
+			}
+			Residual[J * GW + I] = Z[J * GW + I] - A;
 		}
 	}
-	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that mean, one result each.
+	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that plane, one result each.
 	FBumps Out;
 	TBitArray<> Seen(false, GW * GH);
 	TArray<int32> Stack;
@@ -875,7 +939,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		for (const int32 Cell : Cells)
 			Reach = FMath::Max(Reach, FVector2D::Distance(PeakCell, FVector2D(Cell % GW, Cell / GW)));
 		// The extreme vertex near the coarse peak.
-		FVector2D Best(Whole.Min.X + PeakCell.X * Step, Whole.Min.Y + PeakCell.Y * Step);
+		FVector2D Best(VertexX(Peak % GW), VertexY(Peak / GW));
 		double BestZ = Z[Peak];
 		for (int32 DJ = -Step; DJ <= Step; ++DJ)
 		{
