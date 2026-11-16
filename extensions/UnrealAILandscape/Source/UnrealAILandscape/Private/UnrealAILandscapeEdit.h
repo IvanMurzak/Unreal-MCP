@@ -67,10 +67,11 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/**
 	 * RoadBetween's route: a path from Start to End (world) whose ground climbs no more than MaxSlope (with a margin), found by
-	 * an A* search on a ~10 m grid, then resampled every few metres with each point's Z the ground limited to MaxSlope from
-	 * the start. False after Fail; bReached false when the search could not get to End (the path then ends nearest to it).
+	 * an A* search on a grid of nodes Width / 2 apart (at most 400 x 400), then resampled every few metres with each point's Z the ground
+	 * limited to MaxSlope between neighbours (both ends on the ground when that is possible). False after Fail; bReached
+	 * false when the road does not get to End's ground (the search could not reach it: the path then ends nearest to it).
 	 */
-	bool PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached);
+	bool PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double Width, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached);
 
 	/**
 	 * Ramp: the ground along Points (world) set to their Z, straight from point to point, Width cm wide, blended back to the

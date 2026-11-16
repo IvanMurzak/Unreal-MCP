@@ -406,8 +406,8 @@ namespace UnrealAIWaterRqlLocal
 		return Path;
 	}
 
-	/** @p Path resampled every @p Spacing (vertex units) and smoothed (the 8-neighbour grid zigzags), ends kept. */
-	TArray<FVector2D> Resample(const TArray<FVector2D>& Path, double Spacing)
+	/** @p Path resampled every @p Spacing (vertex units) and smoothed @p Passes times (the 8-neighbour grid zigzags), ends kept. */
+	TArray<FVector2D> Resample(const TArray<FVector2D>& Path, double Spacing, int32 Passes = 2)
 	{
 		TArray<FVector2D> Out;
 		Out.Add(Path[0]);
@@ -428,7 +428,7 @@ namespace UnrealAIWaterRqlLocal
 			Out.Last() = Path.Last();
 		else
 			Out.Add(Path.Last());
-		for (int32 Pass = 0; Pass < 2; ++Pass)
+		for (int32 Pass = 0; Pass < Passes; ++Pass)
 		{
 			TArray<FVector2D> Smooth = Out;
 			for (int32 Index = 1; Index + 1 < Out.Num(); ++Index)
@@ -666,14 +666,15 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 	return Changed;
 }
 
-bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached)
+bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double Width, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached)
 {
 	using namespace UnrealAIWaterRqlLocal;
 	FHeightGrid Grid;
 	if (!ReadGrid(Landscape, Grid))
 		return false;
-	// A coarse grid of about 10 m (at most ~250 x 250 nodes) over the landscape.
-	const int32 Step = FMath::Max(1, FMath::Max(FMath::RoundToInt(1000.0 / Grid.QuadCm), FMath::CeilToInt(FMath::Max(Grid.Width(), Grid.Height()) / 250.0)));
+	// A grid of nodes half the road's width apart (each leg of a switchback a stretch of road, yet fine enough to wind up
+	// a narrow hilltop), at most 400 x 400.
+	const int32 Step = FMath::Max3(1, static_cast<int32>(FMath::CeilToInt(0.5 * Width / Grid.QuadCm)), static_cast<int32>(FMath::CeilToInt(FMath::Max(Grid.Width(), Grid.Height()) / 400.0)));
 	const int32 GW = Grid.Width() / Step + 1, GH = Grid.Height() / Step + 1;
 	const auto NodeOf = [&](const FVector& World) -> FIntPoint
 	{
@@ -694,10 +695,10 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	const FIntPoint From = NodeOf(Start), To = NodeOf(End);
 	if (!GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
 		return UnrealMcpRql::Failed<bool>(TEXT("Start and End must be on the (loaded) landscape"));
-	// Moves in 32 directions (offsets up to 3 nodes), so the route can follow a hill's contours closely.
+	// Moves in 48 directions (offsets up to 4 nodes), so the route can follow a steep hill's contours closely.
 	TArray<FIntPoint> Moves;
-	for (int32 DY = -3; DY <= 3; ++DY)
-		for (int32 DX = -3; DX <= 3; ++DX)
+	for (int32 DY = -4; DY <= 4; ++DY)
+		for (int32 DX = -4; DX <= 4; ++DX)
 			if ((DX || DY) && FMath::GreatestCommonDivisor(FMath::Abs(DX), FMath::Abs(DY)) == 1)
 				Moves.Add(FIntPoint(DX, DY));
 	const double Limit = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9)); // a margin for the grading between nodes
@@ -727,11 +728,16 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 			break;
 		const int32 NI = Node % GW, NJ = Node / GW;
 		const double Here = GroundAt(VX(NI), VY(NJ)).Get(0.0);
+		// The way the best route came in: a move may turn at most 60 degrees from it, so the road winds in curves and its
+		// switchbacks stay wide (a sharper turn would lay the next leg on the last one).
+		const FVector2D In = Came[Node] == INDEX_NONE ? FVector2D::ZeroVector : FVector2D(NI - Came[Node] % GW, NJ - Came[Node] / GW).GetSafeNormal();
 		for (const FIntPoint& Move : Moves)
 		{
 			const int32 I = NI + Move.X, J = NJ + Move.Y;
 			if (I < 0 || J < 0 || I >= GW || J >= GH)
 				continue;
+			if (!In.IsZero() && FVector2D::DotProduct(In, FVector2D(Move).GetSafeNormal()) < 0.5 && J * GW + I != GoalNode)
+				continue; // the last step onto End may turn as it must
 			// The ground along the move (4 stretches) must climb gently enough.
 			const double Length = FVector2D(Move).Size() * NodeCm;
 			double Prev = Here, Worst = 0.0;
@@ -767,22 +773,52 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	Route[0] = Grid.ToLocal(Start);
 	if (Last == GoalNode)
 		Route.Last() = Grid.ToLocal(End);
-	// Every few metres (at most ~1000 points), smoothed; each point's Z the ground, limited to MaxSlope from the start on.
+	// A point at least every half node (at most 5 m, at most ~1000 points), lightly smoothed (rounds each turn).
 	double RouteLength = 0.0;
 	for (int32 Index = 1; Index < Route.Num(); ++Index)
 		RouteLength += FVector2D::Distance(Route[Index - 1], Route[Index]);
-	const TArray<FVector2D> Path = Resample(Route, FMath::Max(500.0 / Grid.QuadCm, RouteLength / 990.0));
+	const TArray<FVector2D> Path = Resample(Route, FMath::Max3(1.0, FMath::Min(500.0 / Grid.QuadCm, Step * 0.5), RouteLength / 990.0));
+	// Each point's Z: the ground, limited to MaxSlope between neighbours. Both ends are pinned to the ground when a road can
+	// join them within MaxSlope (else only the start): forward and backward passes clamp each stretch until none is steeper.
 	const double Rise = FMath::Tan(FMath::DegreesToRadians(MaxSlope)) * Grid.QuadCm; // cm per vertex of length
-	OutPoints.Reset();
-	double Z = 0.0;
-	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	const int32 Count = Path.Num();
+	TArray<double> Z, Run;
+	Z.SetNumUninitialized(Count);
+	Run.SetNumZeroed(Count); // Run[i]: the stretch from point i - 1, vertices
+	double Total = 0.0;
+	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		const double Ground = GroundAt(Path[Index].X, Path[Index].Y).Get(Z);
-		Z = Index == 0 ? Ground : FMath::Clamp(Ground, Z - Rise * FVector2D::Distance(Path[Index - 1], Path[Index]), Z + Rise * FVector2D::Distance(Path[Index - 1], Path[Index]));
-		OutPoints.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Z));
+		Run[Index] = Index ? FVector2D::Distance(Path[Index - 1], Path[Index]) : 0.0;
+		Total += Run[Index];
+		Z[Index] = GroundAt(Path[Index].X, Path[Index].Y).Get(Index ? Z[Index - 1] : 0.0);
 	}
 	const TOptional<double> EndGround = GroundAt(Grid.ToLocal(End).X, Grid.ToLocal(End).Y);
-	bReached = Last == GoalNode && EndGround.IsSet() && FMath::Abs(OutPoints.Last().Z - EndGround.GetValue()) <= 100.0;
+	const bool bAtEnd = Last == GoalNode && EndGround.IsSet();
+	const bool bPinEnd = bAtEnd && FMath::Abs(Z.Last() - Z[0]) <= Rise * Total;
+	for (int32 Pass = 0; Pass < 100; ++Pass)
+	{
+		double Moved = 0.0;
+		for (int32 Index = 1; Index < (bPinEnd ? Count - 1 : Count); ++Index)
+		{
+			const double Clamped = FMath::Clamp(Z[Index], Z[Index - 1] - Rise * Run[Index], Z[Index - 1] + Rise * Run[Index]);
+			Moved = FMath::Max(Moved, FMath::Abs(Clamped - Z[Index]));
+			Z[Index] = Clamped;
+		}
+		if (!bPinEnd)
+			break; // the forward pass alone leaves no stretch steeper
+		for (int32 Index = Count - 2; Index > 0; --Index)
+		{
+			const double Clamped = FMath::Clamp(Z[Index], Z[Index + 1] - Rise * Run[Index + 1], Z[Index + 1] + Rise * Run[Index + 1]);
+			Moved = FMath::Max(Moved, FMath::Abs(Clamped - Z[Index]));
+			Z[Index] = Clamped;
+		}
+		if (Moved < 0.01)
+			break;
+	}
+	OutPoints.Reset();
+	for (int32 Index = 0; Index < Count; ++Index)
+		OutPoints.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Z[Index]));
+	bReached = bAtEnd && FMath::Abs(Z.Last() - EndGround.GetValue()) <= 100.0;
 	return true;
 }
 

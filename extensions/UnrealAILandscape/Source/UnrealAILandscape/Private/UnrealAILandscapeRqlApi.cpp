@@ -935,7 +935,7 @@ FUnrealAILandscapeRoad UUnrealAILandscapeRqlApi::RoadBetween(ALandscapeProxy* La
 	if (!(Falloff >= 0.0 && Falloff <= 20000.0))
 		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(FString::Printf(TEXT("Falloff %g is outside 0 .. 20000 cm"), Falloff));
 	FUnrealAILandscapeRoad Out;
-	if (!PlanRoad(Landscape, Start, End, MaxSlope, Out.Points, Out.Reached))
+	if (!PlanRoad(Landscape, Start, End, Width, MaxSlope, Out.Points, Out.Reached))
 		return Out;
 	for (int32 Index = 1; Index < Out.Points.Num(); ++Index)
 	{
