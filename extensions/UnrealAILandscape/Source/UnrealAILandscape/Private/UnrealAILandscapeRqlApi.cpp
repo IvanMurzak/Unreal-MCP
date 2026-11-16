@@ -607,6 +607,303 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	});
 }
 
+int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength)
+{
+	if (!(Radius > 0.0 && Radius <= 30000.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be within 0 (exclusive) .. 30000 cm"));
+	if (!(Strength > 0.0 && Strength <= 1.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
+	// The circle plus a ring of 3 vertices around it: the ground the new surface is fitted to.
+	const double Quad = FMath::Max(Landscape ? FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X) : 1.0, UE_KINDA_SMALL_NUMBER);
+	FCircle Area;
+	if (!Circle(Landscape, Center, Radius + 3.0 * Quad, Area))
+		return 0;
+	const double Inner = Radius / Quad; // vertices
+	const FGuid EditLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
+	if (!EditLayer.IsValid())
+		return 0;
+	FHeightmapAccessor<false> Accessor(Area.Info);
+	Accessor.SetEditLayer(EditLayer);
+	const FIntRect& R = Area.Rect;
+	const int32 W = R.Width() + 1, H = R.Height() + 1;
+	TArray<uint16> Data;
+	Data.SetNumZeroed(W * H);
+	Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
+	// Inside the circle the ground is unknown; around it, fixed. The fill is the smoothest surface (Laplace's equation, solved by
+	// over-relaxation) that meets the ground at the circle's edge: a plane or a hill's flank stays one, a spike or pit is gone.
+	TArray<double> Fill;
+	TBitArray<> Free(false, W * H);
+	Fill.SetNumUninitialized(W * H);
+	// Start from the plane through the ring (fewer iterations than from a constant).
+	double Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0, Sz = 0, Sxz = 0, Syz = 0, N = 0;
+	for (int32 Y = 0; Y < H; ++Y)
+	{
+		for (int32 X = 0; X < W; ++X)
+		{
+			const int32 I = Y * W + X;
+			Fill[I] = Data[I];
+			const double Dx = R.Min.X + X - Area.Center.X, Dy = R.Min.Y + Y - Area.Center.Y;
+			const double D = FMath::Sqrt(Dx * Dx + Dy * Dy);
+			const bool bInside = D <= Inner && X > 0 && Y > 0 && X < W - 1 && Y < H - 1;
+			Free[I] = bInside;
+			if (!bInside && D <= Inner + 3.0)
+			{
+				Sxx += Dx * Dx; Sxy += Dx * Dy; Syy += Dy * Dy; Sx += Dx; Sy += Dy; Sz += Data[I]; Sxz += Dx * Data[I]; Syz += Dy * Data[I]; N += 1;
+			}
+		}
+	}
+	if (N < 3)
+		return UnrealMcpRql::Failed<int32>(TEXT("the circle has no ground around it on the landscape: move Center onto it or make Radius smaller"));
+	{
+		// Least squares z = A + B dx + C dy (normal equations, Cramer's rule); a degenerate ring falls back to its mean.
+		const double M[3][3] = { { N, Sx, Sy }, { Sx, Sxx, Sxy }, { Sy, Sxy, Syy } };
+		const double V[3] = { Sz, Sxz, Syz };
+		const auto Det = [](const double A[3][3]) { return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]); };
+		const double D0 = Det(M);
+		double Coef[3] = { Sz / N, 0.0, 0.0 };
+		if (FMath::Abs(D0) > UE_SMALL_NUMBER)
+		{
+			for (int32 Col = 0; Col < 3; ++Col)
+			{
+				double Mc[3][3];
+				for (int32 Row = 0; Row < 3; ++Row)
+					for (int32 K = 0; K < 3; ++K)
+						Mc[Row][K] = K == Col ? V[Row] : M[Row][K];
+				Coef[Col] = Det(Mc) / D0;
+			}
+		}
+		for (int32 Y = 0; Y < H; ++Y)
+			for (int32 X = 0; X < W; ++X)
+				if (Free[Y * W + X])
+					Fill[Y * W + X] = Coef[0] + Coef[1] * (R.Min.X + X - Area.Center.X) + Coef[2] * (R.Min.Y + Y - Area.Center.Y);
+	}
+	const double Omega = 2.0 / (1.0 + PI / FMath::Max(W, H)); // near-optimal over-relaxation for the square
+	const double Deadline = FPlatformTime::Seconds() + 10.0;
+	for (int32 Iteration = 0; Iteration < 20000 && FPlatformTime::Seconds() < Deadline; ++Iteration)
+	{
+		double MaxStep = 0.0;
+		for (int32 Y = 1; Y < H - 1; ++Y)
+		{
+			for (int32 X = 1; X < W - 1; ++X)
+			{
+				const int32 I = Y * W + X;
+				if (!Free[I])
+					continue;
+				const double Step = Omega * ((Fill[I - 1] + Fill[I + 1] + Fill[I - W] + Fill[I + W]) * 0.25 - Fill[I]);
+				Fill[I] += Step;
+				MaxStep = FMath::Max(MaxStep, FMath::Abs(Step));
+			}
+		}
+		if (MaxStep < 0.02) // height units (~0.02 cm at the default Z scale)
+			break;
+	}
+	int32 Changed = 0;
+	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest();
+	for (int32 I = 0; I < Data.Num(); ++I)
+	{
+		if (!Free[I])
+			continue;
+		const int32 New = FMath::RoundToInt(FMath::Lerp(static_cast<double>(Data[I]), Fill[I], Strength));
+		Low = FMath::Min(Low, New);
+		High = FMath::Max(High, New);
+		if (New != Data[I])
+		{
+			Data[I] = static_cast<uint16>(FMath::Clamp(New, 0, 65535));
+			++Changed;
+		}
+	}
+	if (Changed == 0)
+		return 0;
+	if (!FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High)))
+		return 0;
+	Landscape->Modify();
+	WriteData(Accessor, R, Data.GetData());
+	Accessor.Flush();
+	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	return Changed;
+}
+
+int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff, double MaxSlope)
+{
+	if (!Landscape)
+		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (Points.Num() < 2 || Points.Num() > 1000)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Ramp needs 2 .. 1000 points, got %d"), Points.Num()));
+	if (Points.ContainsByPredicate([](const FVector& Point) { return Point.ContainsNaN(); }))
+		return UnrealMcpRql::Failed<int32>(TEXT("Points must be finite numbers"));
+	if (!(Width >= 100.0 && Width <= 20000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	if (!(Falloff >= 0.0 && Falloff <= 20000.0))
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Falloff %g is outside 0 .. 20000 cm"), Falloff));
+	if (!(MaxSlope >= 0.0 && MaxSlope < 90.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("MaxSlope must be within 0 (no limit) .. 90 degrees"));
+	if (MaxSlope > 0.0)
+	{
+		const double Limit = FMath::Tan(FMath::DegreesToRadians(MaxSlope));
+		for (int32 Index = 0; Index + 1 < Points.Num(); ++Index)
+		{
+			const FVector& A = Points[Index];
+			const FVector& B = Points[Index + 1];
+			const double Run = FVector2D::Distance(FVector2D(A), FVector2D(B));
+			const double Rise = FMath::Abs(B.Z - A.Z);
+			if (Rise > Run * Limit + 0.5)
+				return UnrealMcpRql::Failed<int32>(FString::Printf(
+					TEXT("from point %d [%.0f, %.0f, %.0f] to point %d [%.0f, %.0f, %.0f] the ramp climbs %.1f degrees, more than MaxSlope %g: %.0f cm of rise needs %.0f cm of length at that slope (this stretch is %.0f): nothing was changed. Add points so the path winds (switchbacks, around a hill) or change the Z"),
+					Index, A.X, A.Y, A.Z, Index + 1, B.X, B.Y, B.Z, FMath::RadiansToDegrees(FMath::Atan2(Rise, Run)), MaxSlope, Rise, Rise / Limit, Run));
+		}
+	}
+	return RampAlong(Landscape, Points, Width, Falloff);
+}
+
+TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
+{
+	using FBumps = TArray<FUnrealAILandscapeBump>;
+	if (!Landscape)
+		return UnrealMcpRql::Failed<FBumps>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (!(MinHeight > 0.0) || !(Scale >= 500.0 && Scale <= 50000.0))
+		return UnrealMcpRql::Failed<FBumps>(TEXT("MinHeight must be greater than 0 cm and Scale within 500 .. 50000 cm"));
+	if (!LoadLandscape(Landscape))
+		return {};
+	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
+	FIntRect Whole;
+	if (!Info || !Info->GetLandscapeExtent(Whole))
+		return UnrealMcpRql::Failed<FBumps>(FString::Printf(TEXT("%s has no landscape components"), *Landscape->GetActorNameOrLabel()));
+	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+	const double Quad = FMath::Max(FMath::Abs(ToWorld.GetScale3D().X), UE_KINDA_SMALL_NUMBER);
+	const double ComponentQuads = FMath::Max(1, Info->ComponentSizeQuads);
+	// The ground as collision and Surface read it (not the edit layers: reading those can dirty the landscape), on a grid
+	// of at most about a million samples.
+	const int64 Vertices = static_cast<int64>(Whole.Width() + 1) * (Whole.Height() + 1);
+	const int32 Step = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt(Vertices / 1.0e6)));
+	const auto GroundAt = [&](double X, double Y) -> TOptional<float>
+	{
+		// Inside the component that owns the vertex: on a seam the engine reads the vertex before it.
+		const auto Inside = [ComponentQuads](double V, double Min, double Max)
+		{
+			const double Into = V - FMath::FloorToDouble(V / ComponentQuads) * ComponentQuads;
+			return FMath::Clamp(Into < 1e-3 ? V + 1e-3 : V, Min, Max - 1e-3);
+		};
+		const FVector At = ToWorld.TransformPosition(FVector(Inside(X, Whole.Min.X, Whole.Max.X), Inside(Y, Whole.Min.Y, Whole.Max.Y), 0.0));
+		const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
+		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(At, EHeightfieldSource::Complex);
+	};
+	const int32 GW = Whole.Width() / Step + 1, GH = Whole.Height() / Step + 1;
+	TArray<double> Z;
+	Z.SetNumZeroed(GW * GH);
+	TBitArray<> Valid(false, GW * GH);
+	for (int32 J = 0; J < GH; ++J)
+	{
+		for (int32 I = 0; I < GW; ++I)
+		{
+			if (const TOptional<float> H = GroundAt(Whole.Min.X + I * Step, Whole.Min.Y + J * Step))
+			{
+				Z[J * GW + I] = H.GetValue();
+				Valid[J * GW + I] = true;
+			}
+		}
+	}
+	// Mean ground within Scale (a box, summed-area tables), the sample's own value left out.
+	const int32 B = FMath::Max(1, FMath::RoundToInt(Scale / (Quad * Step)));
+	TArray<double> Sum, Count;
+	Sum.SetNumZeroed((GW + 1) * (GH + 1));
+	Count.SetNumZeroed((GW + 1) * (GH + 1));
+	for (int32 J = 0; J < GH; ++J)
+	{
+		for (int32 I = 0; I < GW; ++I)
+		{
+			const int32 K = (J + 1) * (GW + 1) + (I + 1);
+			const bool bValid = Valid[J * GW + I];
+			Sum[K] = (bValid ? Z[J * GW + I] : 0.0) + Sum[K - 1] + Sum[K - (GW + 1)] - Sum[K - (GW + 1) - 1];
+			Count[K] = (bValid ? 1.0 : 0.0) + Count[K - 1] + Count[K - (GW + 1)] - Count[K - (GW + 1) - 1];
+		}
+	}
+	const auto BoxOf = [&](const TArray<double>& T, int32 I0, int32 J0, int32 I1, int32 J1)
+	{
+		return T[J1 * (GW + 1) + I1] - T[J0 * (GW + 1) + I1] - T[J1 * (GW + 1) + I0] + T[J0 * (GW + 1) + I0];
+	};
+	TArray<double> Residual;
+	Residual.SetNumZeroed(GW * GH);
+	for (int32 J = 0; J < GH; ++J)
+	{
+		for (int32 I = 0; I < GW; ++I)
+		{
+			const int32 I0 = FMath::Max(0, I - B), J0 = FMath::Max(0, J - B), I1 = FMath::Min(GW, I + B + 1), J1 = FMath::Min(GH, J + B + 1);
+			const double C = BoxOf(Count, I0, J0, I1, J1) - 1.0;
+			if (Valid[J * GW + I] && C > 0.0)
+				Residual[J * GW + I] = Z[J * GW + I] - (BoxOf(Sum, I0, J0, I1, J1) - Z[J * GW + I]) / C;
+		}
+	}
+	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that mean, one result each.
+	FBumps Out;
+	TBitArray<> Seen(false, GW * GH);
+	TArray<int32> Stack;
+	for (int32 Start = 0; Start < GW * GH; ++Start)
+	{
+		if (Seen[Start] || FMath::Abs(Residual[Start]) < MinHeight)
+			continue;
+		const double Sign = Residual[Start] > 0.0 ? 1.0 : -1.0;
+		int32 Peak = Start;
+		TArray<int32> Cells;
+		Stack.Reset();
+		Stack.Add(Start);
+		Seen[Start] = true;
+		while (Stack.Num())
+		{
+			const int32 Cell = Stack.Pop(EAllowShrinking::No);
+			Cells.Add(Cell);
+			if (Residual[Cell] * Sign > Residual[Peak] * Sign)
+				Peak = Cell;
+			const int32 CI = Cell % GW, CJ = Cell / GW;
+			for (int32 DJ = -1; DJ <= 1; ++DJ)
+			{
+				for (int32 DI = -1; DI <= 1; ++DI)
+				{
+					const int32 NI = CI + DI, NJ = CJ + DJ;
+					if (NI < 0 || NJ < 0 || NI >= GW || NJ >= GH)
+						continue;
+					const int32 Next = NJ * GW + NI;
+					if (!Seen[Next] && Residual[Next] * Sign >= MinHeight)
+					{
+						Seen[Next] = true;
+						Stack.Add(Next);
+					}
+				}
+			}
+		}
+		const FVector2D PeakCell(Peak % GW, Peak / GW);
+		double Reach = 0.0;
+		for (const int32 Cell : Cells)
+			Reach = FMath::Max(Reach, FVector2D::Distance(PeakCell, FVector2D(Cell % GW, Cell / GW)));
+		// The extreme vertex near the coarse peak.
+		FVector2D Best(Whole.Min.X + PeakCell.X * Step, Whole.Min.Y + PeakCell.Y * Step);
+		double BestZ = Z[Peak];
+		for (int32 DJ = -Step; DJ <= Step; ++DJ)
+		{
+			for (int32 DI = -Step; DI <= Step; ++DI)
+			{
+				const FVector2D V(Best.X + DI, Best.Y + DJ);
+				if (V.X < Whole.Min.X || V.Y < Whole.Min.Y || V.X > Whole.Max.X || V.Y > Whole.Max.Y)
+					continue;
+				if (const TOptional<float> H = GroundAt(V.X, V.Y); H.IsSet() && (H.GetValue() - BestZ) * Sign > 0.0)
+				{
+					BestZ = H.GetValue();
+					Best = V;
+				}
+			}
+		}
+		FUnrealAILandscapeBump& Bump = Out.AddDefaulted_GetRef();
+		Bump.Kind = Sign > 0.0 ? TEXT("Bump") : TEXT("Pit");
+		const FVector World = ToWorld.TransformPosition(FVector(Best.X, Best.Y, 0.0));
+		Bump.Location = FVector(FMath::RoundToDouble(World.X), FMath::RoundToDouble(World.Y), FMath::RoundToDouble(BestZ * 10.0) / 10.0);
+		Bump.Height = FMath::RoundToDouble((Residual[Peak] + (BestZ - Z[Peak])) * 10.0) / 10.0;
+		Bump.Radius = FMath::RoundToDouble((Reach + 1.0) * Step * Quad);
+	}
+	Out.Sort([](const FUnrealAILandscapeBump& A, const FUnrealAILandscapeBump& B) { return FMath::Abs(A.Height) > FMath::Abs(B.Height); });
+	if (Out.Num() > 50)
+		Out.SetNum(50);
+	return Out;
+}
+
 UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, const FString& Layers)
 {
 	TArray<TPair<FName, FLinearColor>> Parsed;

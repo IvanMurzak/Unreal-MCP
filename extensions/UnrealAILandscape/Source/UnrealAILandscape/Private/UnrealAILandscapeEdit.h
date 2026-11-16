@@ -43,4 +43,10 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/** Carve: a channel Depth cm below the ground along Points (world), Width cm of bottom then 1:1 banks; changed vertices. */
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
+
+	/**
+	 * Ramp: the ground along Points (world) set to their Z, straight from point to point, Width cm wide, blended back to the
+	 * ground over Falloff cm (a cosine) on both sides; raises or lowers; changed vertices (0 after Fail).
+	 */
+	int32 RampAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff);
 }

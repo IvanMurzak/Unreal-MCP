@@ -143,7 +143,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -331,9 +331,24 @@ landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain") 
 [[2000, 1500, 1200, 600], [-1800, -900, 1500, 900]] | call landscape.Sculpt(unreal.find("Terrain"), [$[0], $[1], 0], $[2], $[3])    hills: center X Y, radius, height (cm)
 landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)                   a level pad: radius 15 m at Z 400 cm, 8 m blend
 landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)              a channel 1.5 m deep, 6 m wide along the points
+landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)                                 blend a spike, pit or bump within 8 m away into the ground around it
+landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)   a road bed 8 m wide at the points' Z, at most 8 degrees steep
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
 [[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
 landscapes | select Label PaintLayers Sections
+```
+
+Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
+hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius), largest first; `Smooth` replaces the
+ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
+stays a slope (unlike Flatten, which makes it level). `Ramp` grades a road, ramp or path: a strip Width wide set to the
+points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
+stretch that climbs more steeply and says how long it needs to be. A steep climb needs a longer, winding path
+(switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z.
+
+```
+landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius}, ...]
+landscape | call Smooth(unreal.find("Terrain"), [-3000, 3000, 0], 2500)                    a 15 m spike at [-3000, 3000] gone (radius 1.5 x its Radius)
 ```
 
 Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z); a paint layer shows when the material

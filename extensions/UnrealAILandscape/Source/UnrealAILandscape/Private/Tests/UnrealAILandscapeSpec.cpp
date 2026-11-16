@@ -652,6 +652,114 @@ void FUnrealAILandscapeSpec::Define()
 		});
 	});
 
+	Describe("repairs", [this]()
+	{
+		// landscape | call @METHOD@(unreal.find("@LABEL@"), @ARGS@) (rql-mutate unless bQuery)
+		static const auto Call = [](const FString& Label, const FString& Method, const FString& Args, TSharedPtr<FJsonObject>* Out = nullptr, bool bQuery = false)
+		{
+			const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"@METHOD@","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]}@ARGS@]}]})RQL"))
+				.Replace(TEXT("@METHOD@"), *Method).Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@ARGS@"), *(Args.IsEmpty() ? Args : TEXT(",") + Args));
+			return UnrealMcpRqlTools::RunPlan(Plan, !bQuery, Out);
+		};
+		static const auto P3 = [](double X, double Y, double Z) { return FString::Printf(TEXT(R"({"list":[{"lit":%.1f},{"lit":%.1f},{"lit":%.1f}]})"), X, Y, Z); };
+		static const auto Lit = [](double V) { return FString::Printf(TEXT(R"({"lit":%g})"), V); };
+		// landscape | call Create("@LABEL@", [@X@, 0, 0], 20): 20 x 20 m, flat at Z 0
+		static const auto Create = [](const FString& Label, double X) -> ALandscape*
+		{
+			const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":20}]}]})RQL"))
+				.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@X@"), *FString::SanitizeFloat(X));
+			return UnrealMcpRqlTools::RunPlan(Plan, true) ? LandscapeSpecFind<ALandscape>(Label) : nullptr;
+		};
+
+		It("Smooth blends a spike back into the slope around it and leaves the ground outside the radius alone", [this]()
+		{
+			const FString Label = TEXT("RqlSpecSmooth_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 650000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			TestTrue(TEXT("a hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(900) + TEXT(",") + Lit(300)));
+			const double Slope = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
+			const double Outside = LandscapeSpecLayerHeight(Landscape, X0 + 600.0, 0.0);
+			TestTrue(TEXT("a spike on its flank"), Call(Label, TEXT("Sculpt"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(100) + TEXT(",") + Lit(400)));
+			TestTrue(*FString::Printf(TEXT("the spike stands 4 m out (%.1f over %.1f)"), LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0), Slope),
+				LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0) > Slope + 350.0);
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("smoothed"), Call(Label, TEXT("Smooth"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(200), &Result));
+			const double After = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
+			TestTrue(*FString::Printf(TEXT("the ground is back on the slope (%.1f, the slope there %.1f; %s)"), After, Slope, *LandscapeSpecJson(Result).Left(200)), FMath::Abs(After - Slope) < 15.0);
+			TestTrue(TEXT("outside the radius nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0 + 600.0, 0.0), Outside, 0.5));
+			TSharedPtr<FJsonObject> Bad;
+			TestFalse(TEXT("a radius of 0 is refused"), Call(Label, TEXT("Smooth"), P3(X0, 0, 0) + TEXT(",") + Lit(0), &Bad));
+		});
+
+		It("Ramp sets a strip to the points' Z between them, blends its sides and refuses a stretch steeper than MaxSlope", [this]()
+		{
+			const FString Label = TEXT("RqlSpecRamp_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 680000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			const FString Points = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 800.0, 0, 0), *P3(X0 + 800.0, 0, 200));
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("ramp graded"), Call(Label, TEXT("Ramp"), Points + TEXT(",") + Lit(300) + TEXT(",") + Lit(100), &Result));
+			const double Mid = LandscapeSpecLayerHeight(Landscape, X0, 0.0);
+			const double Upper = LandscapeSpecLayerHeight(Landscape, X0 + 400.0, 0.0);
+			const double Side = LandscapeSpecLayerHeight(Landscape, X0, 130.0);
+			const double Off = LandscapeSpecLayerHeight(Landscape, X0, 500.0);
+			TestTrue(*FString::Printf(TEXT("halfway up: 100 cm (%.1f), three quarters: 150 cm (%.1f), level across (%.1f), untouched beyond the falloff (%.1f); %s"), Mid, Upper, Side, Off, *LandscapeSpecJson(Result).Left(200)),
+				FMath::IsNearlyEqual(Mid, 100.0, 3.0) && FMath::IsNearlyEqual(Upper, 150.0, 3.0) && FMath::IsNearlyEqual(Side, Mid, 3.0) && FMath::IsNearlyEqual(Off, 0.0, 0.5));
+			TSharedPtr<FJsonObject> Steep;
+			const FString SteepPoints = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 100.0, 0, 0), *P3(X0 + 100.0, 0, 300));
+			TestFalse(TEXT("a 56 degree stretch with MaxSlope 8 is refused"), Call(Label, TEXT("Ramp"), SteepPoints + TEXT(",") + Lit(300) + TEXT(",") + Lit(100) + TEXT(",") + Lit(8), &Steep));
+			TestTrue(*FString::Printf(TEXT("naming MaxSlope and the length it needs (%s)"), *LandscapeSpecJson(Steep).Left(400)), LandscapeSpecJson(Steep).Contains(TEXT("MaxSlope")) && LandscapeSpecJson(Steep).Contains(TEXT("length")));
+			TestTrue(TEXT("and changing nothing"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0.0), Mid, 0.5));
+		});
+
+		It("Bumps finds a spike and a pit (not the hill they sit on) and runs in rql-query", [this]()
+		{
+			if (!FApp::CanEverRender())
+			{
+				AddInfo(TEXT("this editor does not render (-nullrhi): Bumps reads the merged ground, checked only in a rendering editor"));
+				return;
+			}
+			const FString Label = TEXT("RqlSpecBumps_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 710000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			TestTrue(TEXT("a wide hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(1000) + TEXT(",") + Lit(150)));
+			TestTrue(TEXT("a spike"), Call(Label, TEXT("Sculpt"), P3(X0 + 400.0, 200.0, 0) + TEXT(",") + Lit(80) + TEXT(",") + Lit(300)));
+			TestTrue(TEXT("a pit"), Call(Label, TEXT("Sculpt"), P3(X0 - 400.0, -300.0, 0) + TEXT(",") + Lit(100) + TEXT(",") + Lit(-250)));
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("Bumps runs in rql-query"), Call(Label, TEXT("Bumps"), Lit(100) + TEXT(",") + Lit(500), &Result, /*bQuery*/ true));
+			const FString Text = LandscapeSpecJson(Result);
+			const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+			TArray<TSharedPtr<FJsonValue>> Found;
+			if (Result.IsValid() && Result->TryGetArrayField(TEXT("rows"), Rows) && Rows->Num() && (*Rows)[0]->Type == EJson::Array)
+			{
+				for (const TSharedPtr<FJsonValue>& Cell : (*Rows)[0]->AsArray())
+					if (Cell->Type == EJson::Array)
+						Found = Cell->AsArray();
+			}
+			const auto Has = [&Found](const TCHAR* Kind, double X, double Y)
+			{
+				return Found.ContainsByPredicate([Kind, X, Y](const TSharedPtr<FJsonValue>& V)
+				{
+					const TSharedPtr<FJsonObject> B = V->Type == EJson::Object ? V->AsObject() : nullptr;
+					const TArray<TSharedPtr<FJsonValue>>* L = nullptr;
+					return B && B->GetStringField(TEXT("Kind")) == Kind && B->TryGetArrayField(TEXT("Location"), L) && L->Num() == 3
+						&& FVector2D::Distance(FVector2D((*L)[0]->AsNumber(), (*L)[1]->AsNumber()), FVector2D(X, Y)) <= 100.0;
+				});
+			};
+			TestTrue(*FString::Printf(TEXT("the spike and the pit, two results (%s)"), *Text.Left(600)),
+				Has(TEXT("Bump"), X0 + 400.0, 200.0) && Has(TEXT("Pit"), X0 - 400.0, -300.0) && Found.Num() == 2);
+		});
+	});
+
 	Describe("water", [this]()
 	{
 		It("lists the water operations and the Water status members", [this]()
