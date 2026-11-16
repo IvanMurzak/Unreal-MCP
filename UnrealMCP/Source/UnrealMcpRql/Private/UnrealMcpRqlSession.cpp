@@ -596,16 +596,10 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
 		// through); anything else is refused like any call in rql-query, before it runs.
-		if (bReadOnlyCallRequest)
+		if (bReadOnlyCallRequest && !AllReadOnlyCalls(Records))
 		{
-			for (const rql::MutationRecord& Record : Records)
-			{
-				if (!IsReadOnlyCall(Record))
-				{
-					bRefusedReadOnlyCall = true;
-					return std::string("not a read-only operation");
-				}
-			}
+			bRefusedReadOnlyCall = true;
+			return std::string("not a read-only operation");
 		}
 		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
 		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
