@@ -20,6 +20,7 @@
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
@@ -47,11 +48,6 @@ namespace UnrealMcpRqlSessionLocal
 		return (Last == rql::StageKind::Min || Last == rql::StageKind::Max || Last == rql::StageKind::Avg) && Result.value.is_null();
 	}
 
-	/**
-	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
-	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
-	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
-	 */
 	/**
 	 * The full text of a call argument for the duplicate-call guard: lists, maps and structs element by element, numbers at
 	 * full precision, strings quoted, objects by identity (their text is only a type name). rql::to_text reads every vector,
@@ -145,6 +141,11 @@ namespace UnrealMcpRqlSessionLocal
 		}
 	}
 
+	/**
+	 * A failed or empty query whose plan touches the domain of an extension this editor does not have (niagaraSystems,
+	 * PCGGraph, gasAbilities, ...) names that extension and how to get it: on the first error's hint, or as a warning. Only a
+	 * read finds "nothing": a mutation's empty receipt (a set that kept every value) is not a missing domain.
+	 */
 	void AddExtensionHint(rql::QueryResult& Result, const FString& PlanText, const rql::QueryPlan& Plan, bool bMutation)
 	{
 		rql::Diagnostic* Error = nullptr;
@@ -523,7 +524,8 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 					Arguments += "|";
 					AppendCallKey(Arguments, Argument);
 				}
-				Key += UnrealMcpRqlFromStd(Arguments);
+				// Hashed: an argument can be a whole heightmap or vertex list, and every key stays alive for the batch.
+				Key += FSHA1::HashBuffer(Arguments.data(), Arguments.size()).ToString();
 			}
 			bool bTwice = false;
 			Called.Add({ Record.item.ptr(), Key }, &bTwice);
