@@ -60,13 +60,21 @@ namespace UnrealAILandscapeRqlApiLocal
 		return FComponentLayout{ 2, 127 };
 	}
 
+	/** cm per heightmap unit: the actor's Z scale / 128. */
+	double UnitCm(const ALandscapeProxy* Landscape)
+	{
+		return FMath::Max(FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().Z), UE_KINDA_SMALL_NUMBER) * LANDSCAPE_ZSCALE;
+	}
+
+	/** The world Z (cm) of a heightmap value (MidValue is the actor's Z). */
+	double UnitsToCm(const ALandscapeProxy* Landscape, double Units)
+	{
+		return Landscape->LandscapeActorToWorld().GetLocation().Z + (Units - LandscapeDataAccess::MidValue) * UnitCm(Landscape);
+	}
+
 	FVector2D HeightRange(const ALandscapeProxy* Landscape)
 	{
-		const FTransform ToWorld = Landscape->LandscapeActorToWorld();
-		const double UnitCm = ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
-		const double Low = ToWorld.GetLocation().Z + (0.0 - LandscapeDataAccess::MidValue) * UnitCm;
-		const double High = ToWorld.GetLocation().Z + (static_cast<double>(LandscapeDataAccess::MaxValue) - LandscapeDataAccess::MidValue) * UnitCm;
-		return FVector2D(FMath::Min(Low, High), FMath::Max(Low, High));
+		return FVector2D(UnitsToCm(Landscape, 0.0), UnitsToCm(Landscape, LandscapeDataAccess::MaxValue));
 	}
 
 	bool FitsHeightRange(const ALandscapeProxy* Landscape, double LowCm, double HighCm)
@@ -107,7 +115,7 @@ namespace UnrealAILandscapeRqlApiLocal
 		// UWorldPartitionBlueprintLibrary::LoadActors (the editor's pinned actor list; UnloadActors releases them) is not
 		// exported from the Engine module: call it through reflection.
 		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
-		UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
+		static UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
 		if (!Load)
 			return UnrealMcpRql::Fail(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
 		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
@@ -342,7 +350,7 @@ namespace UnrealAILandscapeRqlApiLocal
 				const int32 Room = 255 - Weights[Index];
 				if (Sum[Index] <= Room || Data[Layer][Index] == 0)
 					continue;
-				Data[Layer][Index] = static_cast<uint8>(FMath::Clamp(FMath::FloorToInt(static_cast<double>(Data[Layer][Index]) * Room / Sum[Index]), 0, 255));
+				Data[Layer][Index] = static_cast<uint8>(FMath::FloorToInt(static_cast<double>(Data[Layer][Index]) * Room / Sum[Index]));
 				bChanged = true;
 			}
 			if (!bChanged)
@@ -499,12 +507,10 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 	FCircle Area;
 	if (!Circle(Landscape, Center, Radius, Area))
 		return 0;
-	// Height units: LANDSCAPE_ZSCALE (1/128) of the actor's Z scale per unit, around the mid value 32768.
-	const double ZScale = FMath::Max(FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().Z), UE_KINDA_SMALL_NUMBER);
-	const double Units = Height / (ZScale * LANDSCAPE_ZSCALE);
+	const double Units = Height / UnitCm(Landscape);
 	FHeightmapAccessor<false> Accessor(Area.Info);
 	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest(); // the unclamped result, height units
-	const int32 Changed = EditCircle<uint16>(Landscape, Accessor, Area, [Units, &Area, &Low, &High](uint16& Value, double Distance)
+	return EditCircle<uint16>(Landscape, Accessor, Area, [Units, &Area, &Low, &High](uint16& Value, double Distance)
 	{
 		const int32 Raw = FMath::RoundToInt(Value + Units * Falloff(Distance, Area));
 		if (Raw == Value)
@@ -513,13 +519,10 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 		High = FMath::Max(High, Raw);
 		Value = static_cast<uint16>(FMath::Clamp(Raw, 0, 65535));
 		return true;
-	}, [Landscape, ZScale, &Low, &High](const FGuid&, const FIntRect&, const TArray<uint16>&)
+	}, [Landscape, &Low, &High](const FGuid&, const FIntRect&, const TArray<uint16>&)
 	{
-		const double Origin = Landscape->LandscapeActorToWorld().GetLocation().Z;
-		const auto Cm = [Origin, ZScale](int32 Units) { return Origin + (Units - LandscapeDataAccess::MidValue) * ZScale * LANDSCAPE_ZSCALE; };
-		return FitsHeightRange(Landscape, Cm(Low), Cm(High));
+		return FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High));
 	});
-	return Changed;
 }
 
 int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff)
@@ -528,16 +531,10 @@ int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Cent
 		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be greater than 0 and Falloff 0 or more (cm)"));
 	if (!FMath::IsFinite(Height))
 		return UnrealMcpRql::Failed<int32>(TEXT("Height must be a finite world Z (cm)"));
-	if (!Landscape)
-		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
-	if (!FitsHeightRange(Landscape, Height, Height))
-		return 0;
 	FCircle Area;
-	if (!Circle(Landscape, Center, Radius + Falloff, Area))
+	if (!Circle(Landscape, Center, Radius + Falloff, Area) || !FitsHeightRange(Landscape, Height, Height))
 		return 0;
-	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
-	const double UnitCm = FMath::Max(FMath::Abs(ToWorld.GetScale3D().Z), UE_KINDA_SMALL_NUMBER) * LANDSCAPE_ZSCALE;
-	const double Target = LandscapeDataAccess::MidValue + (Height - ToWorld.GetLocation().Z) / UnitCm;
+	const double Target = LandscapeDataAccess::MidValue + (Height - Landscape->LandscapeActorToWorld().GetLocation().Z) / UnitCm(Landscape);
 	const double Inner = Area.Radius * Radius / (Radius + Falloff); // vertices
 	const double Band = Area.Radius - Inner;
 	FHeightmapAccessor<false> Accessor(Area.Info);

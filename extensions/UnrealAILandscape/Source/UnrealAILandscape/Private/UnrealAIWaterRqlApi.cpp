@@ -519,18 +519,22 @@ int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const
 		Local.Add(Grid.ToLocal(Point));
 	// One sample per vertex along the path: the bed follows the ground under it, Depth below.
 	const TArray<FVector2D> Path = Resample(Local, 1.0);
+	constexpr double Off = TNumericLimits<double>::Max(); // a sample off the (loaded) landscape
 	TArray<double> Bed;
-	double Low = TNumericLimits<double>::Max(), High = TNumericLimits<double>::Lowest();
+	double Low = Off, High = TNumericLimits<double>::Lowest();
 	for (const FVector2D& P : Path)
 	{
 		const int32 X = FMath::Clamp(FMath::RoundToInt(P.X), Grid.Rect.Min.X, Grid.Rect.Max.X);
 		const int32 Y = FMath::Clamp(FMath::RoundToInt(P.Y), Grid.Rect.Min.Y, Grid.Rect.Max.Y);
-		Bed.Add(Grid.Valid(X, Y) ? Grid.At(X, Y) - Depth : TNumericLimits<double>::Max());
-		if (Grid.Valid(X, Y))
+		if (!Grid.Valid(X, Y))
 		{
-			Low = FMath::Min(Low, Bed.Last());
-			High = FMath::Max(High, Bed.Last());
+			Bed.Add(Off);
+			continue;
 		}
+		const double Z = Grid.At(X, Y) - Depth;
+		Bed.Add(Z);
+		Low = FMath::Min(Low, Z);
+		High = FMath::Max(High, Z);
 	}
 	if (Low > High)
 		return UnrealMcpRql::Failed<int32>(TEXT("the points do not cross the landscape (its Bounds)"));
@@ -543,7 +547,7 @@ int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const
 		{
 			const int32 From = Pass == 0 ? Index : Bed.Num() - 1 - Index;
 			const int32 Prev = Pass == 0 ? From - 1 : From + 1;
-			if (Bed[From] == TNumericLimits<double>::Max() && Bed.IsValidIndex(Prev) && Bed[Prev] != TNumericLimits<double>::Max())
+			if (Bed[From] == Off && Bed.IsValidIndex(Prev) && Bed[Prev] != Off)
 				Bed[From] = Bed[Prev];
 		}
 	}
