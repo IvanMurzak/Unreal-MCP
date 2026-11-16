@@ -8,6 +8,7 @@
 #include "IUnrealMcpRqlModule.h"
 
 #include "ActorFactories/ActorFactory.h"
+#include "Algo/Count.h"
 #include "Editor.h"
 #include "Editor/EditorEngine.h" // FActorLabelUtilities
 #include "Engine/CollisionProfile.h"
@@ -267,6 +268,8 @@ namespace UnrealAIWaterRqlLocal
 
 	bool ReadGrid(ALandscapeProxy* Landscape, FHeightGrid& Out)
 	{
+		if (!UnrealAILandscapeRqlApiLocal::LoadLandscape(Landscape))
+			return false;
 		Out.Info = Landscape->GetLandscapeInfo();
 		if (!Out.Info || !Out.Info->GetLandscapeExtent(Out.Rect))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no landscape components"), *Landscape->GetActorNameOrLabel()));
@@ -438,9 +441,9 @@ namespace UnrealAIWaterRqlLocal
 	/**
 	 * Lower the landscape along the river (vertex-space @p Path with bed heights @p Bed, cm): flat bed HalfWidth either
 	 * side of the centre line, then banks rising 1:1 (at most 2 x the width) to the original ground; only ever lowers.
-	 * Works on the band around the path only; one write, merged before returning. False when nothing was lowered.
+	 * Works on the band around the path only; one write, merged before returning. How many vertices it lowered (0: none).
 	 */
-	bool CarveBed(ALandscapeProxy* Landscape, const FHeightGrid& Grid, const TArray<FVector2D>& Path, const TArray<double>& Bed, double HalfWidthCm)
+	int32 CarveBed(ALandscapeProxy* Landscape, const FHeightGrid& Grid, const TArray<FVector2D>& Path, const TArray<double>& Bed, double HalfWidthCm)
 	{
 		const double Half = HalfWidthCm / Grid.QuadCm;       // vertices
 		const double Bank = 4.0 * HalfWidthCm / Grid.QuadCm; // vertices
@@ -452,11 +455,14 @@ namespace UnrealAIWaterRqlLocal
 			FMath::Max(Grid.Rect.Min.X, FMath::FloorToInt(Box.Min.X - Half - Bank)), FMath::Max(Grid.Rect.Min.Y, FMath::FloorToInt(Box.Min.Y - Half - Bank)),
 			FMath::Min(Grid.Rect.Max.X, FMath::CeilToInt(Box.Max.X + Half + Bank)), FMath::Min(Grid.Rect.Max.Y, FMath::CeilToInt(Box.Max.Y + Half + Bank)));
 		// The ground lowered per vertex (height units), then subtracted from the edit layer: with several height layers the
-		// ground is their sum, so the layer is lowered by the difference rather than set to the target.
+		// ground is their sum, so the layer is lowered by the difference rather than set to the target. Each vertex takes the
+		// bed of its NEAREST point of the path: the lower bed of a path sample further on would cut its 1:1 bank through a
+		// slope steeper than that bank (a channel climbing a rise came out deeper than Depth there).
 		const int32 Width = Band.Width() + 1;
 		TArray<uint16> Lower;
 		Lower.SetNumZeroed(Width * (Band.Height() + 1));
-		bool bChanged = false;
+		TArray<double> Nearest;
+		Nearest.Init(TNumericLimits<double>::Max(), Lower.Num());
 		for (int32 Index = 0; Index + 1 < Path.Num(); ++Index)
 		{
 			const FVector2D A = Path[Index], B = Path[Index + 1];
@@ -475,19 +481,19 @@ namespace UnrealAIWaterRqlLocal
 					const double Distance = FVector2D::Distance(P, A + AB * T);
 					if (Distance > Half + Bank || !Grid.Valid(X, Y))
 						continue;
+					const int32 Cell = (Y - Band.Min.Y) * Width + (X - Band.Min.X);
+					if (Distance >= Nearest[Cell])
+						continue;
+					Nearest[Cell] = Distance;
 					const uint16 Target = Grid.Units(FMath::Lerp(Bed[Index], Bed[Index + 1], T) + FMath::Max(0.0, Distance - Half) * Rise);
 					const uint16 Ground = Grid.Raw[Grid.Index(X, Y)];
-					uint16& Amount = Lower[(Y - Band.Min.Y) * Width + (X - Band.Min.X)];
-					if (Target < Ground && Ground - Target > Amount)
-					{
-						Amount = Ground - Target;
-						bChanged = true;
-					}
+					Lower[Cell] = Target < Ground ? Ground - Target : 0;
 				}
 			}
 		}
-		if (!bChanged)
-			return false;
+		const int32 Changed = Algo::CountIf(Lower, [](uint16 Amount) { return Amount > 0; });
+		if (Changed == 0)
+			return 0;
 		FHeightmapAccessor<false> Accessor(Grid.Info);
 		Accessor.SetEditLayer(Grid.EditLayer);
 		TArray<uint16> Block;
@@ -499,8 +505,62 @@ namespace UnrealAIWaterRqlLocal
 		Accessor.SetData(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
 		Accessor.Flush();
 		UnrealAILandscapeRqlApiLocal::MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
-		return true;
+		return Changed;
 	}
+}
+
+int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth)
+{
+	using namespace UnrealAIWaterRqlLocal;
+	FHeightGrid Grid;
+	if (!ReadGrid(Landscape, Grid))
+		return 0;
+	// Points far off the landscape would make millions of samples: allow the channel's reach beyond the edge, no more.
+	const double Reach = 5.0 * Width / Grid.QuadCm + 2.0; // vertices: the bed plus its banks (CarveBed)
+	TArray<FVector2D> Local;
+	for (const FVector& Point : Points)
+	{
+		const FVector2D P = Grid.ToLocal(Point);
+		if (P.X < Grid.Rect.Min.X - Reach || P.Y < Grid.Rect.Min.Y - Reach || P.X > Grid.Rect.Max.X + Reach || P.Y > Grid.Rect.Max.Y + Reach)
+			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("point [%.0f, %.0f] is off the landscape (its Bounds): keep the points on it or just past its edge"), Point.X, Point.Y));
+		Local.Add(P);
+	}
+	// One sample per vertex along the path: the bed follows the ground under it, Depth below.
+	const TArray<FVector2D> Path = Resample(Local, 1.0);
+	constexpr double Off = TNumericLimits<double>::Max(); // a sample off the (loaded) landscape
+	TArray<double> Bed;
+	double Low = Off, High = TNumericLimits<double>::Lowest();
+	for (const FVector2D& P : Path)
+	{
+		const int32 X = FMath::RoundToInt(P.X);
+		const int32 Y = FMath::RoundToInt(P.Y);
+		if (!Grid.Valid(X, Y))
+		{
+			Bed.Add(Off);
+			continue;
+		}
+		const double Z = Grid.At(X, Y) - Depth;
+		Bed.Add(Z);
+		Low = FMath::Min(Low, Z);
+		High = FMath::Max(High, Z);
+	}
+	if (Low > High)
+		return UnrealMcpRql::Failed<int32>(TEXT("the points do not cross the landscape (its Bounds)"));
+	if (!FitsHeightRange(Landscape, Low, High))
+		return 0;
+	// A sample off the landscape takes its neighbour's bed (the channel runs straight on to the edge).
+	for (int32 Pass = 0; Pass < 2; ++Pass)
+	{
+		for (int32 Index = 0; Index < Bed.Num(); ++Index)
+		{
+			const int32 From = Pass == 0 ? Index : Bed.Num() - 1 - Index;
+			const int32 Prev = Pass == 0 ? From - 1 : From + 1;
+			if (Bed[From] == Off && Bed.IsValidIndex(Prev) && Bed[Prev] != Off)
+				Bed[From] = Bed[Prev];
+		}
+	}
+	const int32 Changed = CarveBed(Landscape, Grid, Path, Bed, Width * 0.5);
+	return Changed > 0 ? Changed : UnrealMcpRql::Failed<int32>(TEXT("nothing to carve: the points do not cross a loaded part of the landscape"));
 }
 
 using namespace UnrealAIWaterRqlLocal;

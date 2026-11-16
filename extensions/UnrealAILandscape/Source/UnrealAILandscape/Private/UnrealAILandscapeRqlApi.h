@@ -52,13 +52,21 @@ class UUnrealAILandscapeRqlApi : public UObject
 	GENERATED_BODY()
 
 public:
-	/** create a flat landscape centred on Location, SizeMeters wide on X and Y (8 to 2000 m; about one vertex per metre), with Material (optional: a landscape material, e.g. from CreateLayerMaterial); then shape it with Sculpt and colour it with Paint; its collision is ready when the call returns; returns the landscape actor */
+	/** create a flat landscape centred on Location, SizeMeters wide on X and Y (8 to 2000 m; about one vertex per metre), with Material (optional: a landscape material, e.g. from CreateLayerMaterial) and room for ground MaxHeightMeters above and below Location's Z (1 to 10000 m; default 256: height steps of 0.78 cm; more room gives coarser steps, ZScale / 128 cm, e.g. 1024 m: 3.1 cm); then shape it with Sculpt, Flatten and Carve and colour it with Paint; its collision is ready when the call returns; returns the landscape actor */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	ALandscape* Create(const FString& Label, FVector Location, double SizeMeters = 100.0, UMaterialInterface* Material = nullptr);
+	ALandscape* Create(const FString& Label, FVector Location, double SizeMeters = 100.0, UMaterialInterface* Material = nullptr, double MaxHeightMeters = 256.0);
 
-	/** raise (Height > 0, cm) or lower (Height < 0) a landscape around Center (world X and Y) within Radius (cm) with a smooth falloff to the edge: one call is one hill or hollow; heights, collision and rendering are updated when the call returns (read them back with Surface); returns how many vertices changed */
+	/** raise (Height > 0, cm) or lower (Height < 0) a landscape around Center (world X and Y) within Radius (cm) with a smooth falloff to the edge: one call is one hill or hollow; fails without changing anything when the ground would leave the landscape's height range (Bounds.HeightRange; Create's MaxHeightMeters); heights, collision and rendering are updated when the call returns (read them back with Surface); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Sculpt(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height);
+
+	/** level a landscape to world Z Height (cm) within Radius (cm) of Center (world X and Y): a flat pad, plateau or basin; Falloff (cm, optional) blends the ground around it back to its old height over that distance (0: a sharp edge); returns how many vertices changed */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff = 0.0);
+
+	/** dig a channel (a riverbed, ditch or road cut) Depth cm (1 .. 10000) below the ground along Points (2 .. 1000 world points; Z is ignored): Width cm (100 .. 20000) of level bottom following the ground, then banks rising 1:1 to the old ground; one undo step; add water along it with water | call CreateRiver; returns how many vertices changed */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
 
 	/** paint a layer by name ("Grass") onto a landscape around Center (world X and Y) within Radius (cm; 0 = the whole landscape) with a soft edge; Strength 0..1 (1 = only this layer at the centre); the layer is added to the landscape (its layer info asset saved beside the level) when it has none of that name; it shows when the landscape material blends a layer of that name (CreateLayerMaterial); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
@@ -71,6 +79,10 @@ public:
 	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground) and Normal; read-only; a point outside the landscape gives Inside false */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAILandscapeSurface Surface(ALandscapeProxy* Landscape, FVector Point);
+
+	/** delete a whole landscape: its landscape actor and every streaming proxy of a World Partition map, loaded or not (Destroy on the landscape actor alone leaves the proxies behind); one undo step; returns how many actors were deleted */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Delete(ALandscapeProxy* Landscape);
 
 	/** merge every edit layer of a landscape again and rebuild its collision and, when it has Nanite enabled, its Nanite mesh: for a landscape edited outside these operations (Landscape mode, Python) whose collision or Nanite looks stale; returns how many landscape components it has */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))

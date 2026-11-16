@@ -7,6 +7,7 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAILandscapeRqlApi.h"
+#include "UnrealAILandscapeEdit.h"
 #include "UnrealAIWaterRqlApi.h"
 #include "UnrealAIWaterSafety.h"
 
@@ -74,6 +75,35 @@ namespace UnrealAILandscapeRqlLocal
 		return FString();
 	}
 
+	/**
+	 * The highest (or lowest) ground point of one collision component, vertex by vertex in its own frame (any rotation or
+	 * scale), read like Surface reads the ground (the editor heightfield, else the physics one), so Bounds' Highest / Lowest
+	 * agree with Surface and line traces. Unset when the component has no heightfield yet.
+	 */
+	TOptional<FVector> ExtremeGround(ULandscapeHeightfieldCollisionComponent* Component, bool bHighest)
+	{
+		ALandscapeProxy* Owner = Component->GetLandscapeProxy();
+		if (!Owner)
+			return {};
+		const FTransform ToWorld = Component->GetComponentTransform();
+		const int32 Quads = FMath::RoundToInt(Component->CollisionSizeQuads * Component->CollisionScale); // its landscape quads
+		const EHeightfieldSource Source = Owner->GetHeightAtLocation(ToWorld.GetLocation(), EHeightfieldSource::Editor).IsSet()
+			? EHeightfieldSource::Editor : EHeightfieldSource::Complex;
+		TOptional<FVector> Best;
+		for (int32 Y = 0; Y <= Quads; ++Y)
+		{
+			for (int32 X = 0; X <= Quads; ++X)
+			{
+				// The last row and column are shared with the next component: nudge them inside this one.
+				const FVector At = ToWorld.TransformPosition(FVector(FMath::Min<double>(X, Quads - 0.01), FMath::Min<double>(Y, Quads - 0.01), 0.0));
+				const TOptional<float> Height = Owner->GetHeightAtLocation(At, Source);
+				if (Height.IsSet() && (!Best.IsSet() || (bHighest ? Height.GetValue() > Best->Z : Height.GetValue() < Best->Z)))
+					Best = FVector(At.X, At.Y, Height.GetValue());
+			}
+		}
+		return Best;
+	}
+
 	const TCHAR* WaterBodyTypeName(EWaterBodyType Type)
 	{
 		switch (Type)
@@ -113,7 +143,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -144,13 +174,18 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Bounds"),
-			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
+			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y], Highest and Lowest [X, Y, Z] (where the highest and lowest ground is, to a vertex), HeightRange [MinZ, MaxZ] (the lowest and highest ground it can hold: Sculpt, Flatten and Carve stay within it; set by Create's MaxHeightMeters)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
+				// A World Partition map loads only the region around the camera: load the rest so the box is the whole landscape.
+				UnrealAILandscapeRqlApiLocal::LoadLandscape(Cast<ALandscapeProxy>(Object));
 				// The loaded collision heightfields' local boxes span the ground (ULandscapeInfo::GetCompleteBounds was empty for a
 				// landscape created in the session; on a World Partition map the primary actor has no components of its own). The
 				// engine pads a flat component's box by one unit up and down: undo it, so Z is the real lowest and highest ground.
 				FBox Box(ForceInit);
+				ULandscapeHeightfieldCollisionComponent* Top = nullptr;
+				ULandscapeHeightfieldCollisionComponent* Bottom = nullptr;
+				double TopZ = TNumericLimits<double>::Lowest(), BottomZ = TNumericLimits<double>::Max();
 				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
 				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
@@ -161,7 +196,18 @@ public:
 						FBox Local = Pair.Value->CachedLocalBox;
 						if (FMath::IsNearlyEqual(Local.GetExtent().Z, 1.0))
 							Local.Min.Z = Local.Max.Z = Local.GetCenter().Z;
-						Box += Local.TransformBy(Pair.Value->GetComponentTransform());
+						const FBox World = Local.TransformBy(Pair.Value->GetComponentTransform());
+						Box += World;
+						if (World.Max.Z > TopZ)
+						{
+							TopZ = World.Max.Z;
+							Top = Pair.Value;
+						}
+						if (World.Min.Z < BottomZ)
+						{
+							BottomZ = World.Min.Z;
+							Bottom = Pair.Value;
+						}
 					}
 				}
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -177,6 +223,13 @@ public:
 				Out->SetArrayField(TEXT("Min"), Vector({ Box.Min.X, Box.Min.Y, Box.Min.Z }));
 				Out->SetArrayField(TEXT("Max"), Vector({ Box.Max.X, Box.Max.Y, Box.Max.Z }));
 				Out->SetArrayField(TEXT("SizeMeters"), Vector({ (Box.Max.X - Box.Min.X) / 100.0, (Box.Max.Y - Box.Min.Y) / 100.0 }));
+				// Only the components holding the extremes are read vertex by vertex (a 2 km landscape: 2 of 64).
+				if (const TOptional<FVector> High = ExtremeGround(Top, true))
+					Out->SetArrayField(TEXT("Highest"), Vector({ High->X, High->Y, High->Z }));
+				if (const TOptional<FVector> Low = ExtremeGround(Bottom, false))
+					Out->SetArrayField(TEXT("Lowest"), Vector({ Low->X, Low->Y, Low->Z }));
+				const FVector2D Range = UnrealAILandscapeRqlApiLocal::HeightRange(Proxy);
+				Out->SetArrayField(TEXT("HeightRange"), Vector({ Range.X, Range.Y }));
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("PaintLayers"), TEXT("the names of the landscape's paint layers"),
@@ -187,7 +240,10 @@ public:
 				if (ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
 					for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
-						Layers.Add(MakeShared<FJsonValueString>(Layer.GetLayerName().ToString()));
+					{
+						if (Layer.LayerInfoObj != ALandscapeProxy::VisibilityLayer) // the engine's hole layer, not a paint layer
+							Layers.Add(MakeShared<FJsonValueString>(Layer.GetLayerName().ToString()));
+					}
 				}
 				return MakeShared<FJsonValueArray>(Layers);
 			});
@@ -264,31 +320,40 @@ waterZones | select Label Location ZoneExtent
 landscapes | where IsPrimary | set LandscapeMaterial = "/Game/Materials/M_Terrain"
 ```
 
-Create, sculpt and paint with the `landscape` operations (each call is one undo step):
+Create, sculpt and paint with the `landscape` operations (each call is one undo step). A landscape holds ground within
+`HeightRange` (in `Bounds`): +-256 m around its Z by default. For taller ground pass `MaxHeightMeters` to `Create` (a 300 m
+hill: `Create("Island", [0, 0, 0], 2000, null, 400)`); a Sculpt, Flatten or Carve that would leave the range fails and
+changes nothing.
 
 ```
 landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")    a material blending two paint layers
 landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")                      100 x 100 m, flat, centred on the location
 [[2000, 1500, 1200, 600], [-1800, -900, 1500, 900]] | call landscape.Sculpt(unreal.find("Terrain"), [$[0], $[1], 0], $[2], $[3])    hills: center X Y, radius, height (cm)
+landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)                   a level pad: radius 15 m at Z 400 cm, 8 m blend
+landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)              a channel 1.5 m deep, 6 m wide along the points
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
 [[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
 landscapes | select Label PaintLayers Sections
 ```
 
-Heights are in cm (negative Height digs a hollow); a paint layer shows when the material blends a layer of that name.
+Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z); a paint layer shows when the material
+blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Delete a whole
+landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition
+streaming proxies behind.
 Created materials and layer infos are unsaved: `editor | call SaveAll()`.
 
 Read the ground back with `Surface` (rql-mutate, read-only) and `Bounds` instead of line traces: Create, Sculpt and
 Paint return with the landscape merged, so its collision, `Surface` and the rendered surface agree at once.
 
 ```
-landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters
+landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters, Highest/Lowest [X, Y, Z]
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])                                   {Inside, Height, Slope, Location, Normal}
 range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 - 4500, floor($ / 10) * 1000 - 4500, 0])   a 10 x 10 grid
 ```
 
 `Height` is the world Z (cm) that traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the
-ground; off the landscape `Inside` is false. Traces from above also hit your own actors (probes, roads, trees);
+ground; off the landscape `Inside` is false. On a World Partition map these operations and `Bounds` load the regions of
+the landscape they touch (a reopened map loads only the region around the camera). Traces from above also hit your own actors (probes, roads, trees);
 `Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
 can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
 `call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
@@ -304,6 +369,7 @@ tick, and its "Water" edit layer is made without the engine's modal dialog.)
 water | call CreateOcean("Ocean", 0)                                                    sea level Z 0 around the island (fills the water zone)
 water | call CreateLake("Lake", [12000, -8000, 2400], 3000)                             Z of the center is the water surface
 water | call CreateRiverBetween("River", unreal.find("Terrain"), [-20000, 30000, 0], [60000, -90000, 0], 1500, 300)
+landscape | call Carve(unreal.find("Terrain"), [[-9000, 0, 0], [9000, 0, 0]], 2000, 300)   a bed along YOUR line (CreateRiverBetween picks the lowest route)
 water | call CreateRiver("Creek", [[0, 0, 900], [4000, 1000, 700], [9000, 0, 400]], 800)  your own points, upstream first
 waterBodies | select Label Water Path                                                  Water.Ready / Water.Problem: renders or why not
 water | call SetMaterial(unreal.find("Lake"), "/Water/Materials/WaterSurface/Water_Material")
