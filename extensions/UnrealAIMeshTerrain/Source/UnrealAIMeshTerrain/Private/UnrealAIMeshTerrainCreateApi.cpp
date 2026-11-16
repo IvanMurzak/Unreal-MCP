@@ -54,7 +54,7 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		if (!CheckTimeout(TimeoutSeconds))
 			return false;
 		if (!(SizeMeters >= MinSizeMeters && SizeMeters <= MaxSizeMeters))
-			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("SizeMeters %g is outside %g .. %g"), SizeMeters, MinSizeMeters, MaxSizeMeters));
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("SizeMeters %.10g is outside %g .. %g"), SizeMeters, MinSizeMeters, MaxSizeMeters));
 		if (Location.ContainsNaN() || Location.GetAbsMax() > MaxLocation)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Location %s is not within 200 km (%g cm) of the origin"), *Location.ToString(), MaxLocation));
 		return CheckAvailable() && CheckLabel(Label);
@@ -218,7 +218,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::Create(const F
 	if (SizeYMeters == 0.0)
 		SizeYMeters = SizeMeters;
 	if (!(SizeYMeters >= MinSizeMeters && SizeYMeters <= MaxSizeMeters))
-		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("SizeYMeters %g is outside %g .. %g (0 = square)"), SizeYMeters, MinSizeMeters, MaxSizeMeters));
+		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("SizeYMeters %.10g is outside %g .. %g (0 = square)"), SizeYMeters, MinSizeMeters, MaxSizeMeters));
 	if (Resolution < 0 || Resolution > MaxQuadsPerSide)
 		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("Resolution %d is outside 1 .. %d quads (0 = about one per metre, at most 1000)"), Resolution, MaxQuadsPerSide));
 

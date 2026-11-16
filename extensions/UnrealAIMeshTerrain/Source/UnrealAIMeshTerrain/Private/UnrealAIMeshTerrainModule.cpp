@@ -108,7 +108,9 @@ namespace UnrealAIMeshTerrainModuleLocal
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 		// A terrain with unloaded base / modifier actors (World Partition, after the level is reopened) is built without them.
 		const bool bUnloaded = State.Actors > State.LoadedActors;
-		Out->SetBoolField(TEXT("Ready"), State.IsReady() && !bUnloaded);
+		// While Play In Editor runs the editor shows no sections (nothing to report as built) and the operations refuse.
+		const FString Unavailable = UnavailableReason();
+		Out->SetBoolField(TEXT("Ready"), State.IsReady() && !bUnloaded && Unavailable.IsEmpty());
 		Out->SetNumberField(TEXT("Sections"), State.Sections);
 		Out->SetNumberField(TEXT("Triangles"), State.Triangles);
 		Out->SetBoolField(TEXT("Building"), State.bBuilding);
@@ -117,7 +119,7 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetNumberField(TEXT("CompilingMeshes"), State.CompilingMeshes);
 		Out->SetNumberField(TEXT("Actors"), State.Actors);
 		Out->SetNumberField(TEXT("LoadedActors"), State.LoadedActors);
-		Out->SetStringField(TEXT("State"), bUnloaded
+		Out->SetStringField(TEXT("State"), !Unavailable.IsEmpty() ? Unavailable : bUnloaded
 			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition), so it is built without them: any meshTerrain call loads them"),
 				State.bNoBase ? TEXT("not built") : *State.Describe(), State.Actors - State.LoadedActors, State.Actors)
 			: State.Describe());
