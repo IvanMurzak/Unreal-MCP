@@ -114,9 +114,9 @@ namespace UnrealMcpRqlSessionLocal
 	}
 
 	/** A call result list cut at MaxCallResultItems gets a warning that says how many items were left out and what to do. */
-	void AddCallResultListNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	void AddCallResultListNote(rql::QueryResult& Result)
 	{
-		if (!Result.ok || !Result.rows || !Result.columns || !EndsWithCall(Plan))
+		if (!Result.ok || !Result.rows || !Result.columns)
 			return;
 		const std::vector<std::string>& Columns = *Result.columns;
 		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
@@ -744,10 +744,12 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		rql::Budgets Budgets;
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
-		if (EndsWithCall(Plan))
+		const bool bCall = EndsWithCall(Plan);
+		if (bCall)
 			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
-		AddCallResultListNote(Result, Plan);
+		if (bCall)
+			AddCallResultListNote(Result);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
