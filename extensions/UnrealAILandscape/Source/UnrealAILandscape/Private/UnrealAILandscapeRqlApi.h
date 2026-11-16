@@ -107,9 +107,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0);
 
-	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 200) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
+	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
-	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 200.0, double Scale = 5000.0);
+	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 300.0, double Scale = 5000.0);
 
 	/** create a landscape material at Path ("/Game/Landscape/M_Terrain") that blends one paint layer per entry of Layers, each a name with an optional colour: "Grass #3a7d2c, Rock #808080"; assign it with Create or set LandscapeMaterial, then Paint the layers; returns the material (unsaved) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))

@@ -877,46 +877,56 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 	// 1, i, j, i^2, ij, j^2, z, iz, jz): the residual is how far the ground stands out of that plane. A slope, or a box cut
 	// off by the landscape's edge, then gives no residual; only a place that rises or sinks out of its surroundings does.
 	const int32 B = FMath::Max(1, FMath::RoundToInt(Scale / (Quad * Step)));
+	// Two passes: the second fits only the samples the first found ordinary, so a spike or pit does not tilt the plane of its
+	// own surroundings (which showed as a ghost pit beside a spike, a ghost bump on a pit's rim).
 	enum { C1, CI, CJ, CII, CIJ, CJJ, CZ, CIZ, CJZ, CN };
-	TArray<double> Sat[CN];
-	for (TArray<double>& T : Sat)
-		T.SetNumZeroed((GW + 1) * (GH + 1));
-	for (int32 J = 0; J < GH; ++J)
-	{
-		for (int32 I = 0; I < GW; ++I)
-		{
-			const int32 K = (J + 1) * (GW + 1) + (I + 1);
-			const bool bValid = Valid[J * GW + I];
-			const double Zv = Z[J * GW + I];
-			const double Values[CN] = { 1.0, double(I), double(J), double(I) * I, double(I) * J, double(J) * J, Zv, I * Zv, J * Zv };
-			for (int32 C = 0; C < CN; ++C)
-				Sat[C][K] = (bValid ? Values[C] : 0.0) + Sat[C][K - 1] + Sat[C][K - (GW + 1)] - Sat[C][K - (GW + 1) - 1];
-		}
-	}
 	TArray<double> Residual;
 	Residual.SetNumZeroed(GW * GH);
-	for (int32 J = 0; J < GH; ++J)
+	TBitArray<> Fit = Valid;
+	for (int32 Pass = 0; Pass < 2; ++Pass)
 	{
-		for (int32 I = 0; I < GW; ++I)
+		if (Pass == 1)
 		{
-			if (!Valid[J * GW + I])
-				continue;
-			const int32 I0 = FMath::Max(0, I - B), J0 = FMath::Max(0, J - B), I1 = FMath::Min(GW, I + B + 1), J1 = FMath::Min(GH, J + B + 1);
-			double S[CN];
-			for (int32 C = 0; C < CN; ++C)
-				S[C] = Sat[C][J1 * (GW + 1) + I1] - Sat[C][J0 * (GW + 1) + I1] - Sat[C][J1 * (GW + 1) + I0] + Sat[C][J0 * (GW + 1) + I0];
-			const double N = S[C1];
-			if (N < 3.0)
-				continue;
-			// Centred on this sample: u = i - I, v = j - J; fit z = A + Bu u + Bv v, the plane's height here is A.
-			const double Su = S[CI] - N * I, Sv = S[CJ] - N * J;
-			const double Suu = S[CII] - 2.0 * I * S[CI] + N * I * I, Svv = S[CJJ] - 2.0 * J * S[CJ] + N * J * J;
-			const double Suv = S[CIJ] - J * S[CI] - I * S[CJ] + N * I * J;
-			const double Sz = S[CZ], Suz = S[CIZ] - I * S[CZ], Svz = S[CJZ] - J * S[CZ];
-			double Plane[3];
-			FitPlane(N, Su, Sv, Suu, Suv, Svv, Sz, Suz, Svz, Plane);
-			const double A = Plane[0];
-			Residual[J * GW + I] = Z[J * GW + I] - A;
+			for (int32 Index = 0; Index < GW * GH; ++Index)
+				Fit[Index] = Valid[Index] && FMath::Abs(Residual[Index]) < MinHeight;
+		}
+		TArray<double> Sat[CN];
+		for (TArray<double>& T : Sat)
+			T.SetNumZeroed((GW + 1) * (GH + 1));
+		for (int32 J = 0; J < GH; ++J)
+		{
+			for (int32 I = 0; I < GW; ++I)
+			{
+				const int32 K = (J + 1) * (GW + 1) + (I + 1);
+				const bool bFit = Fit[J * GW + I];
+				const double Zv = Z[J * GW + I];
+				const double Values[CN] = { 1.0, double(I), double(J), double(I) * I, double(I) * J, double(J) * J, Zv, I * Zv, J * Zv };
+				for (int32 C = 0; C < CN; ++C)
+					Sat[C][K] = (bFit ? Values[C] : 0.0) + Sat[C][K - 1] + Sat[C][K - (GW + 1)] - Sat[C][K - (GW + 1) - 1];
+			}
+		}
+		for (int32 J = 0; J < GH; ++J)
+		{
+			for (int32 I = 0; I < GW; ++I)
+			{
+				if (!Valid[J * GW + I])
+					continue;
+				const int32 I0 = FMath::Max(0, I - B), J0 = FMath::Max(0, J - B), I1 = FMath::Min(GW, I + B + 1), J1 = FMath::Min(GH, J + B + 1);
+				double S[CN];
+				for (int32 C = 0; C < CN; ++C)
+					S[C] = Sat[C][J1 * (GW + 1) + I1] - Sat[C][J0 * (GW + 1) + I1] - Sat[C][J1 * (GW + 1) + I0] + Sat[C][J0 * (GW + 1) + I0];
+				const double N = S[C1];
+				if (N < 3.0)
+					continue; // the second pass keeps the first's residual where too few ordinary samples remain
+				// Centred on this sample: u = i - I, v = j - J; fit z = A + Bu u + Bv v, the plane's height here is A.
+				const double Su = S[CI] - N * I, Sv = S[CJ] - N * J;
+				const double Suu = S[CII] - 2.0 * I * S[CI] + N * I * I, Svv = S[CJJ] - 2.0 * J * S[CJ] + N * J * J;
+				const double Suv = S[CIJ] - J * S[CI] - I * S[CJ] + N * I * J;
+				const double Sz = S[CZ], Suz = S[CIZ] - I * S[CZ], Svz = S[CJZ] - J * S[CZ];
+				double Plane[3];
+				FitPlane(N, Su, Sv, Suu, Suv, Svv, Sz, Suz, Svz, Plane);
+				Residual[J * GW + I] = Z[J * GW + I] - Plane[0];
+			}
 		}
 	}
 	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that plane, one result each.
@@ -985,9 +995,20 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		Bump.Radius = FMath::RoundToDouble((Reach + 1.0) * Step * Quad);
 	}
 	Out.Sort([](const FUnrealAILandscapeBump& A, const FUnrealAILandscapeBump& B) { return FMath::Abs(A.Height) > FMath::Abs(B.Height); });
-	if (Out.Num() > 50)
-		Out.SetNum(50);
-	return Out;
+	// A smaller result on a larger one's rim (within 1.5 x its Radius) is that one's edge, not a place of its own.
+	FBumps Kept;
+	for (const FUnrealAILandscapeBump& Bump : Out)
+	{
+		const bool bRim = Kept.ContainsByPredicate([&Bump](const FUnrealAILandscapeBump& Larger)
+		{
+			return FVector2D::Distance(FVector2D(Bump.Location), FVector2D(Larger.Location)) < 1.5 * Larger.Radius;
+		});
+		if (!bRim)
+			Kept.Add(Bump);
+		if (Kept.Num() == 50)
+			break;
+	}
+	return Kept;
 }
 
 UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, const FString& Layers)
