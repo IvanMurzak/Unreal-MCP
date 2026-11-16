@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Landscape.h"
 #include "LandscapeDataAccess.h"
+#include "LandscapeComponent.h"
 #include "LandscapeEdit.h"
 #include "LandscapeEditLayer.h"
 #include "LandscapeEditTypes.h"
@@ -96,22 +97,20 @@ namespace UnrealAILandscapeRqlApiLocal
 			*Landscape->GetActorNameOrLabel(), Suggested, Suggested));
 	}
 
-	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	/**
+	 * Load the World Partition actors of the editor world's descs @p Wanted accepts (only unloaded ones are offered), as the
+	 * editor's region loading does; false after Fail when the engine cannot load them.
+	 */
+	bool LoadDescs(UClass* Class, TFunctionRef<bool(const FWorldPartitionActorDescInstance*)> Wanted)
 	{
-		UWorld* World = Landscape ? Landscape->GetWorld() : nullptr;
+		UWorld* World = UnrealMcpRql::EditorWorld();
 		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
-		// LoadActors loads into the editor world only (another world, e.g. play in editor, streams by itself).
-		if (!Partition || World != UnrealMcpRql::EditorWorld())
+		if (!Partition)
 			return true;
-		const FGuid Guid = Landscape->GetLandscapeGuid();
 		TArray<FGuid> ToLoad;
-		FWorldPartitionHelpers::ForEachActorDescInstance<ALandscapeStreamingProxy>(Partition, [&](const FWorldPartitionActorDescInstance* Instance)
+		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, Class, [&](const FWorldPartitionActorDescInstance* Instance)
 		{
-			const FPartitionActorDesc* Desc = static_cast<const FPartitionActorDesc*>(Instance->GetActorDesc());
-			if (Desc->GridGuid != Guid || Instance->IsLoaded())
-				return true;
-			const FBox Box = Instance->GetEditorBounds();
-			if (!Area || FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(*Area))
+			if (!Instance->IsLoaded() && Wanted(Instance))
 				ToLoad.Add(Instance->GetGuid());
 			return true;
 		});
@@ -122,10 +121,30 @@ namespace UnrealAILandscapeRqlApiLocal
 		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
 		static UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
 		if (!Load)
-			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
+			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the regions in the World Partition window first"));
 		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
 		Library->GetDefaultObject()->ProcessEvent(Load, &Params);
 		return true;
+	}
+
+	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	{
+		// LoadActors loads into the editor world only (another world, e.g. play in editor, streams by itself).
+		if (!Landscape || Landscape->GetWorld() != UnrealMcpRql::EditorWorld())
+			return true;
+		const FGuid Guid = Landscape->GetLandscapeGuid();
+		return LoadDescs(ALandscapeStreamingProxy::StaticClass(), [&Guid, Area](const FWorldPartitionActorDescInstance* Instance)
+		{
+			if (static_cast<const FPartitionActorDesc*>(Instance->GetActorDesc())->GridGuid != Guid)
+				return false;
+			const FBox Box = Instance->GetEditorBounds();
+			return !Area || FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(*Area);
+		});
+	}
+
+	void LoadAll(UClass* Class)
+	{
+		LoadDescs(Class, [](const FWorldPartitionActorDescInstance*) { return true; });
 	}
 
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
@@ -651,16 +670,24 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 		return Out;
 	// The full-resolution collision heightfield (the editor's copy; the physics one when it has none): what line traces and
 	// actors placed on the ground meet at the default collision mip 0, and what the editor renders up close. A point on the
-	// far edge is nudged inside: the engine looks it up in a component past the last one.
+	// far edge is nudged inside: the engine looks it up in a component past the last one. A point exactly on the line
+	// between two components (every ComponentSizeQuads vertices: on a 2 km landscape every 250 m, X or Y 0, 25000, ...) is
+	// nudged into the next one: the engine reads it from the one before and returns the height one vertex back.
 	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
-	const auto HeightAt = [Landscape, &ToWorld, &Whole](double X, double Y) -> TOptional<float>
+	const double ComponentQuads = FMath::Max(1, Landscape->ComponentSizeQuads);
+	const auto HeightAt = [Landscape, &ToWorld, &Whole, ComponentQuads](double X, double Y) -> TOptional<float>
 	{
 		FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
 		constexpr double Edge = 1e-3; // quads
 		if (Local.X < Whole.Min.X - Edge || Local.Y < Whole.Min.Y - Edge || Local.X > Whole.Max.X + Edge || Local.Y > Whole.Max.Y + Edge)
 			return TOptional<float>();
-		Local.X = FMath::Clamp(Local.X, static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
-		Local.Y = FMath::Clamp(Local.Y, static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
+		const auto OffSeam = [ComponentQuads](double Value)
+		{
+			const double Into = Value - FMath::FloorToDouble(Value / ComponentQuads) * ComponentQuads;
+			return Into < Edge ? Value + Edge : Value;
+		};
+		Local.X = FMath::Clamp(OffSeam(Local.X), static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
+		Local.Y = FMath::Clamp(OffSeam(Local.Y), static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
 		const FVector Inside = ToWorld.TransformPosition(Local);
 		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Editor);
 		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Complex);
@@ -684,6 +711,17 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	Out.Location = FVector(Point.X, Point.Y, Out.Height);
 	Out.Normal = FVector(-SlopeX, -SlopeY, 1.0).GetSafeNormal();
 	Out.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Out.Normal.Z, -1.0, 1.0)));
+	// The paint layers' weights from the final (merged) weightmaps of the component under the point.
+	const FVector Local = ToWorld.InverseTransformPosition(FVector(Point.X, Point.Y, ToWorld.GetLocation().Z));
+	const auto ComponentIndex = [ComponentQuads](double Value, int32 Min, int32 Max) { return FMath::FloorToInt(FMath::Clamp(Value, static_cast<double>(Min), Max - 1e-3) / ComponentQuads); };
+	if (ULandscapeComponent* const* Component = Info->XYtoComponentMap.Find(FIntPoint(ComponentIndex(Local.X, Whole.Min.X, Whole.Max.X), ComponentIndex(Local.Y, Whole.Min.Y, Whole.Max.Y))))
+	{
+		for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
+		{
+			if (Layer.LayerInfoObj && Layer.LayerInfoObj != ALandscapeProxy::VisibilityLayer)
+				Out.Layers.Add(Layer.GetLayerName().ToString(), FMath::RoundToDouble((*Component)->GetLayerWeightAtLocation(Out.Location, Layer.LayerInfoObj, nullptr, false) * 100.0) / 100.0);
+		}
+	}
 	return Out;
 }
 

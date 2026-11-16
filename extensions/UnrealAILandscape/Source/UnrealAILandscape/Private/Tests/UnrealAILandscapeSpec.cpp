@@ -515,6 +515,63 @@ void FUnrealAILandscapeSpec::Define()
 			const TOptional<float> After = Landscape->GetHeightAtLocation(Top, EHeightfieldSource::Complex);
 			TestTrue(*FString::Printf(TEXT("the hill survives a rebuild (%.1f cm; %s)"), After.Get(-1.0f), *LandscapeSpecJson(Rebuilt).Left(200)), After.IsSet() && FMath::IsNearlyEqual(After.GetValue(), 300.0f, 25.0f));
 		});
+		It("reads the right vertex on a seam between two components and each paint layer's weight (Surface)", [this]()
+		{
+			if (!FApp::CanEverRender())
+			{
+				AddInfo(TEXT("this editor does not render (-nullrhi): the sculpted ground and paint merge only in a rendering editor"));
+				return;
+			}
+			const FString Label = TEXT("RqlSpecSeam_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 700000.0;
+			// landscape | call Create("@LABEL@", [700000, 0, 0], 130): 3 x 3 components of 63 quads
+			TestTrue(TEXT("landscape created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":700000},{"lit":0},{"lit":0}]},{"lit":130}]}]})RQL"), Label, FString(), true));
+			ALandscape* Landscape = LandscapeSpecFind<ALandscape>(Label);
+			if (!TestNotNull(TEXT("the landscape is in the editor world"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+			const double Seam = ToWorld.TransformPosition(FVector(Landscape->ComponentSizeQuads, 0.0, 0.0)).X; // first and second component meet
+			const auto Run = [&Label](const FString& Plan, TSharedPtr<FJsonObject>* Out = nullptr, bool bMutate = true)
+			{
+				return LandscapeSpecRun(Plan, Label, FString(), bMutate, Out);
+			};
+			// landscape | call Sculpt(unreal.find("@LABEL@"), [Seam + 1500, 0, 0], 3000, 1500): the seam on the hill's flank
+			TestTrue(TEXT("hill raised"), Run(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":3000},{"lit":1500}]}]})RQL")).Replace(TEXT("@X@"), *FString::SanitizeFloat(Seam + 1500.0))));
+			// landscape | call Surface(unreal.find("@LABEL@"), [X, 0, 0]) in rql-query: Height and the Layers object
+			const auto Surface = [this, &Run](double X) -> TSharedPtr<FJsonObject>
+			{
+				TSharedPtr<FJsonObject> Result;
+				Run(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Surface","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]}]}]})RQL")).Replace(TEXT("@X@"), *FString::SanitizeFloat(X)), &Result, false);
+				return LandscapeSpecCallResult(Result);
+			};
+			const auto Height = [](const TSharedPtr<FJsonObject>& Ground) { double Value = TNumericLimits<double>::Max(); if (Ground) Ground->TryGetNumberField(TEXT("Height"), Value); return Value; };
+			const double OnSeam = Height(Surface(Seam));
+			const double Before = Height(Surface(Seam - 0.01));
+			const double After = Height(Surface(Seam + 0.01));
+			const double Vertex = Height(Surface(ToWorld.TransformPosition(FVector(Landscape->ComponentSizeQuads - 1, 0.0, 0.0)).X));
+			TestTrue(*FString::Printf(TEXT("on the seam Surface reads the seam's vertex, not the one before it (%.2f; just before %.2f, just after %.2f, the vertex before %.2f)"), OnSeam, Before, After, Vertex),
+				FMath::Abs(OnSeam - Before) < 1.0 && FMath::Abs(OnSeam - After) < 1.0 && FMath::Abs(OnSeam - Vertex) > 5.0);
+
+			// landscape | call Paint(unreal.find("@LABEL@"), "Grass", [700000, 0, 0], 0), then Rock within 15 m of [704000, 0]
+			TestTrue(TEXT("grass painted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"Grass"},{"list":[{"lit":700000},{"lit":0},{"lit":0}]},{"lit":0}]}]})RQL")));
+			TestTrue(TEXT("rock painted"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"Rock"},{"list":[{"lit":704000},{"lit":0},{"lit":0}]},{"lit":1500}]}]})RQL")));
+			const auto Weights = [](const TSharedPtr<FJsonObject>& Ground)
+			{
+				const TSharedPtr<FJsonObject>* Layers = nullptr;
+				double Grass = -1.0, Rock = -1.0;
+				if (Ground && Ground->TryGetObjectField(TEXT("Layers"), Layers))
+				{
+					(*Layers)->TryGetNumberField(TEXT("Grass"), Grass);
+					(*Layers)->TryGetNumberField(TEXT("Rock"), Rock);
+				}
+				return FVector2D(Grass, Rock);
+			};
+			const FVector2D Painted = Weights(Surface(X0 + 4000.0));
+			const FVector2D Plain = Weights(Surface(X0 - 5000.0));
+			TestTrue(*FString::Printf(TEXT("Layers: rock where Rock was painted (Grass %.2f, Rock %.2f), grass elsewhere (Grass %.2f, Rock %.2f)"), Painted.X, Painted.Y, Plain.X, Plain.Y),
+				Painted.Y >= 0.9 && Painted.X <= 0.1 && Plain.X >= 0.9 && Plain.Y >= 0.0 && Plain.Y <= 0.1);
+		});
 	});
 
 	Describe("shaping", [this]()
