@@ -273,7 +273,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 	}
 	const double SizeYMeters = SizeMeters * Aspect;
 	if (SizeYMeters < 1.0 || SizeYMeters > MaxSizeMeters)
-		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("the heightmap's aspect makes the terrain %g m on Y: keep it within 1 .. %g"), SizeYMeters, MaxSizeMeters));
+		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("the heightmap's aspect makes the terrain %.10g m on Y: keep it within 1 .. %g"), SizeYMeters, MaxSizeMeters));
 
 	UE::MeshPartition::FHeightmapImportParams Params;
 	Params.World = UnrealMcpRql::EditorWorld();

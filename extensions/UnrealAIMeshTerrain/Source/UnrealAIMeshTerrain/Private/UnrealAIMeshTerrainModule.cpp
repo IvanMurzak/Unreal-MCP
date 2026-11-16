@@ -119,10 +119,17 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetNumberField(TEXT("CompilingMeshes"), State.CompilingMeshes);
 		Out->SetNumberField(TEXT("Actors"), State.Actors);
 		Out->SetNumberField(TEXT("LoadedActors"), State.LoadedActors);
-		Out->SetStringField(TEXT("State"), !Unavailable.IsEmpty() ? Unavailable : bUnloaded
-			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition), so it is built without them: any meshTerrain call loads them"),
-				State.bNoBase ? TEXT("not built") : *State.Describe(), State.Actors - State.LoadedActors, State.Actors)
-			: State.Describe());
+		FString StateText;
+		if (!Unavailable.IsEmpty())
+			StateText = Unavailable; // first: nothing else is meaningful while the operations refuse
+		else if (bUnloaded)
+		{
+			StateText = FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition), so it is built without them: any meshTerrain call loads them"),
+				State.bNoBase ? TEXT("not built") : *State.Describe(), State.Actors - State.LoadedActors, State.Actors);
+		}
+		else
+			StateText = State.Describe();
+		Out->SetStringField(TEXT("State"), StateText);
 		return MakeShared<FJsonValueObject>(Out);
 	}
 
