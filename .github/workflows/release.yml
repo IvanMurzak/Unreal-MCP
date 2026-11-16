@@ -28,11 +28,12 @@
 #                        Fab strips Binaries/), emits the dedicated SOURCE install asset
 #                        unreal-mcp-plugin-source-<version>.zip and the executable-free Fab
 #                        asset unreal-mcp-plugin-fab-<version>.zip (both carry the bridge zips'
-#                        SHA256SUMS, §6.8), runs BuildPlugin -Rocket
+#                        SHA256SUMS, §6.8) plus its per-engine copies
+#                        unreal-mcp-plugin-fab-<version>-ue<engine>.zip, runs BuildPlugin -Rocket
 #                        (RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/ ->
 #                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips the PACKAGED
 #                        plugin with the latest supported UE as unreal-mcp-plugin-<version>.zip ->
-#                        publish-release attaches the three plugin zips + the 4 signed bridge zips.
+#                        publish-release attaches the plugin zips + the 4 signed bridge zips.
 # Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
 # guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
 # Unreal-MCP repo has no signing secrets yet (the owner mirrors the 9 from
@@ -589,6 +590,8 @@ jobs:
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Windows only: this is the Fab Win64 package. The engine label must match the ue-env version below.
     runs-on: [self-hosted, windows, unreal-5-8]
+    outputs:
+      fab_engine_zips: ${{ steps.fab_engine_zips.outputs.fab_engine_zips }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -631,7 +634,7 @@ jobs:
           path: ./bridge-staging/win-x64
       # The per-RID release zips (the exact bytes publish-release attaches): stage-bridge writes their SHA-256 into
       # the plugin (Source/ThirdParty/UnrealMcpBridge/SHA256SUMS), the trust anchor the editor verifies a downloaded
-      # bridge against when the plugin ships without one (the Fab asset, docs/ARCHITECTURE.md §6.8).
+      # bridge against (docs/ARCHITECTURE.md §6.8).
       - name: Download bridge release zips (osx + linux)
         uses: actions/download-artifact@v8
         with:
@@ -658,9 +661,14 @@ jobs:
       - name: Build source plugin zip
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py source-zip --version ${{ needs.check-version.outputs.version }}
       # The Fab submission asset: the source asset with no executable at all (Epic's Fab review accepts source files
-      # only); the editor downloads + verifies the bridge instead (§6.8). The step fails if anything executable is left.
+      # only); Fab users download the bridge by hand (§6.8). The step fails if anything executable is left.
       - name: Build Fab plugin zip
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py fab-zip --version ${{ needs.check-version.outputs.version }}
+      # The Fab project files: one zip per engine with EngineVersion pinned (docs/RELEASING.md C5), built from the
+      # Fab zip above, so a Fab update only needs these release assets as the listing's File Links.
+      - name: Build per-engine Fab zips
+        id: fab_engine_zips
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py fab-engine-zips --version ${{ needs.check-version.outputs.version }}
       # Machine-wide UE serialization (#293) — see the plugin job. The source zip above runs no UE.
       - name: Acquire machine-wide UE lock
         run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 180
@@ -687,6 +695,13 @@ jobs:
           path: ./dist/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}.zip
           if-no-files-found: error
           retention-days: 7
+      - name: Upload per-engine Fab zips
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-fab-engine-zips
+          path: ./dist/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}-ue*.zip
+          if-no-files-found: error
+          retention-days: 7
 
       # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
       - name: Teardown (cleanup, release the machine-wide UE lock)
@@ -710,7 +725,12 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-zip
           path: ./assets
-      # Sign the plugin-SOURCE zip (and the Fab zip, the same source minus executables) with the pinned publisher key so the CLI can
+      - name: Download per-engine Fab zips
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-fab-engine-zips
+          path: ./assets
+      # Sign the plugin-SOURCE zip (and the Fab zips, the same source minus executables) with the pinned publisher key so the CLI can
       # VERIFY it before install (zero-config-engine-connect D12). A same-origin
       # SHA256 is integrity-only (a release-asset attacker swaps the zip AND its
       # checksum); a detached minisign (Ed25519) signature over an OFFLINE key is a
@@ -747,10 +767,10 @@ jobs:
           # The key is passwordless (minted with `minisign -G -W`), so signing does
           # not prompt; `< /dev/null` guards against any interactive read on a CI
           # runner with no tty. `-x` names the detached signature output.
-          for kind in source fab; do
-            zip="./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip"
+          # Every plugin zip here: the source and Fab zips plus the per-engine Fab zips (the Fab File Links).
+          for zip in ./assets/unreal-mcp-plugin-*.zip; do
             minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
-              -t "unreal-mcp plugin ${kind} ${VERSION} signed by AI Game Dev release CI" < /dev/null
+              -t "$(basename "$zip") signed by AI Game Dev release CI" < /dev/null
             echo "Signed $zip -> ${zip}.minisig"
           done
           rm -f "$keyfile"
@@ -767,6 +787,13 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-minisig
           path: ./assets/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}.zip.minisig
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload per-engine Fab signatures
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-fab-engine-minisig
+          path: ./assets/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}-ue*.zip.minisig
           if-no-files-found: error
           retention-days: 7
 
@@ -806,10 +833,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      # Attach the three plugin artifacts:
+      # Attach the plugin artifacts and their .minisig signatures:
       #   * unreal-mcp-plugin-source-<version>.zip  -> CLI source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
       #   * unreal-mcp-plugin-fab-<version>.zip     -> input of the per-engine Fab zips (source, no executable; §6.8)
+      #   * unreal-mcp-plugin-fab-<version>-ue<engine>.zip -> the Fab listing's per-engine File Links (RELEASING.md C5)
       # The per-RID signed bridge zips are also attached for debugging /
       # UNREAL_MCP_BRIDGE_PATH users.
       - name: Download bridge release zips (osx + linux)
@@ -847,6 +875,16 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-minisig
           path: ./assets
+      - name: Download per-engine Fab zips
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-fab-engine-zips
+          path: ./assets
+      - name: Download per-engine Fab signatures
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-fab-engine-minisig
+          path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets
       - name: Create GitHub Release
@@ -859,9 +897,9 @@ jobs:
           shopt -s nullglob
           # Fail-closed: the CLI rejects an unsigned source zip (D12); the signatures
           # are produced by sign-plugin-source.
-          for kind in source fab; do
-            if [ ! -f "./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig" ]; then
-              echo "::error::Plugin signature ./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig is missing — refusing to create the Release."
+          for zip in ./assets/unreal-mcp-plugin-source-*.zip ./assets/unreal-mcp-plugin-fab-*.zip; do
+            if [ ! -f "${zip}.minisig" ]; then
+              echo "::error::Plugin signature ${zip}.minisig is missing — refusing to create the Release."
               exit 1
             fi
           done
@@ -1161,7 +1199,7 @@ jobs:
   # the CLI / consumers download.
   verify-release:
     name: verify published release
-    needs: [check-version, publish-npm, publish-release]
+    needs: [check-version, build-plugin-zip, publish-npm, publish-release]
     if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -1194,9 +1232,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-version.outputs.tag }}
           VERSION: ${{ needs.check-version.outputs.version }}
+          # One name per FAB_ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
+          FAB_ENGINE_ZIPS: ${{ needs.build-plugin-zip.outputs.fab_engine_zips }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${FAB_ENGINE_ZIPS:-}" ]; then
+            echo "::error::build-plugin-zip reported no per-engine Fab zips."
+            exit 1
+          fi
+          fab_engine_assets=""
+          for zip in ${FAB_ENGINE_ZIPS}; do
+            fab_engine_assets="${fab_engine_assets} ${zip} ${zip}.minisig"
+          done
           release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
           tag_name="$(jq -r '.tagName' <<<"$release_json")"
           is_draft="$(jq -r '.isDraft' <<<"$release_json")"
@@ -1216,6 +1264,7 @@ jobs:
             "unreal-mcp-plugin-source-${VERSION}.zip.minisig" \
             "unreal-mcp-plugin-fab-${VERSION}.zip" \
             "unreal-mcp-plugin-fab-${VERSION}.zip.minisig" \
+            ${fab_engine_assets} \
             "unreal-mcp-bridge-win-x64.zip" \
             "unreal-mcp-bridge-osx-arm64.zip" \
             "unreal-mcp-bridge-osx-x64.zip" \
@@ -1228,7 +1277,7 @@ jobs:
             fi
           done
           exit "$missing"
-      # A Fab install downloads the attached bridge zips and accepts them only if they match the SHA256SUMS shipped
+      # The editor's bridge download accepts the attached bridge zips only if they match the SHA256SUMS shipped
       # inside the plugin (docs/ARCHITECTURE.md §6.8): prove the published bytes and the shipped digests agree.
       - name: Verify the bridge zips match the plugin's SHA256SUMS
         env:
