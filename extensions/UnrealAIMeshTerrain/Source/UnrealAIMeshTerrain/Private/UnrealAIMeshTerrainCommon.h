@@ -121,11 +121,11 @@ namespace UnrealAIMeshTerrain
 	FBox BaseBounds(const AMeshPartition* Terrain);
 
 	/**
-	 * Where @p Terrain's built ground is highest and lowest within its own area (BaseBounds): a vertex of the rendered sections'
+	 * Where @p Terrain's built ground is highest and lowest within its own area @p Base (BaseBounds): a vertex of the rendered sections'
 	 * collision that a vertical trace from above lands on (what traces and physics hit; not the underside of an overhang).
 	 * False when nothing is built (or no section has cooked collision yet).
 	 */
-	bool GroundExtremes(const AMeshPartition* Terrain, FVector& OutHighest, FVector& OutLowest);
+	bool GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, FVector& OutHighest, FVector& OutLowest);
 
 	// ---- Build -------------------------------------------------------------------------------------------------------
 

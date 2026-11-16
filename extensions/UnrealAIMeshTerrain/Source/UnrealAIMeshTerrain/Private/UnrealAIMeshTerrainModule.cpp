@@ -112,9 +112,10 @@ namespace UnrealAIMeshTerrainModuleLocal
 		const TSharedPtr<FJsonObject>& Fields = Out->AsObject();
 		if (!Fields->Values.IsEmpty())
 		{
-			Fields->SetField(TEXT("Base"), BoxJson(BaseBounds(Terrain)));
+			const FBox Base = BaseBounds(Terrain);
+			Fields->SetField(TEXT("Base"), BoxJson(Base));
 			FVector Highest, Lowest;
-			if (GroundExtremes(Terrain, Highest, Lowest))
+			if (GroundExtremes(Terrain, Base, Highest, Lowest))
 			{
 				Fields->SetArrayField(TEXT("Highest"), Vector({ Highest.X, Highest.Y, Highest.Z }));
 				Fields->SetArrayField(TEXT("Lowest"), Vector({ Lowest.X, Lowest.Y, Lowest.Z }));
@@ -309,11 +310,10 @@ meshTerrains | select Label Build Bounds PriorityLayers Channels
 meshTerrains | where Label == "Island" | select Bounds        Base.SizeMeters: its size; Highest / Lowest [X, Y, Z]: its highest and lowest ground
 meshTerrains | first | get Modifiers | select Modifier
 meshTerrainModifiers | where Kind == "Noise" | select $ref Modifier
-meshTerrainModifiers | where Terrain == null | select $ref Modifier   leftovers bound to no terrain (a deleted terrain's modifiers and base meshes)
+meshTerrainModifiers | where Terrain == null | select $ref Modifier   leftovers (see Repairs)
 ```
 
-`Bounds` is the built ground's box: where a Union shape reaches past the terrain's edge it is larger than the terrain
-itself, whose extent is `Bounds.Base` (the base meshes: the size Create or ImportHeightmap gave it).
+`Bounds` is the built ground's box, larger than the terrain's own extent `Bounds.Base` where a Union shape reaches past the edge.
 
 Modifiers apply layer by layer (the definition's `PriorityLayers`, first to last), then by `Priority` (sub-priority,
 higher later) within a layer. A terrain rebuilds after every change in the background: read heights with `Surface`, which

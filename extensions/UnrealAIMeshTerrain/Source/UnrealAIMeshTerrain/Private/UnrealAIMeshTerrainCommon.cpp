@@ -353,34 +353,34 @@ namespace UnrealAIMeshTerrain
 	FBox BaseBounds(const AMeshPartition* Terrain)
 	{
 		FBox Box(ForceInit);
-		for (const UModifierComponent* Modifier : Modifiers(Terrain, /*bBases*/ true))
+		if (const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
 		{
-			if (Modifier->IsBase())
-				Box += Modifier->ComputeCombinedBounds();
+			for (const UModifierComponent* Base : Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier) && Modifier->IsBase(); }))
+				Box += Base->ComputeCombinedBounds();
 		}
 		return Box;
 	}
 
-	bool GroundExtremes(const AMeshPartition* Terrain, FVector& OutHighest, FVector& OutLowest)
+	bool GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, FVector& OutHighest, FVector& OutLowest)
 	{
+		if (!Base.IsValid)
+			return false;
 		// The highest and lowest vertices of the sections' collision, a few candidates each way: a vertex can lie under an
 		// overhang (the underside of a Union shape past the terrain's edge), which no vertical trace reaches, so the first
-		// candidate the trace from above lands on is the ground's extreme.
+		// candidate the trace from above lands on is the ground's extreme. Within the terrain's own area: the collision also
+		// has a skirt a few cm outside and below its edges.
 		constexpr int32 Candidates = 64;
+		auto ByZ = [](bool bHighest) { return [bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; }; };
 		TArray<FVector> High, Low;
-		auto Keep = [](TArray<FVector>& Best, const FVector& Point, bool bHighest)
+		auto Keep = [&ByZ](TArray<FVector>& Best, const FVector& Point, bool bHighest)
 		{
 			Best.Add(Point);
 			if (Best.Num() >= Candidates * 2)
 			{
-				Best.Sort([bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; });
+				Best.Sort(ByZ(bHighest));
 				Best.SetNum(Candidates);
 			}
 		};
-		// Within the terrain's own area: the collision also has a skirt a few cm outside and below its edges.
-		const FBox Base = BaseBounds(Terrain);
-		if (!Base.IsValid)
-			return false;
 		const FBox2D Area(FVector2D(Base.Min) - FVector2D(1.0), FVector2D(Base.Max) + FVector2D(1.0));
 		TArray<UPrimitiveComponent*> Components;
 		for (const APreviewSection* Section : PreviewSections(Terrain))
@@ -408,9 +408,9 @@ namespace UnrealAIMeshTerrain
 				}
 			}
 		}
-		auto FirstOnGround = [Terrain](TArray<FVector>& Best, bool bHighest, FVector& Out)
+		auto FirstOnGround = [Terrain, &ByZ](TArray<FVector>& Best, bool bHighest, FVector& Out)
 		{
-			Best.Sort([bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; });
+			Best.Sort(ByZ(bHighest));
 			for (const FVector& Point : Best)
 			{
 				const FSurfaceSample Ground = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false);

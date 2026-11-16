@@ -1193,7 +1193,9 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::
 	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false, /*bOrphanBase*/ true))
 		return FModifierOpResult();
 	// A deleted terrain the modifier still points at counts as none (it may not be garbage collected yet).
-	AMeshPartition* Terrain = IsValid(TerrainOf(Modifier)) ? TerrainOf(Modifier) : nullptr;
+	AMeshPartition* Terrain = TerrainOf(Modifier);
+	if (!IsValid(Terrain))
+		Terrain = nullptr;
 	AActor* Owner = Modifier->GetOwner();
 	const FString Label = Owner->GetActorNameOrLabel();
 	const FString Kind = ModifierKind(Modifier);

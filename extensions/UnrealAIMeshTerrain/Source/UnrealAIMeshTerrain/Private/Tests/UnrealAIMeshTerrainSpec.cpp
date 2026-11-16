@@ -265,7 +265,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(*FString::Printf(TEXT("AddShape (%s)"), *MeshTerrainSpecJson(Result)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Sphere"},{"list":[{"lit":-898500},{"lit":0},{"lit":0}]},{"list":[{"lit":2000},{"lit":2000},{"lit":1000}]},{"lit":"Union"}]}]})RQL"), *Label), true, &Result));
 
 			FVector Highest, Lowest;
-			TestTrue(TEXT("the built ground has extremes"), UnrealAIMeshTerrain::GroundExtremes(Terrain, Highest, Lowest));
+			TestTrue(TEXT("the built ground has extremes"), UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), Highest, Lowest));
 			TestTrue(*FString::Printf(TEXT("highest ground on the dome's top (%s)"), *Highest.ToString()), FMath::IsNearlyEqual(Highest.Z, 500.0, 5.0)
 				&& FVector2D::Distance(FVector2D(Highest), FVector2D(-898500.0, 0.0)) <= 300.0);
 			const FBox Base = UnrealAIMeshTerrain::BaseBounds(Terrain);
