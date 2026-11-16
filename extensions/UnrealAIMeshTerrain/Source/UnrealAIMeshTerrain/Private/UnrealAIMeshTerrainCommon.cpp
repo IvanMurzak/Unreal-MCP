@@ -574,6 +574,11 @@ namespace UnrealAIMeshTerrain
 				if (!Part.Spatial.IsValid())
 					continue;
 				const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
+				// Parts cached for other points: skip the ones that are not under this one before tracing them (the ray is
+				// vertical in an unrotated terrain's space).
+				const UE::Geometry::FAxisAlignedBox3d Box = Part.Spatial->GetBoundingBox();
+				if (Part.Transform.GetRotation().IsIdentity(1e-6) && (LocalStart.X < Box.Min.X || LocalStart.X > Box.Max.X || LocalStart.Y < Box.Min.Y || LocalStart.Y > Box.Max.Y))
+					continue;
 				const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
 				double Distance = 0.0;
 				int32 Triangle = INDEX_NONE;
@@ -600,14 +605,15 @@ namespace UnrealAIMeshTerrain
 		TArray<FRegionMesh>& Parts = Evaluated ? *Evaluated : Local;
 		if (HitIn(Parts))
 			return Out;
+		// Keep only the region that hit (or the widest, on a miss): the smaller ones lie inside it.
+		TArray<FRegionMesh> Around;
 		for (const double Half : { 250.0, 2500.0, 25000.0, 250000.0 })
 		{
-			TArray<FRegionMesh> Around = BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
-			const bool bHit = HitIn(Around);
-			Parts.Append(MoveTemp(Around));
-			if (bHit)
+			Around = BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
+			if (HitIn(Around))
 				break;
 		}
+		Parts.Append(MoveTemp(Around));
 		return Out;
 	}
 

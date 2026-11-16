@@ -301,12 +301,14 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 */
 	bool CoverTerrainHeights(UModifierComponent* Modifier, const AMeshPartition* Terrain, const FVector& Location)
 	{
+		constexpr double Spare = 10000.0; // cm
 		const FNumericProperty* Property = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("MaxZDistance")));
-		const FBox Built = BuiltBounds(Terrain);
+		const FBox Built = BuiltBounds(Terrain); // valid: the Add operations wait for the build (CheckFootprint) first
 		if (!Property || !Built.IsValid)
 			return true;
 		const double Current = Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Modifier));
-		const double Needed = 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + 10000.0);
+		// MaxZDistance is the whole span, centred on the location.
+		const double Needed = 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + Spare);
 		return Needed <= Current || SetNumber(Modifier, TEXT("MaxZDistance"), Needed);
 	}
 
