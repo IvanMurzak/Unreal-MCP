@@ -108,6 +108,8 @@ private:
 		int32 SourceEnd = 0;
 		int32 GuideBegin = 0;
 		int32 GuideEnd = 0;
+		/** Its operations classes (AddApiClass / AddApiSource). */
+		TArray<UClass*> ApiClasses;
 	};
 	TArray<FModuleInfo> ModuleInfos;
 	TArray<FBatchValidator> BatchValidators;
@@ -122,10 +124,11 @@ private:
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);
 	/** {"type": descriptor, "shared": its base, whose members the sidecar summarises once} for rql-schema. */
 	rql::Json Describe(const rql::TypeDescriptor* Type);
-	/** The module @p Key names (module name, extension id, one of its sources or their type; case-insensitive), or null. */
+	/** The module @p Key names (module name, extension id, one of its sources or its operations type; case-insensitive), or null. */
 	const FModuleInfo* FindModuleInfo(const FString& Key) const;
-	/** The module one of whose sources has @p Type, or null. */
+	/** The module with a guide whose operations class @p Type is, or null. */
 	const FModuleInfo* ModuleOfType(const rql::TypeDescriptor* Type) const;
+	bool IsApiType(const FModuleInfo& Info, const rql::TypeDescriptor* Type) const;
 	/** {"name", "extension", "version"} of a module, for the overview and its guide. */
 	static rql::Json ModuleJson(const FModuleInfo& Info);
 	FString GuideSchema(const FString& Key, bool& bOutOk) const;

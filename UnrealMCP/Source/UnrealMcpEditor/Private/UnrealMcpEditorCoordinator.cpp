@@ -369,12 +369,14 @@ void FUnrealMcpEditorCoordinator::Startup()
 	// already persisted the choice to the §8 store before invoking this; here we only mutate the live registry +
 	// push. Runs on the game thread (the UI calls it there), matching the §2.2 dynamic-re-registration contract.
 	FUnrealMcpToolRegistry* RegistryPtr = Registry.Get();
-	ViewModel->OnToolVisibilityChanged = [RegistryPtr, BridgeServerPtr](const TArray<FString>& HiddenTools)
+	ViewModel->OnToolVisibilityChanged = [this, RegistryPtr, BridgeServerPtr](const TArray<FString>& HiddenTools)
 	{
 		if (RegistryPtr)
 			RegistryPtr->ApplyHiddenTools(HiddenTools);
 		if (BridgeServerPtr)
 			BridgeServerPtr->PushManifest();
+		if (SkillAutoGenerator.IsValid())
+			SkillAutoGenerator->Schedule(TEXT("tool visibility changed")); // a hidden tool's skill goes, a shown one's comes
 	};
 
 	// §7 live status feed: the bridge delivers `status` / `device-auth` on the IPC READER thread. Marshal onto
@@ -434,7 +436,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 					VM->NotifySidecarHandshakeComplete();
 					// The connection is ready: the auto-generate agents' skills (same weak-VM teardown guard as the status sink).
 					if (CoordinatorPtr->SkillAutoGenerator.IsValid())
-						CoordinatorPtr->SkillAutoGenerator->Schedule(TEXT("connected"));
+						CoordinatorPtr->SkillAutoGenerator->Schedule(FUnrealMcpSkillAutoGenerator::ConnectedReason);
 				}
 			});
 		});

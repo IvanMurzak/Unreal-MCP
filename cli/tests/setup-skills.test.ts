@@ -182,6 +182,25 @@ describe('the unreal-mcp-cli skill', () => {
     expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'SKILL.md'))).toBe(true);
   });
 
+  it('keeps a same-named skill someone else wrote when the editor step overwrites it, unless --force', async () => {
+    const dir = tmp();
+    const mine = skillsOf(dir, 'unreal-rql', 'SKILL.md');
+    fs.mkdirSync(path.dirname(mine), { recursive: true });
+    fs.writeFileSync(mine, '---\nname: unreal-rql\n---\nmy own notes\n');
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    // The editor's generator overwrites the folder, as unreal-skill-generate does.
+    systemToolMock.mockImplementation(async () => {
+      fs.writeFileSync(mine, '---\nname: unreal-rql\nmetadata:\n  generated-by: unreal-mcp\n---\nthe editor\'s\n');
+      return { kind: 'success', success: true, endpoint: 'x', httpStatus: 200, data: { status: 'success', structured: { filesWritten: 1 } } };
+    });
+    const kept = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(read(mine)).toContain('my own notes');
+    expect(kept.warnings.join('\n')).toContain('the editor\'s version was not kept');
+    const forced = await setupSkills({ projectDir: dir, url: 'http://localhost:1234', force: true });
+    expect(forced.kind).toBe('success');
+    expect(read(mine)).toContain("the editor's");
+  });
+
   it('skips the editor step offline', async () => {
     const dir = tmp();
     const r = await setupSkills({ projectDir: dir, editor: false });

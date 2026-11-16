@@ -103,8 +103,22 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
     const skillsDir = path.join(projectDir, agent.skillsPath);
     emitProgress(opts.onProgress, { phase: 'start', message: `Writing ${agent.name} skills to ${skillsDir}` });
 
-    // The editor's skills first: the offline files below then keep this CLI's version of the skills both write.
-    const editorSkills = opts.editor === false ? undefined : await generateEditorSkills(projectDir, agent.skillsPath, opts);
+    // The editor's skills first: the offline files below then keep this CLI's version of the skills both write. The editor
+    // overwrites every folder it generates, so a same-named skill someone else wrote is put back afterwards (see `force`).
+    let editorSkills: EditorSkillsOutcome | undefined;
+    if (opts.editor !== false) {
+      const foreign = opts.force ? [] : foreignSkills(skillsDir);
+      editorSkills = await generateEditorSkills(projectDir, agent.skillsPath, opts);
+      const ownNames = new Set(buildGuideFiles().map((f) => f.relativePath.split('/')[0]));
+      for (const skill of foreign) {
+        if (fs.readFileSync(skill.file, 'utf-8') === skill.content) continue;
+        fs.writeFileSync(skill.file, skill.content, 'utf-8');
+        // The offline step below warns about its own skill names.
+        if (!ownNames.has(path.basename(path.dirname(skill.file)))) {
+          warnings.push(`${skill.file} was not written by unreal-mcp: the editor's version was not kept (--force keeps it).`);
+        }
+      }
+    }
 
     const filesWritten: string[] = [];
     const skipped = new Set<string>();
@@ -156,6 +170,21 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
   } catch (err: unknown) {
     return { kind: 'failure', success: false, warnings, error: asError(err) };
   }
+}
+
+/** The SKILL.md files under @p skillsDir that this CLI and the editor did not write (no `generated-by` metadata). */
+function foreignSkills(skillsDir: string): { file: string; content: string }[] {
+  let dirs: fs.Dirent[];
+  try {
+    dirs = fs.readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return dirs
+    .filter((d) => d.isDirectory())
+    .map((d) => path.join(skillsDir, d.name, 'SKILL.md'))
+    .filter((file) => fs.existsSync(file) && !isGenerated(file))
+    .map((file) => ({ file, content: fs.readFileSync(file, 'utf-8') }));
 }
 
 /**

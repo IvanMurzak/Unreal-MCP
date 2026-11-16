@@ -364,6 +364,9 @@ namespace UnrealMcpRqlSessionLocal
 	public:
 		explicit FModuleContext(FUnrealMcpRqlSession& InSession) : Session(InSession) {}
 
+		/** The operations classes the module being configured adds (its guide covers them); set per module. */
+		TArray<UClass*>* ApiClasses = nullptr;
+
 		virtual void AddObjectSource(const FString& Name, const FString& Description, UClass* Class, TFunction<UObject*()> Getter) override
 		{
 			FUnrealMcpRqlTypes* Types = &Session.Types();
@@ -389,6 +392,8 @@ namespace UnrealMcpRqlSessionLocal
 		virtual void AddApiClass(UClass* Class, const FString& TypeName) override
 		{
 			Session.Types().AddApiClass(Class, TypeName);
+			if (ApiClasses && Class)
+				ApiClasses->Add(Class);
 		}
 
 		virtual void ExposeProperties(UStruct* Owner, const TArray<FName>& PropertyNames, bool bWritable) override
@@ -801,7 +806,9 @@ void FUnrealMcpRqlSession::ConfigureModules()
 		Info.ExtensionId = Extension;
 		Info.SourceBegin = SourceEntries.Num();
 		Info.GuideBegin = Guides.Num();
+		Context.ApiClasses = &Info.ApiClasses;
 		Module->ConfigureRql(Context);
+		Context.ApiClasses = nullptr;
 		const FString Version = Module->GetExtensionVersion();
 		Info.Version = Version;
 		Info.SourceEnd = SourceEntries.Num();
@@ -1043,9 +1050,11 @@ const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(co
 	{
 		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
 		{
+			// A source by name, or an operations source by its type (MeshTerrainOperations); a source typed by a shared
+			// engine class (Light, StaticMesh) does not make that class this module's.
 			const FEntry& Source = SourceEntries[Index];
 			if (Source.Name.Equals(Key, ESearchCase::IgnoreCase)
-				|| (Source.Type && UnrealMcpRqlFromStd(Source.Type->name).Equals(Key, ESearchCase::IgnoreCase)))
+				|| (IsApiType(Info, Source.Type) && UnrealMcpRqlFromStd(Source.Type->name).Equals(Key, ESearchCase::IgnoreCase)))
 				return &Info;
 		}
 	}
@@ -1054,19 +1063,17 @@ const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(co
 
 const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::ModuleOfType(const rql::TypeDescriptor* Type) const
 {
-	if (!Type)
-		return nullptr;
 	for (const FModuleInfo& Info : ModuleInfos)
 	{
-		if (Info.GuideEnd == Info.GuideBegin)
-			continue; // nothing to point at
-		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
-		{
-			if (SourceEntries[Index].Type == Type)
-				return &Info;
-		}
+		if (Info.GuideEnd > Info.GuideBegin && IsApiType(Info, Type))
+			return &Info;
 	}
 	return nullptr;
+}
+
+bool FUnrealMcpRqlSession::IsApiType(const FModuleInfo& Info, const rql::TypeDescriptor* Type) const
+{
+	return Type && Info.ApiClasses.Contains(TypesPtr->ClassOf(Type));
 }
 
 FString FUnrealMcpRqlSession::GuideSchema(const FString& Key, bool& bOutOk) const

@@ -237,8 +237,8 @@ Widgets and sequences:
 	{
 		if (ModuleNames.IsEmpty())
 			return FString();
-		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: %s."),
-			*FString::Join(ModuleNames, TEXT(", ")), *GuideCall(ModuleNames[0]));
+		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: %s "
+			"(each extension's own name)."), *FString::Join(ModuleNames, TEXT(", ")), *GuideCall(TEXT("<name>")));
 	}
 
 	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */

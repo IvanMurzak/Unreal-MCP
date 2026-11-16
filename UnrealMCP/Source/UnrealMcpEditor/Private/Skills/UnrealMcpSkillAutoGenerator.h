@@ -36,6 +36,8 @@ public:
 
 	/** Request ids of this generator's requests start with it, so their results are not the panel's. */
 	static constexpr const TCHAR* RequestIdPrefix = TEXT("auto-skills-");
+	/** Schedule()'s reason on a sidecar handshake: requests of the earlier connection are forgotten. */
+	static constexpr const TCHAR* ConnectedReason = TEXT("connected");
 
 	explicit FUnrealMcpSkillAutoGenerator(FDeps InDeps);
 	~FUnrealMcpSkillAutoGenerator();

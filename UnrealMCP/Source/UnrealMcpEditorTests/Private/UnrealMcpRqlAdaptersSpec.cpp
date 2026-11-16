@@ -925,6 +925,13 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 				TestTrue(TEXT("its sources, and only its"), GuideSources.Contains(TEXT("rqlSpecApi")) && GuideSources.Contains(TEXT("rqlSpecLights"))
 					&& !GuideSources.Contains(TEXT("actors")));
 			}
+			bool bLightOk = false;
+			const TSharedPtr<FJsonObject> Light = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(TEXT("Light"), bLightOk));
+			TestFalse(TEXT("a shared engine class a module source lists (Light) names no module's guide"),
+				Light.IsValid() && Light->HasField(TEXT("guideCall")));
+			bool bLightGuideOk = true;
+			UnrealMcpRqlTools::Schema(FString(), TEXT("Light"), bLightGuideOk);
+			TestFalse(TEXT("nor is it a guide key"), bLightGuideOk);
 			bool bMissingOk = true;
 			const TSharedPtr<FJsonObject> Missing = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), TEXT("NoSuchRqlSpecGuide"), bMissingOk));
 			TestFalse(TEXT("an unknown guide fails"), bMissingOk);

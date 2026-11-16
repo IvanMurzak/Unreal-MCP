@@ -39,6 +39,9 @@ int32 FUnrealMcpSkillAutoGenerator::Flush()
 	}
 	const FString Reason = PendingReason.IsEmpty() ? FString(TEXT("requested")) : PendingReason;
 	PendingReason.Reset();
+	// A request still unanswered from an earlier sidecar never will be (a reconnect drops it): keep the map bounded.
+	if (Reason == ConnectedReason)
+		InFlight.Reset();
 	const TArray<FString> Agents = Deps.Agents ? Deps.Agents() : TArray<FString>();
 	if (Agents.IsEmpty() || !Deps.Send)
 		return 0;
@@ -78,7 +81,7 @@ bool FUnrealMcpSkillAutoGenerator::HandleResult(const TSharedPtr<FJsonObject>& R
 		return false;
 	TPair<FString, FString> Request;
 	if (!InFlight.RemoveAndCopyValue(RequestId, Request))
-		return true; // ours, from before a reconnect: nothing to report
+		return true; // ours, but no longer tracked (sent before a reconnect): nothing to report
 	bool bOk = false;
 	Result->TryGetBoolField(TEXT("ok"), bOk);
 	FString SkillsPath;
