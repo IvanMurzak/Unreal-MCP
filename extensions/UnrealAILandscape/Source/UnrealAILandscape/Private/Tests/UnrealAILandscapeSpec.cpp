@@ -538,6 +538,11 @@ void FUnrealAILandscapeSpec::Define()
 			TestFalse(TEXT("a Flatten above the range is refused"), Call(Label, TEXT("Flatten"), Point(X0, 0) + TEXT(R"(,{"lit":500},{"lit":40000})"), &High));
 			TestTrue(*FString::Printf(TEXT("for its height range (%s)"), *LandscapeSpecJson(High).Left(300)), LandscapeSpecJson(High).Contains(TEXT("height range")));
 			TestTrue(TEXT("still nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0), 0.0, 1.0));
+			// landscape | call Create("@LABEL@_Far", [1e30, 0, 0], 20): the renderer cannot place it (an ensure every frame)
+			TSharedPtr<FJsonObject> Far;
+			TestFalse(TEXT("a landscape beyond the engine's world bound is refused"), UnrealMcpRqlTools::RunPlan(FString(CreatePlan).Replace(TEXT("@LABEL@"), *(Label + TEXT("_Far"))).Replace(TEXT("@X@"), TEXT("1e30")).Replace(TEXT("@MORE@"), TEXT("")), true, &Far));
+			TestNull(TEXT("and not created"), LandscapeSpecFind<ALandscape>(Label + TEXT("_Far")));
+			TestTrue(TEXT("a Sculpt with a huge radius edits the whole landscape safely"), Call(Label, TEXT("Sculpt"), Point(X0, 0) + TEXT(R"(,{"lit":1e30},{"lit":10})")));
 			TestFalse(TEXT("a Carve with a point 10 km off the landscape is refused"), Call(Label, TEXT("Carve"), FString::Printf(TEXT(R"({"list":[%s,%s]},{"lit":200},{"lit":100})"), *Point(X0, 0), *Point(X0 + 1000000.0, 0))));
 
 			const FString TallLabel = Label + TEXT("_Tall");

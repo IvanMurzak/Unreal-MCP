@@ -26,6 +26,7 @@
 #include "AssetCompilingManager.h"
 #include "Containers/Ticker.h"
 #include "Misc/App.h"
+#include "EngineDefines.h" // UE_LARGE_WORLD_MAX
 #include "Misc/Paths.h"
 #include "WorldPartition/ActorPartition/PartitionActorDesc.h"
 #include "WorldPartition/WorldPartition.h"
@@ -157,10 +158,12 @@ namespace UnrealAILandscapeRqlApiLocal
 		if (Radius <= 0.0)
 			return true;
 		Out.Radius = Radius / FMath::Max(FMath::Abs(ToWorld.GetScale3D().X), UE_KINDA_SMALL_NUMBER);
-		Out.Rect.Min.X = FMath::Max(Whole.Min.X, FMath::FloorToInt(Out.Center.X - Out.Radius));
-		Out.Rect.Min.Y = FMath::Max(Whole.Min.Y, FMath::FloorToInt(Out.Center.Y - Out.Radius));
-		Out.Rect.Max.X = FMath::Min(Whole.Max.X, FMath::CeilToInt(Out.Center.X + Out.Radius));
-		Out.Rect.Max.Y = FMath::Min(Whole.Max.Y, FMath::CeilToInt(Out.Center.Y + Out.Radius));
+		// Clamp in double before converting: a huge radius or far centre would overflow int32.
+		const auto Clamped = [](double Value, int32 Low, int32 High) { return FMath::Clamp(Value, Low - 1.0, High + 1.0); };
+		Out.Rect.Min.X = FMath::Max(Whole.Min.X, FMath::FloorToInt(Clamped(Out.Center.X - Out.Radius, Whole.Min.X, Whole.Max.X)));
+		Out.Rect.Min.Y = FMath::Max(Whole.Min.Y, FMath::FloorToInt(Clamped(Out.Center.Y - Out.Radius, Whole.Min.Y, Whole.Max.Y)));
+		Out.Rect.Max.X = FMath::Min(Whole.Max.X, FMath::CeilToInt(Clamped(Out.Center.X + Out.Radius, Whole.Min.X, Whole.Max.X)));
+		Out.Rect.Max.Y = FMath::Min(Whole.Max.Y, FMath::CeilToInt(Clamped(Out.Center.Y + Out.Radius, Whole.Min.Y, Whole.Max.Y)));
 		if (Out.Rect.Min.X > Out.Rect.Max.X || Out.Rect.Min.Y > Out.Rect.Max.Y)
 			return UnrealMcpRql::Failed<bool>(TEXT("the circle does not touch the landscape"));
 		return true;
@@ -467,8 +470,10 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("SizeMeters %g is outside 8 .. 2000"), SizeMeters));
 	if (!(MaxHeightMeters >= 1.0 && MaxHeightMeters <= 10000.0))
 		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("MaxHeightMeters %g is outside 1 .. 10000"), MaxHeightMeters));
-	if (Location.ContainsNaN())
-		return UnrealMcpRql::Failed<ALandscape*>(TEXT("Location must be finite numbers"));
+	// Beyond the engine's large-world bound the renderer loses precision (an ensure every frame, CheckMatrixPrecision).
+	constexpr double MaxCoordinate = UE_LARGE_WORLD_MAX * 0.5;
+	if (Location.ContainsNaN() || Location.GetAbsMax() > MaxCoordinate - SizeMeters * 50.0)
+		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("Location must be finite numbers within +-%.0f cm (the engine's world bound)"), MaxCoordinate - SizeMeters * 50.0));
 	// Z scale 100 (Landscape mode's default) holds +-256 m in 0.78 cm steps; more room needs a larger scale, coarser steps.
 	const double ZScale = FMath::Max(100.0, FMath::CeilToDouble(MaxHeightMeters / 2.56));
 	// Whole components (at most 8 per side), then a horizontal scale that makes the side exactly SizeMeters.
