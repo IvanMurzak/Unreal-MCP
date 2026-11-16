@@ -346,9 +346,10 @@ Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z)
 - `Flatten(landscape, center, radius, height, falloff)`: every vertex within Radius is set to Height (a flat disc); from Radius to
   Radius + Falloff the ground blends (a cosine) from Height back to its own height; beyond Radius + Falloff nothing changes.
   Falloff is optional, default 0: a sharp step at Radius (a cliff where the ground differs from Height). For a pad that
-  blends in, give Falloff at least the height difference (a 1:1 slope), more for a gentle one.
+  blends in, give Falloff about 1.6 x the height difference (its steepest part is then 45 degrees), more for a gentle one.
 - `Carve(landscape, points, width, depth)`: a bed Width wide along the points (Z ignored) Depth below the ground under the
-  path, then banks rising 1:1 back to the ground; it only lowers ground, so it follows hills (a ditch, not a level road).
+  path, then banks rising 1:1 back to the ground for at most 2 x Width (on steeper ground the bank ends in a step); it
+  only lowers ground, so it follows hills (a ditch, not a level road).
 A paint layer shows when the material
 blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Delete a whole
 landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition

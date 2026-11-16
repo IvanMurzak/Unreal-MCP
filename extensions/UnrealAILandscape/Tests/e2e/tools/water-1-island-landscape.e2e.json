@@ -1,8 +1,8 @@
 {
-  "description": "a 2 km island landscape for the water checks, 30 km from the origin",
+  "description": "a 2 km island landscape for the water checks, 30 km from the origin, with room for the 250 m mountain (MaxHeightMeters 400)",
   "tool": "rql-mutate",
   "input": {
-    "query": "landscape | call Create(\"E2EIsland\", [3000000, 0, 0], 2000)"
+    "query": "landscape | call Create(\"E2EIsland\", [3000000, 0, 0], 2000, null, 400)"
   },
   "assert": {
     "pattern": "Landscape#\\d+\\(E2EIsland\\)"

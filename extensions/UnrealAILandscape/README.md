@@ -58,7 +58,7 @@ per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape t
 size; `Sculpt` raises or lowers a smooth circular area (cm: the full height at the centre, a cosine down to nothing at
 `Radius`); `Flatten` levels everything within `Radius` to a world height (a building pad), then blends back to the old
 ground between `Radius` and `Radius + Falloff` (`Falloff` defaults to 0: a sharp step at the edge); `Carve` digs a channel a given depth below the ground along your
-points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks); `Paint` adds a paint layer by name (creating
+points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks at most 2 x `Width` long); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
 coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the
 landscape actor alone leaves the proxies behind).

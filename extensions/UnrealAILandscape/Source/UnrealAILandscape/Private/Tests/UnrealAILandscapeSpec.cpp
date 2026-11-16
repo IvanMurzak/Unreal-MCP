@@ -545,7 +545,15 @@ void FUnrealAILandscapeSpec::Define()
 				Run(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Surface","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]}]}]})RQL")).Replace(TEXT("@X@"), *FString::SanitizeFloat(X)), &Result, false);
 				return LandscapeSpecCallResult(Result);
 			};
-			const auto Height = [](const TSharedPtr<FJsonObject>& Ground) { double Value = TNumericLimits<double>::Max(); if (Ground) Ground->TryGetNumberField(TEXT("Height"), Value); return Value; };
+			// The Height of a ground read on the landscape (NaN when the read failed or was off it, so no comparison passes).
+			const auto Height = [](const TSharedPtr<FJsonObject>& Ground)
+			{
+				double Value = std::numeric_limits<double>::quiet_NaN();
+				bool bInside = false;
+				if (Ground && Ground->TryGetBoolField(TEXT("Inside"), bInside) && bInside)
+					Ground->TryGetNumberField(TEXT("Height"), Value);
+				return Value;
+			};
 			const double OnSeam = Height(Surface(Seam));
 			const double Before = Height(Surface(Seam - 0.01));
 			const double After = Height(Surface(Seam + 0.01));

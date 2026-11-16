@@ -144,7 +144,9 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	void LoadAll(UClass* Class)
 	{
-		LoadDescs(Class, [](const FWorldPartitionActorDescInstance*) { return true; });
+		// Listing a source has no call to fail: the reason goes to the log, the loaded actors are still listed.
+		if (!LoadDescs(Class, [](const FWorldPartitionActorDescInstance*) { return true; }))
+			UE_LOG(LogUnrealAILandscape, Warning, TEXT("could not load the World Partition actors of class %s: only the loaded ones are listed"), *GetNameSafe(Class));
 	}
 
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
@@ -675,12 +677,13 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	// nudged into the next one: the engine reads it from the one before and returns the height one vertex back.
 	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
 	const double ComponentQuads = FMath::Max(1, Landscape->ComponentSizeQuads);
-	const auto HeightAt = [Landscape, &ToWorld, &Whole, ComponentQuads](double X, double Y) -> TOptional<float>
+	// The world point the engine reads for X, Y (unset off the landscape).
+	const auto InsidePoint = [&ToWorld, &Whole, ComponentQuads](double X, double Y) -> TOptional<FVector>
 	{
 		FVector Local = ToWorld.InverseTransformPosition(FVector(X, Y, ToWorld.GetLocation().Z));
 		constexpr double Edge = 1e-3; // quads
 		if (Local.X < Whole.Min.X - Edge || Local.Y < Whole.Min.Y - Edge || Local.X > Whole.Max.X + Edge || Local.Y > Whole.Max.Y + Edge)
-			return TOptional<float>();
+			return TOptional<FVector>();
 		const auto OffSeam = [ComponentQuads](double Value)
 		{
 			const double Into = Value - FMath::FloorToDouble(Value / ComponentQuads) * ComponentQuads;
@@ -688,9 +691,15 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 		};
 		Local.X = FMath::Clamp(OffSeam(Local.X), static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
 		Local.Y = FMath::Clamp(OffSeam(Local.Y), static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
-		const FVector Inside = ToWorld.TransformPosition(Local);
-		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Editor);
-		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside, EHeightfieldSource::Complex);
+		return ToWorld.TransformPosition(Local);
+	};
+	const auto HeightAt = [Landscape, &InsidePoint](double X, double Y) -> TOptional<float>
+	{
+		const TOptional<FVector> Inside = InsidePoint(X, Y);
+		if (!Inside.IsSet())
+			return TOptional<float>();
+		const TOptional<float> Editor = Landscape->GetHeightAtLocation(Inside.GetValue(), EHeightfieldSource::Editor);
+		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(Inside.GetValue(), EHeightfieldSource::Complex);
 	};
 	const TOptional<float> Height = HeightAt(Point.X, Point.Y);
 	if (!Height.IsSet())
@@ -711,15 +720,16 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	Out.Location = FVector(Point.X, Point.Y, Out.Height);
 	Out.Normal = FVector(-SlopeX, -SlopeY, 1.0).GetSafeNormal();
 	Out.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Out.Normal.Z, -1.0, 1.0)));
-	// The paint layers' weights from the final (merged) weightmaps of the component under the point.
-	const FVector Local = ToWorld.InverseTransformPosition(FVector(Point.X, Point.Y, ToWorld.GetLocation().Z));
-	const auto ComponentIndex = [ComponentQuads](double Value, int32 Min, int32 Max) { return FMath::FloorToInt(FMath::Clamp(Value, static_cast<double>(Min), Max - 1e-3) / ComponentQuads); };
-	if (ULandscapeComponent* const* Component = Info->XYtoComponentMap.Find(FIntPoint(ComponentIndex(Local.X, Whole.Min.X, Whole.Max.X), ComponentIndex(Local.Y, Whole.Min.Y, Whole.Max.Y))))
+	// The paint layers' weights from the final (merged) weightmaps of the component under the point (the point inside it:
+	// the engine gives 0 for a point a hair outside, on the landscape's edge).
+	const FVector Inside = InsidePoint(Point.X, Point.Y).GetValue();
+	const FVector Local = ToWorld.InverseTransformPosition(Inside);
+	if (ULandscapeComponent* const* Component = Info->XYtoComponentMap.Find(FIntPoint(FMath::FloorToInt(Local.X / ComponentQuads), FMath::FloorToInt(Local.Y / ComponentQuads))))
 	{
 		for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
 		{
 			if (Layer.LayerInfoObj && Layer.LayerInfoObj != ALandscapeProxy::VisibilityLayer)
-				Out.Layers.Add(Layer.GetLayerName().ToString(), FMath::RoundToDouble((*Component)->GetLayerWeightAtLocation(Out.Location, Layer.LayerInfoObj, nullptr, false) * 100.0) / 100.0);
+				Out.Layers.Add(Layer.GetLayerName().ToString(), FMath::RoundToDouble((*Component)->GetLayerWeightAtLocation(Inside, Layer.LayerInfoObj, nullptr, false) * 100.0) / 100.0);
 		}
 	}
 	return Out;
