@@ -682,11 +682,11 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("a hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(900) + TEXT(",") + Lit(300)));
 			const double Slope = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
 			const double Outside = LandscapeSpecLayerHeight(Landscape, X0 + 600.0, 0.0);
-			TestTrue(TEXT("a spike on its flank"), Call(Label, TEXT("Sculpt"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(100) + TEXT(",") + Lit(400)));
+			TestTrue(TEXT("a spike on its flank"), Call(Label, TEXT("Sculpt"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(60) + TEXT(",") + Lit(400)));
 			TestTrue(*FString::Printf(TEXT("the spike stands 4 m out (%.1f over %.1f)"), LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0), Slope),
 				LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0) > Slope + 350.0);
 			TSharedPtr<FJsonObject> Result;
-			TestTrue(TEXT("smoothed"), Call(Label, TEXT("Smooth"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(200), &Result));
+			TestTrue(TEXT("smoothed"), Call(Label, TEXT("Smooth"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(120), &Result));
 			const double After = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
 			TestTrue(*FString::Printf(TEXT("the ground is back on the slope (%.1f, the slope there %.1f; %s)"), After, Slope, *LandscapeSpecJson(Result).Left(200)), FMath::Abs(After - Slope) < 15.0);
 			TestTrue(TEXT("outside the radius nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0 + 600.0, 0.0), Outside, 0.5));

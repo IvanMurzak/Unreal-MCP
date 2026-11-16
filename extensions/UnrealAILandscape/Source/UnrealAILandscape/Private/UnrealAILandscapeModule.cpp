@@ -341,7 +341,8 @@ landscapes | select Label PaintLayers Sections
 Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
 hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius), largest first; `Smooth` replaces the
 ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
-stays a slope (unlike Flatten, which makes it level). `Ramp` grades a road, ramp or path: a strip Width wide set to the
+stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
+radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
 points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
 stretch that climbs more steeply and says how long it needs to be. A steep climb needs a longer, winding path
 (switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z.
