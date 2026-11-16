@@ -732,11 +732,11 @@ void FUnrealAILandscapeSpec::Define()
 		};
 		static const auto P3 = [](double X, double Y, double Z) { return FString::Printf(TEXT(R"({"list":[{"lit":%.1f},{"lit":%.1f},{"lit":%.1f}]})"), X, Y, Z); };
 		static const auto Lit = [](double V) { return FString::Printf(TEXT(R"({"lit":%g})"), V); };
-		// landscape | call Create("@LABEL@", [@X@, 0, 0], 20): 20 x 20 m, flat at Z 0
-		static const auto Create = [](const FString& Label, double X) -> ALandscape*
+		// landscape | call Create("@LABEL@", [@X@, 0, 0], @SIZE@): @SIZE@ x @SIZE@ m (default 20), flat at Z 0
+		static const auto Create = [](const FString& Label, double X, int32 Meters = 20) -> ALandscape*
 		{
-			const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":20}]}]})RQL"))
-				.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@X@"), *FString::SanitizeFloat(X));
+			const FString Plan = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LABEL@"},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":@SIZE@}]}]})RQL"))
+				.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@X@"), *FString::SanitizeFloat(X)).Replace(TEXT("@SIZE@"), *FString::FromInt(Meters));
 			return UnrealMcpRqlTools::RunPlan(Plan, true) ? LandscapeSpecFind<ALandscape>(Label) : nullptr;
 		};
 
@@ -785,6 +785,41 @@ void FUnrealAILandscapeSpec::Define()
 			TestFalse(TEXT("a 56 degree stretch with MaxSlope 8 is refused"), Call(Label, TEXT("Ramp"), SteepPoints + TEXT(",") + Lit(300) + TEXT(",") + Lit(100) + TEXT(",") + Lit(8), &Steep));
 			TestTrue(*FString::Printf(TEXT("naming MaxSlope and the length it needs (%s)"), *LandscapeSpecJson(Steep).Left(400)), LandscapeSpecJson(Steep).Contains(TEXT("MaxSlope")) && LandscapeSpecJson(Steep).Contains(TEXT("length")));
 			TestTrue(TEXT("and changing nothing"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0.0), Mid, 0.5));
+		});
+
+		It("RoadBetween winds up a hill too steep to climb straight, no steeper than MaxSlope, logs one edit, and says when it cannot reach", [this]()
+		{
+			const FString Label = TEXT("RqlSpecRoad_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 1000000.0;
+			ALandscape* Landscape = Create(Label, X0, 200);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// A hill 25 m high, 80 m in radius (about 26 degrees on its flanks): a straight road from the corner climbs too steeply.
+			TestTrue(TEXT("a hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(8000) + TEXT(",") + Lit(2500)));
+			const FVector Start(X0 - 9000.0, -9000.0, 0.0), Top(X0, 0.0, 0.0);
+			TSharedPtr<FJsonObject> Result;
+			const double T0 = FPlatformTime::Seconds();
+			TestTrue(TEXT("road built"), Call(Label, TEXT("RoadBetween"), P3(Start.X, Start.Y, 0) + TEXT(",") + P3(Top.X, Top.Y, 0) + TEXT(",") + Lit(600) + TEXT(",") + Lit(10) + TEXT(",") + Lit(300) + TEXT(R"(,{"lit":"spec-road"})"), &Result));
+			const FString Text = LandscapeSpecJson(Result);
+			const double Seconds = FPlatformTime::Seconds() - T0;
+			TestTrue(*FString::Printf(TEXT("it reaches the top (%s)"), *Text.Left(300)), Text.Contains(TEXT("\"Reached\":true")));
+			double Length = 0.0, Built = 0.0;
+			FParse::Value(*Text, TEXT("\"LengthMeters\":"), Length);
+			FParse::Value(*Text, TEXT("\"MaxSlope\":"), Built);
+			const double Straight = FVector2D::Distance(FVector2D(Start), FVector2D(Top)) / 100.0;
+			TestTrue(*FString::Printf(TEXT("longer than the straight line, winding (%.1f m vs %.1f m)"), Length, Straight), Length > Straight * 1.1);
+			TestTrue(*FString::Printf(TEXT("no stretch steeper than MaxSlope 10 (%.2f)"), Built), Built > 0.0 && Built <= 10.05);
+			TestTrue(*FString::Printf(TEXT("the top keeps its height (%.1f)"), LandscapeSpecLayerHeight(Landscape, Top.X, Top.Y)), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, Top.X, Top.Y), 2500.0, 60.0));
+			TestTrue(*FString::Printf(TEXT("bounded time (%.1f s)"), Seconds), Seconds < 30.0);
+			const TArray<FUnrealAILandscapeEdit>& Log = UnrealAILandscapeRqlApiLocal::EditLog(Landscape);
+			TestTrue(TEXT("one RoadBetween record labelled spec-road"), Log.Num() == 2 && Log.Last().Op == TEXT("RoadBetween") && Log.Last().Label == TEXT("spec-road"));
+			// MaxSlope 1: no route climbs 25 m within this landscape.
+			TSharedPtr<FJsonObject> Short;
+			TestTrue(TEXT("an impossible road still answers"), Call(Label, TEXT("RoadBetween"), P3(Start.X, Start.Y, 0) + TEXT(",") + P3(Top.X, Top.Y, 0) + TEXT(",") + Lit(600) + TEXT(",") + Lit(1), &Short));
+			TestTrue(*FString::Printf(TEXT("with Reached false (%s)"), *LandscapeSpecJson(Short).Left(300)), LandscapeSpecJson(Short).Contains(TEXT("\"Reached\":false")));
+			TSharedPtr<FJsonObject> Bad;
+			TestFalse(TEXT("an End off the landscape is refused"), Call(Label, TEXT("RoadBetween"), P3(Start.X, Start.Y, 0) + TEXT(",") + P3(X0 + 500000.0, 0, 0), &Bad));
 		});
 
 		It("keeps an edit log: one record per shaping call with its Label, undone and redone with it, the last MaxEdits only", [this]()

@@ -666,6 +666,126 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 	return Changed;
 }
 
+bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached)
+{
+	using namespace UnrealAIWaterRqlLocal;
+	FHeightGrid Grid;
+	if (!ReadGrid(Landscape, Grid))
+		return false;
+	// A coarse grid of about 10 m (at most ~250 x 250 nodes) over the landscape.
+	const int32 Step = FMath::Max(1, FMath::Max(FMath::RoundToInt(1000.0 / Grid.QuadCm), FMath::CeilToInt(FMath::Max(Grid.Width(), Grid.Height()) / 250.0)));
+	const int32 GW = Grid.Width() / Step + 1, GH = Grid.Height() / Step + 1;
+	const auto NodeOf = [&](const FVector& World) -> FIntPoint
+	{
+		const FVector2D L = Grid.ToLocal(World);
+		return FIntPoint(FMath::Clamp(FMath::RoundToInt((L.X - Grid.Rect.Min.X) / Step), 0, GW - 1), FMath::Clamp(FMath::RoundToInt((L.Y - Grid.Rect.Min.Y) / Step), 0, GH - 1));
+	};
+	const auto VX = [&](double I) { return FMath::Min(Grid.Rect.Min.X + I * Step, double(Grid.Rect.Max.X)); };
+	const auto VY = [&](double J) { return FMath::Min(Grid.Rect.Min.Y + J * Step, double(Grid.Rect.Max.Y)); };
+	const auto GroundAt = [&](double X, double Y) -> TOptional<double> // vertex space, bilinear
+	{
+		const int32 X0 = FMath::Clamp(FMath::FloorToInt(X), Grid.Rect.Min.X, Grid.Rect.Max.X), Y0 = FMath::Clamp(FMath::FloorToInt(Y), Grid.Rect.Min.Y, Grid.Rect.Max.Y);
+		const int32 X1 = FMath::Min(X0 + 1, Grid.Rect.Max.X), Y1 = FMath::Min(Y0 + 1, Grid.Rect.Max.Y);
+		if (!Grid.Valid(X0, Y0) || !Grid.Valid(X1, Y0) || !Grid.Valid(X0, Y1) || !Grid.Valid(X1, Y1))
+			return {};
+		const double FX = FMath::Clamp(X - X0, 0.0, 1.0), FY = FMath::Clamp(Y - Y0, 0.0, 1.0);
+		return FMath::Lerp(FMath::Lerp(Grid.At(X0, Y0), Grid.At(X1, Y0), FX), FMath::Lerp(Grid.At(X0, Y1), Grid.At(X1, Y1), FX), FY);
+	};
+	const FIntPoint From = NodeOf(Start), To = NodeOf(End);
+	if (!GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
+		return UnrealMcpRql::Failed<bool>(TEXT("Start and End must be on the (loaded) landscape"));
+	// Moves in 32 directions (offsets up to 3 nodes), so the route can follow a hill's contours closely.
+	TArray<FIntPoint> Moves;
+	for (int32 DY = -3; DY <= 3; ++DY)
+		for (int32 DX = -3; DX <= 3; ++DX)
+			if ((DX || DY) && FMath::GreatestCommonDivisor(FMath::Abs(DX), FMath::Abs(DY)) == 1)
+				Moves.Add(FIntPoint(DX, DY));
+	const double Limit = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9)); // a margin for the grading between nodes
+	const double NodeCm = Step * Grid.QuadCm;
+	TArray<double> Cost;
+	Cost.Init(TNumericLimits<double>::Max(), GW * GH);
+	TArray<int32> Came;
+	Came.Init(INDEX_NONE, GW * GH);
+	struct FOpen { double F; int32 Node; bool operator<(const FOpen& O) const { return F < O.F; } };
+	TArray<FOpen> Heap;
+	const auto H = [&](int32 Node) { return FVector2D::Distance(FVector2D(Node % GW, Node / GW), FVector2D(To)) * NodeCm; };
+	const int32 StartNode = From.Y * GW + From.X, GoalNode = To.Y * GW + To.X;
+	Cost[StartNode] = 0.0;
+	Heap.HeapPush({ H(StartNode), StartNode });
+	int32 Best = StartNode; // nearest to the goal reached so far
+	const double Deadline = FPlatformTime::Seconds() + 20.0;
+	while (Heap.Num() && FPlatformTime::Seconds() < Deadline)
+	{
+		FOpen Top;
+		Heap.HeapPop(Top, EAllowShrinking::No);
+		const int32 Node = Top.Node;
+		if (Top.F - H(Node) > Cost[Node] + 1e-6)
+			continue; // stale
+		if (H(Node) < H(Best))
+			Best = Node;
+		if (Node == GoalNode)
+			break;
+		const int32 NI = Node % GW, NJ = Node / GW;
+		const double Here = GroundAt(VX(NI), VY(NJ)).Get(0.0);
+		for (const FIntPoint& Move : Moves)
+		{
+			const int32 I = NI + Move.X, J = NJ + Move.Y;
+			if (I < 0 || J < 0 || I >= GW || J >= GH)
+				continue;
+			// The ground along the move (4 stretches) must climb gently enough.
+			const double Length = FVector2D(Move).Size() * NodeCm;
+			double Prev = Here, Worst = 0.0;
+			bool bOk = true;
+			for (int32 K = 1; K <= 4 && bOk; ++K)
+			{
+				const TOptional<double> Z = GroundAt(VX(NI + Move.X * K / 4.0), VY(NJ + Move.Y * K / 4.0));
+				bOk = Z.IsSet();
+				if (bOk)
+				{
+					Worst = FMath::Max(Worst, FMath::Abs(Z.GetValue() - Prev) / (Length / 4.0));
+					Prev = Z.GetValue();
+				}
+			}
+			if (!bOk || Worst > Limit)
+				continue;
+			const int32 Next = J * GW + I;
+			const double NewCost = Cost[Node] + Length * (1.0 + Worst / FMath::Max(Limit, UE_SMALL_NUMBER)); // gentler routes preferred
+			if (NewCost < Cost[Next])
+			{
+				Cost[Next] = NewCost;
+				Came[Next] = Node;
+				Heap.HeapPush({ NewCost + H(Next), Next });
+			}
+		}
+	}
+	const int32 Last = Came[GoalNode] != INDEX_NONE || GoalNode == StartNode ? GoalNode : Best;
+	TArray<FVector2D> Route; // vertex space, start first
+	for (int32 Node = Last; Node != INDEX_NONE; Node = Came[Node])
+		Route.Insert(FVector2D(VX(Node % GW), VY(Node / GW)), 0);
+	if (Route.Num() < 2)
+		return UnrealMcpRql::Failed<bool>(TEXT("no route leaves Start within MaxSlope: the ground around it is steeper (start on gentler ground or allow a larger MaxSlope)"));
+	Route[0] = Grid.ToLocal(Start);
+	if (Last == GoalNode)
+		Route.Last() = Grid.ToLocal(End);
+	// Every few metres (at most ~1000 points), smoothed; each point's Z the ground, limited to MaxSlope from the start on.
+	double RouteLength = 0.0;
+	for (int32 Index = 1; Index < Route.Num(); ++Index)
+		RouteLength += FVector2D::Distance(Route[Index - 1], Route[Index]);
+	const TArray<FVector2D> Path = Resample(Route, FMath::Max(500.0 / Grid.QuadCm, RouteLength / 990.0));
+	const double Rise = FMath::Tan(FMath::DegreesToRadians(MaxSlope)) * Grid.QuadCm; // cm per vertex of length
+	OutPoints.Reset();
+	double Z = 0.0;
+	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	{
+		const double Ground = GroundAt(Path[Index].X, Path[Index].Y).Get(Z);
+		Z = Index == 0 ? Ground : FMath::Clamp(Ground, Z - Rise * FVector2D::Distance(Path[Index - 1], Path[Index]), Z + Rise * FVector2D::Distance(Path[Index - 1], Path[Index]));
+		OutPoints.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Z));
+	}
+	const TOptional<double> EndGround = GroundAt(Grid.ToLocal(End).X, Grid.ToLocal(End).Y);
+	bReached = Last == GoalNode && EndGround.IsSet() && FMath::Abs(OutPoints.Last().Z - EndGround.GetValue()) <= 100.0;
+	return true;
+}
+
 using namespace UnrealAIWaterRqlLocal;
 
 FString UUnrealAIWaterRqlApi::EnableWater()

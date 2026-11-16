@@ -133,6 +133,33 @@ struct FUnrealAILandscapeBump
 	FString Edit;
 };
 
+/** The result of `landscape | call RoadBetween(...)`: the road it routed and graded. */
+USTRUCT(BlueprintType)
+struct FUnrealAILandscapeRoad
+{
+	GENERATED_BODY()
+
+	/** true when the road reaches the end's ground (within 1 m) no steeper than MaxSlope; false: it was built as far as a route goes */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	bool Reached = false;
+
+	/** the road's length along its route, m */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double LengthMeters = 0.0;
+
+	/** the steepest stretch of the built road, degrees */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double MaxSlope = 0.0;
+
+	/** the road's centre line: [X, Y, Z] every few metres (the points Ramp graded) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	TArray<FVector> Points;
+
+	/** how many vertices changed */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	int32 Changed = 0;
+};
+
 /** One result of `landscape | call Coverage(landscape, layer)`: a connected area where a paint layer is painted. */
 USTRUCT(BlueprintType)
 struct FUnrealAILandscapeCoverage
@@ -199,6 +226,10 @@ public:
 	/** level a strip Width cm wide (100 .. 20000) along Points (2 .. 1000 world points) to the points' Z, straight from point to point (raising or lowering the ground): a road bed, ramp, railway or path; Falloff cm (0 .. 20000) blends its sides back to the ground (0: a sharp edge); MaxSlope degrees (optional, 0: any): fails without changing anything when a stretch climbs more steeply, naming it and the length it needs; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0, const FString& Label = TEXT(""));
+
+	/** build a road from Start to End (world X, Y; Z ignored) no steeper than MaxSlope degrees (default 8): it searches the landscape for a route that climbs gently enough (switchbacks or a spiral up a hill, around steep ground), then grades a strip Width cm wide (default 800) along it like Ramp (cut and fill, sides blended over Falloff cm, default 500); bounded work (seconds on a 2 km landscape); returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}: Reached false when no route climbs to End within MaxSlope (the road then goes as far as one does); Label (optional) names it in the edit log. Use Ramp instead to grade a route you chose yourself. */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	FUnrealAILandscapeRoad RoadBetween(ALandscapeProxy* Landscape, FVector Start, FVector End, double Width = 800.0, double MaxSlope = 8.0, double Falloff = 500.0, const FString& Label = TEXT(""));
 
 	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump, Pit, or Ridge / Channel when long and narrow), Location, Height, Radius, Length, Edit (the logged edit that made it)}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))

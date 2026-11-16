@@ -147,7 +147,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -369,13 +369,14 @@ landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 80
 landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)              a channel 1.5 m deep, 6 m wide along the points
 landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)                                 blend a spike, pit or bump within 8 m away into the ground around it
 landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)   a road bed 8 m wide at the points' Z, at most 8 degrees steep
+landscape | call RoadBetween(unreal.find("Terrain"), [-80000, -80000, 0], [40000, 20000, 0], 800, 8, 500, "road to the top")   a road 8 m wide that finds its own way (switchbacks) at most 8 degrees steep
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
 [[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
 landscapes | select Label PaintLayers Sections
 ```
 
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
-Ramp, Paint, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
+Ramp, RoadBetween, Paint, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
 Index, Op, Label, Points, Radius, Width, Height, Layer, Time). Give a call an optional last argument `Label` ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
 made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
@@ -394,9 +395,13 @@ ground within a radius by the smoothest surface that meets the ground around it,
 stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
 points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
-stretch that climbs more steeply and says how long it needs to be. A steep climb needs a longer, winding path
-(switchbacks or a spiral around a hill): read the ground along it with Surface and choose each point's Z; on a tight bend
-give a point every few metres (each corner of the line tilts the road a little across).
+stretch that climbs more steeply and says how long it needs to be. `RoadBetween` builds a road between two places by
+itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around cliffs),
+grades it like Ramp and returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}; Reached false means no route
+climbs there within MaxSlope (the road goes as far as one does: allow a larger MaxSlope or pick another end). Use
+RoadBetween for a road up a hill or across rough ground; use Ramp when you choose the route yourself (a ramp to a pad,
+a road along given points): read the ground along it with Surface and choose each point's Z; on a tight bend give a point
+every few metres (each corner of the line tilts the road a little across).
 
 ```
 landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius, Length}, ...]

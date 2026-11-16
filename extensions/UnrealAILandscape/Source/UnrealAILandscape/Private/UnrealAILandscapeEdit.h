@@ -66,6 +66,13 @@ namespace UnrealAILandscapeRqlApiLocal
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
 
 	/**
+	 * RoadBetween's route: a path from Start to End (world) whose ground climbs no more than MaxSlope (with a margin), found by
+	 * an A* search on a ~10 m grid, then resampled every few metres with each point's Z the ground limited to MaxSlope from
+	 * the start. False after Fail; bReached false when the search could not get to End (the path then ends nearest to it).
+	 */
+	bool PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached);
+
+	/**
 	 * Ramp: the ground along Points (world) set to their Z, straight from point to point, Width cm wide, blended back to the
 	 * ground over Falloff cm (a cosine) on both sides; raises or lowers; changed vertices (0 after Fail).
 	 */

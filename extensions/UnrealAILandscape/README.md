@@ -32,7 +32,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape`, `water` |
-| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Bumps`, `Coverage`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
+| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Bumps`, `Coverage`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
 | Members | `LandscapeProxy.Edits`, `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
 
 ```
@@ -48,6 +48,7 @@ landscape | call Bumps(unreal.find("Terrain"))
 landscape | call Coverage(unreal.find("Terrain"), "Rock")
 landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)
 landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)
+landscape | call RoadBetween(unreal.find("Terrain"), [-80000, -80000, 0], [40000, 20000, 0], 800, 8, 500, "road to the top")
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
 landscapes | where IsPrimary | select Label Bounds
@@ -65,7 +66,10 @@ ground between `Radius` and `Radius + Falloff` (`Falloff` defaults to 0: a sharp
 points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks at most 2 x `Width` long); `Smooth` replaces the ground within a radius by
 the smoothest surface meeting the ground around it (a spike, pit or bump blends away, a slope stays a slope); `Ramp` sets a
 strip along points to their Z (a road bed or ramp, cut and fill, sides blended over `Falloff`; `MaxSlope` refuses a stretch
-steeper than that); `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
+steeper than that); `RoadBetween` finds a route from a start to an end no steeper than `MaxSlope` (an A* search on a
+10 m grid: switchbacks or a spiral up a hill), grades it like `Ramp` and returns `Reached`, `LengthMeters`, the built
+`MaxSlope`, the `Points` and `Changed` (`Reached` false: no route climbs there within `MaxSlope`, the road goes as far as
+one does); use it for a road up a hill, `Ramp` for a route you choose; `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
 Channel / Ridge; `Location`, `Height`, `Radius`, `Length`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
 `Weight`); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
@@ -80,7 +84,7 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 
 ### Edit log
 
-Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Paint`, and
+Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Paint`, and
 `CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | select Edits`
 (the last 1000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Time`). Each of these
 operations takes an optional last argument `Label` that names the edit. The log is an editor-only component of the landscape

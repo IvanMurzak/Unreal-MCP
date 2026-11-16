@@ -922,6 +922,38 @@ int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FV
 	return Logged(Changed, Landscape, TEXT("Ramp"), Label, Points, Falloff, Width, 0.0);
 }
 
+FUnrealAILandscapeRoad UUnrealAILandscapeRqlApi::RoadBetween(ALandscapeProxy* Landscape, FVector Start, FVector End, double Width, double MaxSlope, double Falloff, const FString& Label)
+{
+	if (!Landscape)
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
+	if (Start.ContainsNaN() || End.ContainsNaN())
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(TEXT("Start and End must be finite numbers"));
+	if (!(Width >= 100.0 && Width <= 20000.0))
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
+	if (!(MaxSlope >= 1.0 && MaxSlope <= 45.0))
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(TEXT("MaxSlope must be within 1 .. 45 degrees"));
+	if (!(Falloff >= 0.0 && Falloff <= 20000.0))
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(FString::Printf(TEXT("Falloff %g is outside 0 .. 20000 cm"), Falloff));
+	FUnrealAILandscapeRoad Out;
+	if (!PlanRoad(Landscape, Start, End, MaxSlope, Out.Points, Out.Reached))
+		return Out;
+	for (int32 Index = 1; Index < Out.Points.Num(); ++Index)
+	{
+		const double Run = FVector2D::Distance(FVector2D(Out.Points[Index - 1]), FVector2D(Out.Points[Index]));
+		Out.LengthMeters += Run / 100.0;
+		if (Run > 0.0)
+			Out.MaxSlope = FMath::Max(Out.MaxSlope, FMath::RadiansToDegrees(FMath::Atan2(FMath::Abs(Out.Points[Index].Z - Out.Points[Index - 1].Z), Run)));
+	}
+	Out.LengthMeters = FMath::RoundToDouble(Out.LengthMeters * 10.0) / 10.0;
+	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
+	if (Out.Points.Num() < 2)
+		return UnrealMcpRql::Failed<FUnrealAILandscapeRoad>(TEXT("Start and End are the same place"));
+	Out.Changed = Logged(RampAlong(Landscape, Out.Points, Width, Falloff), Landscape, TEXT("RoadBetween"), Label, Out.Points, Falloff, Width, 0.0);
+	for (FVector& Point : Out.Points)
+		Point = FVector(FMath::RoundToDouble(Point.X), FMath::RoundToDouble(Point.Y), FMath::RoundToDouble(Point.Z));
+	return Out;
+}
+
 TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
 {
 	using FBumps = TArray<FUnrealAILandscapeBump>;
