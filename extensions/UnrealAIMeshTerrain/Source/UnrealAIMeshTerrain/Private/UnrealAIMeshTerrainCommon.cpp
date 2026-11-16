@@ -533,7 +533,7 @@ namespace UnrealAIMeshTerrain
 		return Out;
 	}
 
-	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels, const TArray<FRegionMesh>* Evaluated)
+	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels, TArray<FRegionMesh>* Evaluated)
 	{
 		FSurfaceSample Out;
 		const FBox Bounds = BuiltBounds(Terrain);
@@ -565,7 +565,8 @@ namespace UnrealAIMeshTerrain
 		if (!Out.bInside || !bChannels)
 			return Out;
 		// The paint channels are not in the collision: evaluate the modifier stack around the point (cached per region).
-		// The builder keeps only triangles wholly inside the region: retry wider for a coarse terrain (quads over ~2.5 m).
+		// The builder keeps only triangles wholly inside the region: retry wider for coarse geometry (quads over ~2.5 m, a
+		// Boolean shape's triangles of 100+ m), and keep what was evaluated in Evaluated for the caller's next points.
 		const auto HitIn = [&Out, &Start, &End](const TArray<FRegionMesh>& Parts)
 		{
 			for (const FRegionMesh& Part : Parts)
@@ -586,16 +587,27 @@ namespace UnrealAIMeshTerrain
 						+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
 				}
 				Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
+				// The evaluated face's normal: a trace that lands on an edge of the collision (a section seam, the terrain's
+				// border) reports the edge's normal (45 degrees or more on flat ground), not the ground's.
+				const FVector Face = Part.Transform.TransformVectorNoScale(Part.Mesh->GetTriNormal(Triangle)).GetSafeNormal();
+				if (!Face.IsNearlyZero())
+					Out.Normal = Face;
 				return true;
 			}
 			return false;
 		};
-		const auto Around = [Terrain, X, Y, &Bounds](double Half)
+		TArray<FRegionMesh> Local;
+		TArray<FRegionMesh>& Parts = Evaluated ? *Evaluated : Local;
+		if (HitIn(Parts))
+			return Out;
+		for (const double Half : { 250.0, 2500.0, 25000.0, 250000.0 })
 		{
-			return BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
-		};
-		if (!HitIn(Evaluated ? *Evaluated : Around(250.0)))
-			HitIn(Around(2500.0));
+			TArray<FRegionMesh> Around = BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
+			const bool bHit = HitIn(Around);
+			Parts.Append(MoveTemp(Around));
+			if (bHit)
+				break;
+		}
 		return Out;
 	}
 

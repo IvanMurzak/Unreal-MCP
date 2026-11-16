@@ -24,6 +24,7 @@
 #include "MeshPartition.h"
 #include "MeshPartitionModifierActor.h"
 #include "MeshPartitionModifierComponent.h"
+#include "MeshPartitionPreviewSection.h"
 #include "Modifiers/MeshPartitionNoiseModifier.h"
 
 // ============================================================================================
@@ -303,6 +304,37 @@ void FUnrealAIMeshTerrainSpec::Define()
 			{
 				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
 				TestTrue(*FString::Printf(TEXT("flat again at %s (%.2f)"), *Point.ToString(), Sample.Height), Sample.bInside && FMath::IsNearlyZero(Sample.Height, 0.5));
+			}
+		});
+
+		It("reads a flat ground's Slope as 0 on the seams between sections and at its border", [this]()
+		{
+			// 1000 x 300 quads: more than one section (at most 500 x 500 quads each), so there are seams to sample.
+			const FString Label = MeshTerrainSpecLabel(TEXT("SpecSeams"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-2300000.0, -3000000.0, 40.0), 12000.0, 3600.0, 1000, 300);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const TArray<UnrealAIMeshTerrain::APreviewSection*> Sections = UnrealAIMeshTerrain::PreviewSections(Terrain);
+			if (!TestTrue(*FString::Printf(TEXT("several sections (%d)"), Sections.Num()), Sections.Num() > 1))
+				return;
+			TArray<FVector2D> Points;
+			for (const UnrealAIMeshTerrain::APreviewSection* Section : Sections)
+			{
+				// Every section corner and edge midpoint: on a seam or on the terrain's border.
+				const FBox Box = Section->GetPreviewMeshBounds();
+				for (const double X : { Box.Min.X, Box.GetCenter().X, Box.Max.X })
+				{
+					for (const double Y : { Box.Min.Y, Box.GetCenter().Y, Box.Max.Y })
+						Points.Add(FVector2D(X, Y));
+				}
+			}
+			for (const FVector2D& Point : Points)
+			{
+				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
+				const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Sample.Normal.Z), 0.0, 1.0)));
+				TestTrue(*FString::Printf(TEXT("flat at %s: height %.2f, slope %.2f (normal %s)"), *Point.ToString(), Sample.Height, Slope, *Sample.Normal.ToString()),
+					Sample.bInside && FMath::IsNearlyEqual(Sample.Height, 40.0, 0.5) && Slope < 0.5);
 			}
 		});
 

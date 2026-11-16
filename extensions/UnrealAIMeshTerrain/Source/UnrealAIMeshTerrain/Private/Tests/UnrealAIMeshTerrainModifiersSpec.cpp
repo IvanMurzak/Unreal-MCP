@@ -565,6 +565,47 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			}
 		});
 
+		It("paint a 300 m dome and raise a plateau as high: Weight and Patch reach 300 m, Surface reads the channel on the dome's large triangles", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModDome"));
+			const double X0 = -2600000.0;
+			const double Y0 = -3000000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, Y0, 0.0), 160000.0, 160000.0, 80, 80);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain))
+				return;
+			const FString T = ModSpecFind(Label);
+			// A 1200 m wide, 300 m high dome: a lat-long sphere's triangles there are 100+ m across.
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Sphere", [X0, Y0, 0], [120000, 120000, 60000], "Union", [0, 0, 0], "<label>_Dome")
+			if (!ModSpecRun(TEXT("dome"), TEXT("AddShape"), { T, ModSpecStr(TEXT("Sphere")), ModSpecVec(X0, Y0, 0.0), ModSpecVec(120000.0, 120000.0, 60000.0), ModSpecStr(TEXT("Union")),
+				ModSpecVec(0.0, 0.0, 0.0), ModSpecStr(Label + TEXT("_Dome")) }))
+				return;
+			ModSpecExpectHeight(TEXT("the dome's top"), Terrain, X0, Y0, 30000.0, 300.0);
+			// meshTerrains | where Label == "<label>" | get Modifiers | select Modifier: a Boolean is in none of the default definition's layers.
+			TSharedPtr<FJsonObject> Listed;
+			TestTrue(TEXT("list the modifiers"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrains"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"%s"}]}},{"op":"get","expr":{"path":["Modifiers"]}},{"op":"select","fields":[{"name":"Modifier","expr":{"path":["Modifier"]}}]}]})RQL"), *Label), false, &Listed));
+			const FString ListedJson = ModSpecJson(Listed);
+			TestTrue(*FString::Printf(TEXT("LayerIndex -1 outside the definition's layers (%s)"), *ListedJson.Left(600)), ListedJson.Contains(TEXT("\"LayerIndex\":-1")) && !ListedJson.Contains(TEXT("4294967295")));
+			// meshTerrainModifier | call AddWeight(unreal.find("<label>"), "Red", [X0, Y0, 0], 70000, 1000, 1, "<label>_Rock"): placed on the ground, 300 m below the top.
+			if (!ModSpecRun(TEXT("paint the dome"), TEXT("AddWeight"), { T, ModSpecStr(TEXT("Red")), ModSpecVec(X0, Y0, 0.0), ModSpecNum(70000.0), ModSpecNum(1000.0), ModSpecNum(1.0),
+				ModSpecStr(Label + TEXT("_Rock")) }))
+				return;
+			for (const FVector2D Point : { FVector2D(X0, Y0), FVector2D(X0 + 30000.0, Y0 - 20000.0), FVector2D(X0 - 50000.0, Y0) })
+			{
+				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
+				const float* Red = Sample.Channels.Find(TEXT("Red"));
+				TestTrue(*FString::Printf(TEXT("Red painted at %s, %.0f cm up (%s)"), *Point.ToString(), Sample.Height, Red ? *FString::SanitizeFloat(*Red) : TEXT("no channels")),
+					Sample.bInside && Red && *Red >= 0.9f);
+			}
+			const UnrealAIMeshTerrain::FSurfaceSample Outside = UnrealAIMeshTerrain::SampleSurface(Terrain, X0 + 75000.0, Y0 + 75000.0);
+			TestTrue(TEXT("not painted outside"), Outside.bInside && Outside.Channels.FindRef(TEXT("Red")) <= 0.1f);
+			// A plateau as high as the dome on the flat ground beside it: 300 m above the ground there. (A Patch moves the
+			// vertices within its radius: on the dome's 100+ m triangles a small pad has none to move.)
+			// meshTerrainModifier | call AddPatch(unreal.find("<label>"), [X0 + 70000, Y0 + 70000, 30000], 3000, 1000, "<label>_Plateau")
+			if (ModSpecRun(TEXT("plateau"), TEXT("AddPatch"), { T, ModSpecVec(X0 + 70000.0, Y0 + 70000.0, 30000.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Plateau")) }))
+				ModSpecExpectHeight(TEXT("the plateau is level at its Z, 300 m above the ground"), Terrain, X0 + 70000.0, Y0 + 70000.0, 30000.0, 5.0);
+		});
+
 		It("rebuild after RQL set on a modifier and WaitForBuild", [this]()
 		{
 			const FString Label = ModSpecLabel(TEXT("ModSet"));

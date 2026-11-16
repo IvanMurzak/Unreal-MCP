@@ -193,10 +193,12 @@ namespace UnrealAIMeshTerrain
 	/**
 	 * The highest point of @p Terrain's built surface under @p X, @p Y: a trace against the rendered sections' collision.
 	 * With @p bChannels it also evaluates the modifier stack there for the paint channels and ModelHeight: from
-	 * @p Evaluated (a BuildRegion covering the point, for many points) or a small region around the point. Read-only; call
-	 * WaitForBuild first after an edit.
+	 * @p Evaluated (BuildRegions evaluated for earlier points, for many points) or regions around the point, widened until
+	 * one holds a whole triangle under it (Boolean shapes have triangles of 100+ m); the regions it evaluates are added to
+	 * @p Evaluated. With bChannels, Normal is the evaluated face's (a trace on a collision edge, such as a section seam,
+	 * reports the edge's normal). Read-only; call WaitForBuild first after an edit.
 	 */
-	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels = true, const TArray<FRegionMesh>* Evaluated = nullptr);
+	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels = true, TArray<FRegionMesh>* Evaluated = nullptr);
 
 	/**
 	 * Evaluate @p Terrain's modifier stack (its bases and every modifier, in build order) for the base-mesh groups that

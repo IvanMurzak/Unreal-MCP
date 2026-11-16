@@ -294,6 +294,22 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		Owner->PostEditMove(/*bFinished*/ true);
 	}
 
+	/**
+	 * A Patch / WeightUtility modifier reaches the ground only within MaxZDistance / 2 above and below its location (default
+	 * 200 m in all): a pad or paint on a 300 m hill would miss the ground above. Widen it to every height the terrain's built
+	 * ground has around @p Location, with 100 m to spare.
+	 */
+	bool CoverTerrainHeights(UModifierComponent* Modifier, const AMeshPartition* Terrain, const FVector& Location)
+	{
+		const FNumericProperty* Property = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("MaxZDistance")));
+		const FBox Built = BuiltBounds(Terrain);
+		if (!Property || !Built.IsValid)
+			return true;
+		const double Current = Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Modifier));
+		const double Needed = 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + 10000.0);
+		return Needed <= Current || SetNumber(Modifier, TEXT("MaxZDistance"), Needed);
+	}
+
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
 	bool CheckAdd(const AMeshPartition* Terrain, const FVector& Location)
 	{
@@ -590,7 +606,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE
 	FTerrainTransaction Transaction(LOCTEXT("AddPatch", "Add Mesh Terrain Patch"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Patch = Placed.Spawn(ModifierClassOf(TEXT("Patch")), Location, FRotator::ZeroRotator, Label);
-	if (!Patch || !SetNumber(Patch, TEXT("Radius"), Radius) || !SetNumber(Patch, TEXT("Falloff"), Falloff))
+	if (!Patch || !SetNumber(Patch, TEXT("Radius"), Radius) || !SetNumber(Patch, TEXT("Falloff"), Falloff) || !CoverTerrainHeights(Patch, Terrain, Location))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -609,7 +625,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(U
 	FPlacement Placed(Terrain);
 	UModifierComponent* Weight = Placed.Spawn(ModifierClassOf(TEXT("WeightUtility")), Location, FRotator::ZeroRotator, Label);
 	if (!Weight || !SetProperty(Weight, TEXT("WeightChannelName"), ChannelName(Terrain, Channel)) || !SetNumber(Weight, TEXT("Radius"), Radius)
-		|| !SetNumber(Weight, TEXT("Falloff"), Falloff) || !SetNumber(Weight, TEXT("InnerValue"), Value) || !SetNumber(Weight, TEXT("OuterValue"), 0.0))
+		|| !SetNumber(Weight, TEXT("Falloff"), Falloff) || !SetNumber(Weight, TEXT("InnerValue"), Value) || !SetNumber(Weight, TEXT("OuterValue"), 0.0)
+		|| !CoverTerrainHeights(Weight, Terrain, Location))
 		return FModifierOpResult();
 	return Placed.Keep();
 }

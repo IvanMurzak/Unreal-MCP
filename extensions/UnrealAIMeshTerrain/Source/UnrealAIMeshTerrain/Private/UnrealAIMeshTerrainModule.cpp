@@ -106,7 +106,9 @@ namespace UnrealAIMeshTerrainModuleLocal
 		const AMeshPartition* Terrain = Cast<AMeshPartition>(Object);
 		const FBuildState State = BuildState(Terrain);
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
-		Out->SetBoolField(TEXT("Ready"), State.IsReady());
+		// A terrain with unloaded base / modifier actors (World Partition, after the level is reopened) is built without them.
+		const bool bUnloaded = State.Actors > State.LoadedActors;
+		Out->SetBoolField(TEXT("Ready"), State.IsReady() && !bUnloaded);
 		Out->SetNumberField(TEXT("Sections"), State.Sections);
 		Out->SetNumberField(TEXT("Triangles"), State.Triangles);
 		Out->SetBoolField(TEXT("Building"), State.bBuilding);
@@ -115,9 +117,9 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetNumberField(TEXT("CompilingMeshes"), State.CompilingMeshes);
 		Out->SetNumberField(TEXT("Actors"), State.Actors);
 		Out->SetNumberField(TEXT("LoadedActors"), State.LoadedActors);
-		Out->SetStringField(TEXT("State"), State.Actors > State.LoadedActors
-			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition): any meshTerrain call loads them"),
-				*State.Describe(), State.Actors - State.LoadedActors, State.Actors)
+		Out->SetStringField(TEXT("State"), bUnloaded
+			? FString::Printf(TEXT("%s; %d of its %d base / modifier actors are not loaded (World Partition), so it is built without them: any meshTerrain call loads them"),
+				State.bNoBase ? TEXT("not built") : *State.Describe(), State.Actors - State.LoadedActors, State.Actors)
 			: State.Describe());
 		return MakeShared<FJsonValueObject>(Out);
 	}
@@ -134,7 +136,9 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetStringField(TEXT("Actor"), Modifier->GetOwner() ? Modifier->GetOwner()->GetActorNameOrLabel() : FString());
 		Out->SetStringField(TEXT("Terrain"), Terrain ? Terrain->GetActorNameOrLabel() : FString());
 		Out->SetStringField(TEXT("PriorityLayer"), Modifier->GetType().ToString());
-		Out->SetNumberField(TEXT("LayerIndex"), Component ? static_cast<double>(Component->GetModifierLayerIndex(Modifier->GetType())) : -1.0);
+		// GetModifierLayerIndex is unsigned: a modifier in no priority layer of the definition ("None") is INDEX_NONE (-1).
+		const int32 LayerIndex = Component ? static_cast<int32>(Component->GetModifierLayerIndex(Modifier->GetType())) : INDEX_NONE;
+		Out->SetNumberField(TEXT("LayerIndex"), LayerIndex);
 		Out->SetNumberField(TEXT("SubPriority"), Modifier->GetPriority());
 		Out->SetBoolField(TEXT("Disabled"), Modifier->GetIsDisabledFlag());
 		Out->SetBoolField(TEXT("IsBase"), Modifier->IsBase());
@@ -247,7 +251,7 @@ public:
 				return MakeShared<FJsonValueBoolean>(Modifier && Modifier->GetIsDisabledFlag());
 			});
 		Context.AddJsonMember(ModifierClass, TEXT("Modifier"),
-			TEXT("modifier summary: Kind, Actor, Terrain, PriorityLayer, LayerIndex (build order of the layer), SubPriority (order within it, higher later), Disabled, IsBase, Bounds"),
+			TEXT("modifier summary: Kind, Actor, Terrain, PriorityLayer, LayerIndex (build order of its priority layer; -1: in none of the definition's layers, applied after them), SubPriority (order within it, higher later), Disabled, IsBase, Bounds"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue> { return ModifierJson(Object); });
 		Context.AddJsonMember(UE::MeshPartition::ULatticeModifier::StaticClass(), TEXT("LatticePoints"),
 			TEXT("the lattice's control points (world [X, Y, Z], cm) in the order meshTerrainModifier | call SetLatticePoints(modifier, points) takes them"),
@@ -340,7 +344,8 @@ Use the operations, not `set`, to move a modifier (`set Location` on its actor d
 WeightUtility's InnerValue (Edit Strength; the engine caches the old weights) and a Lattice's size (Edit; never set LatticeResolution: its
 points would no longer match, an engine ensure). Where two modifiers overlap the later one in build order wins (`Modifiers` lists
 them in order); the Boolean modifier may log "reported errors ... cracks" for box shapes: an engine warning, check
-`Surface`.)MD"));
+`Surface`. A Patch and brush strokes move the vertices within their radius: a Boolean shape's surface keeps the shape's
+own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller than those changes nothing there.)MD"));
 
 		Context.AddGuide(TEXT("Mesh Terrain: create, import a heightmap, delete"), TEXT(R"MD(`meshTerrainCreate` makes Mesh Terrains the way
 Mesh Terrain Mode's Create palette does; each call is one undo step and returns when the terrain is built.

@@ -84,7 +84,7 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 				TEXT("sampling %d points spread over more than 500 m took over %.0f s (%d done; each such point evaluates the terrain around it): pass points within 500 m of each other per call, or fewer points"),
 				Points.Num(), UnrealAIMeshTerrain::DefaultBuildTimeoutSeconds, Out.Num()));
 		}
-		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, bShared ? &Evaluated : nullptr);
+		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, &Evaluated);
 		FUnrealAIMeshTerrainSurface& Surface = Out.AddDefaulted_GetRef();
 		if (!Sample.bInside)
 			continue;

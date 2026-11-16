@@ -70,7 +70,10 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
 `meshTerrainModifiers` (or a terrain's `Modifiers`) loads them.
 
 - `Surface` / `SurfacePoints`: `Inside`, `Height` (world Z, cm, what traces and collision hit), `Slope` (degrees),
-  `Location`, `Normal`, `Channels` (the paint weights there, from the evaluated modifier stack).
+  `Location`, `Normal`, `Channels` (the paint weights there, from the evaluated modifier stack). `Normal` and `Slope` are
+  the evaluated ground's under the point (a trace on a collision edge, such as a seam between sections, reports the edge's
+  normal instead); the stack is evaluated in regions widened until one holds the triangle under the point (a Boolean
+  shape's triangles can be 100+ m across).
 - `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
 - `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
 - `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 120)`:
@@ -140,8 +143,8 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | Operation | What it places / changes |
 | --- | --- |
 | `AddNoise(terrain, location, size [X, Y], strength, frequency, falloff, label)` | Noise: hills over an area; Strength cm, Frequency 1/cm, Falloff 0..1 |
-| `AddPatch(terrain, location, radius, falloff, label)` | Patch: a flat round pad at the location's Z |
-| `AddWeight(terrain, channel, location, radius, falloff, value, label)` | WeightUtility: paints a channel of the definition (value 0..1) |
+| `AddPatch(terrain, location, radius, falloff, label)` | Patch: a flat round pad at the location's Z, cut into or built up from any ground height there |
+| `AddWeight(terrain, channel, location, radius, falloff, value, label)` | WeightUtility: paints a channel of the definition (value 0..1) on the ground at every height |
 | `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
 | `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y outer diameter, Z ring height) as Boolean Union / Subtract / Trim; Rectangle, Disc as MeshProject |
 | `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
@@ -152,6 +155,12 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | `Move(modifier, location)`, `SetSplinePoints(modifier, points, closed)`, `SetLatticePoints(modifier, points)` | placement (Z moves every kind) and paths (closed 1 / 0 / -1 keep) |
 | `SetOrder(modifier, priority, priorityLayer)` | build order: the definition's priority layer, then Priority (higher is applied later, on top) |
 | `Enable`, `Disable`, `Remove(modifier)`, `Bind(modifier, terrain)` | switch, delete, re-bind to another terrain |
+
+A Patch or WeightUtility reaches the ground only within `MaxZDistance / 2` above and below its location (the engine's
+default, 200 m in all, would miss the top of a 300 m hill): AddPatch and AddWeight widen it to the terrain's built heights
+with 100 m to spare. A terrain raised later beyond that needs a larger `MaxZDistance` (`set` it). A Patch and brush strokes
+move the terrain's vertices within their radius; a Boolean shape's surface is made of the shape's own triangles (a 1 km
+Sphere's are 100+ m across), so a pad or stroke smaller than those finds no vertex to move there.
 
 Not offered: MeshProvider (the base meshes, made by the terrain's create / import), InstancedProjection and
 InstancedTexturePatch (their instances are filled by other tools and read-only), SimpleWrite, LevelInstanceAdapter and
