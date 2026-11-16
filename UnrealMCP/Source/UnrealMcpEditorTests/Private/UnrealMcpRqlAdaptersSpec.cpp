@@ -843,6 +843,40 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("in-out parameter, reported after the call (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(Doubled), *UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2)),
 				UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2) == TEXT("6"));
 
+			// A list-valued call result lists every item up to 1000 (RQL lists 20 per list in plain queries, then "…+N").
+			const auto CallResultList = [this](const TSharedPtr<FJsonObject>& Result) -> TArray<TSharedPtr<FJsonValue>>
+			{
+				const TSharedPtr<FJsonValue> Value = UnrealMcpRqlSpecHelpers::Cell(Result, 0, 2);
+				return Value.IsValid() && Value->Type == EJson::Array ? Value->AsArray() : TArray<TSharedPtr<FJsonValue>>();
+			};
+			const TSharedPtr<FJsonObject> Thirty = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Sequence(30) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Sequence","args":[{"lit":30}]}]})RQL"), true);
+			const TArray<TSharedPtr<FJsonValue>> ThirtyItems = CallResultList(Thirty);
+			TestEqual(*FString::Printf(TEXT("a call result of 30 items lists all 30 (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Thirty)), ThirtyItems.Num(), 30);
+			TestTrue(TEXT("the last item is the 30th number"), ThirtyItems.Num() == 30 && ThirtyItems.Last()->Type == EJson::Number && ThirtyItems.Last()->AsNumber() == 29.0);
+			TestFalse(TEXT("no truncation warning under the cap"), UnrealMcpRqlSpecHelpers::Codes(Thirty).Contains(TEXT("call-result-truncated")));
+			const TSharedPtr<FJsonObject> Many = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Sequence(1500) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Sequence","args":[{"lit":1500}]}]})RQL"), true);
+			const TArray<TSharedPtr<FJsonValue>> ManyItems = CallResultList(Many);
+			TestEqual(TEXT("a call result of 1500 items lists 1000 and the count left out"), ManyItems.Num(), 1001);
+			TestTrue(TEXT("the 1000th item is the number 999"), ManyItems.Num() == 1001 && ManyItems[999]->AsNumber() == 999.0);
+			const FString ManyCodes = UnrealMcpRqlSpecHelpers::Codes(Many);
+			TestTrue(*FString::Printf(TEXT("says how many were left out (%s)"), *ManyCodes),
+				ManyCodes.Contains(TEXT("call-result-truncated: the call result lists 1500 items: the first 1000 are shown, 500 left out")));
+			const TArray<TSharedPtr<FJsonValue>>* ManyDiagnostics = nullptr;
+			FString ManyHint;
+			if (Many.IsValid() && Many->TryGetArrayField(TEXT("diagnostics"), ManyDiagnostics))
+				for (const TSharedPtr<FJsonValue>& Diagnostic : *ManyDiagnostics)
+					if (Diagnostic->AsObject()->GetStringField(TEXT("code")) == TEXT("call-result-truncated"))
+						Diagnostic->AsObject()->TryGetStringField(TEXT("hint"), ManyHint);
+			TestTrue(*FString::Printf(TEXT("and what to do (%s)"), *ManyHint), ManyHint.Contains(TEXT("call again with fewer inputs")));
+			// Plain queries keep RQL's list cap (20 items, then "…+N").
+			Fixture->Numbers.Reset();
+			for (int32 I = 0; I < 30; ++I)
+				Fixture->Numbers.Add(I);
+			const TSharedPtr<FJsonObject> Plain = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecFixture | select Numbers */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecFixture"]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			const TSharedPtr<FJsonValue> PlainList = UnrealMcpRqlSpecHelpers::Cell(Plain, 0, 0);
+			TestEqual(*FString::Printf(TEXT("a plain query lists 20 items and the count left out (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Plain)),
+				PlainList.IsValid() && PlainList->Type == EJson::Array ? PlainList->AsArray().Num() : -1, 21);
+
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpRqlTools::Register(Registry);
 			const FUnrealMcpRegisteredTool* Query = Registry.Find(TEXT("rql-query"));

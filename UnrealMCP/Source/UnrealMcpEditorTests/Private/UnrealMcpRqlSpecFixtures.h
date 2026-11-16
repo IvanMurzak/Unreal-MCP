@@ -207,6 +207,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
 	void MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row);
 
+	/** the numbers 0 .. Count - 1 (a list-valued call result) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	TArray<int32> Sequence(int32 Count)
+	{
+		TArray<int32> Out;
+		for (int32 I = 0; I < Count; ++I)
+			Out.Add(I);
+		return Out;
+	}
+
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
 };
 
