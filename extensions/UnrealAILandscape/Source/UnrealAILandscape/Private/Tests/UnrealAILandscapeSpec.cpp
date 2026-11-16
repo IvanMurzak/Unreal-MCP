@@ -62,14 +62,16 @@ BEGIN_DEFINE_SPEC(FUnrealAILandscapeSpec, "UnrealAILandscape",
 		return Text;
 	}
 
-	/** The object in the "result" column of the first row of an RQL call result (null when there is none). */
-	static TSharedPtr<FJsonObject> LandscapeSpecCallResult(const TSharedPtr<FJsonObject>& Result)
+	/** The object in column @p Name ("result" for a call) of the first row of an RQL result (null when there is none). */
+	static TSharedPtr<FJsonObject> LandscapeSpecCallResult(const TSharedPtr<FJsonObject>& Result, const TCHAR* Name = TEXT("result"))
 	{
 		const TArray<TSharedPtr<FJsonValue>>* Columns = nullptr;
 		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
 		if (!Result.IsValid() || !Result->TryGetArrayField(TEXT("columns"), Columns) || !Result->TryGetArrayField(TEXT("rows"), Rows) || Rows->IsEmpty())
 			return nullptr;
-		const int32 Column = Columns->IndexOfByPredicate([](const TSharedPtr<FJsonValue>& Name) { return Name->AsString() == TEXT("result"); });
+		const int32 Column = Columns->IndexOfByPredicate([Name](const TSharedPtr<FJsonValue>& Value) { return Value->AsString() == Name; });
+		if ((*Rows)[0]->Type != EJson::Array)
+			return nullptr;
 		const TArray<TSharedPtr<FJsonValue>>& Row = (*Rows)[0]->AsArray();
 		return Row.IsValidIndex(Column) && Row[Column]->Type == EJson::Object ? Row[Column]->AsObject() : nullptr;
 	}
@@ -410,8 +412,18 @@ void FUnrealAILandscapeSpec::Define()
 			const FString BoundsText = LandscapeSpecJson(Bounds);
 			TestTrue(*FString::Printf(TEXT("Bounds: 20 x 20 m around X 400000, flat at Z 0 (%s)"), *BoundsText.Left(300)),
 				BoundsText.Contains(TEXT("\"SizeMeters\":[20,20]")) && BoundsText.Contains(TEXT("\"Min\":[399000,-1000,0]")) && BoundsText.Contains(TEXT("\"Max\":[401000,1000,0]")));
-			TestTrue(*FString::Printf(TEXT("Bounds: Highest and Lowest are points on the flat ground (%s)"), *BoundsText.Left(400)),
-				BoundsText.Contains(TEXT("\"Highest\":[")) && BoundsText.Contains(TEXT("\"Lowest\":[")) && BoundsText.Contains(TEXT(",0],\"Lowest\"")) && BoundsText.Contains(TEXT(",0],\"HeightRange\"")));
+			{
+				// Highest / Lowest: [X, Y, Z] on the flat ground (Z 0) inside the 20 m square
+				const TSharedPtr<FJsonObject> Box = LandscapeSpecCallResult(Bounds, TEXT("Bounds"));
+				const TArray<TSharedPtr<FJsonValue>>* High = nullptr;
+				const TArray<TSharedPtr<FJsonValue>>* Low = nullptr;
+				const auto OnGround = [OriginX](const TArray<TSharedPtr<FJsonValue>>* P)
+				{
+					return P && P->Num() == 3 && FMath::Abs((*P)[2]->AsNumber()) < 1.0 && FMath::Abs((*P)[0]->AsNumber() - OriginX) <= 1000.0 && FMath::Abs((*P)[1]->AsNumber()) <= 1000.0;
+				};
+				TestTrue(*FString::Printf(TEXT("Bounds: Highest and Lowest are points on the flat ground (%s)"), *BoundsText.Left(400)),
+					Box.IsValid() && Box->TryGetArrayField(TEXT("Highest"), High) && Box->TryGetArrayField(TEXT("Lowest"), Low) && OnGround(High) && OnGround(Low));
+			}
 
 			const TSharedRef<FJsonObject> Flat = Surface(OriginX, 0.0);
 			TestTrue(*FString::Printf(TEXT("flat ground: inside, height 0, slope 0 (%s)"), *Text(Flat)), Flat->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Flat->GetBoolField(TEXT("Inside"))
@@ -456,10 +468,9 @@ void FUnrealAILandscapeSpec::Define()
 			TSharedPtr<FJsonObject> HillBounds;
 			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &HillBounds);
 			{
-				const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+				const TSharedPtr<FJsonObject> Box = LandscapeSpecCallResult(HillBounds, TEXT("Bounds"));
 				const TArray<TSharedPtr<FJsonValue>>* Highest = nullptr;
-				const bool bHighest = HillBounds.IsValid() && HillBounds->TryGetArrayField(TEXT("rows"), Rows) && Rows->Num() == 1
-					&& (*Rows)[0]->AsArray()[0]->AsObject()->TryGetArrayField(TEXT("Highest"), Highest) && Highest->Num() == 3;
+				const bool bHighest = Box.IsValid() && Box->TryGetArrayField(TEXT("Highest"), Highest) && Highest->Num() == 3;
 				TestTrue(*FString::Printf(TEXT("Bounds.Highest is the hill top: within 2 m of its centre, 3 m up (%s)"), *LandscapeSpecJson(HillBounds).Left(400)),
 					bHighest && FVector2D::Distance(FVector2D((*Highest)[0]->AsNumber(), (*Highest)[1]->AsNumber()), FVector2D(OriginX, 0.0)) <= 200.0
 					&& FMath::IsNearlyEqual((*Highest)[2]->AsNumber(), 300.0, 25.0));

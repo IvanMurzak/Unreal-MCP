@@ -76,24 +76,28 @@ namespace UnrealAILandscapeRqlLocal
 	}
 
 	/**
-	 * The highest (or lowest) ground point of one collision component: its vertices read like Surface reads the ground (the
-	 * editor heightfield, else the physics one), so Bounds' Highest / Lowest agree with Surface and line traces.
+	 * The highest (or lowest) ground point of one collision component, vertex by vertex in its own frame (any rotation or
+	 * scale), read like Surface reads the ground (the editor heightfield, else the physics one), so Bounds' Highest / Lowest
+	 * agree with Surface and line traces. Unset when the component has no heightfield yet.
 	 */
-	FVector ExtremeGround(ULandscapeHeightfieldCollisionComponent* Component, bool bHighest)
+	TOptional<FVector> ExtremeGround(ULandscapeHeightfieldCollisionComponent* Component, bool bHighest)
 	{
 		ALandscapeProxy* Owner = Component->GetLandscapeProxy();
-		const FBox Box = Component->Bounds.GetBox();
-		const double Step = FMath::Max(Owner ? Owner->LandscapeActorToWorld().GetScale3D().X : 100.0, 1.0);
-		FVector Best(Box.GetCenter().X, Box.GetCenter().Y, bHighest ? TNumericLimits<double>::Lowest() : TNumericLimits<double>::Max());
-		for (double Y = Box.Min.Y; Owner && Y <= Box.Max.Y + 0.5 * Step; Y += Step)
+		if (!Owner)
+			return {};
+		const FTransform ToWorld = Component->GetComponentTransform();
+		const int32 Quads = FMath::RoundToInt(Component->CollisionSizeQuads * Component->CollisionScale); // its landscape quads
+		const EHeightfieldSource Source = Owner->GetHeightAtLocation(ToWorld.GetLocation(), EHeightfieldSource::Editor).IsSet()
+			? EHeightfieldSource::Editor : EHeightfieldSource::Complex;
+		TOptional<FVector> Best;
+		for (int32 Y = 0; Y <= Quads; ++Y)
 		{
-			for (double X = Box.Min.X; X <= Box.Max.X + 0.5 * Step; X += Step)
+			for (int32 X = 0; X <= Quads; ++X)
 			{
-				const FVector At(FMath::Min(X, Box.Max.X - 1.0), FMath::Min(Y, Box.Max.Y - 1.0), 0.0);
-				TOptional<float> Height = Owner->GetHeightAtLocation(At, EHeightfieldSource::Editor);
-				if (!Height.IsSet())
-					Height = Owner->GetHeightAtLocation(At, EHeightfieldSource::Complex);
-				if (Height.IsSet() && (bHighest ? Height.GetValue() > Best.Z : Height.GetValue() < Best.Z))
+				// The last row and column are shared with the next component: nudge them inside this one.
+				const FVector At = ToWorld.TransformPosition(FVector(FMath::Min<double>(X, Quads - 0.01), FMath::Min<double>(Y, Quads - 0.01), 0.0));
+				const TOptional<float> Height = Owner->GetHeightAtLocation(At, Source);
+				if (Height.IsSet() && (!Best.IsSet() || (bHighest ? Height.GetValue() > Best->Z : Height.GetValue() < Best->Z)))
 					Best = FVector(At.X, At.Y, Height.GetValue());
 			}
 		}
@@ -220,9 +224,10 @@ public:
 				Out->SetArrayField(TEXT("Max"), Vector({ Box.Max.X, Box.Max.Y, Box.Max.Z }));
 				Out->SetArrayField(TEXT("SizeMeters"), Vector({ (Box.Max.X - Box.Min.X) / 100.0, (Box.Max.Y - Box.Min.Y) / 100.0 }));
 				// Only the components holding the extremes are read vertex by vertex (a 2 km landscape: 2 of 64).
-				const FVector High = ExtremeGround(Top, true), Low = ExtremeGround(Bottom, false);
-				Out->SetArrayField(TEXT("Highest"), Vector({ High.X, High.Y, High.Z }));
-				Out->SetArrayField(TEXT("Lowest"), Vector({ Low.X, Low.Y, Low.Z }));
+				if (const TOptional<FVector> High = ExtremeGround(Top, true))
+					Out->SetArrayField(TEXT("Highest"), Vector({ High->X, High->Y, High->Z }));
+				if (const TOptional<FVector> Low = ExtremeGround(Bottom, false))
+					Out->SetArrayField(TEXT("Lowest"), Vector({ Low->X, Low->Y, Low->Z }));
 				const FVector2D Range = UnrealAILandscapeRqlApiLocal::HeightRange(Proxy);
 				Out->SetArrayField(TEXT("HeightRange"), Vector({ Range.X, Range.Y }));
 				return MakeShared<FJsonValueObject>(Out);
