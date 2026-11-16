@@ -20,9 +20,12 @@
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <stdexcept>
 #include <string_view>
 
@@ -44,6 +47,99 @@ namespace UnrealMcpRqlSessionLocal
 		if (Last == rql::StageKind::Count)
 			return Result.value.is_number() && Result.value.as_number() == 0;
 		return (Last == rql::StageKind::Min || Last == rql::StageKind::Max || Last == rql::StageKind::Avg) && Result.value.is_null();
+	}
+
+	/**
+	 * The full text of a call argument for the duplicate-call guard: lists, maps and structs element by element, numbers at
+	 * full precision, strings quoted, objects by identity (their text is only a type name). rql::to_text reads every vector,
+	 * list or struct as its type name, so two calls differing only in a point would look identical.
+	 */
+	void AppendCallKey(std::string& Out, const rql::Value& Value, int32 Depth = 0)
+	{
+		if (Depth > 32)
+		{
+			Out += "...";
+			return;
+		}
+		switch (Value.kind())
+		{
+		case rql::Value::Kind::Number:
+			Out += Value.is_single() ? rql::format_float(static_cast<float>(Value.as_number())) : rql::format_double(Value.as_number());
+			return;
+		case rql::Value::Kind::String:
+			Out += rql::Json(Value.as_string()).dump();
+			return;
+		case rql::Value::Kind::Object:
+		{
+			char Buffer[32];
+			std::snprintf(Buffer, sizeof(Buffer), "@%p", Value.ptr());
+			Out += Buffer;
+			return;
+		}
+		case rql::Value::Kind::Struct:
+			Out += Value.type()->name + "{";
+			for (const rql::MemberDescriptor& Member : Value.type()->members)
+			{
+				if (Member.explicit_only || !Member.getter)
+					continue;
+				Out += Member.name + "=";
+				try
+				{
+					AppendCallKey(Out, Member.getter(Value.ptr()), Depth + 1);
+				}
+				catch (const std::exception&)
+				{
+					Out += "?";
+				}
+				Out += ",";
+			}
+			Out += "}";
+			return;
+		case rql::Value::Kind::List:
+			Out += "[";
+			for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			{
+				AppendCallKey(Out, Value.list().at(Index), Depth + 1);
+				Out += ",";
+			}
+			Out += "]";
+			return;
+		case rql::Value::Kind::Map:
+			Out += "{";
+			Value.map().for_each([&Out, Depth](const rql::Value& Key, const rql::Value& Item)
+			{
+				AppendCallKey(Out, Key, Depth + 1);
+				Out += ":";
+				AppendCallKey(Out, Item, Depth + 1);
+				Out += ",";
+				return true;
+			});
+			Out += "}";
+			return;
+		case rql::Value::Kind::Entry:
+			AppendCallKey(Out, Value.entry().key, Depth + 1);
+			Out += ":";
+			AppendCallKey(Out, Value.entry().value, Depth + 1);
+			return;
+		case rql::Value::Kind::Row:
+			Out += "(";
+			for (const rql::Value& Cell : Value.row().values)
+			{
+				AppendCallKey(Out, Cell, Depth + 1);
+				Out += ",";
+			}
+			Out += ")";
+			return;
+		case rql::Value::Kind::Null:
+			Out += "null";
+			return;
+		case rql::Value::Kind::Missing:
+			Out += "missing";
+			return;
+		default: // bool, enum, error, unknown
+			Out += rql::describe_value(Value) + ":" + rql::to_text(Value);
+			return;
+		}
 	}
 
 	/**
@@ -98,6 +194,79 @@ namespace UnrealMcpRqlSessionLocal
 		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level%s"),
 			*UnrealMcpRqlUtil::OpenLevelPath(), Partitioned);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
+	}
+
+	/**
+	 * Items a list-valued call result shows. RQL encodes at most maxListItems (20) items of a list and appends "…+N", which
+	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and call is terminal, so
+	 * nothing can page them. A plan ending in call encodes up to this many instead; plain queries keep RQL's default.
+	 */
+	constexpr int32 MaxCallResultItems = 1000;
+
+	bool EndsWithCall(const rql::QueryPlan& Plan)
+	{
+		return !Plan.stages.empty() && Plan.stages.back().kind == rql::StageKind::Call;
+	}
+
+	/**
+	 * The lists and maps of one encoded call result that RQL cut at MaxCallResultItems, at any depth: a list ends in
+	 * "…+<left out>", a map has the key "…" with the value "+<left out>" (U+2026 in UTF-8).
+	 */
+	void CountCutLists(const rql::Json& Value, int32& OutLists, int64& OutLeftOut)
+	{
+		static const std::string Ellipsis = "\xE2\x80\xA6";
+		const size_t Cut = static_cast<size_t>(MaxCallResultItems) + 1;
+		if (Value.is_array() && Value.size() == Cut && Value.at(MaxCallResultItems).is_string()
+			&& Value.at(MaxCallResultItems).as_string().rfind(Ellipsis + "+", 0) == 0)
+		{
+			++OutLists;
+			OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Value.at(MaxCallResultItems).as_string().c_str() + Ellipsis.size() + 1));
+		}
+		else if (Value.is_object() && Value.size() == Cut)
+		{
+			const rql::Json* LeftOut = Value.find(Ellipsis);
+			if (LeftOut && LeftOut->is_string() && LeftOut->as_string().rfind("+", 0) == 0)
+			{
+				++OutLists;
+				OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(LeftOut->as_string().c_str() + 1));
+			}
+		}
+		for (const rql::Json& Item : Value.items())
+			CountCutLists(Item, OutLists, OutLeftOut);
+	}
+
+	/** Call results with a list or map cut at MaxCallResultItems get a warning: how many items were left out, and what to do. */
+	void AddCallResultListNote(rql::QueryResult& Result)
+	{
+		if (!Result.ok || !Result.rows || !Result.columns)
+			return;
+		const std::vector<std::string>& Columns = *Result.columns;
+		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
+		if (Column == Columns.end())
+			return;
+		const size_t Index = static_cast<size_t>(Column - Columns.begin());
+		int64 LeftOut = 0;
+		int32 Lists = 0;
+		bool bWholeResult = false; // the one cut list is the result itself (not a member or an output of it)
+		for (const std::vector<rql::Json>& Row : *Result.rows)
+		{
+			if (Index >= Row.size())
+				continue;
+			const int32 Before = Lists;
+			CountCutLists(Row[Index], Lists, LeftOut);
+			if (Before == 0 && Lists == 1)
+				bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
+		}
+		if (Lists == 0)
+			return;
+		const FString Message = Lists == 1 && bWholeResult
+			? FString::Printf(TEXT("the call result lists %lld items: the first %d are shown, %lld left out"),
+				LeftOut + MaxCallResultItems, MaxCallResultItems, LeftOut)
+			: FString::Printf(TEXT("%d list(s) in the call results hold more than %d items: the first %d of each are shown, %lld item(s) left out"),
+				Lists, MaxCallResultItems, MaxCallResultItems, LeftOut);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("call-result-truncated", UnrealMcpRqlToStd(Message),
+			UnrealMcpRqlToStd(FString::Printf(TEXT("the call ran: only its result is shortened. To see every item, call again with fewer inputs "
+				"(at most %d items per list); do not repeat a call that creates or changes things just to read its result"), MaxCallResultItems))));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -423,9 +592,14 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 			{
 				if (Key.StartsWith(TEXT("spawn")))
 					continue;
-				// An object argument by identity: its text is only its type name (two Blueprints both read "Blueprint").
+				std::string Arguments;
 				for (const rql::Value& Argument : Record.args)
-					Key += TEXT("|") + (Argument.is_object() ? FString::Printf(TEXT("%p"), Argument.ptr()) : UnrealMcpRqlFromStd(rql::to_text(Argument)));
+				{
+					Arguments += "|";
+					AppendCallKey(Arguments, Argument);
+				}
+				// Hashed: an argument can be a whole heightmap or vertex list, and every key stays alive for the batch.
+				Key += FSHA1::HashBuffer(Arguments.data(), Arguments.size()).ToString();
 			}
 			bool bTwice = false;
 			Called.Add({ Record.item.ptr(), Key }, &bTwice);
@@ -696,7 +870,12 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		rql::Budgets Budgets;
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
+		const bool bCall = EndsWithCall(Plan);
+		if (bCall)
+			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
+		if (bCall)
+			AddCallResultListNote(Result);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
