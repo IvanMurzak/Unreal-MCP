@@ -399,7 +399,7 @@ over the shape first gives it finer triangles).
 
 A road with a grade limit: `AddRoad(terrain, points, width, maxSlope)` takes the path's X, Y, follows the ground and cuts or
 fills where it is steeper, and remeshes a Boolean shape's coarse surface under it. Read `Reached`, `MaxSlope` (built) and
-`Note`: a path too short for the climb (`MinLengthMeters`: rise / tan(maxSlope)) ends below the target; wind it
+`Note`: a path shorter than `MinLengthMeters` (about rise / tan(maxSlope), with a margin) ends below the target; wind it
 (switchbacks, a spiral around a hill), `Remove` the road (and its `Remesh`) and call again.
 
 Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` a modifier to

@@ -712,8 +712,22 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	// The path every few metres (at most 1000 points: the spline's limit).
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
-		Length += FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index]));
-	const double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
+	{
+		const double Segment = FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index]));
+		if (Segment < 1.0) // the path is X, Y: points apart only in Z are the same place
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("points %d and %d are the same X, Y: remove the duplicate"), Index - 1, Index));
+		Length += Segment;
+	}
+	auto Samples = [&Points](double Step)
+	{
+		int32 Count = 1;
+		for (int32 Index = 1; Index < Points.Num(); ++Index)
+			Count += FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index])) / Step));
+		return Count;
+	};
+	double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
+	while (Samples(Step) > 1000)
+		Step *= 1.1;
 	TArray<FVector2D> Path = { FVector2D(Points[0]) };
 	TArray<double> Along = { 0.0 };
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
@@ -778,7 +792,15 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		if (!IsKind(Modifier, TEXT("Boolean")) || Modifier->GetIsDisabledFlag() || !Box.IsValid)
 			continue;
 		const FBox2D Area(FVector2D(Box.Min), FVector2D(Box.Max));
-		if (Path.ContainsByPredicate([&Area](const FVector2D& Point) { return Area.IsInside(Point); }))
+		bool bCrossed = false;
+		for (int32 Index = 1; Index < Path.Num() && !bCrossed; ++Index)
+		{
+			FBox2D Segment(ForceInit);
+			Segment += Path[Index - 1];
+			Segment += Path[Index];
+			bCrossed = Area.Intersect(Segment);
+		}
+		if (bCrossed)
 			Coarse += Box.ExpandBy(FVector(0.05 * Box.GetSize().X + 1000.0, 0.05 * Box.GetSize().Y + 1000.0, 0.0));
 	}
 	double Order = 0.0;
@@ -806,7 +828,12 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
 	// Flat 1 m past each edge, so the whole Width is flat (the banks start outside it).
-	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetSpline(Terrain, Spline, Road, Width / 2.0 + 100.0, Falloff, FString(), /*bClosed*/ false))
+	// The spline reaches the ground only within MaxZDistance of its points (engine default 20 m): cover the deepest cut or fill.
+	double Deepest = 0.0;
+	for (int32 Index = 0; Index < Z.Num(); ++Index)
+		Deepest = FMath::Max(Deepest, FMath::Abs(Ground[Index] - Z[Index]));
+	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetNumber(Spline, TEXT("MaxZDistance"), FMath::Max(2000.0, Deepest + 1000.0))
+		|| !SetSpline(Terrain, Spline, Road, Width / 2.0 + 100.0, Falloff, FString(), /*bClosed*/ false))
 		return FRoadResult();
 	Remeshed.bKept = true;
 	const FModifierOpResult Built = Placed.Keep();
@@ -825,13 +852,13 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	Out.EndZ = Z.Last();
 	Out.EndGroundZ = Ground.Last();
 	Out.Reached = FMath::Abs(Z.Last() - Ground.Last()) <= 100.0;
-	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / FMath::Tan(FMath::DegreesToRadians(MaxSlope)) / 100.0;
+	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / Tan / 100.0; // with the profile's margin: what it needs
 	// The built road: its grade along the centre line, from the collision.
 	double Previous = 0.0;
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
 	{
 		const double Height = SampleSurface(Terrain, Path[Index].X, Path[Index].Y, /*bChannels*/ false).Height;
-		if (Index > 0)
+		if (Index > 0 && Along[Index] > Along[Index - 1])
 			Out.MaxSlope = FMath::Max(Out.MaxSlope, FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - Previous) / (Along[Index] - Along[Index - 1]))));
 		Previous = Height;
 	}
@@ -840,7 +867,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	{
 		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
 			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
-			Out.MinLengthMeters * 1.1, RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" and its Remesh"));
+			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" and its Remesh"));
 	}
 	else if (Out.MaxSlope > MaxSlope + 0.5)
 	{

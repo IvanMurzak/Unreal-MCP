@@ -113,7 +113,7 @@ struct FUnrealAIMeshTerrainRoadResult
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	bool Reached = false;
 
-	/** the shortest path (m) that climbs from the start's ground to the end's at MaxSlope */
+	/** the shortest path (m) the road can climb from the start's ground to the end's on (AddRoad keeps a 10% margin under MaxSlope) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double MinLengthMeters = 0.0;
 

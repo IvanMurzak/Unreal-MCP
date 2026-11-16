@@ -541,16 +541,17 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			const double Left = ModSpecHeight(Terrain, X0 - 4500.0 - 212.0, -4500.0 + 212.0), Right = ModSpecHeight(Terrain, X0 - 4500.0 + 212.0, -4500.0 - 212.0);
 			TestTrue(*FString::Printf(TEXT("flat across (%.1f / %.1f / %.1f)"), Left, Mid, Right), FMath::Abs(Left - Mid) <= 15.0 && FMath::Abs(Right - Mid) <= 15.0);
 
-			// The same path at 2 degrees needs 1000 / tan(2) = 286 m: it falls short and says so.
+			// The same path at 2 degrees needs about 1000 / tan(1.8) = 318 m (AddRoad keeps a 10% margin): it falls short and says so.
 			ModSpecRun(TEXT("remove the road"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road")) });
 			ModSpecRun(TEXT("remove its remesh"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Remesh")) });
 			TestTrue(TEXT("AddRoad 2 degrees"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(2.0) }), true, &Result));
 			Road = ModSpecResult(Result);
 			TestTrue(*FString::Printf(TEXT("too short: not reached, the minimum length and what to do (%s)"), *ModSpecJson(Result).Left(900)), Road.IsValid()
-				&& !Road->GetBoolField(TEXT("Reached")) && FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), 286.4, 5.0)
-				&& FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), (Road->GetNumberField(TEXT("EndGroundZ")) - Road->GetNumberField(TEXT("StartZ"))) / FMath::Tan(FMath::DegreesToRadians(2.0)) / 100.0, 0.5)
+				&& !Road->GetBoolField(TEXT("Reached")) && FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), 318.2, 5.0)
+				&& FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), (Road->GetNumberField(TEXT("EndGroundZ")) - Road->GetNumberField(TEXT("StartZ"))) / FMath::Tan(FMath::DegreesToRadians(1.8)) / 100.0, 0.5)
 				&& Road->GetStringField(TEXT("Note")).Contains(TEXT("switchbacks")));
 
+			ModSpecRefuses(TEXT("two points at the same X, Y"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0, 0.0, 500.0)) }, TEXT("same X, Y"));
 			ModSpecRefuses(TEXT("a road steeper than 45 degrees"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(60.0) }, TEXT("MaxSlope 60"));
 			ModSpecRefuses(TEXT("a road off the terrain"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 30000.0, 0.0, 0.0)) }, TEXT("leaves"));
 		});
