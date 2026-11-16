@@ -396,9 +396,9 @@ stays a slope (unlike Flatten, which makes it level); a curved surface comes bac
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
 points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
 stretch that climbs more steeply and says how long it needs to be. `RoadBetween` builds a road between two places by
-itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around cliffs),
-grades it like Ramp and returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}; Reached false means no route
-climbs there within MaxSlope (the road goes as far as one does: allow a larger MaxSlope or pick another end). Use
+itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around steep ground),
+grades it like Ramp and returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}; Reached false means it found no
+route that climbs there within MaxSlope (the road goes as far as it found one: allow a larger MaxSlope or pick another end). Use
 RoadBetween for a road up a hill or across rough ground; use Ramp when you choose the route yourself (a ramp to a pad,
 a road along given points): read the ground along it with Surface and choose each point's Z; on a tight bend give a point
 every few metres (each corner of the line tilts the road a little across).

@@ -675,7 +675,7 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	// A grid of nodes half the road's width apart (each leg of a switchback a stretch of road, yet fine enough to wind up
 	// a narrow hilltop), at most 400 x 400.
 	const int32 Step = FMath::Max3(1, static_cast<int32>(FMath::CeilToInt(0.5 * Width / Grid.QuadCm)), static_cast<int32>(FMath::CeilToInt(FMath::Max(Grid.Width(), Grid.Height()) / 400.0)));
-	const int32 GW = Grid.Width() / Step + 1, GH = Grid.Height() / Step + 1;
+	const int32 GW = (Grid.Width() - 1) / Step + 1, GH = (Grid.Height() - 1) / Step + 1;
 	const auto NodeOf = [&](const FVector& World) -> FIntPoint
 	{
 		const FVector2D L = Grid.ToLocal(World);
@@ -692,8 +692,10 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 		const double FX = FMath::Clamp(X - X0, 0.0, 1.0), FY = FMath::Clamp(Y - Y0, 0.0, 1.0);
 		return FMath::Lerp(FMath::Lerp(Grid.At(X0, Y0), Grid.At(X1, Y0), FX), FMath::Lerp(Grid.At(X0, Y1), Grid.At(X1, Y1), FX), FY);
 	};
+	const FVector2D StartAt = Grid.ToLocal(Start), EndAt = Grid.ToLocal(End);
 	const FIntPoint From = NodeOf(Start), To = NodeOf(End);
-	if (!GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
+	const auto On = [&](const FVector2D& At) { return At.X >= Grid.Rect.Min.X && At.Y >= Grid.Rect.Min.Y && At.X <= Grid.Rect.Max.X && At.Y <= Grid.Rect.Max.Y && GroundAt(At.X, At.Y).IsSet(); };
+	if (!On(StartAt) || !On(EndAt) || !GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
 		return UnrealMcpRql::Failed<bool>(TEXT("Start and End must be on the (loaded) landscape"));
 	// Moves in 48 directions (offsets up to 4 nodes), so the route can follow a steep hill's contours closely.
 	TArray<FIntPoint> Moves;
@@ -769,11 +771,13 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	for (int32 Node = Last; Node != INDEX_NONE; Node = Came[Node])
 		Route.Add(FVector2D(VX(Node % GW), VY(Node / GW)));
 	Algo::Reverse(Route);
-	if (Route.Num() < 2)
+	if (Route.Num() < 2 && Last != GoalNode)
 		return UnrealMcpRql::Failed<bool>(TEXT("no route leaves Start within MaxSlope: the ground around it is steeper (start on gentler ground or allow a larger MaxSlope)"));
-	Route[0] = Grid.ToLocal(Start);
+	if (Route.Num() < 2)
+		Route.Add(EndAt); // Start and End in one node
+	Route[0] = StartAt;
 	if (Last == GoalNode)
-		Route.Last() = Grid.ToLocal(End);
+		Route.Last() = EndAt;
 	// A point at least every half node (at most 5 m, at most ~1000 points), lightly smoothed (rounds each turn).
 	double RouteLength = 0.0;
 	for (int32 Index = 1; Index < Route.Num(); ++Index)
@@ -793,7 +797,7 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 		Total += Run[Index];
 		Z[Index] = GroundAt(Path[Index].X, Path[Index].Y).Get(Index ? Z[Index - 1] : 0.0);
 	}
-	const TOptional<double> EndGround = GroundAt(Grid.ToLocal(End).X, Grid.ToLocal(End).Y);
+	const TOptional<double> EndGround = GroundAt(EndAt.X, EndAt.Y);
 	const bool bAtEnd = Last == GoalNode && EndGround.IsSet();
 	const bool bPinEnd = bAtEnd && FMath::Abs(Z.Last() - Z[0]) <= Rise * Total;
 	for (int32 Pass = 0; Pass < 100; ++Pass)

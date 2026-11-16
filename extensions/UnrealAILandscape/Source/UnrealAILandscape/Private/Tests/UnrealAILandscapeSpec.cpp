@@ -820,6 +820,11 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(*FString::Printf(TEXT("with Reached false (%s)"), *LandscapeSpecJson(Short).Left(300)), LandscapeSpecJson(Short).Contains(TEXT("\"Reached\":false")));
 			TSharedPtr<FJsonObject> Bad;
 			TestFalse(TEXT("an End off the landscape is refused"), Call(Label, TEXT("RoadBetween"), P3(Start.X, Start.Y, 0) + TEXT(",") + P3(X0 + 500000.0, 0, 0), &Bad));
+			TestTrue(*FString::Printf(TEXT("saying it must be on the landscape (%s)"), *LandscapeSpecJson(Bad).Left(300)), LandscapeSpecJson(Bad).Contains(TEXT("on the (loaded) landscape")));
+			TestFalse(TEXT("and so is a Start just past its edge"), Call(Label, TEXT("RoadBetween"), P3(X0 - 10200.0, -9000.0, 0) + TEXT(",") + P3(Start.X, Start.Y, 0), &Bad));
+			TSharedPtr<FJsonObject> Short2;
+			TestTrue(TEXT("a road 1 m long up the flank (Start and End in one node)"), Call(Label, TEXT("RoadBetween"), P3(X0 - 5000.0, 3000.0, 0) + TEXT(",") + P3(X0 - 4900.0, 3000.0, 0) + TEXT(",") + Lit(600), &Short2));
+			TestTrue(*FString::Printf(TEXT("reaches it (%s)"), *LandscapeSpecJson(Short2).Left(300)), LandscapeSpecJson(Short2).Contains(TEXT("\"Reached\":true")));
 		});
 
 		It("keeps an edit log: one record per shaping call with its Label, undone and redone with it, the last MaxEdits only", [this]()

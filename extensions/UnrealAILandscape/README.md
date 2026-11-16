@@ -68,8 +68,8 @@ the smoothest surface meeting the ground around it (a spike, pit or bump blends 
 strip along points to their Z (a road bed or ramp, cut and fill, sides blended over `Falloff`; `MaxSlope` refuses a stretch
 steeper than that); `RoadBetween` finds a route from a start to an end no steeper than `MaxSlope` (an A* search on a grid of nodes
 half the road's width apart: switchbacks or a spiral up a hill), grades it like `Ramp` and returns `Reached`, `LengthMeters`, the built
-`MaxSlope`, the `Points` and `Changed` (`Reached` false: no route climbs there within `MaxSlope`, the road goes as far as
-one does); use it for a road up a hill, `Ramp` for a route you choose; `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
+`MaxSlope`, the `Points` and `Changed` (`Reached` false: it found no route that climbs there within `MaxSlope`, the road goes as
+far as it found one); use it for a road up a hill, `Ramp` for a route you choose; `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
 Channel / Ridge; `Location`, `Height`, `Radius`, `Length`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
 `Weight`); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
