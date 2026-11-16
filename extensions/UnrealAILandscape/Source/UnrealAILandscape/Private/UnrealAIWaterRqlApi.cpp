@@ -406,8 +406,8 @@ namespace UnrealAIWaterRqlLocal
 		return Path;
 	}
 
-	/** @p Path resampled every @p Spacing (vertex units) and smoothed @p Passes times (the 8-neighbour grid zigzags), ends kept. */
-	TArray<FVector2D> Resample(const TArray<FVector2D>& Path, double Spacing, int32 Passes = 2)
+	/** @p Path resampled every @p Spacing (vertex units) and smoothed (the 8-neighbour grid zigzags), ends kept. */
+	TArray<FVector2D> Resample(const TArray<FVector2D>& Path, double Spacing)
 	{
 		TArray<FVector2D> Out;
 		Out.Add(Path[0]);
@@ -428,7 +428,7 @@ namespace UnrealAIWaterRqlLocal
 			Out.Last() = Path.Last();
 		else
 			Out.Add(Path.Last());
-		for (int32 Pass = 0; Pass < Passes; ++Pass)
+		for (int32 Pass = 0; Pass < 2; ++Pass)
 		{
 			TArray<FVector2D> Smooth = Out;
 			for (int32 Index = 1; Index + 1 < Out.Num(); ++Index)
@@ -767,7 +767,8 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	const int32 Last = Came[GoalNode] != INDEX_NONE || GoalNode == StartNode ? GoalNode : Best;
 	TArray<FVector2D> Route; // vertex space, start first
 	for (int32 Node = Last; Node != INDEX_NONE; Node = Came[Node])
-		Route.Insert(FVector2D(VX(Node % GW), VY(Node / GW)), 0);
+		Route.Add(FVector2D(VX(Node % GW), VY(Node / GW)));
+	Algo::Reverse(Route);
 	if (Route.Num() < 2)
 		return UnrealMcpRql::Failed<bool>(TEXT("no route leaves Start within MaxSlope: the ground around it is steeper (start on gentler ground or allow a larger MaxSlope)"));
 	Route[0] = Grid.ToLocal(Start);
