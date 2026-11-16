@@ -1,0 +1,10 @@
+{
+  "description": "a labelled Sculpt: one record in the edit log",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Sculpt(unreal.find(\"E2EEditLog\"), [0, 0, 0], 500, 200, \"e2e-hill\")"
+  },
+  "assert": {
+    "pattern": "Sculpt\\(.*\\|[1-9]\\d*"
+  }
+}

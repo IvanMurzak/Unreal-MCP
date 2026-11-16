@@ -1,0 +1,10 @@
+{
+  "description": "the reloaded landscape still has its Sculpt record (rql-query: Edits is read-only)",
+  "tool": "rql-query",
+  "input": {
+    "query": "landscapes | where IsPrimary and Label == \"E2EEditLog\" | select Edits"
+  },
+  "assert": {
+    "pattern": "Sculpt.*e2e-hill"
+  }
+}

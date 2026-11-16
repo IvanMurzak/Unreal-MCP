@@ -33,7 +33,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape`, `water` |
 | Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Bumps`, `Coverage`, `Paint`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
-| Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
+| Members | `LandscapeProxy.Edits`, `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
 
 ```
 landscapes | select Label Sections PaintLayers LandscapeMaterial
@@ -77,6 +77,17 @@ steps. `Create`'s optional last argument `MaxHeightMeters` (1 to 10000) makes mo
 `max(100, ceil(MaxHeightMeters / 2.56))`, so the height steps grow to Z scale / 128 cm (1024 m: Z scale 400, 3.1 cm).
 `Sculpt`, `Flatten` and `Carve` refuse an edit that would leave the range and change nothing (the error names the range and
 the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the limit silently.
+
+### Edit log
+
+Every shaping and paint call of these operations (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `Paint`, and
+`CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | select Edits`
+(the last 1000 records, oldest first: `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Time`). Each of these
+operations takes an optional last argument `Label` that names the edit. The log is an editor-only component of the landscape
+actor (`AIEditLog`): saved with the level, changed in the operation's own undo step (undo / redo take the record with the
+edit), stripped from cooked games. `Bumps` names the logged edit that made each place (`Edit`). Edits made any other way
+(Landscape mode, Python, heightmap imports) are not recorded. A level saved with a log and opened without this extension
+loses the log (its component class is missing) and nothing else.
 
 On a World Partition map, an editor that opens the map loads only the region around the camera. The operations and
 `Bounds` load the landscape's streaming proxies they need first (as the World Partition window's region loading does), so

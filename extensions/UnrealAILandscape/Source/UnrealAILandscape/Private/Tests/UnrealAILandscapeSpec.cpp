@@ -32,6 +32,10 @@
 #include "Serialization/JsonWriter.h"
 #include "Containers/Ticker.h"
 #include "LandscapeSettings.h"
+#include "UnrealAILandscapeEdit.h"
+#include "UnrealAILandscapeRqlApi.h"
+#include "Editor.h"
+#include "ScopedTransaction.h"
 #include "WaterBodyActor.h"
 #include "WaterBodyComponent.h"
 #include "WaterBodyLakeActor.h"
@@ -783,6 +787,42 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("and changing nothing"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0.0), Mid, 0.5));
 		});
 
+		It("keeps an edit log: one record per shaping call with its Label, undone and redone with it, the last MaxEdits only", [this]()
+		{
+			const FString Label = TEXT("RqlSpecEditLog_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 800000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			const auto Count = [Landscape]() { return UnrealAILandscapeRqlApiLocal::EditLog(Landscape).Num(); };
+			TestEqual(TEXT("no log before an edit"), Count(), 0);
+			TestTrue(TEXT("a labelled Sculpt"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(500) + TEXT(",") + Lit(200) + TEXT(R"(,{"lit":"spec-hill"})")));
+			TestTrue(TEXT("a Flatten without a label"), Call(Label, TEXT("Flatten"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(200) + TEXT(",") + Lit(50)));
+			// landscapes | where Label == "@LABEL@" | select Edits (rql-query)
+			TSharedPtr<FJsonObject> Rows;
+			LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"@LABEL@"}]}},{"op":"select","fields":[{"name":"Edits","expr":{"path":["Edits"]}}]}]})RQL"), Label, FString(), false, &Rows);
+			const FString Text = LandscapeSpecJson(Rows);
+			TestTrue(*FString::Printf(TEXT("Edits lists Sculpt 'spec-hill' then Flatten (%s)"), *Text.Left(600)),
+				Text.Contains(TEXT("\"Op\":\"Sculpt\"")) && Text.Contains(TEXT("\"Label\":\"spec-hill\"")) && Text.Contains(TEXT("\"Op\":\"Flatten\""))
+				&& Text.Find(TEXT("Sculpt")) < Text.Find(TEXT("Flatten")));
+			TestEqual(TEXT("two records"), Count(), 2);
+			GEditor->UndoTransaction();
+			TestEqual(TEXT("undo takes the Flatten's record with it"), Count(), 1);
+			GEditor->RedoTransaction();
+			TestEqual(TEXT("redo brings it back"), Count(), 2);
+			{
+				// The bound: the oldest records go past MaxEdits (recorded directly, without editing the ground 1000 times).
+				FScopedTransaction Transaction(FText::FromString(TEXT("edit log bound")));
+				for (int32 Index = 0; Index < UnrealAILandscapeRqlApiLocal::MaxEdits + 5; ++Index)
+					UnrealAILandscapeRqlApiLocal::RecordEdit(Landscape, TEXT("Sculpt"), FString::FromInt(Index), { FVector(X0, 0.0, 0.0) }, 100.0, 0.0, 1.0);
+			}
+			const TArray<FUnrealAILandscapeEdit>& Log = UnrealAILandscapeRqlApiLocal::EditLog(Landscape);
+			TestEqual(TEXT("at most MaxEdits records"), Log.Num(), UnrealAILandscapeRqlApiLocal::MaxEdits);
+			TestEqual(TEXT("the oldest went first"), Log.Num() ? Log[0].Label : FString(), FString(TEXT("5")));
+			TestTrue(TEXT("the log is editor-only (not cooked)"), Landscape->FindComponentByClass<UUnrealAILandscapeEditLog>() && Landscape->FindComponentByClass<UUnrealAILandscapeEditLog>()->IsEditorOnly());
+		});
+
 		It("Coverage lists where a paint layer is painted, in rql-query, and names the layers for an unknown one", [this]()
 		{
 			const FString Label = TEXT("RqlSpecCoverage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
@@ -846,12 +886,13 @@ void FUnrealAILandscapeSpec::Define()
 			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
 			// 16 m long, 1 m wide, 4 m deep, clear of the landscape's edges: far longer than wide at any MinHeight cut.
 			const FString Points = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 800.0, 0, 0), *P3(X0 + 800.0, 0, 0));
-			TestTrue(TEXT("a ditch carved"), Call(Label, TEXT("Carve"), Points + TEXT(",") + Lit(100) + TEXT(",") + Lit(400)));
+			TestTrue(TEXT("a ditch carved"), Call(Label, TEXT("Carve"), Points + TEXT(",") + Lit(100) + TEXT(",") + Lit(400) + TEXT(R"(,{"lit":"ditch"})")));
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(TEXT("Bumps runs"), Call(Label, TEXT("Bumps"), Lit(100) + TEXT(",") + Lit(500), &Result, /*bQuery*/ true));
 			const FString Text = LandscapeSpecJson(Result);
 			TestTrue(*FString::Printf(TEXT("one Channel about 16 m long, no Pit (%s)"), *Text.Left(500)),
 				Text.Contains(TEXT("\"Kind\":\"Channel\"")) && !Text.Contains(TEXT("\"Kind\":\"Pit\"")));
+			TestTrue(*FString::Printf(TEXT("naming the logged Carve that made it (%s)"), *Text.Left(500)), Text.Contains(TEXT("Carve 'ditch' #0")));
 		});
 
 		It("Bumps finds a spike and a pit (not the hill they sit on) and runs in rql-query", [this]()

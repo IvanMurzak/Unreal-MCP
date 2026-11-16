@@ -1,0 +1,10 @@
+{
+  "description": "a 20 m landscape in it",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Create(\"E2EEditLog\", [0, 0, 0], 20)"
+  },
+  "assert": {
+    "pattern": "Landscape#\\d+\\(E2EEditLog\\)"
+  }
+}

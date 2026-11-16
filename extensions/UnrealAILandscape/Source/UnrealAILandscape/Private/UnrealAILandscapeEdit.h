@@ -7,6 +7,7 @@
 #include "LandscapeEditTypes.h"
 
 class ALandscapeProxy;
+struct FUnrealAILandscapeEdit;
 enum ELandscapeLayerUpdateMode : uint32;
 
 /** Landscape edit helpers the landscape and water operations share (UnrealAILandscapeRqlApi.cpp). */
@@ -47,6 +48,19 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * region a reopened map loads around the camera. Loading changes and dirties nothing. Nothing to do without World Partition.
 	 */
 	void LoadAll(UClass* Class);
+
+	/** How many records a landscape's edit log keeps (the oldest go first). */
+	constexpr int32 MaxEdits = 1000;
+
+	/**
+	 * Append a record to the edit log of @p Landscape's landscape actor (creating the editor-only log component the first
+	 * time), inside the current operation's undo step; the oldest records go beyond MaxEdits.
+	 */
+	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
+		double Width, double Height, const FString& Layer = FString());
+
+	/** The edit log of @p Landscape's landscape actor, oldest first (empty when it has none). */
+	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape);
 
 	/** Carve: a channel Depth cm below the ground along Points (world), Width cm of bottom then 1:1 banks; changed vertices. */
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);

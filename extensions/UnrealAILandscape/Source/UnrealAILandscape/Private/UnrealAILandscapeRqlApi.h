@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "Components/ActorComponent.h"
 
 #include "UnrealAILandscapeRqlApi.generated.h"
 
@@ -44,6 +45,63 @@ struct FUnrealAILandscapeSurface
 	TMap<FString, double> Layers;
 };
 
+/** One record of a landscape's edit log (LandscapeProxy.Edits): a shaping or paint operation of this extension. */
+USTRUCT(BlueprintType)
+struct FUnrealAILandscapeEdit
+{
+	GENERATED_BODY()
+
+	/** the operation: Sculpt, Flatten, Carve, Smooth, Ramp, Paint or CreateRiverBetween */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Op;
+
+	/** the caller's name for the edit (the optional Label argument; a river's own label), empty when none was given */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Label;
+
+	/** where: the centre ([X, Y, 0]) of a circle edit, or the path's points */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	TArray<FVector> Points;
+
+	/** a circle edit's radius, cm (Flatten: plus its falloff; Paint: 0 = the whole landscape) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Radius = 0.0;
+
+	/** a path edit's width, cm */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Width = 0.0;
+
+	/** Sculpt's height, Flatten's world Z, Carve's / a river's depth, Smooth's and Paint's strength (cm, or 0..1) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Height = 0.0;
+
+	/** Paint's layer */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Layer;
+
+	/** when (UTC, ISO 8601) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Time;
+};
+
+/**
+ * The edit log of a landscape: an editor-only component on its landscape actor that keeps the last records of this extension's
+ * shaping and paint operations. It is saved with the level and changed in the operation's own undo step (undo / redo take the
+ * record with the edit); stripped from cooked games. Edits made another way (Landscape mode, Python, imports) are not in it.
+ */
+UCLASS(ClassGroup = Landscape)
+class UUnrealAILandscapeEditLog : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UUnrealAILandscapeEditLog() { bIsEditorOnly = true; }
+
+	/** oldest first; at most UnrealAILandscapeRqlApiLocal::MaxEdits */
+	UPROPERTY()
+	TArray<FUnrealAILandscapeEdit> Edits;
+};
+
 /** One result of `landscape | call Bumps(landscape)`: a place where the ground stands out of its surroundings. */
 USTRUCT(BlueprintType)
 struct FUnrealAILandscapeBump
@@ -69,6 +127,10 @@ struct FUnrealAILandscapeBump
 	/** how long it is along its longest direction (cm); about 2 x Radius for a round place, much more than its width for a Channel or Ridge */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	double Length = 0.0;
+
+	/** the latest logged edit that reaches it ("Carve 'River' #12": its Op, Label and index in LandscapeProxy.Edits), empty when none did (made outside these operations, or before the log) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Edit;
 };
 
 /** One result of `landscape | call Coverage(landscape, layer)`: a connected area where a paint layer is painted. */
@@ -114,29 +176,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	ALandscape* Create(const FString& Label, FVector Location, double SizeMeters = 100.0, UMaterialInterface* Material = nullptr, double MaxHeightMeters = 256.0);
 
-	/** raise (Height > 0, cm) or lower (Height < 0) a landscape around Center (world X and Y) within Radius (cm) with a smooth falloff to the edge: one call is one hill or hollow; fails without changing anything when the ground would leave the landscape's height range (Bounds.HeightRange; Create's MaxHeightMeters); heights, collision and rendering are updated when the call returns (read them back with Surface); returns how many vertices changed */
+	/** raise (Height > 0, cm) or lower (Height < 0) a landscape around Center (world X and Y) within Radius (cm) with a smooth falloff to the edge: one call is one hill or hollow; fails without changing anything when the ground would leave the landscape's height range (Bounds.HeightRange; Create's MaxHeightMeters); heights, collision and rendering are updated when the call returns (read them back with Surface); Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Sculpt(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height);
+	int32 Sculpt(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, const FString& Label = TEXT(""));
 
-	/** level a landscape to world Z Height (cm) within Radius (cm) of Center (world X and Y): a flat pad, plateau or basin; Falloff (cm, optional) blends the ground around it back to its old height over that distance (0: a sharp edge); returns how many vertices changed */
+	/** level a landscape to world Z Height (cm) within Radius (cm) of Center (world X and Y): a flat pad, plateau or basin; Falloff (cm, optional) blends the ground around it back to its old height over that distance (0: a sharp edge); Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff = 0.0);
+	int32 Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff = 0.0, const FString& Label = TEXT(""));
 
-	/** dig a channel (a riverbed, ditch or road cut) Depth cm (1 .. 10000) below the ground along Points (2 .. 1000 world points; Z is ignored): Width cm (100 .. 20000) of level bottom following the ground, then banks rising 1:1 to the old ground; one undo step; add water along it with water | call CreateRiver; returns how many vertices changed */
+	/** dig a channel (a riverbed, ditch or road cut) Depth cm (1 .. 10000) below the ground along Points (2 .. 1000 world points; Z is ignored): Width cm (100 .. 20000) of level bottom following the ground, then banks rising 1:1 to the old ground; one undo step; add water along it with water | call CreateRiver; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
+	int32 Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth, const FString& Label = TEXT(""));
 
-	/** paint a layer by name ("Grass") onto a landscape around Center (world X and Y) within Radius (cm; 0 = the whole landscape) with a soft edge; Strength 0..1 (1 = only this layer at the centre); the layer is added to the landscape (its layer info asset saved beside the level) when it has none of that name; it shows when the landscape material blends a layer of that name (CreateLayerMaterial); returns how many vertices changed */
+	/** paint a layer by name ("Grass") onto a landscape around Center (world X and Y) within Radius (cm; 0 = the whole landscape) with a soft edge; Strength 0..1 (1 = only this layer at the centre); the layer is added to the landscape (its layer info asset saved beside the level) when it has none of that name; it shows when the landscape material blends a layer of that name (CreateLayerMaterial); Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius = 0.0, double Strength = 1.0);
+	int32 Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius = 0.0, double Strength = 1.0, const FString& Label = TEXT(""));
 
-	/** replace the ground within Radius (cm) of Center (world X and Y) by a smooth surface fitted to the ground around that circle, so a spike, pit, bump or hole disappears into its surroundings (a slope stays a slope); Strength 0..1 (1: all the way); fails without changing anything when the result leaves the height range; returns how many vertices changed */
+	/** replace the ground within Radius (cm) of Center (world X and Y) by a smooth surface fitted to the ground around that circle, so a spike, pit, bump or hole disappears into its surroundings (a slope stays a slope); Strength 0..1 (1: all the way); fails without changing anything when the result leaves the height range; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength = 1.0);
+	int32 Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength = 1.0, const FString& Label = TEXT(""));
 
-	/** level a strip Width cm wide (100 .. 20000) along Points (2 .. 1000 world points) to the points' Z, straight from point to point (raising or lowering the ground): a road bed, ramp, railway or path; Falloff cm (0 .. 20000) blends its sides back to the ground (0: a sharp edge); MaxSlope degrees (optional, 0: any): fails without changing anything when a stretch climbs more steeply, naming it and the length it needs; returns how many vertices changed */
+	/** level a strip Width cm wide (100 .. 20000) along Points (2 .. 1000 world points) to the points' Z, straight from point to point (raising or lowering the ground): a road bed, ramp, railway or path; Falloff cm (0 .. 20000) blends its sides back to the ground (0: a sharp edge); MaxSlope degrees (optional, 0: any): fails without changing anything when a stretch climbs more steeply, naming it and the length it needs; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
-	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0);
+	int32 Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff = 500.0, double MaxSlope = 0.0, const FString& Label = TEXT(""));
 
 	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump, Pit, or Ridge / Channel when long and narrow), Location, Height, Radius, Length}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
