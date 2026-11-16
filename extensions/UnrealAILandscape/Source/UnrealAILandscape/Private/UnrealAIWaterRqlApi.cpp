@@ -803,12 +803,13 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 		Bed.Add(Running - Depth);
 		Surface.Add(Depth > 0.0 ? Running - Depth / 3.0 : Running + 20.0);
 	}
-	if (Depth > 0.0)
-		CarveBed(Landscape, Grid, Path, Bed, Width * 0.5);
+	const int32 Carved = Depth > 0.0 ? CarveBed(Landscape, Grid, Path, Bed, Width * 0.5) : 0;
 
 	TArray<FVector> Points;
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
 		Points.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Surface[Index]));
+	if (Carved > 0) // its bed is carved into the landscape (whether or not the river then spawns): logged like a Carve
+		UnrealAILandscapeRqlApiLocal::RecordEdit(Landscape, TEXT("CreateRiverBetween"), Label, Points, 0.0, Width, Depth);
 	return SpawnRiver(Label, Points, Width, Depth > 0.0 ? Depth * 2.0 / 3.0 : 0.0, Material);
 }
 

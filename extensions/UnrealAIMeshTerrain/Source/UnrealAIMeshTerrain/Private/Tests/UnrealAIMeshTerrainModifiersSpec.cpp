@@ -182,7 +182,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TEXT("AddPatch(MeshPartition Terrain, Vector Location, double Radius, double Falloff, string Label)"),
 				TEXT("AddWeight(MeshPartition Terrain, string Channel, Vector Location, double Radius, double Falloff, double Value, string Label)"),
 				TEXT("AddSpline(MeshPartition Terrain, List<Vector> Points, double Width, double Falloff, bool Closed, string Channel, string Label)"),
-				TEXT("AddRoad(MeshPartition Terrain, List<Vector> Points, double Width, double MaxSlope, double Falloff, string Label)"),
+				TEXT("AddRoad(MeshPartition Terrain, List<Vector> Points, double Width, double MaxSlope, double Falloff, string Label, double TimeoutSeconds)"),
 				TEXT("AddShape(MeshPartition Terrain, string Shape, Vector Location, Vector Size, string Operation, Rotator Rotation, string Label)"),
 				TEXT("AddLattice(MeshPartition Terrain, Vector Location, Vector Size, int Resolution, string Label)"),
 				TEXT("AddTexturePatch(MeshPartition Terrain, Texture2D Texture, Vector Location, Vector2D Size, double Height, string Label)"),
@@ -552,6 +552,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				&& Road->GetStringField(TEXT("Note")).Contains(TEXT("switchbacks")));
 
 			ModSpecRefuses(TEXT("two points at the same X, Y"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0, 0.0, 500.0)) }, TEXT("same X, Y"));
+			ModSpecRefuses(TEXT("a timeout of 0"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(TEXT("")), ModSpecNum(0.0) }, TEXT("1 .. 600"));
 			ModSpecRefuses(TEXT("a road steeper than 45 degrees"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(60.0) }, TEXT("MaxSlope 60"));
 			ModSpecRefuses(TEXT("a road off the terrain"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 30000.0, 0.0, 0.0)) }, TEXT("leaves"));
 		});

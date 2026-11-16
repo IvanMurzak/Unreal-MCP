@@ -1,0 +1,10 @@
+{
+  "description": "a new level for the edit log save / reload check",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call NewLevel(\"/Game/E2E/LsEditLog\")"
+  },
+  "assert": {
+    "pattern": "LsEditLog"
+  }
+}

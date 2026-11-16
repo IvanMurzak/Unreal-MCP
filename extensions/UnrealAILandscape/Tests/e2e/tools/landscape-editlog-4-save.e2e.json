@@ -1,0 +1,10 @@
+{
+  "description": "the level saved with its edit log",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call SaveLevel()"
+  },
+  "assert": {
+    "pattern": "SaveLevel"
+  }
+}

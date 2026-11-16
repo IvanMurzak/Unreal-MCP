@@ -541,6 +541,60 @@ namespace UnrealAILandscapeRqlApiLocal
 			Visit(Cells);
 		}
 	}
+
+	/** @p Changed (an operation's changed vertices), after logging the operation when it changed anything. */
+	int32 Logged(int32 Changed, ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
+		double Width, double Height, const FString& Layer = FString())
+	{
+		if (Changed > 0)
+			RecordEdit(Landscape, Op, Label, Points, Radius, Width, Height, Layer);
+		return Changed;
+	}
+
+	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape)
+	{
+		static const TArray<FUnrealAILandscapeEdit> None;
+		const ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
+		const UUnrealAILandscapeEditLog* Log = Primary ? Primary->FindComponentByClass<UUnrealAILandscapeEditLog>() : nullptr;
+		return Log ? Log->Edits : None;
+	}
+
+	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
+		double Width, double Height, const FString& Layer)
+	{
+		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
+		if (!Primary)
+			return;
+		UUnrealAILandscapeEditLog* Log = Primary->FindComponentByClass<UUnrealAILandscapeEditLog>();
+		if (!Log)
+		{
+			// An instance component of the landscape actor: saved with it, undone with the operation that made it.
+			Primary->Modify();
+			Log = NewObject<UUnrealAILandscapeEditLog>(Primary, UUnrealAILandscapeEditLog::StaticClass(), MakeUniqueObjectName(Primary, UUnrealAILandscapeEditLog::StaticClass(), TEXT("AIEditLog")), RF_Transactional);
+			Primary->AddInstanceComponent(Log);
+			Log->OnComponentCreated();
+			Log->RegisterComponent();
+		}
+		Log->Modify();
+		FUnrealAILandscapeEdit& Edit = Log->Edits.AddDefaulted_GetRef();
+		Edit.Op = Op;
+		Edit.Label = Label.TrimStartAndEnd();
+		// A long path (a river is one point per vertex) keeps 64 evenly spaced points, its ends included.
+		constexpr int32 MaxPoints = 64;
+		const int32 Count = FMath::Min(Points.Num(), MaxPoints);
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FVector& Point = Points[Count == Points.Num() ? Index : FMath::RoundToInt(static_cast<double>(Index) * (Points.Num() - 1) / (Count - 1))];
+			Edit.Points.Add(FVector(FMath::RoundToDouble(Point.X), FMath::RoundToDouble(Point.Y), FMath::RoundToDouble(Point.Z)));
+		}
+		Edit.Radius = Radius;
+		Edit.Width = Width;
+		Edit.Height = Height;
+		Edit.Layer = Layer;
+		Edit.Time = FDateTime::UtcNow().ToIso8601();
+		if (Log->Edits.Num() > MaxEdits)
+			Log->Edits.RemoveAt(0, Log->Edits.Num() - MaxEdits);
+	}
 }
 
 using namespace UnrealAILandscapeRqlApiLocal;
@@ -593,7 +647,7 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 	return Landscape;
 }
 
-int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height)
+int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, const FString& Label)
 {
 	if (!(Radius > 0.0))
 		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be greater than 0 (cm)"));
@@ -605,7 +659,7 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 	const double Units = Height / UnitCm(Landscape);
 	FHeightmapAccessor<false> Accessor(Area.Info);
 	int32 Low = TNumericLimits<int32>::Max(), High = TNumericLimits<int32>::Lowest(); // the unclamped result, height units
-	return EditCircle<uint16>(Landscape, Accessor, Area, [Units, &Area, &Low, &High](uint16& Value, double Distance)
+	const int32 Changed = EditCircle<uint16>(Landscape, Accessor, Area, [Units, &Area, &Low, &High](uint16& Value, double Distance)
 	{
 		const int32 Raw = FMath::RoundToInt(Value + Units * Falloff(Distance, Area));
 		if (Raw == Value)
@@ -618,9 +672,10 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 	{
 		return FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High));
 	});
+	return Logged(Changed, Landscape, TEXT("Sculpt"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Height);
 }
 
-int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff)
+int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff, const FString& Label)
 {
 	if (!(Radius > 0.0) || !(Falloff >= 0.0) || !FMath::IsFinite(Radius + Falloff))
 		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be greater than 0 and Falloff 0 or more (cm)"));
@@ -633,7 +688,7 @@ int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Cent
 	const double Inner = Area.Radius * Radius / (Radius + Falloff); // vertices
 	const double Band = Area.Radius - Inner;
 	FHeightmapAccessor<false> Accessor(Area.Info);
-	return EditCircle<uint16>(Landscape, Accessor, Area, [Target, Inner, Band](uint16& Value, double Distance)
+	const int32 Changed = EditCircle<uint16>(Landscape, Accessor, Area, [Target, Inner, Band](uint16& Value, double Distance)
 	{
 		const double Weight = Distance <= Inner ? 1.0 : Band > 0.0 ? Cosine((Distance - Inner) / Band) : 0.0;
 		const uint16 New = static_cast<uint16>(FMath::Clamp(FMath::RoundToInt(FMath::Lerp(static_cast<double>(Value), Target, Weight)), 0, 65535));
@@ -641,9 +696,10 @@ int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Cent
 		Value = New;
 		return bChanged;
 	});
+	return Logged(Changed, Landscape, TEXT("Flatten"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius + Falloff, 0.0, Height);
 }
 
-int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth)
+int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth, const FString& Label)
 {
 	if (!Landscape)
 		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
@@ -655,10 +711,11 @@ int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<F
 		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Width %g is outside 100 .. 20000 cm"), Width));
 	if (!(Depth >= 1.0 && Depth <= 10000.0))
 		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Depth %g is outside 1 .. 10000 cm"), Depth));
-	return CarveAlong(Landscape, Points, Width, Depth);
+	const int32 Changed = CarveAlong(Landscape, Points, Width, Depth);
+	return Logged(Changed, Landscape, TEXT("Carve"), Label, Points, 0.0, Width, Depth);
 }
 
-int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius, double Strength)
+int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius, double Strength, const FString& Label)
 {
 	const FString Name = Layer.TrimStartAndEnd();
 	if (!ValidLayerName(Name, Layer))
@@ -674,7 +731,7 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	if (!LayerInfo)
 		return 0;
 	TAlphamapAccessor<false> Accessor(Area.Info, LayerInfo);
-	return EditCircle<uint8>(Landscape, Accessor, Area, [Strength, &Area](uint8& Value, double Distance)
+	const int32 Changed = EditCircle<uint8>(Landscape, Accessor, Area, [Strength, &Area](uint8& Value, double Distance)
 	{
 		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Strength * Falloff(Distance, Area)), 0, 255));
 		if (Target <= Value)
@@ -686,9 +743,10 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, R, Weights);
 		return true;
 	});
+	return Logged(Changed, Landscape, TEXT("Paint"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength, Name);
 }
 
-int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength)
+int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength, const FString& Label)
 {
 	if (!(Radius > 0.0 && Radius <= 30000.0))
 		return UnrealMcpRql::Failed<int32>(TEXT("Radius must be within 0 (exclusive) .. 30000 cm"));
@@ -827,10 +885,11 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 	WriteData(Accessor, R, Data.GetData());
 	Accessor.Flush();
 	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	RecordEdit(Landscape, TEXT("Smooth"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength);
 	return Changed;
 }
 
-int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff, double MaxSlope)
+int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff, double MaxSlope, const FString& Label)
 {
 	if (!Landscape)
 		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
@@ -859,7 +918,8 @@ int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FV
 					Index, A.X, A.Y, A.Z, Index + 1, B.X, B.Y, B.Z, FMath::RadiansToDegrees(FMath::Atan2(Rise, Run)), MaxSlope, Rise, Rise / Limit, Run));
 		}
 	}
-	return RampAlong(Landscape, Points, Width, Falloff);
+	const int32 Changed = RampAlong(Landscape, Points, Width, Falloff);
+	return Logged(Changed, Landscape, TEXT("Ramp"), Label, Points, Falloff, Width, 0.0);
 }
 
 TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
@@ -1064,6 +1124,34 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 	FBumps Result;
 	for (const int32 Index : Kept)
 		Result.Add(Out[Index]);
+	// Which logged edit made it: the latest height edit whose circle or path reaches the place.
+	const TArray<FUnrealAILandscapeEdit>& Edits = EditLog(Landscape);
+	for (FUnrealAILandscapeBump& Bump : Result)
+	{
+		const FVector2D At(Bump.Location);
+		for (int32 Index = Edits.Num() - 1; Index >= 0 && Bump.Edit.IsEmpty(); --Index)
+		{
+			const FUnrealAILandscapeEdit& Edit = Edits[Index];
+			if (Edit.Op == TEXT("Paint") || Edit.Points.IsEmpty())
+				continue;
+			double Distance = TNumericLimits<double>::Max();
+			// A circle edit made the place only when it is about its size: a 800 m hill's Sculpt covers a spike in it but did
+			// not make it.
+			if (Edit.Points.Num() == 1 && Edit.Radius > 0.0 && Edit.Radius <= 3.0 * Bump.Radius)
+				Distance = FVector2D::Distance(At, FVector2D(Edit.Points[0])) - Edit.Radius;
+			// A path reaches Width / 2 plus its sides: Ramp's falloff (Radius), a carved bed's 1:1 banks (Depth, Height).
+			const double Sides = Edit.Radius + ((Edit.Op == TEXT("Carve") || Edit.Op == TEXT("CreateRiverBetween")) ? FMath::Min(Edit.Height, 2.0 * Edit.Width) : 0.0);
+			for (int32 P = 0; P + 1 < Edit.Points.Num(); ++P)
+			{
+				const FVector2D From(Edit.Points[P]), To(Edit.Points[P + 1]);
+				const FVector2D Along = To - From;
+				const double T = FMath::Clamp(FVector2D::DotProduct(At - From, Along) / FMath::Max(Along.SizeSquared(), UE_SMALL_NUMBER), 0.0, 1.0);
+				Distance = FMath::Min(Distance, FVector2D::Distance(At, From + Along * T) - Edit.Width * 0.5 - Sides);
+			}
+			if (Distance <= Bump.Radius)
+				Bump.Edit = Edit.Label.IsEmpty() ? FString::Printf(TEXT("%s #%d"), *Edit.Op, Index) : FString::Printf(TEXT("%s '%s' #%d"), *Edit.Op, *Edit.Label, Index);
+		}
+	}
 	return Result;
 }
 
