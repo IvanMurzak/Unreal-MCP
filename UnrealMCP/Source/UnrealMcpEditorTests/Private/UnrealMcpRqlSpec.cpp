@@ -22,6 +22,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "ScopedTransaction.h"
 #include "Engine/LevelStreamingVolume.h"
 #include "Engine/PointLight.h"
@@ -414,6 +415,35 @@ void FUnrealMcpRqlSpec::Define()
 			// actors | where Label == "RqlSpecLamp" | call Destroy(): others still go
 			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("a deletable actor is destroyed (%s)"), *Codes(Destroyed)), IsOk(Destroyed) && CountLamps() == 0);
+		});
+
+		It("undoes and redoes the last change with editor | call Undo / Redo, returning its title, adding no undo step", [this]()
+		{
+			SpawnLamp();
+			if (!TestEqual(TEXT("one lamp"), CountLamps(), 1) || !GEditor || !GEditor->Trans)
+				return;
+			const int32 Queue = GEditor->Trans->GetQueueLength();
+			const FString Title = GEditor->Trans->GetTransaction(Queue - 1)->GetTitle().ToString();
+			auto Text = [](const TSharedPtr<FJsonObject>& Result)
+			{
+				FString Json;
+				if (Result.IsValid())
+					FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Json));
+				return Json;
+			};
+			// editor | call Undo(1000): more than there is, nothing undone
+			const TSharedPtr<FJsonObject> TooMany = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[{"lit":1000}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("too many steps are refused (%s)"), *Codes(TooMany)), !IsOk(TooMany) && Codes(TooMany).Contains(TEXT("can be undone now")));
+			TestEqual(TEXT("and nothing was undone"), CountLamps(), 1);
+			// editor | call Undo()
+			const TSharedPtr<FJsonObject> Undone = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("undo returns the undone step's title '%s' (%s)"), *Title, *Text(Undone)), IsOk(Undone) && Text(Undone).Contains(Title));
+			TestEqual(TEXT("the spawn is undone"), CountLamps(), 0);
+			TestEqual(TEXT("Undo adds no undo step of its own"), GEditor->Trans->GetQueueLength(), Queue);
+			// editor | call Redo()
+			const TSharedPtr<FJsonObject> Redone = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Redo","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("redo returns the title (%s)"), *Text(Redone)), IsOk(Redone) && Text(Redone).Contains(Title));
+			TestEqual(TEXT("the spawn is back"), CountLamps(), 1);
 		});
 
 		It("duplicates an actor at its own world transform plus the offset", [this]()

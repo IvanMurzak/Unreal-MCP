@@ -128,6 +128,8 @@ private:
 	bool IsReadOnlyCall(const rql::MutationRecord& Record) const;
 	/** @p Records is a non-empty batch of read-only calls only. */
 	bool AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const;
+	/** @p Records is a non-empty batch of calls of operations that work the undo buffer themselves (Undo / Redo). */
+	bool AllOwnUndoCalls(const std::vector<rql::MutationRecord>& Records) const;
 	/** Subobjects create_for_literal built for the running query: kept alive until it ends. */
 	TArray<TStrongObjectPtr<UObject>> LiteralObjects;
 	FString UndoTitle = TEXT("RQL mutation");

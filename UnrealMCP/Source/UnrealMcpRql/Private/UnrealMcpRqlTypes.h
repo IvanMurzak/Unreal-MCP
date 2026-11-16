@@ -167,6 +167,11 @@ public:
 	bool IsReadOnlyOperation(const UClass* Class, const FString& Method) const;
 	/** Some operations class has a read-only operation named @p Method: rql-query may run a `call` of it. */
 	bool HasReadOnlyOperation(const FString& Method) const;
+	/**
+	 * An operation that works the undo buffer itself (meta = (RqlOwnUndo): Undo / Redo): the session opens no undo step
+	 * around it and marks nothing unsaved after it (the undone change does both).
+	 */
+	bool IsOwnUndoOperation(const UClass* Class, const FString& Method) const;
 	void ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable);
 
 	/** Add or replace a member of a descriptor (hooks use it). */

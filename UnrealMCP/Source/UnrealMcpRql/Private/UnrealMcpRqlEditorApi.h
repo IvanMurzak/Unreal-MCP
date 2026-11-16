@@ -177,6 +177,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<AActor*> LoadRegion(FVector2D Min, FVector2D Max);
 
+	/** undo the editor's last Steps undoable changes (RQL mutations, Details panel edits, ...), as Ctrl+Z does; returns their titles, newest first. Refused, with nothing undone, when fewer steps can be undone (editor | select UndoHistory lists them) */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlOwnUndo))
+	TArray<FString> Undo(int32 Steps = 1);
+
+	/** redo the last Steps undone changes, as Ctrl+Y does; returns their titles, in redo order. Refused, with nothing redone, when fewer can be redone (editor | select RedoHistory) */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlOwnUndo))
+	TArray<FString> Redo(int32 Steps = 1);
+
 	/** play test: start Play In Editor NOW (inside this call) and return the play state (player pawn, location, movement); bPaused (default true) keeps the game still between calls, so it moves only inside AdvancePlay / InjectInput (deterministic); a running session is kept. Then: editor | call AdvancePlay(1.0, 0, "W") */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealMcpPlayState StartPlay(bool bPaused = true);

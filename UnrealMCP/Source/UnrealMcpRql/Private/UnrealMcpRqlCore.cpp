@@ -1337,7 +1337,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 		TEXT("editor state (IsPlaying, IsPaused, PlayState, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: play test with call StartPlay / AdvancePlay(seconds, frames, keys) / StopPlay; call SpawnActor / SpawnActorFromAsset / OpenLevel / NewLevel / "
 			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
-			"RenameGameplayTag"), [Types]()
+			"RenameGameplayTag / Undo(steps) / Redo(steps); World Partition: LoadActors / LoadRegion"), [Types]()
 	{
 		return Types->WrapObject(GetMutableDefault<UUnrealMcpRqlEditorApi>());
 	});
@@ -1364,4 +1364,46 @@ UActorComponent* UnrealMcpRql::AddComponent(AActor* Actor, UClass* Class, const 
 	if (!Component)
 		Fail(Error);
 	return Component;
+}
+
+namespace UnrealMcpRqlCoreLocal
+{
+	/** Undo (@p bRedo false) or redo @p Steps transactions as Ctrl+Z / Ctrl+Y do; their titles, or empty after Fail. */
+	TArray<FString> UndoOrRedo(bool bRedo, int32 Steps)
+	{
+		const TCHAR* Verb = bRedo ? TEXT("redo") : TEXT("undo");
+		if (!GEditor || !Transactor())
+			return UnrealMcpRql::Failed<TArray<FString>>(TEXT("no editor"));
+		if (Steps < 1)
+			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("Steps must be at least 1 (got %d)"), Steps));
+		if (GEditor->IsTransactionActive())
+			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("cannot %s while an editor transaction is open (run it in its own query)"), Verb));
+		const int32 Available = UndoSteps(bRedo);
+		// Check first: a partial undo would leave the editor somewhere the caller did not ask for.
+		if (Steps > Available)
+			return UnrealMcpRql::Failed<TArray<FString>>(FString::Printf(TEXT("only %d step(s) can be %s now%s; nothing was %s"), Available,
+				bRedo ? TEXT("redone") : TEXT("undone"),
+				Available > 0 ? *(TEXT(": ") + FString::Join(UndoTitles(bRedo, Available), TEXT(", "))) : TEXT(""), bRedo ? TEXT("redone") : TEXT("undone")));
+		TArray<FString> Titles = UndoTitles(bRedo, Steps);
+		for (int32 Step = 0; Step < Steps; ++Step)
+		{
+			if (!(bRedo ? GEditor->RedoTransaction() : GEditor->UndoTransaction()))
+			{
+				Titles.SetNum(Step);
+				UnrealMcpRql::Fail(FString::Printf(TEXT("the editor refused to %s \"%s\" after %d step(s)"), Verb, *Titles[Step], Step));
+				return Titles;
+			}
+		}
+		return Titles;
+	}
+}
+
+TArray<FString> UUnrealMcpRqlEditorApi::Undo(int32 Steps)
+{
+	return UnrealMcpRqlCoreLocal::UndoOrRedo(/*bRedo*/ false, Steps);
+}
+
+TArray<FString> UUnrealMcpRqlEditorApi::Redo(int32 Steps)
+{
+	return UnrealMcpRqlCoreLocal::UndoOrRedo(/*bRedo*/ true, Steps);
 }

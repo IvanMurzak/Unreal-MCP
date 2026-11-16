@@ -277,15 +277,15 @@ namespace UnrealMcpRqlSessionLocal
 	 * The lists and maps of one encoded call result that RQL cut at MaxCallResultItems, at any depth: a list ends in
 	 * "…+<left out>", a map has the key "…" with the value "+<left out>" (U+2026 in UTF-8).
 	 */
-	void CountCutLists(const rql::Json& Value, int32& OutLists, int64& OutLeftOut)
+	void CountCutLists(const rql::Json& Value, int32& OutLists, int64& OutLeftOut, int32 Limit = MaxCallResultItems)
 	{
 		static const std::string Ellipsis = "\xE2\x80\xA6";
-		const size_t Cut = static_cast<size_t>(MaxCallResultItems) + 1;
-		if (Value.is_array() && Value.size() == Cut && Value.at(MaxCallResultItems).is_string()
-			&& Value.at(MaxCallResultItems).as_string().rfind(Ellipsis + "+", 0) == 0)
+		const size_t Cut = static_cast<size_t>(Limit) + 1;
+		if (Value.is_array() && Value.size() == Cut && Value.at(Limit).is_string()
+			&& Value.at(Limit).as_string().rfind(Ellipsis + "+", 0) == 0)
 		{
 			++OutLists;
-			OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Value.at(MaxCallResultItems).as_string().c_str() + Ellipsis.size() + 1));
+			OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Value.at(Limit).as_string().c_str() + Ellipsis.size() + 1));
 		}
 		else if (Value.is_object() && Value.size() == Cut)
 		{
@@ -297,7 +297,7 @@ namespace UnrealMcpRqlSessionLocal
 			}
 		}
 		for (const rql::Json& Item : Value.items())
-			CountCutLists(Item, OutLists, OutLeftOut);
+			CountCutLists(Item, OutLists, OutLeftOut, Limit);
 	}
 
 	/** Call results with a list or map cut at MaxCallResultItems get a warning: how many items were left out, and what to do. */
@@ -332,6 +332,40 @@ namespace UnrealMcpRqlSessionLocal
 		Result.diagnostics.push_back(rql::Diagnostic::warning("call-result-truncated", UnrealMcpRqlToStd(Message),
 			UnrealMcpRqlToStd(FString::Printf(TEXT("the call ran: only its result is shortened. To see every item, call again with fewer inputs "
 				"(at most %d items per list); do not repeat a call that creates or changes things just to read its result"), MaxCallResultItems))));
+	}
+
+	/**
+	 * A list member in a plain query shows RQL's first 20 items, then "…+N" (browsing: `select Components` over many
+	 * actors stays short). Reads must not lose items silently: the warning names the cut columns and how to read every
+	 * item, `get <member>` streaming them as rows (paged with first / skip). Call results show 1000 (AddCallResultListNote).
+	 */
+	void AddListMemberNote(rql::QueryResult& Result)
+	{
+		constexpr int32 PlainListItems = 20; // RQL's EngineDefaults::max_list_items, which plain queries keep
+		if (!Result.ok || !Result.rows || !Result.columns)
+			return;
+		const std::vector<std::string>& Columns = *Result.columns;
+		TArray<FString> Cut;
+		int64 LeftOut = 0;
+		for (size_t Column = 0; Column < Columns.size(); ++Column)
+		{
+			int32 Lists = 0;
+			for (const std::vector<rql::Json>& Row : *Result.rows)
+			{
+				if (Column < Row.size())
+					CountCutLists(Row[Column], Lists, LeftOut, PlainListItems);
+			}
+			if (Lists > 0)
+				Cut.Add(UnrealMcpRqlFromStd(Columns[Column]));
+		}
+		if (Cut.IsEmpty())
+			return;
+		const FString Member = Cut[0];
+		Result.diagnostics.push_back(rql::Diagnostic::warning("list-truncated",
+			UnrealMcpRqlToStd(FString::Printf(TEXT("list members show their first %d items in a query: %s (%lld item(s) not shown)"),
+				PlainListItems, *FString::Join(Cut, TEXT(", ")), LeftOut)),
+			UnrealMcpRqlToStd(FString::Printf(TEXT("every item: ... | get %s | select ... streams them as rows (page with first / skip); "
+				"count them with %s.count()"), *Member, *Member))));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -843,8 +877,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
-		// Calls of read-only operations change nothing: no undo step, nothing to snapshot.
-		if (AllReadOnlyCalls(Records))
+		// Calls of read-only operations change nothing: no undo step, nothing to snapshot. Undo / Redo work the undo buffer
+		// themselves, which an open transaction would block.
+		if (AllReadOnlyCalls(Records) || AllOwnUndoCalls(Records))
 			return;
 		// Also when a call ended it (StartPlay / StopPlay close it before PIE starts or ends): later writes of the same
 		// query still get an undo step.
@@ -862,8 +897,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// Property writes already ran the editor's PreEditChange / PostEditChangeProperty; mark what changed as unsaved.
 	Policy.committed = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
 	{
-		// Calls of read-only operations changed nothing: nothing to mark unsaved, no change for the modules' hooks.
-		if (AllReadOnlyCalls(Records))
+		// Calls of read-only operations changed nothing: nothing to mark unsaved, no change for the modules' hooks. An undone
+		// or redone change marks its own packages.
+		if (AllReadOnlyCalls(Records) || AllOwnUndoCalls(Records))
 			return;
 		for (const rql::MutationRecord& Record : Records)
 		{
@@ -891,6 +927,15 @@ bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) con
 bool FUnrealMcpRqlSession::AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const
 {
 	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record) { return IsReadOnlyCall(Record); });
+}
+
+bool FUnrealMcpRqlSession::AllOwnUndoCalls(const std::vector<rql::MutationRecord>& Records) const
+{
+	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record)
+	{
+		const UObject* Receiver = Record.method ? TypesPtr->AsObject(Record.item) : nullptr;
+		return Receiver && TypesPtr->IsOwnUndoOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
+	});
 }
 
 void FUnrealMcpRqlSession::ConfigureModules()
@@ -1031,6 +1076,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
 		else if (bCall)
 			AddCallResultListNote(Result);
+		else
+			UnrealMcpRqlSessionLocal::AddListMemberNote(Result);
 		if (bReadOnlyLimit)
 			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
 	}

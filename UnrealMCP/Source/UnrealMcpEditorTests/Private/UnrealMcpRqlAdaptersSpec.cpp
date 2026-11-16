@@ -439,6 +439,26 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 
 	Describe("containers", [this]()
 	{
+		It("says when a selected list member shows only its first 20 items, and how to read every item", [this]()
+		{
+			Fixture->Numbers.Reset();
+			for (int32 I = 0; I < 30; ++I)
+				Fixture->Numbers.Add(I);
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select Numbers
+			const TSharedPtr<FJsonObject> Cut = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			const FString Said = UnrealMcpRqlSpecHelpers::Codes(Cut) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Cut);
+			TestTrue(*FString::Printf(TEXT("a list-truncated warning names the column and the items left out (%s)"), *Said),
+				UnrealMcpRqlSpecHelpers::IsOk(Cut) && Said.Contains(TEXT("list-truncated: list members show their first 20 items in a query: Numbers (10 item(s) not shown)"))
+				&& Said.Contains(TEXT("... | get Numbers | select ...")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | get Numbers | count: every item streams
+			const TSharedPtr<FJsonObject> All = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Numbers"]}},{"op":"count"}]})RQL"));
+			TestEqual(TEXT("get streams all 30"), UnrealMcpRqlSpecHelpers::Number(All), 30.0);
+			Fixture->Numbers.SetNum(20);
+			const TSharedPtr<FJsonObject> Whole = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			TestFalse(TEXT("no warning for a list shown whole"), UnrealMcpRqlSpecHelpers::Codes(Whole).Contains(TEXT("list-truncated")));
+			Fixture->Numbers.Reset();
+		});
+
 		It("writes arrays whole and by element, and refuses bad elements and indexes", [this]()
 		{
 			SetsTo(TEXT("whole array"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Numbers = [1, 2, 3] */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Numbers"]},"value":{"list":[{"lit":1},{"lit":2},{"lit":3}]}}]}]})RQL"),
