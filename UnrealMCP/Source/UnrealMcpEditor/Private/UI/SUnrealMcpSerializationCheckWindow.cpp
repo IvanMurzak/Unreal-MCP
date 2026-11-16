@@ -95,11 +95,11 @@ TSharedRef<FJsonObject> SUnrealMcpSerializationCheckWindow::ShallowFilter(const 
 	TSharedRef<FJsonObject> Shallow = MakeShared<FJsonObject>();
 	if (!Source.IsValid())
 		return Shallow;
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Source->Values)
+	for (const auto& Field : Source->Values)
 	{
 		const EJson Type = Field.Value.IsValid() ? Field.Value->Type : EJson::Null;
 		if (Type != EJson::Object && Type != EJson::Array)
-			Shallow->SetField(Field.Key, Field.Value);
+			Shallow->SetField(FString(*Field.Key), Field.Value);
 	}
 	return Shallow;
 }
