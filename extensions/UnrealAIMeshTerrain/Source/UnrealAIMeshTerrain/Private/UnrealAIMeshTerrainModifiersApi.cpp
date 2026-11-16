@@ -324,9 +324,10 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	bool CoverTexturePatch(UModifierComponent* Patch, const AMeshPartition* Terrain, const FVector& Location, double Height)
 	{
 		const FBox Built = BuiltBounds(Terrain);
-		const double Up = (Built.IsValid ? FMath::Max(Built.Max.Z - Location.Z, 0.0) : 0.0) + FMath::Abs(Height) + ReachSpare;
-		const double Down = (Built.IsValid ? FMath::Max(Location.Z - Built.Min.Z, 0.0) : 0.0) + FMath::Abs(Height) + ReachSpare;
-		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), Up) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), Down);
+		const double Above = Built.IsValid ? FMath::Max(Built.Max.Z - Location.Z, 0.0) : 0.0; // ground above the patch
+		const double Below = Built.IsValid ? FMath::Max(Location.Z - Built.Min.Z, 0.0) : 0.0; // and below it
+		const double Reach = FMath::Abs(Height) + ReachSpare;
+		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), Above + Reach) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), Below + Reach);
 	}
 
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
@@ -1071,7 +1072,23 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::Me
 	// carries its world-space points along itself).
 	Owner->SetActorLocation(Location, /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
 	Owner->PostEditMove(/*bFinished*/ true);
-	return Finish(Modifier, { TerrainOf(Modifier) });
+	// The vertical reach the Add operations gave is measured from the location: keep it covering the ground at the new one.
+	AMeshPartition* Terrain = TerrainOf(Modifier);
+	if (IsKind(Modifier, TEXT("Patch")) || IsKind(Modifier, TEXT("WeightUtility")))
+	{
+		if (!CoverTerrainHeights(Modifier, Terrain, Modifier->GetComponentLocation()))
+			return FModifierOpResult();
+	}
+	else if (IsKind(Modifier, TEXT("TexturePatch")))
+	{
+		const FObjectProperty* Entry = CastField<FObjectProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("HeightChannel")));
+		UObject* HeightEntry = Entry ? Entry->GetObjectPropertyValue_InContainer(Modifier) : nullptr;
+		const FNumericProperty* Scale = HeightEntry ? CastField<FNumericProperty>(HeightEntry->GetClass()->FindPropertyByName(TEXT("EncodingScale"))) : nullptr;
+		const double Height = Scale ? Scale->GetFloatingPointPropertyValue(Scale->ContainerPtrToValuePtr<void>(HeightEntry)) : 0.0;
+		if (!CoverTexturePatch(Modifier, Terrain, Modifier->GetComponentLocation(), Height))
+			return FModifierOpResult();
+	}
+	return Finish(Modifier, { Terrain });
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, int32 Closed)

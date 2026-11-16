@@ -161,9 +161,12 @@ namespace UnrealAIMeshTerrainSculptLocal
 		TMap<int32, double> Weights;
 		int32 Nearest = INDEX_NONE;
 		double NearestDistance = TNumericLimits<double>::Max();
+		// How far the nearest vertex is, under the brush or not (for the error when none is under it).
+		OutNearest = TNumericLimits<double>::Max();
 		for (const int32 Vertex : Mesh.VertexIndicesItr())
 		{
 			const double Distance = FVector2D::Distance(FVector2D(Mesh.GetVertex(Vertex)), Center);
+			OutNearest = FMath::Min(OutNearest, Distance);
 			const double Weight = BrushWeight(Distance, Stroke.Radius, Stroke.Falloff) * Stroke.Strength;
 			if (Weight <= 0.0)
 				continue;
@@ -175,13 +178,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			}
 		}
 		if (Weights.IsEmpty())
-		{
-			// How far the nearest vertex is (for the error): the ground there may be a modifier's large triangles.
-			OutNearest = TNumericLimits<double>::Max();
-			for (const int32 Vertex : Mesh.VertexIndicesItr())
-				OutNearest = FMath::Min(OutNearest, FVector2D::Distance(FVector2D(Mesh.GetVertex(Vertex)), Center));
 			return NoVertex;
-		}
 
 		if (Stroke.Kind == EStroke::Paint)
 		{
@@ -474,10 +471,11 @@ namespace UnrealAIMeshTerrainSculptLocal
 		if (Out.Vertices == NoVertex)
 		{
 			// The base meshes' spacing alone would have put a vertex under the brush: the ground there is a modifier's own
-			// triangles (a Boolean shape keeps its mesh's, 100+ m across for a large sphere).
-			return Abandon(Nearest < TNumericLimits<double>::Max() && Nearest > Stroke.Radius && Spacing < Stroke.Radius
-				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, not the base mesh's (a vertex every %.0f cm): a modifier's own mesh, such as a Boolean shape's. Use a Radius above %.0f cm, or shape that ground with modifiers"),
-					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, Spacing, Nearest)
+			// triangles (a Boolean shape keeps its mesh's, 100+ m across for a large sphere). (No vertex at all: Nearest is Max.)
+			const bool bCoarseGround = Nearest < TNumericLimits<double>::Max() && Nearest > Stroke.Radius && Spacing < Stroke.Radius;
+			return Abandon(bCoarseGround
+				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, such as a Boolean shape's: use a Radius above %.0f cm, or shape that ground with modifiers"),
+					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, Nearest)
 				: FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
 					Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
 		}
