@@ -542,6 +542,15 @@ namespace UnrealAILandscapeRqlApiLocal
 		}
 	}
 
+	/** @p Changed (an operation's changed vertices), after logging the operation when it changed anything. */
+	int32 Logged(int32 Changed, ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
+		double Width, double Height, const FString& Layer = FString())
+	{
+		if (Changed > 0)
+			RecordEdit(Landscape, Op, Label, Points, Radius, Width, Height, Layer);
+		return Changed;
+	}
+
 	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape)
 	{
 		static const TArray<FUnrealAILandscapeEdit> None;
@@ -663,9 +672,7 @@ int32 UUnrealAILandscapeRqlApi::Sculpt(ALandscapeProxy* Landscape, FVector Cente
 	{
 		return FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High));
 	});
-	if (Changed > 0)
-		RecordEdit(Landscape, TEXT("Sculpt"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Height);
-	return Changed;
+	return Logged(Changed, Landscape, TEXT("Sculpt"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Height);
 }
 
 int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Center, double Radius, double Height, double Falloff, const FString& Label)
@@ -689,9 +696,7 @@ int32 UUnrealAILandscapeRqlApi::Flatten(ALandscapeProxy* Landscape, FVector Cent
 		Value = New;
 		return bChanged;
 	});
-	if (Changed > 0)
-		RecordEdit(Landscape, TEXT("Flatten"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius + Falloff, 0.0, Height);
-	return Changed;
+	return Logged(Changed, Landscape, TEXT("Flatten"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius + Falloff, 0.0, Height);
 }
 
 int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth, const FString& Label)
@@ -707,9 +712,7 @@ int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<F
 	if (!(Depth >= 1.0 && Depth <= 10000.0))
 		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Depth %g is outside 1 .. 10000 cm"), Depth));
 	const int32 Changed = CarveAlong(Landscape, Points, Width, Depth);
-	if (Changed > 0)
-		RecordEdit(Landscape, TEXT("Carve"), Label, Points, 0.0, Width, Depth);
-	return Changed;
+	return Logged(Changed, Landscape, TEXT("Carve"), Label, Points, 0.0, Width, Depth);
 }
 
 int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius, double Strength, const FString& Label)
@@ -740,9 +743,7 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, R, Weights);
 		return true;
 	});
-	if (Changed > 0)
-		RecordEdit(Landscape, TEXT("Paint"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength, Name);
-	return Changed;
+	return Logged(Changed, Landscape, TEXT("Paint"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength, Name);
 }
 
 int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength, const FString& Label)
@@ -918,9 +919,7 @@ int32 UUnrealAILandscapeRqlApi::Ramp(ALandscapeProxy* Landscape, const TArray<FV
 		}
 	}
 	const int32 Changed = RampAlong(Landscape, Points, Width, Falloff);
-	if (Changed > 0)
-		RecordEdit(Landscape, TEXT("Ramp"), Label, Points, 0.0, Width, 0.0);
-	return Changed;
+	return Logged(Changed, Landscape, TEXT("Ramp"), Label, Points, 0.0, Width, 0.0);
 }
 
 TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* Landscape, double MinHeight, double Scale)
