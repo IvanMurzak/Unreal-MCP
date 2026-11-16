@@ -23,6 +23,7 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string_view>
 
@@ -98,6 +99,53 @@ namespace UnrealMcpRqlSessionLocal
 		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level%s"),
 			*UnrealMcpRqlUtil::OpenLevelPath(), Partitioned);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
+	}
+
+	/**
+	 * Items a list-valued call result shows. RQL encodes at most maxListItems (20) items of a list and appends "…+N", which
+	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and call is terminal, so
+	 * nothing can page them. A plan ending in call encodes up to this many instead; plain queries keep RQL's default.
+	 */
+	constexpr int32 MaxCallResultItems = 1000;
+
+	bool EndsWithCall(const rql::QueryPlan& Plan)
+	{
+		return !Plan.stages.empty() && Plan.stages.back().kind == rql::StageKind::Call;
+	}
+
+	/** A call result list cut at MaxCallResultItems gets a warning that says how many items were left out and what to do. */
+	void AddCallResultListNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	{
+		if (!Result.ok || !Result.rows || !Result.columns || !EndsWithCall(Plan))
+			return;
+		const std::vector<std::string>& Columns = *Result.columns;
+		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
+		if (Column == Columns.end())
+			return;
+		const size_t Index = static_cast<size_t>(Column - Columns.begin());
+		// RQL's marker of a cut list: its last element, "…+<left out>" (U+2026 in UTF-8).
+		static const std::string Marker = "\xE2\x80\xA6+";
+		int64 LeftOut = 0;
+		int32 Lists = 0;
+		for (const std::vector<rql::Json>& Row : *Result.rows)
+		{
+			if (Index >= Row.size() || !Row[Index].is_array() || Row[Index].size() != static_cast<size_t>(MaxCallResultItems) + 1)
+				continue;
+			const rql::Json& Last = Row[Index].at(MaxCallResultItems);
+			if (!Last.is_string() || Last.as_string().rfind(Marker, 0) != 0)
+				continue;
+			LeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Last.as_string().c_str() + Marker.size()));
+			++Lists;
+		}
+		if (Lists == 0)
+			return;
+		const FString Message = Lists == 1
+			? FString::Printf(TEXT("the call result lists %lld items: the first %d are shown, %lld left out"),
+				LeftOut + MaxCallResultItems, MaxCallResultItems, LeftOut)
+			: FString::Printf(TEXT("%d call results list more than %d items each: the first %d of each are shown, %lld items left out"),
+				Lists, MaxCallResultItems, MaxCallResultItems, LeftOut);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("call-result-truncated", UnrealMcpRqlToStd(Message),
+			UnrealMcpRqlToStd(FString::Printf(TEXT("call again with fewer inputs (at most %d results per call)"), MaxCallResultItems))));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -696,7 +744,10 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		rql::Budgets Budgets;
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
+		if (EndsWithCall(Plan))
+			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
+		AddCallResultListNote(Result, Plan);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage

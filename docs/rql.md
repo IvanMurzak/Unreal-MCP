@@ -147,6 +147,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   the old value is left out and counted in the result's `unchanged` (the sidecar prints "(N unchanged assignment(s) not
   listed)"); outside a dry run the write still runs and the commit hooks see every record, and a write the editor
   refused or clamped back to the old value stays listed.
+- **Call results** that are lists list every item, up to 1000 (the session raises RQL's `maxListItems` to 1000 for a
+  plan ending in `call`; lists in plain queries still show 20 items, then `…+N`). `call` is terminal, so nothing can
+  page its result: past 1000 the result shows the first 1000 items, then `…+N`, and a `call-result-truncated` warning
+  says how many were left out and to call again with fewer inputs.
 - **Conditions** (`where`, `and` / `or` / `not`, `?:`, list predicates) must be booleans: `where StaticMesh` is a
   `type-mismatch` whose hint suggests `StaticMesh != null` or `has(StaticMesh)`; null still counts as false.
   Lists compare by value (`group-by Tags` merges equal tag lists), and group-by rows have `items` for per-group
