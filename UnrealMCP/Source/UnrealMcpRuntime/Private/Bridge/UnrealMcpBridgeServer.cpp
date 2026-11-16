@@ -1051,8 +1051,8 @@ void FUnrealMcpBridgeServer::SendConfigLocked()
 	Message->SetStringField(TEXT("type"), TypeConfig);
 	// Spread the effective config fields (mode/host/cloudUrl/token/keepConnected) onto the envelope so the
 	// §1.3 `config` message is flat (the sidecar reads them off the top level, like the handshake-ack does).
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : ConfigCopy->Values)
-		Message->SetField(Field.Key, Field.Value);
+	for (const auto& Field : ConfigCopy->Values)
+		Message->SetField(FString(*Field.Key), Field.Value);
 
 	const TArray<uint8> Framed = FUnrealMcpNdjsonAccumulator::Encode(SerializeCondensed(Message));
 	SendFramedLocked(Framed, TEXT("config send failed mid-frame"));

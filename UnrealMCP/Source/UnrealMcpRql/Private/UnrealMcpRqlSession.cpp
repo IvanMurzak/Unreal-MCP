@@ -156,8 +156,8 @@ namespace UnrealMcpRqlSessionLocal
 			const TSharedPtr<FJsonObject>& Object = Json->AsObject();
 			if (Object.IsValid())
 			{
-				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Object->Values)
-					Entries.emplace_back(rql::Value::string(UnrealMcpRqlToStd(Pair.Key)), FromJson(Pair.Value));
+				for (const auto& Pair : Object->Values)
+					Entries.emplace_back(rql::Value::string(UnrealMcpRqlToStd(FString(*Pair.Key))), FromJson(Pair.Value));
 			}
 			return rql::Value::map(std::make_shared<rql::OwnedMap>(nullptr, std::move(Entries)));
 		}

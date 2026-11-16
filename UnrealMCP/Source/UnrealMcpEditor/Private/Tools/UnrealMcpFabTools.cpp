@@ -783,7 +783,7 @@ namespace UnrealMcpFabToolsLocal
 		if (Method.IsEmpty() && Format.TryGetObjectField(TEXT("techDetails"), Details))
 		{
 			// One sub-object per listing category (threeDModel, toolAndPlugin, tutorialsExamples, ...), the others null.
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Category : (*Details)->Values)
+			for (const auto& Category : (*Details)->Values)
 			{
 				const TSharedPtr<FJsonObject>* Object = nullptr;
 				if (Category.Value.IsValid() && Category.Value->TryGetObject(Object) && (*Object)->TryGetStringField(TEXT("distributionMethod"), Method))

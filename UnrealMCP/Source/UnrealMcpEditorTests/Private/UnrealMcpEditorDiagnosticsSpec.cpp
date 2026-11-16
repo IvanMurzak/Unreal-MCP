@@ -163,7 +163,8 @@ void FUnrealMcpEditorDiagnosticsSpec::Define()
 	{
 		{
 			FMessageLog MapCheck(TEXT("MapCheck"));
-			MapCheck.Warning(FText::FromString(TEXT("DiagSpec read-before-push warning")));
+			// Message(Warning, ...) rather than Warning(): UE 5.5-5.7 drop FMessageLog::Warning on Linux (PLATFORM_UNIX).
+			MapCheck.Message(EMessageSeverity::Warning, FText::FromString(TEXT("DiagSpec read-before-push warning")));
 		}
 		FUnrealMcpToolResult PullResult;
 		const TSharedPtr<FJsonObject> Listed = Pull(TEXT("DiagSpec read-before-push"), &PullResult);

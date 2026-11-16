@@ -303,8 +303,8 @@ FUnrealMcpToolResult FUnrealMcpToolRegistry::Execute(const FString& Name, const 
 		TArray<FString> Declared, Sent;
 		for (const FUnrealMcpParamSpec& Each : Found->Params)
 			Declared.Add(Each.Name);
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Call.Arguments->Values)
-			Sent.Add(Pair.Key);
+		for (const auto& Pair : Call.Arguments->Values)
+			Sent.Add(FString(*Pair.Key));
 		return FUnrealMcpToolResult::Error(FString::Printf(TEXT("Missing required '%s' (parameters: %s; sent: %s)."), *Param.Name,
 			*FString::Join(Declared, TEXT(", ")), Sent.Num() ? *FString::Join(Sent, TEXT(", ")) : TEXT("none")));
 	}
