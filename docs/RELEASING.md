@@ -24,7 +24,7 @@ file's contract — it only wraps `commands/bump_version.py` and `release.yml`.
 The following actions are **deliberately operator-gated** and are **not** performed by a normal
 merge, by CI on a feature/docs PR, or by any automated task. GitHub Releases and npm publishes are
 CI-backed, but only a manual `workflow_dispatch` of `release.yml` on `main` publishes — merging a
-version bump publishes nothing. Fab submission remains fully manual:
+version bump publishes nothing. The Fab portal step (File Links, submit for review) remains manual:
 
 - [ ] **GitHub Release + `v<version>` tag.** Land a deliberate `VersionName` bump on `main` (run
       `commands/bump_version.py`, commit, merge), then dispatch `release.yml` on `main` with
@@ -80,7 +80,7 @@ artifact jobs in `release.yml`:
   resolver reads — declared on the runtime module in R2 so the bridge bundles into
   packaged GAMES, not just editor packages; see
   [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), then emits
-  **three plugin zips**: the dedicated source install asset
+  **the plugin zips**: the dedicated source install asset
   `unreal-mcp-plugin-source-<version>.zip` (CLI source form, no `EngineVersion` pin, no test module),
   the Fab asset `unreal-mcp-plugin-fab-<version>.zip` (the same source with **no executable**: the bridge
   payloads are removed and `ue_ci.py fab-zip` fails on any file it flags by extension, PE/ELF/Mach-O magic
@@ -88,7 +88,8 @@ artifact jobs in `release.yml`:
   `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` (C5) and the packaged
   BuildPlugin asset `unreal-mcp-plugin-<version>.zip`. It also downloads the four per-RID release zips and
   `stage-bridge` writes their SHA-256 into `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`, which ships in all
-  three: the trust anchor the editor verifies a downloaded bridge against (§6.8).
+  of them: the trust anchor the editor verifies a downloaded bridge against (§6.8). Every source and Fab zip gets a
+  `.minisig` (`sign-plugin-source`).
   A post-BuildPlugin guard copies the binaries from `Source/ThirdParty/UnrealMcpBridge/<rid>/` into the
   package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's

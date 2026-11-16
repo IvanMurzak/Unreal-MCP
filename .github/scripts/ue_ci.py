@@ -506,6 +506,8 @@ def fab_engine_zips(args) -> None:
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
     require_fab_build(stage)
     names = [f"unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip" for engine in FAB_ENGINES]
+    for stale in (ROOT / "dist").glob(f"unreal-mcp-plugin-fab-{args.version}-ue*.zip"):
+        stale.unlink()  # the runner keeps dist/; the release attaches every match, so drop engines no longer built
     for engine, name in zip(FAB_ENGINES, names):
         pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")

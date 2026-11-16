@@ -28,11 +28,12 @@
 #                        Fab strips Binaries/), emits the dedicated SOURCE install asset
 #                        unreal-mcp-plugin-source-<version>.zip and the executable-free Fab
 #                        asset unreal-mcp-plugin-fab-<version>.zip (both carry the bridge zips'
-#                        SHA256SUMS, §6.8), runs BuildPlugin -Rocket
+#                        SHA256SUMS, §6.8) plus its per-engine copies
+#                        unreal-mcp-plugin-fab-<version>-ue<engine>.zip, runs BuildPlugin -Rocket
 #                        (RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/ ->
 #                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips the PACKAGED
 #                        plugin with the latest supported UE as unreal-mcp-plugin-<version>.zip ->
-#                        publish-release attaches the three plugin zips + the 4 signed bridge zips.
+#                        publish-release attaches the plugin zips + the 4 signed bridge zips.
 # Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
 # guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
 # Unreal-MCP repo has no signing secrets yet (the owner mirrors the 9 from
@@ -724,7 +725,12 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-zip
           path: ./assets
-      # Sign the plugin-SOURCE zip (and the Fab zip, the same source minus executables) with the pinned publisher key so the CLI can
+      - name: Download per-engine Fab zips
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-fab-engine-zips
+          path: ./assets
+      # Sign the plugin-SOURCE zip (and the Fab zips, the same source minus executables) with the pinned publisher key so the CLI can
       # VERIFY it before install (zero-config-engine-connect D12). A same-origin
       # SHA256 is integrity-only (a release-asset attacker swaps the zip AND its
       # checksum); a detached minisign (Ed25519) signature over an OFFLINE key is a
@@ -761,10 +767,10 @@ jobs:
           # The key is passwordless (minted with `minisign -G -W`), so signing does
           # not prompt; `< /dev/null` guards against any interactive read on a CI
           # runner with no tty. `-x` names the detached signature output.
-          for kind in source fab; do
-            zip="./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip"
+          # Every plugin zip here: the source and Fab zips plus the per-engine Fab zips (the Fab File Links).
+          for zip in ./assets/unreal-mcp-plugin-*.zip; do
             minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
-              -t "unreal-mcp plugin ${kind} ${VERSION} signed by AI Game Dev release CI" < /dev/null
+              -t "$(basename "$zip") signed by AI Game Dev release CI" < /dev/null
             echo "Signed $zip -> ${zip}.minisig"
           done
           rm -f "$keyfile"
@@ -781,6 +787,13 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-minisig
           path: ./assets/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}.zip.minisig
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload per-engine Fab signatures
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-fab-engine-minisig
+          path: ./assets/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}-ue*.zip.minisig
           if-no-files-found: error
           retention-days: 7
 
@@ -820,7 +833,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      # Attach the three plugin artifacts:
+      # Attach the plugin artifacts and their .minisig signatures:
       #   * unreal-mcp-plugin-source-<version>.zip  -> CLI source install asset
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
       #   * unreal-mcp-plugin-fab-<version>.zip     -> input of the per-engine Fab zips (source, no executable; §6.8)
@@ -867,6 +880,11 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-engine-zips
           path: ./assets
+      - name: Download per-engine Fab signatures
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-fab-engine-minisig
+          path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets
       - name: Create GitHub Release
@@ -879,9 +897,9 @@ jobs:
           shopt -s nullglob
           # Fail-closed: the CLI rejects an unsigned source zip (D12); the signatures
           # are produced by sign-plugin-source.
-          for kind in source fab; do
-            if [ ! -f "./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig" ]; then
-              echo "::error::Plugin signature ./assets/unreal-mcp-plugin-${kind}-${VERSION}.zip.minisig is missing — refusing to create the Release."
+          for zip in ./assets/unreal-mcp-plugin-source-*.zip ./assets/unreal-mcp-plugin-fab-*.zip; do
+            if [ ! -f "${zip}.minisig" ]; then
+              echo "::error::Plugin signature ${zip}.minisig is missing — refusing to create the Release."
               exit 1
             fi
           done
@@ -1223,6 +1241,10 @@ jobs:
             echo "::error::build-plugin-zip reported no per-engine Fab zips."
             exit 1
           fi
+          fab_engine_assets=""
+          for zip in ${FAB_ENGINE_ZIPS}; do
+            fab_engine_assets="${fab_engine_assets} ${zip} ${zip}.minisig"
+          done
           release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
           tag_name="$(jq -r '.tagName' <<<"$release_json")"
           is_draft="$(jq -r '.isDraft' <<<"$release_json")"
@@ -1242,7 +1264,7 @@ jobs:
             "unreal-mcp-plugin-source-${VERSION}.zip.minisig" \
             "unreal-mcp-plugin-fab-${VERSION}.zip" \
             "unreal-mcp-plugin-fab-${VERSION}.zip.minisig" \
-            ${FAB_ENGINE_ZIPS} \
+            ${fab_engine_assets} \
             "unreal-mcp-bridge-win-x64.zip" \
             "unreal-mcp-bridge-osx-arm64.zip" \
             "unreal-mcp-bridge-osx-x64.zip" \
