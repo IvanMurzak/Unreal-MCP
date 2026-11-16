@@ -163,16 +163,19 @@ namespace UnrealMcpRql
 	 * `editor | call LoadActors` does: through the editor's actor-list loader (UWorldPartitionBlueprintLibrary::LoadActors,
 	 * what Python's load_actors calls). Loading changes no saved data: no package is marked unsaved and no undo step is
 	 * added, so a read-only operation (meta = (RqlReadOnly)) may call it. The actors stay loaded until the world goes.
-	 * Synchronous: the actors exist when it returns. True without World Partition or with nothing to load; false with
-	 * @p OutError when this engine has no such loader.
+	 * Synchronous, and only what the editor allows: GUIDs of loaded actors, of actors deleted in this session (their
+	 * descriptor stays until save), of runtime-only descriptors and unknown GUIDs are skipped, and an actor in a data layer
+	 * the editor has not loaded stays unloaded; check IsLoaded() of the descriptor (or the region's OutLoaded) when it
+	 * matters. Nothing happens without World Partition or while a play world is the active world (the loader loads into
+	 * the editor world only). True then too; false with @p OutError only when this engine has no such loader.
 	 */
 	UNREALMCPRQL_API bool LoadWorldPartitionActors(const TArray<FGuid>& Guids, FString* OutError = nullptr);
 
 	/**
 	 * World Partition: load every actor of the editor world that is not loaded and whose editor bounds overlap @p Region in
-	 * XY (cm; Z ignored, as region loading in the World Partition window), as `editor | call LoadRegion` does; same loader
-	 * and guarantees as LoadWorldPartitionActors. @p OutLoaded, when given, receives the actors it loaded. Actors deleted in
-	 * this session (descriptor kept until save) and runtime-only descriptors are never loaded.
+	 * XY (cm; Z ignored, as region loading in the World Partition window), as `editor | call LoadRegion` does; same loader,
+	 * skips and guarantees as LoadWorldPartitionActors. @p OutLoaded, when given, is reset and receives only the actors this
+	 * call loaded (actors already loaded in the region are not listed). False with @p OutError for an invalid or inverted box.
 	 */
 	UNREALMCPRQL_API bool LoadWorldPartitionRegion(const FBox2D& Region, TArray<AActor*>* OutLoaded = nullptr, FString* OutError = nullptr);
 

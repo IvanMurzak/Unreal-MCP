@@ -79,7 +79,9 @@ registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules an
 World Partition actors that are not loaded: `LoadWorldPartitionActors(Guids, &Error)` (by descriptor GUID) and
 `LoadWorldPartitionRegion(Box2D, &Loaded, &Error)` (bounds overlapping an XY box) load them as `editor | call LoadActors`
 / `LoadRegion` do, through the editor's actor-list loader: synchronous, nothing marked unsaved, no undo step, so a
-read-only operation may call them. They return `false` with the error (no `Fail`) only when the engine has no loader.
+read-only operation may call them. They skip loaded actors, actors deleted in this session and runtime-only descriptors,
+act on the editor world only (nothing while playing), and an actor in a data layer the editor has not loaded stays
+unloaded. They return `false` with the error (no `Fail`) only when the engine has no loader, or for an invalid box.
 
 The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
 (and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use

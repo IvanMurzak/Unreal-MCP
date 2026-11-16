@@ -202,13 +202,21 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		// A region beside the cube loads nothing; one over it loads it.
 		TArray<AActor*> Loaded;
 		FString Error;
-		TestTrue(*FString::Printf(TEXT("a region away from the cube (%s)"), *Error),
-			UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(-1000, -1000), FVector2D(1000, 1000)), &Loaded, &Error));
+		const FBox2D OverCube(FVector2D(399000, 399000), FVector2D(401000, 401000));
+		bool bOk = UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(-1000, -1000), FVector2D(1000, 1000)), &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("a region away from the cube (%s)"), *Error), bOk);
 		TestFalse(TEXT("does not load it"), Loaded.ContainsByPredicate([](const AActor* A) { return A && A->GetActorLabel() == TEXT("WpSpecFar"); }));
-		TestTrue(*FString::Printf(TEXT("a region over the cube (%s)"), *Error),
-			UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(399000, 399000), FVector2D(401000, 401000)), &Loaded, &Error));
+		FBox2D Inverted(FVector2D(1, 1), FVector2D(0, 0));
+		Inverted.bIsValid = true;
+		bOk = UnrealMcpRql::LoadWorldPartitionRegion(Inverted, &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("an inverted box is refused (%s)"), *Error), !bOk && Error.Contains(TEXT("not a valid box")) && Loaded.IsEmpty());
+		TestFalse(TEXT("an unset box is refused"), UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(ForceInit), &Loaded));
+		TestTrue(TEXT("an empty GUID list is nothing to do"), UnrealMcpRql::LoadWorldPartitionActors({}));
+		bOk = UnrealMcpRql::LoadWorldPartitionRegion(OverCube, &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("a region over the cube (%s)"), *Error), bOk);
 		TestTrue(TEXT("returns it"), Loaded.Num() == 1 && Loaded[0] && Loaded[0]->GetActorLabel() == TEXT("WpSpecFar"));
 		TestEqual(TEXT("actors lists it"), CountFar(), 1.0);
+		TestTrue(TEXT("the same region again loads nothing new"), UnrealMcpRql::LoadWorldPartitionRegion(OverCube, &Loaded) && Loaded.IsEmpty());
 		TestEqual(*FString::Printf(TEXT("nothing marked unsaved (%s)"), *FString::Join(DirtyPackages(), TEXT(", "))), DirtyPackages(), DirtyBefore);
 		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBefore);
 
@@ -220,9 +228,13 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		if (!TestTrue(*FString::Printf(TEXT("its GUID (%s)"), *CellText(Row)), FGuid::Parse(CellText(Row), Guid)))
 			return;
 		const TArray<FString> DirtyBeforeGuid = DirtyPackages();
-		TestTrue(*FString::Printf(TEXT("loads by GUID (%s)"), *Error), UnrealMcpRql::LoadWorldPartitionActors({ Guid }, &Error));
+		const int32 StepsBeforeGuid = UndoSteps();
+		bOk = UnrealMcpRql::LoadWorldPartitionActors({ Guid, Guid, FGuid::NewGuid() }, &Error);
+		TestTrue(*FString::Printf(TEXT("loads by GUID, skipping a repeat and an unknown one (%s)"), *Error), bOk);
 		TestEqual(TEXT("actors lists it"), CountFar(), 1.0);
+		TestTrue(TEXT("a loaded actor's GUID is nothing to do"), UnrealMcpRql::LoadWorldPartitionActors({ Guid }));
 		TestEqual(TEXT("nothing marked unsaved"), DirtyPackages(), DirtyBeforeGuid);
+		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBeforeGuid);
 	});
 
 	It("stays quiet on a level without World Partition, where LoadActors says why it has nothing to do and the public API loads nothing", [this]()
