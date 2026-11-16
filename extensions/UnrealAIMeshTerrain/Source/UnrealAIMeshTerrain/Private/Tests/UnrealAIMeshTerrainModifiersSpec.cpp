@@ -393,15 +393,29 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TestTrue(TEXT("Green 0.3 after Edit"), Sample.Channels.Contains(TEXT("Green")) && FMath::IsNearlyEqual(Sample.Channels[TEXT("Green")], 0.3f, 0.02f));
 			}
 
-			// meshTerrainModifier | call AddTexturePatch(unreal.find("<label>"), "/Engine/EngineResources/WhiteSquareTexture", [X0, 0, 0], [1000, 1000], 1000)
-			if (ModSpecRun(TEXT("texture patch"), TEXT("AddTexturePatch"), { T, ModSpecStr(TEXT("/Engine/EngineResources/WhiteSquareTexture")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(1000.0, 1000.0), ModSpecNum(1000.0),
+			// A 300 m stamp: white raises half the Height. The engine's default vertical extents (100 m up and down) would clamp it.
+			// meshTerrainModifier | call AddTexturePatch(unreal.find("<label>"), "/Engine/EngineResources/WhiteSquareTexture", [X0, 0, 0], [1000, 1000], 60000)
+			if (ModSpecRun(TEXT("texture patch"), TEXT("AddTexturePatch"), { T, ModSpecStr(TEXT("/Engine/EngineResources/WhiteSquareTexture")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(1000.0, 1000.0), ModSpecNum(60000.0),
 				ModSpecStr(Label + TEXT("_Tex")) }))
 			{
+				const auto Extent = [this, Terrain, &Label](const TCHAR* Name)
+				{
+					UModifierComponent* Patch = ModSpecFindModifier(Terrain, Label + TEXT("_Tex"));
+					const FNumericProperty* Property = Patch ? CastField<FNumericProperty>(Patch->GetClass()->FindPropertyByName(Name)) : nullptr;
+					return Property ? Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Patch)) : -1.0;
+				};
+				TestTrue(*FString::Printf(TEXT("the patch reaches its Height up and down (%.0f / %.0f)"), Extent(TEXT("VerticalPatchExtentUp")), Extent(TEXT("VerticalPatchExtentDown"))),
+					Extent(TEXT("VerticalPatchExtentUp")) >= 60000.0 && Extent(TEXT("VerticalPatchExtentDown")) >= 60000.0);
 				// Mesh Partition reads a texture patch's texture through the renderer: under -nullrhi (the suite) it applies nothing.
 				if (FApp::CanEverRender())
-					ModSpecExpectHeight(TEXT("white raises half the Height"), Terrain, X0, 0.0, 500.0, 2.0);
+					ModSpecExpectHeight(TEXT("white raises half the Height, 300 m"), Terrain, X0, 0.0, 30000.0, 20.0);
 				else
 					AddInfo(TEXT("-nullrhi: a texture patch changes no height without a renderer (engine); its height is checked in a rendering editor"));
+				// meshTerrainModifier | call Edit(unreal.find("<label>_Tex").Modifier, [-1, -1, -1], -1, -1, 80000): a higher stamp widens them again.
+				ModSpecRun(TEXT("higher stamp"), TEXT("Edit"), { ModSpecModifier(Label + TEXT("_Tex")), ModSpecVec(-1.0, -1.0, -1.0), ModSpecNum(-1.0), ModSpecNum(-1.0), ModSpecNum(80000.0) });
+				TestTrue(*FString::Printf(TEXT("Edit widens the extents (%.0f)"), Extent(TEXT("VerticalPatchExtentUp"))), Extent(TEXT("VerticalPatchExtentUp")) >= 80000.0);
+				// Back to a low stamp: the shapes placed later around it are checked at ground level.
+				ModSpecRun(TEXT("low stamp"), TEXT("Edit"), { ModSpecModifier(Label + TEXT("_Tex")), ModSpecVec(-1.0, -1.0, -1.0), ModSpecNum(-1.0), ModSpecNum(-1.0), ModSpecNum(1000.0) });
 			}
 
 			// meshTerrainModifier | call AddRemesh(unreal.find("<label>"), [X0 + 4000, -1500, 0], [2000, 2000, 50000], 100)
@@ -581,6 +595,15 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				ModSpecVec(0.0, 0.0, 0.0), ModSpecStr(Label + TEXT("_Dome")) }))
 				return;
 			ModSpecExpectHeight(TEXT("the dome's top"), Terrain, X0, Y0, 30000.0, 300.0);
+			// A 30 m stroke on the dome's flank, between its lat-long vertices (rings 230 and 333 m out, every 15 degrees; the base mesh
+			// has one every 20 m), finds none of them: the error says why, not only "a vertex every 20 m".
+			// meshTerrainBrush | call Sculpt(unreal.find("<label>"), "Raise", [X0 + 27760, Y0 + 3655, 0], 3000, 100)
+			{
+				TSharedPtr<FJsonObject> Refused;
+				TestFalse(TEXT("a 30 m stroke on the dome's flank is refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"Sculpt","args":[%s,{"lit":"Raise"},%s,{"lit":3000},{"lit":100}]}]})RQL"),
+					*T, *ModSpecVec(X0 + 27760.0, Y0 + 3655.0, 0.0)), true, &Refused));
+				TestTrue(*FString::Printf(TEXT("the error names the large triangles (%s)"), *ModSpecJson(Refused).Left(600)), ModSpecJson(Refused).Contains(TEXT("made of large triangles")));
+			}
 			// meshTerrains | where Label == "<label>" | get Modifiers | select Modifier: a Boolean is in none of the default definition's layers.
 			TSharedPtr<FJsonObject> Listed;
 			TestTrue(TEXT("list the modifiers"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrains"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"%s"}]}},{"op":"get","expr":{"path":["Modifiers"]}},{"op":"select","fields":[{"name":"Modifier","expr":{"path":["Modifier"]}}]}]})RQL"), *Label), false, &Listed));

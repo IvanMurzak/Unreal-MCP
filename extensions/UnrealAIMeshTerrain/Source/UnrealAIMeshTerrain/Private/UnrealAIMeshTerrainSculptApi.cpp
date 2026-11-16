@@ -154,7 +154,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 	constexpr int32 NoVertex = -1;
 	constexpr int32 NoWeightLayer = -2;
 
-	int32 ApplyStroke(FDynamicMesh3& Mesh, const FTransform& Transform, const FStroke& Stroke, double& OutBefore, double& OutAfter)
+	int32 ApplyStroke(FDynamicMesh3& Mesh, const FTransform& Transform, const FStroke& Stroke, double& OutBefore, double& OutAfter, double& OutNearest)
 	{
 		const FVector Local = Transform.InverseTransformPosition(FVector(Stroke.Point, 0.0));
 		const FVector2D Center(Local.X, Local.Y);
@@ -175,7 +175,13 @@ namespace UnrealAIMeshTerrainSculptLocal
 			}
 		}
 		if (Weights.IsEmpty())
+		{
+			// How far the nearest vertex is (for the error): the ground there may be a modifier's large triangles.
+			OutNearest = TNumericLimits<double>::Max();
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+				OutNearest = FMath::Min(OutNearest, FVector2D::Distance(FVector2D(Mesh.GetVertex(Vertex)), Center));
 			return NoVertex;
+		}
 
 		if (Stroke.Kind == EStroke::Paint)
 		{
@@ -461,14 +467,21 @@ namespace UnrealAIMeshTerrainSculptLocal
 			return Abandon(FString::Printf(TEXT("the brush modifier %s has no sculpt layer to edit"), Owner ? *Owner->GetActorLabel() : TEXT("?")));
 
 		FUnrealAIMeshTerrainStroke Out;
-		Out.Vertices = ApplyStroke(Mesh, Target->GetWorldTransform(), Stroke, Out.Before, Out.After);
+		double Nearest = 0.0;
+		Out.Vertices = ApplyStroke(Mesh, Target->GetWorldTransform(), Stroke, Out.Before, Out.After, Nearest);
 		if (Out.Vertices == NoWeightLayer)
 			return Abandon(FString::Printf(TEXT("the brush modifier %s has no weight attribute for the channel %s"), Owner ? *Owner->GetActorLabel() : TEXT("?"), *Stroke.Channel.ToString()));
 		if (Out.Vertices == NoVertex)
 		{
-			return Abandon(FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
-				Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
+			// The base meshes' spacing alone would have put a vertex under the brush: the ground there is a modifier's own
+			// triangles (a Boolean shape keeps its mesh's, 100+ m across for a large sphere).
+			return Abandon(Nearest < TNumericLimits<double>::Max() && Nearest > Stroke.Radius && Spacing < Stroke.Radius
+				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, not the base mesh's (a vertex every %.0f cm): a modifier's own mesh, such as a Boolean shape's. Use a Radius above %.0f cm, or shape that ground with modifiers"),
+					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, Spacing, Nearest)
+				: FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
+					Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
 		}
+
 		if (Out.Vertices == 0)
 		{
 			// Already that shape / weight there (an Erase where nothing is painted): nothing to store, and no new channel

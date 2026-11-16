@@ -294,22 +294,39 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		Owner->PostEditMove(/*bFinished*/ true);
 	}
 
+	/** Room (cm) left above and below the heights a modifier must reach. */
+	constexpr double ReachSpare = 10000.0;
+
+	/** Raise @p Modifier's numeric property @p Name to @p Needed when it is lower (through SetNumber: one undo step with the edit). */
+	bool WidenTo(UModifierComponent* Modifier, const TCHAR* Name, double Needed)
+	{
+		const FNumericProperty* Property = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(Name));
+		return !Property || Needed <= Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Modifier)) || SetNumber(Modifier, Name, Needed);
+	}
+
 	/**
 	 * A Patch / WeightUtility modifier reaches the ground only within MaxZDistance / 2 above and below its location (default
 	 * 200 m in all): a pad or paint on a 300 m hill would miss the ground above. Widen it to every height the terrain's built
-	 * ground has around @p Location, with 100 m to spare.
+	 * ground has around @p Location, with ReachSpare to spare.
 	 */
 	bool CoverTerrainHeights(UModifierComponent* Modifier, const AMeshPartition* Terrain, const FVector& Location)
 	{
-		constexpr double Spare = 10000.0; // cm
-		const FNumericProperty* Property = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("MaxZDistance")));
 		const FBox Built = BuiltBounds(Terrain); // valid: the Add operations wait for the build (CheckFootprint) first
-		if (!Property || !Built.IsValid)
-			return true;
-		const double Current = Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Modifier));
 		// MaxZDistance is the whole span, centred on the location.
-		const double Needed = 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + Spare);
-		return Needed <= Current || SetNumber(Modifier, TEXT("MaxZDistance"), Needed);
+		return !Built.IsValid || WidenTo(Modifier, TEXT("MaxZDistance"), 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + ReachSpare));
+	}
+
+	/**
+	 * A TexturePatch moves only the ground within VerticalPatchExtentUp / Down of its location (default 100 m each) and clamps
+	 * what it writes to them: a 300 m stamp would be cut at 100 m. Widen them to the terrain's built heights plus the stamp's
+	 * @p Height (its EncodingScale), with ReachSpare to spare.
+	 */
+	bool CoverTexturePatch(UModifierComponent* Patch, const AMeshPartition* Terrain, const FVector& Location, double Height)
+	{
+		const FBox Built = BuiltBounds(Terrain);
+		const double Up = (Built.IsValid ? FMath::Max(Built.Max.Z - Location.Z, 0.0) : 0.0) + FMath::Abs(Height) + ReachSpare;
+		const double Down = (Built.IsValid ? FMath::Max(Location.Z - Built.Min.Z, 0.0) : 0.0) + FMath::Abs(Height) + ReachSpare;
+		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), Up) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), Down);
 	}
 
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
@@ -776,7 +793,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 		if (!SetProperty(Patch, TEXT("HeightChannel"), Height_->GetPathName()))
 			return FModifierOpResult();
 	}
-	if (!SetProperty(Height_, TEXT("TextureAsset"), Texture->GetPathName()) || !SetNumber(Height_, TEXT("EncodingScale"), Height))
+	if (!SetProperty(Height_, TEXT("TextureAsset"), Texture->GetPathName()) || !SetNumber(Height_, TEXT("EncodingScale"), Height)
+		|| !CoverTexturePatch(Patch, Terrain, Location, Height))
 		return FModifierOpResult();
 	Patch->OnChanged(Patch->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 	return Placed.Keep();
@@ -1029,7 +1047,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 		}
 		if (HeightEntry)
 		{
-			if (!SetNumber(HeightEntry, TEXT("EncodingScale"), Strength))
+			if (!SetNumber(HeightEntry, TEXT("EncodingScale"), Strength) || !CoverTexturePatch(Modifier, TerrainOf(Modifier), Modifier->GetComponentLocation(), Strength))
 				return FModifierOpResult();
 			Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		}

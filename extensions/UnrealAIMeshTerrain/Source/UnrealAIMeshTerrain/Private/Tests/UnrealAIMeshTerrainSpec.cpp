@@ -115,7 +115,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 		{
 			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
 			for (const TCHAR* Text : { TEXT("meshTerrains"), TEXT("meshTerrainModifiers"), TEXT("meshTerrain | call Surface("), TEXT("call WaitForBuild("),
-				TEXT("Mesh Terrain (Experimental, UE 5.8+)") })
+				TEXT("Mesh Terrain (Experimental, UE 5.8+)"), TEXT("generic paint slots"), TEXT("A stroke is at most 250 m in radius") })
 			{
 				TestTrue(*FString::Printf(TEXT("skill mentions %s"), Text), Skill.Contains(Text));
 			}

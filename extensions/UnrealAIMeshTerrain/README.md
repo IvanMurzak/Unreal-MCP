@@ -103,7 +103,10 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
   centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
 - `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff = 0.5)`:
-  move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0).
+  move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0). The channels
+  are generic slots (the default definition's Red, Green, Blue, Yellow; its material decides how each looks): a "rock"
+  layer is painted into one of them. A stroke is at most 250 m in radius: larger features are modifiers (AddShape, AddNoise,
+  AddTexturePatch, AddWeight).
 - Strokes are stored the way Mesh Terrain Mode's Sculpt and Paint tools store theirs: in a brush modifier
   (`ProjectMeshLayersModifier`, the mode's "BrushModifier", labelled `<terrain>_Brush`), the sculpt as offsets in its
   active sculpt layer and the paint in its weight attributes (a `Set` channel entry per painted channel), edited through
@@ -148,7 +151,7 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
 | `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y outer diameter, Z ring height) as Boolean Union / Subtract / Trim; Rectangle, Disc as MeshProject |
 | `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
-| `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2); needs a rendering editor (under `-nullrhi` the engine applies no texture) |
+| `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2); needs a rendering editor (under `-nullrhi` the engine applies no texture); its vertical extents (engine default 100 m up and down, which clamp the stamp) are widened to the terrain's heights plus `height` (Edit Strength too) |
 | `AddRemesh(terrain, location, size, edgeLength, label)` | Remesh: finer or coarser triangles in a box |
 | `Add(terrain, kind, location, label)` | any other scriptable kind with its defaults (InstancedPatch, SplineRemesh, MeshProject, Boolean, ProjectMeshLayers), then `set` |
 | `Edit(modifier, size, radius, width, strength, falloff)` | the common parameters; a negative value keeps the current one (a negative noise or texture height: `set` it) |
