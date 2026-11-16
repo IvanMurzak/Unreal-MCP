@@ -37,8 +37,9 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * Load the World Partition streaming proxies of the landscape that overlap @p Area (world X, Y; null: all of them), as
 	 * the editor's region loading does, so an edit or read sees all of the ground and not only the region loaded around the
 	 * camera after a map opens. Nothing to do on a map without World Partition. Loading changes and dirties nothing.
+	 * False after Fail when the regions could not be loaded (an edit must then not run on part of the ground).
 	 */
-	void LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area = nullptr);
+	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area = nullptr);
 
 	/** Carve: a channel Depth cm below the ground along Points (world), Width cm of bottom then 1:1 banks; changed vertices. */
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);

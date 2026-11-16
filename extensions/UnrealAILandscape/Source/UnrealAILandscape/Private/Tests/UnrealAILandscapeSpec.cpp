@@ -509,7 +509,11 @@ void FUnrealAILandscapeSpec::Define()
 			const FString TallText = LandscapeSpecJson(Tall);
 			TestTrue(*FString::Printf(TEXT("the error names the range and MaxHeightMeters (%s)"), *TallText.Left(400)), TallText.Contains(TEXT("height range")) && TallText.Contains(TEXT("MaxHeightMeters")));
 			TestTrue(TEXT("nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0), 0.0, 1.0));
-			TestFalse(TEXT("a Flatten above the range is refused"), Call(Label, TEXT("Flatten"), Point(X0, 0) + TEXT(R"(,{"lit":500},{"lit":40000})")));
+			TSharedPtr<FJsonObject> High;
+			TestFalse(TEXT("a Flatten above the range is refused"), Call(Label, TEXT("Flatten"), Point(X0, 0) + TEXT(R"(,{"lit":500},{"lit":40000})"), &High));
+			TestTrue(*FString::Printf(TEXT("for its height range (%s)"), *LandscapeSpecJson(High).Left(300)), LandscapeSpecJson(High).Contains(TEXT("height range")));
+			TestTrue(TEXT("still nothing changed"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0), 0.0, 1.0));
+			TestFalse(TEXT("a Carve with a point 10 km off the landscape is refused"), Call(Label, TEXT("Carve"), FString::Printf(TEXT(R"({"list":[%s,%s]},{"lit":200},{"lit":100})"), *Point(X0, 0), *Point(X0 + 1000000.0, 0))));
 
 			const FString TallLabel = Label + TEXT("_Tall");
 			ALandscape* Room = Create(TallLabel, X0 + 5000.0, TEXT(R"(,{"lit":null},{"lit":400})"));

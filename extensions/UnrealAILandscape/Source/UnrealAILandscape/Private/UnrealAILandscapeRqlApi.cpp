@@ -84,7 +84,10 @@ namespace UnrealAILandscapeRqlApiLocal
 			return true;
 		const double Origin = Landscape->LandscapeActorToWorld().GetLocation().Z;
 		const double Needed = FMath::Max(FMath::Abs(HighCm - Origin), FMath::Abs(LowCm - Origin)) / 100.0;
-		const int32 Suggested = FMath::CeilToInt(Needed * 1.1 / 50.0) * 50;
+		if (Needed > 10000.0)
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("the ground would reach %.0f .. %.0f cm, %.0f m from %s's Z: more than any landscape holds (MaxHeightMeters 10000): nothing was changed"),
+				LowCm, HighCm, Needed, *Landscape->GetActorNameOrLabel()));
+		const int32 Suggested = FMath::Min(10000, FMath::CeilToInt(Needed * 1.1 / 50.0) * 50);
 		return UnrealMcpRql::Failed<bool>(FString::Printf(
 			TEXT("the ground would reach %.0f .. %.0f cm, outside %s's height range %.0f .. %.0f cm (%.0f m around its Z %.0f cm): nothing was changed. ")
 			TEXT("Its range is fixed when it is created: recreate it with landscape | call Create(\"%s\", <location>, <size>, <material>, %d) (MaxHeightMeters %d), or keep the edit within the range"),
@@ -92,12 +95,13 @@ namespace UnrealAILandscapeRqlApiLocal
 			*Landscape->GetActorNameOrLabel(), Suggested, Suggested));
 	}
 
-	void LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
+	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
 	{
 		UWorld* World = Landscape ? Landscape->GetWorld() : nullptr;
 		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
-		if (!Partition)
-			return;
+		// LoadActors loads into the editor world only (another world, e.g. play in editor, streams by itself).
+		if (!Partition || World != UnrealMcpRql::EditorWorld())
+			return true;
 		const FGuid Guid = Landscape->GetLandscapeGuid();
 		TArray<FGuid> ToLoad;
 		FWorldPartitionHelpers::ForEachActorDescInstance<ALandscapeStreamingProxy>(Partition, [&](const FWorldPartitionActorDescInstance* Instance)
@@ -111,15 +115,16 @@ namespace UnrealAILandscapeRqlApiLocal
 			return true;
 		});
 		if (ToLoad.IsEmpty())
-			return;
+			return true;
 		// UWorldPartitionBlueprintLibrary::LoadActors (the editor's pinned actor list; UnloadActors releases them) is not
 		// exported from the Engine module: call it through reflection.
 		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
 		static UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
 		if (!Load)
-			return UnrealMcpRql::Fail(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
+			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the landscape's regions in the World Partition window first"));
 		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
 		Library->GetDefaultObject()->ProcessEvent(Load, &Params);
+		return true;
 	}
 
 	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
@@ -139,7 +144,8 @@ namespace UnrealAILandscapeRqlApiLocal
 		if (Center.ContainsNaN() || !FMath::IsFinite(Radius))
 			return UnrealMcpRql::Failed<bool>(TEXT("Center and Radius must be finite numbers"));
 		const FBox2D Area(FVector2D(Center.X - Radius, Center.Y - Radius), FVector2D(Center.X + Radius, Center.Y + Radius));
-		LoadLandscape(Landscape, Radius > 0.0 ? &Area : nullptr);
+		if (!LoadLandscape(Landscape, Radius > 0.0 ? &Area : nullptr))
+			return false;
 		Out.Info = Landscape->GetLandscapeInfo();
 		FIntRect Whole;
 		if (!Out.Info || !Out.Info->GetLandscapeExtent(Whole))
@@ -426,13 +432,16 @@ namespace UnrealAILandscapeRqlApiLocal
 		ULandscapeLayerInfoObject* LayerInfo = Cast<ULandscapeLayerInfoObject>(UnrealMcpRql::LoadObject(ULandscapeLayerInfoObject::StaticClass(), Package));
 		if (LayerInfo && LayerInfo->GetLayerName() != Layer)
 			LayerInfo = nullptr; // a different layer's asset took the name: let the engine pick a unique one
+		if (LayerInfo && LayerInfo->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::None)
+			LayerInfo->SetBlendMethod(ELandscapeTargetLayerBlendMethod::FinalWeightBlending, /*bInModify*/ true); // made by an earlier version
 		if (!LayerInfo)
 		{
 			// Weight-blended, as Landscape mode's default "Weight-Blended Layer (normal)": painting one layer takes the weight
 			// from the others, so the layers sum to 1 and a LB_WeightBlend material (CreateLayerMaterial) shows one of them.
 			// The engine's default layer info blends nothing: Rock painted over Grass then rendered both added together.
+			// A project default layer info (Landscape settings) keeps its own blend method unless that blends nothing.
 			LayerInfo = UE::Landscape::CreateTargetLayerInfo(Layer, Folder);
-			if (LayerInfo)
+			if (LayerInfo && LayerInfo->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::None)
 				LayerInfo->SetBlendMethod(ELandscapeTargetLayerBlendMethod::FinalWeightBlending, /*bInModify*/ false);
 		}
 		if (!LayerInfo)
@@ -629,7 +638,8 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 	if (Point.ContainsNaN())
 		return UnrealMcpRql::Failed<FUnrealAILandscapeSurface>(TEXT("Point must be finite numbers"));
 	const FBox2D Near(FVector2D(Point) - FVector2D(1000.0), FVector2D(Point) + FVector2D(1000.0));
-	LoadLandscape(Landscape, &Near);
+	if (!LoadLandscape(Landscape, &Near))
+		return Out;
 	ULandscapeInfo* Info = Landscape->GetLandscapeInfo();
 	FIntRect Whole;
 	if (!Info || !Info->GetLandscapeExtent(Whole))
@@ -678,7 +688,8 @@ int32 UUnrealAILandscapeRqlApi::Delete(ALandscapeProxy* Landscape)
 	if (!Primary)
 		return UnrealMcpRql::Failed<int32>(TEXT("Landscape is null or its landscape actor is not loaded: pass unreal.find(\"<label>\")"));
 	UWorld* World = Primary->GetWorld();
-	LoadLandscape(Primary); // the proxies of unloaded regions too: deleting only the loaded ones would orphan the rest
+	if (!LoadLandscape(Primary)) // the proxies of unloaded regions too: deleting only the loaded ones would orphan the rest
+		return 0;
 	TArray<ALandscapeProxy*> Proxies;
 	if (ULandscapeInfo* Info = Primary->GetLandscapeInfo())
 	{
@@ -704,7 +715,8 @@ int32 UUnrealAILandscapeRqlApi::Rebuild(ALandscapeProxy* Landscape)
 		return UnrealMcpRql::Failed<int32>(TEXT("the landscape has no primary landscape actor to rebuild"));
 	if (!FApp::CanEverRender())
 		return UnrealMcpRql::Failed<int32>(TEXT("this editor does not render (-nullrhi): a landscape merges its edit layers only in a rendering editor"));
-	LoadLandscape(Primary);
+	if (!LoadLandscape(Primary))
+		return 0;
 	Primary->ForceLayersFullUpdate(); // every edit layer merged again, collision recreated
 	if (Primary->IsNaniteEnabled())
 	{

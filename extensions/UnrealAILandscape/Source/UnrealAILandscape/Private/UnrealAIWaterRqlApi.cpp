@@ -268,7 +268,8 @@ namespace UnrealAIWaterRqlLocal
 
 	bool ReadGrid(ALandscapeProxy* Landscape, FHeightGrid& Out)
 	{
-		UnrealAILandscapeRqlApiLocal::LoadLandscape(Landscape);
+		if (!UnrealAILandscapeRqlApiLocal::LoadLandscape(Landscape))
+			return false;
 		Out.Info = Landscape->GetLandscapeInfo();
 		if (!Out.Info || !Out.Info->GetLandscapeExtent(Out.Rect))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no landscape components"), *Landscape->GetActorNameOrLabel()));
@@ -514,9 +515,16 @@ int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const
 	FHeightGrid Grid;
 	if (!ReadGrid(Landscape, Grid))
 		return 0;
+	// Points far off the landscape would make millions of samples: allow the channel's reach beyond the edge, no more.
+	const double Reach = 5.0 * Width / Grid.QuadCm + 2.0; // vertices: the bed plus its banks (CarveBed)
 	TArray<FVector2D> Local;
 	for (const FVector& Point : Points)
-		Local.Add(Grid.ToLocal(Point));
+	{
+		const FVector2D P = Grid.ToLocal(Point);
+		if (P.X < Grid.Rect.Min.X - Reach || P.Y < Grid.Rect.Min.Y - Reach || P.X > Grid.Rect.Max.X + Reach || P.Y > Grid.Rect.Max.Y + Reach)
+			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("point [%.0f, %.0f] is off the landscape (its Bounds): keep the points on it or just past its edge"), Point.X, Point.Y));
+		Local.Add(P);
+	}
 	// One sample per vertex along the path: the bed follows the ground under it, Depth below.
 	const TArray<FVector2D> Path = Resample(Local, 1.0);
 	constexpr double Off = TNumericLimits<double>::Max(); // a sample off the (loaded) landscape
@@ -524,8 +532,8 @@ int32 UnrealAILandscapeRqlApiLocal::CarveAlong(ALandscapeProxy* Landscape, const
 	double Low = Off, High = TNumericLimits<double>::Lowest();
 	for (const FVector2D& P : Path)
 	{
-		const int32 X = FMath::Clamp(FMath::RoundToInt(P.X), Grid.Rect.Min.X, Grid.Rect.Max.X);
-		const int32 Y = FMath::Clamp(FMath::RoundToInt(P.Y), Grid.Rect.Min.Y, Grid.Rect.Max.Y);
+		const int32 X = FMath::RoundToInt(P.X);
+		const int32 Y = FMath::RoundToInt(P.Y);
 		if (!Grid.Valid(X, Y))
 		{
 			Bed.Add(Off);
