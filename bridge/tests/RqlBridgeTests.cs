@@ -293,11 +293,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         [Fact]
         public void RenderSchema_GuideRendersTheSourcesAndEverySection()
         {
-            var json = JsonNode.Parse(@"{""guide"": {""module"": ""Landscape"", ""extension"": ""com.ivanmurzak.unreal-ai-landscape"", ""version"": ""0.3.0"",
+            var json = JsonNode.Parse(@"{""guide"": {""name"": ""Landscape"", ""extension"": ""com.ivanmurzak.unreal-ai-landscape"", ""version"": ""0.3.0"",
                 ""sources"": [{""name"": ""landscape"", ""type"": ""LandscapeApi"", ""description"": ""landscape operations""}],
                 ""sections"": [{""topic"": ""Landscape and Water"", ""markdown"": ""Sculpt with `landscape | call Sculpt(...)`.""}, {""topic"": ""More"", ""markdown"": ""second""}]}}")!.AsObject();
             var text = RqlBridge.RenderSchema(json);
-            Assert.StartsWith("# Landscape guide (extension com.ivanmurzak.unreal-ai-landscape 0.3.0)\n\n", text);
+            Assert.StartsWith("# Landscape guide (com.ivanmurzak.unreal-ai-landscape 0.3.0)\n\n", text);
             Assert.Contains("  landscape: LandscapeApi — landscape operations\n", text);
             Assert.Contains("\n## Landscape and Water\n\nSculpt with `landscape | call Sculpt(...)`.\n", text);
             Assert.EndsWith("\n## More\n\nsecond", text);

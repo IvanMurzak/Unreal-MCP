@@ -341,6 +341,17 @@ namespace UnrealMcpRqlSessionLocal
 		return Entry.bList ? FString(TEXT("list of ")) + Name : Name;
 	}
 
+	/** A source as rql-schema lists it: name, type, description. */
+	rql::Json SourceJson(const FUnrealMcpRqlSession::FEntry& Entry)
+	{
+		rql::Json Item = rql::Json::object();
+		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
+		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
+		if (!Entry.Description.IsEmpty())
+			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
+		return Item;
+	}
+
 	/** A Markdown table cell. Not `Cell`: macOS MacTypes.h (pulled in by UE 5.7 on Mac) declares a global `Cell`. */
 	FString TableCell(const FString& Text)
 	{
@@ -1002,11 +1013,6 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 	return false;
 }
 
-FString FUnrealMcpRqlSession::GuideCall(const FString& ModuleName)
-{
-	return FString::Printf(TEXT("rql-schema {\"guide\": \"%s\"}"), *ModuleName);
-}
-
 TArray<FString> FUnrealMcpRqlSession::ModuleNames() const
 {
 	TArray<FString> Names;
@@ -1015,11 +1021,22 @@ TArray<FString> FUnrealMcpRqlSession::ModuleNames() const
 	return Names;
 }
 
+rql::Json FUnrealMcpRqlSession::ModuleJson(const FModuleInfo& Info)
+{
+	rql::Json Item = rql::Json::object();
+	Item.set("name", UnrealMcpRqlToStd(Info.Name));
+	if (!Info.ExtensionId.IsEmpty())
+		Item.set("extension", UnrealMcpRqlToStd(Info.ExtensionId));
+	if (!Info.Version.IsEmpty())
+		Item.set("version", UnrealMcpRqlToStd(Info.Version));
+	return Item;
+}
+
 const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(const FString& Key) const
 {
 	for (const FModuleInfo& Info : ModuleInfos)
 	{
-		if (Info.Name.Equals(Key, ESearchCase::IgnoreCase) || (!Info.ExtensionId.IsEmpty() && Info.ExtensionId.Equals(Key, ESearchCase::IgnoreCase)))
+		if (Info.Name.Equals(Key, ESearchCase::IgnoreCase) || Info.ExtensionId.Equals(Key, ESearchCase::IgnoreCase))
 			return &Info;
 	}
 	for (const FModuleInfo& Info : ModuleInfos)
@@ -1037,13 +1054,15 @@ const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(co
 
 const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::ModuleOfType(const rql::TypeDescriptor* Type) const
 {
+	if (!Type)
+		return nullptr;
 	for (const FModuleInfo& Info : ModuleInfos)
 	{
 		if (Info.GuideEnd == Info.GuideBegin)
 			continue; // nothing to point at
 		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
 		{
-			if (Type && SourceEntries[Index].Type == Type)
+			if (SourceEntries[Index].Type == Type)
 				return &Info;
 		}
 	}
@@ -1066,23 +1085,10 @@ FString FUnrealMcpRqlSession::GuideSchema(const FString& Key, bool& bOutOk) cons
 		return UnrealMcpRqlFromStd(Root.dump());
 	}
 	bOutOk = true;
-	rql::Json Guide = rql::Json::object();
-	Guide.set("module", UnrealMcpRqlToStd(Info->Name));
-	if (!Info->ExtensionId.IsEmpty())
-		Guide.set("extension", UnrealMcpRqlToStd(Info->ExtensionId));
-	if (!Info->Version.IsEmpty())
-		Guide.set("version", UnrealMcpRqlToStd(Info->Version));
+	rql::Json Guide = ModuleJson(*Info);
 	rql::Json SourceList = rql::Json::array();
 	for (int32 Index = Info->SourceBegin; Index < Info->SourceEnd; ++Index)
-	{
-		const FEntry& Entry = SourceEntries[Index];
-		rql::Json Item = rql::Json::object();
-		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
-		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
-		if (!Entry.Description.IsEmpty())
-			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
-		SourceList.push(std::move(Item));
-	}
+		SourceList.push(SourceJson(SourceEntries[Index]));
 	Guide.set("sources", std::move(SourceList));
 	rql::Json Sections = rql::Json::array();
 	for (int32 Index = Info->GuideBegin; Index < Info->GuideEnd; ++Index)
@@ -1166,20 +1172,13 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, const FString& Gui
 		Root.set("types", std::move(TypeList));
 		// An extension's source type: its guide says how the operations work together.
 		if (const FModuleInfo* Owner = ModuleOfType(Found))
-			Root.set("guideCall", UnrealMcpRqlToStd(GuideCall(Owner->Name)));
+			Root.set("guideCall", UnrealMcpRqlToStd(UnrealMcpRqlGuide::GuideCall(Owner->Name)));
 		return UnrealMcpRqlFromStd(Root.dump());
 	}
 
 	rql::Json SourceList = rql::Json::array();
 	for (const FEntry& Entry : SourceEntries)
-	{
-		rql::Json Item = rql::Json::object();
-		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
-		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
-		if (!Entry.Description.IsEmpty())
-			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
-		SourceList.push(std::move(Item));
-	}
+		SourceList.push(SourceJson(Entry));
 	Root.set("sources", std::move(SourceList));
 
 	rql::Json FunctionList = rql::Json::array();
@@ -1198,18 +1197,13 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, const FString& Gui
 		rql::Json ModuleList = rql::Json::array();
 		for (const FModuleInfo& Info : ModuleInfos)
 		{
-			rql::Json Item = rql::Json::object();
-			Item.set("name", UnrealMcpRqlToStd(Info.Name));
-			if (!Info.ExtensionId.IsEmpty())
-				Item.set("extension", UnrealMcpRqlToStd(Info.ExtensionId));
-			if (!Info.Version.IsEmpty())
-				Item.set("version", UnrealMcpRqlToStd(Info.Version));
+			rql::Json Item = ModuleJson(Info);
 			rql::Json Names = rql::Json::array();
 			for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
 				Names.push(rql::Json(UnrealMcpRqlToStd(SourceEntries[Index].Name)));
 			Item.set("sources", std::move(Names));
 			if (Info.GuideEnd > Info.GuideBegin)
-				Item.set("guideCall", UnrealMcpRqlToStd(GuideCall(Info.Name)));
+				Item.set("guideCall", UnrealMcpRqlToStd(UnrealMcpRqlGuide::GuideCall(Info.Name)));
 			ModuleList.push(std::move(Item));
 		}
 		Root.set("modules", std::move(ModuleList));

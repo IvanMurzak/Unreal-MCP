@@ -42,7 +42,6 @@ int32 FUnrealMcpSkillAutoGenerator::Flush()
 	const TArray<FString> Agents = Deps.Agents ? Deps.Agents() : TArray<FString>();
 	if (Agents.IsEmpty() || !Deps.Send)
 		return 0;
-	const FString ProjectRoot = Deps.ProjectRoot ? Deps.ProjectRoot() : FString();
 	int32 Sent = 0;
 	for (const FString& AgentId : Agents)
 	{
@@ -58,7 +57,7 @@ int32 FUnrealMcpSkillAutoGenerator::Flush()
 		if (AgentId == TEXT("other-custom") && Deps.CustomSkillsPath)
 			Request->SetStringField(TEXT("customSkillsPath"), Deps.CustomSkillsPath());
 		TSharedPtr<FJsonObject> Settings = MakeShared<FJsonObject>();
-		Settings->SetStringField(TEXT("projectRootPath"), ProjectRoot);
+		Settings->SetStringField(TEXT("projectRootPath"), Deps.ProjectRoot);
 		Request->SetObjectField(TEXT("settings"), Settings);
 		if (!Deps.Send(Request))
 		{

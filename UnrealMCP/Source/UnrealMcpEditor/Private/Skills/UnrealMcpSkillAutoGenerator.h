@@ -27,7 +27,7 @@ public:
 		/** The Custom agent's skills folder (FUnrealMcpConfig::SkillsPath). */
 		TFunction<FString()> CustomSkillsPath;
 		/** The project root the sidecar resolves the skills folders against. */
-		TFunction<FString()> ProjectRoot;
+		FString ProjectRoot;
 		/** Sends one agent-config request to the sidecar; false when none is connected. */
 		TFunction<bool(const TSharedPtr<FJsonObject>&)> Send;
 		/** Debounce: seconds from the last Schedule() to the generation. */

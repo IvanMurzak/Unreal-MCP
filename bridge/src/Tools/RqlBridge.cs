@@ -269,8 +269,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         {
             if (Str(json, "error") == "unknown-type")
             {
-                var candidates = (json["candidates"] as JsonArray)?.Select(c => c?.GetValue<string>() ?? "").Where(c => c.Length > 0).ToList()
-                    ?? new List<string>();
+                var candidates = Strings(json["candidates"]);
                 var error = AgentFormat.UnknownTypeError(Str(json, "name") ?? "", candidates);
                 // The type belongs to an extension this editor does not have: the hint names it and how to get it.
                 var hint = Str(json, "hint");
@@ -279,8 +278,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
 
             if (Str(json, "error") == "unknown-guide")
             {
-                var names = (json["candidates"] as JsonArray)?.Select(c => c?.GetValue<string>() ?? "").Where(c => c.Length > 0).ToList()
-                    ?? new List<string>();
+                var names = Strings(json["candidates"]);
                 return $"error unknown-guide: no installed extension '{Str(json, "name")}'"
                     + (names.Count > 0 ? $"; guides: {string.Join(", ", names)} (or one of their sources)" : "; none is installed (rql-schema lists the extensions you can add)");
             }
@@ -305,10 +303,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 sb.Append("installed extensions (sources; read the guide before using them):\n");
                 foreach (var m in modules.OfType<JsonObject>())
                 {
-                    sb.Append("  ").Append(Str(m, "name"));
-                    var extension = Str(m, "extension");
-                    if (!string.IsNullOrEmpty(extension)) sb.Append(" (").Append(extension).Append(' ').Append(Str(m, "version") ?? "").Append(')');
-                    var names = (m["sources"] as JsonArray)?.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).ToList() ?? new List<string>();
+                    sb.Append("  ").Append(Str(m, "name")).Append(ExtensionLabel(m));
+                    var names = Strings(m["sources"]);
                     if (names.Count > 0) sb.Append(": ").Append(string.Join(", ", names));
                     var call = Str(m, "guideCall");
                     if (!string.IsNullOrEmpty(call)) sb.Append(" — guide: ").Append(call);
@@ -350,9 +346,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 }
             }
             var guideCall = Str(json, "guideCall");
-            if (!overview && !string.IsNullOrEmpty(guideCall))
+            if (!string.IsNullOrEmpty(guideCall))
                 sb.Append("guide (how these operations work together): ").Append(guideCall).Append('\n');
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>The non-empty strings of a JSON string array (none when absent).</summary>
+        private static List<string> Strings(JsonNode? array) =>
+            (array as JsonArray)?.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).ToList() ?? new List<string>();
+
+        /// <summary><c> (extension version)</c> of a module; empty without an extension id.</summary>
+        private static string ExtensionLabel(JsonObject module)
+        {
+            var extension = Str(module, "extension");
+            if (string.IsNullOrEmpty(extension)) return "";
+            var version = Str(module, "version");
+            return string.IsNullOrEmpty(version) ? $" ({extension})" : $" ({extension} {version})";
         }
 
         /// <summary>`source: type — description` lines.</summary>
@@ -376,10 +385,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         private static string RenderGuide(JsonObject guide)
         {
             var sb = new StringBuilder();
-            sb.Append("# ").Append(Str(guide, "module")).Append(" guide");
-            var extension = Str(guide, "extension");
-            if (!string.IsNullOrEmpty(extension)) sb.Append(" (extension ").Append(extension).Append(' ').Append(Str(guide, "version") ?? "").Append(')');
-            sb.Append("\n\n");
+            sb.Append("# ").Append(Str(guide, "name")).Append(" guide").Append(ExtensionLabel(guide)).Append("\n\n");
             if (guide["sources"] is JsonArray sources && sources.Count > 0)
             {
                 sb.Append("sources (rql-schema \"<type>\" lists a type's members and operations):\n");

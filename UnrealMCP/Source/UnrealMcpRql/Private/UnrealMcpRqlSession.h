@@ -67,9 +67,6 @@ public:
 	/** The installed modules that add sources or guides, by name (the rql-* descriptions name them). */
 	TArray<FString> ModuleNames() const;
 
-	/** The rql-schema call that returns @p ModuleName's guide: rql-schema {"guide": "MeshTerrain"}. */
-	static FString GuideCall(const FString& ModuleName);
-
 	/** The unreal-rql skill: language, operations, live sources / functions, module guides, installed modules. */
 	FString SkillMarkdown() const;
 
@@ -129,6 +126,8 @@ private:
 	const FModuleInfo* FindModuleInfo(const FString& Key) const;
 	/** The module one of whose sources has @p Type, or null. */
 	const FModuleInfo* ModuleOfType(const rql::TypeDescriptor* Type) const;
+	/** {"name", "extension", "version"} of a module, for the overview and its guide. */
+	static rql::Json ModuleJson(const FModuleInfo& Info);
 	FString GuideSchema(const FString& Key, bool& bOutOk) const;
 	void ConfigureMutations();
 	void ConfigureModules();

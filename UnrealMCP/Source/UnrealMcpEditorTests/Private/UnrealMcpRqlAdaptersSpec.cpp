@@ -914,7 +914,7 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 				const TSharedPtr<FJsonObject>* Body = nullptr;
 				if (!TestTrue(*FString::Printf(TEXT("guide '%s' found"), Key), bGuideOk && Guide.IsValid() && Guide->TryGetObjectField(TEXT("guide"), Body)))
 					continue;
-				TestEqual(TEXT("its module"), (*Body)->GetStringField(TEXT("module")), FString(TEXT("RqlAdaptersSpec")));
+				TestEqual(TEXT("its module"), (*Body)->GetStringField(TEXT("name")), FString(TEXT("RqlAdaptersSpec")));
 				const TArray<TSharedPtr<FJsonValue>>& Sections = (*Body)->GetArrayField(TEXT("sections"));
 				TestTrue(TEXT("its AddGuide markdown"), Sections.Num() == 1
 					&& Sections[0]->AsObject()->GetStringField(TEXT("topic")) == TEXT("RqlAdaptersSpec guide")

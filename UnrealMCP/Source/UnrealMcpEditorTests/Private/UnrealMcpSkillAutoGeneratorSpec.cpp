@@ -24,7 +24,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpSkillAutoGeneratorSpec, "UnrealMcp.Skills.AutoGenera
 		FUnrealMcpSkillAutoGenerator::FDeps Deps;
 		Deps.Agents = [this]() { return Agents; };
 		Deps.CustomSkillsPath = []() { return FString(TEXT(".custom/skills")); };
-		Deps.ProjectRoot = []() { return FString(TEXT("/Projects/Game")); };
+		Deps.ProjectRoot = TEXT("/Projects/Game");
 		Deps.Send = [this](const TSharedPtr<FJsonObject>& Request)
 		{
 			if (bConnected)

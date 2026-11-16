@@ -223,6 +223,12 @@ Widgets and sequences:
 			"together; read it before using them." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
+	/** The rql-schema call that returns @p ModuleName's guide: rql-schema {"guide": "MeshTerrain"}. */
+	inline FString GuideCall(const FString& ModuleName)
+	{
+		return FString::Printf(TEXT("rql-schema {\"guide\": \"%s\"}"), *ModuleName);
+	}
+
 	/**
 	 * The installed extension modules, for the rql-query / rql-mutate descriptions (built at registration, which re-runs when
 	 * the module set changes). Empty when none is installed.
@@ -231,8 +237,8 @@ Widgets and sequences:
 	{
 		if (ModuleNames.IsEmpty())
 			return FString();
-		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: "
-			"rql-schema {\"guide\": \"%s\"}."), *FString::Join(ModuleNames, TEXT(", ")), *ModuleNames[0]);
+		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: %s."),
+			*FString::Join(ModuleNames, TEXT(", ")), *GuideCall(ModuleNames[0]));
 	}
 
 	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */
