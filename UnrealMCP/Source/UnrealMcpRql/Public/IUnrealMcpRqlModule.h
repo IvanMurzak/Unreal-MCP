@@ -159,6 +159,24 @@ namespace UnrealMcpRql
 		TFunction<void(UActorComponent*)> Configure = nullptr);
 
 	/**
+	 * World Partition: load actors of the editor world that are not loaded, by actor GUID (a descriptor's GetGuid()), as
+	 * `editor | call LoadActors` does: through the editor's actor-list loader (UWorldPartitionBlueprintLibrary::LoadActors,
+	 * what Python's load_actors calls). Loading changes no saved data: no package is marked unsaved and no undo step is
+	 * added, so a read-only operation (meta = (RqlReadOnly)) may call it. The actors stay loaded until the world goes.
+	 * Synchronous: the actors exist when it returns. True without World Partition or with nothing to load; false with
+	 * @p OutError when this engine has no such loader.
+	 */
+	UNREALMCPRQL_API bool LoadWorldPartitionActors(const TArray<FGuid>& Guids, FString* OutError = nullptr);
+
+	/**
+	 * World Partition: load every actor of the editor world that is not loaded and whose editor bounds overlap @p Region in
+	 * XY (cm; Z ignored, as region loading in the World Partition window), as `editor | call LoadRegion` does; same loader
+	 * and guarantees as LoadWorldPartitionActors. @p OutLoaded, when given, receives the actors it loaded. Actors deleted in
+	 * this session (descriptor kept until save) and runtime-only descriptors are never loaded.
+	 */
+	UNREALMCPRQL_API bool LoadWorldPartitionRegion(const FBox2D& Region, TArray<AActor*>* OutLoaded = nullptr, FString* OutError = nullptr);
+
+	/**
 	 * Create an asset of @p Class at @p Path ("/Game/Input/IA_Jump", project or plugin content, not taken yet), with the
 	 * Content Browser's "New" factory when one creates the class, as `editor | call CreateAsset(...)` does. Unsaved.
 	 * nullptr after Fail() when it cannot.

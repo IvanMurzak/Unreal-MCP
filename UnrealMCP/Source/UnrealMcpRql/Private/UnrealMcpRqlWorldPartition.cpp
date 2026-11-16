@@ -228,12 +228,32 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadRegion(FVector2D Min, FVector2D Max)
 	using namespace UnrealMcpRqlWorldPartitionLocal;
 	if (Min.X > Max.X || Min.Y > Max.Y)
 		return UnrealMcpRql::Failed<TArray<AActor*>>(FString::Printf(TEXT("Min (%g, %g) must not exceed Max (%g, %g) on either axis"), Min.X, Min.Y, Max.X, Max.Y));
-	UWorld* World = PartitionedEditorWorld();
-	if (!World)
+	if (!PartitionedEditorWorld())
 		return {};
+	TArray<AActor*> Loaded;
+	FString Error;
+	if (!UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(Min, Max), &Loaded, &Error))
+		return UnrealMcpRql::Failed<TArray<AActor*>>(Error);
+	return Loaded;
+}
+
+bool UnrealMcpRql::LoadWorldPartitionActors(const TArray<FGuid>& Guids, FString* OutError)
+{
+	const UWorld* World = UnrealMcpRql::EditorWorld();
+	if (!World || !World->GetWorldPartition())
+		return true; // nothing is unloaded without World Partition
+	FString Error;
+	const bool bLoaded = UnrealMcpRqlWorldPartition::Load(Guids, Error);
+	if (!bLoaded && OutError)
+		*OutError = Error;
+	return bLoaded;
+}
+
+bool UnrealMcpRql::LoadWorldPartitionRegion(const FBox2D& Region, TArray<AActor*>* OutLoaded, FString* OutError)
+{
+	UWorld* World = UnrealMcpRql::EditorWorld();
 	TArray<FGuid> Guids;
 	const TArray<FUnrealMcpUnloadedActor> Rows = UnrealMcpRqlWorldPartition::Unloaded(World, &Guids);
-	const FBox2D Region(Min, Max);
 	TArray<FGuid> ToLoad;
 	for (int32 Index = 0; Index < Rows.Num(); ++Index)
 	{
@@ -244,7 +264,11 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadRegion(FVector2D Min, FVector2D Max)
 		if (Region.Intersect(Footprint))
 			ToLoad.Add(Guids[Index]);
 	}
-	return LoadAndCollect(World, ToLoad);
+	if (!LoadWorldPartitionActors(ToLoad, OutError))
+		return false;
+	if (OutLoaded)
+		*OutLoaded = UnrealMcpRqlWorldPartition::Actors(World, ToLoad);
+	return true;
 }
 
 void UnrealMcpRqlAddWorldPartition(FUnrealMcpRqlSession& Session)

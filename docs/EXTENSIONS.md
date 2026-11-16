@@ -76,6 +76,10 @@ Core helpers in `UnrealMcpRql` (they report failures with `Fail` and return null
 (class names, asset paths), `EditorWorld()`, `SpawnActor(Class, Location, Rotation, Label, Parent)`,
 `AddComponent(Actor, Class, Name, Configure)` (the actor `AddComponent` method; `Configure` runs before the component
 registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules and factory), `PluginVersion(PluginName)`.
+World Partition actors that are not loaded: `LoadWorldPartitionActors(Guids, &Error)` (by descriptor GUID) and
+`LoadWorldPartitionRegion(Box2D, &Loaded, &Error)` (bounds overlapping an XY box) load them as `editor | call LoadActors`
+/ `LoadRegion` do, through the editor's actor-list loader: synchronous, nothing marked unsaved, no undo step, so a
+read-only operation may call them. They return `false` with the error (no `Fail`) only when the engine has no loader.
 
 The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
 (and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use
