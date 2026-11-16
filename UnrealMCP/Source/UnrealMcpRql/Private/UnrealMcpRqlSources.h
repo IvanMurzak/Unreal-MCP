@@ -69,5 +69,8 @@ void UnrealMcpRqlAddWidgets(FUnrealMcpRqlSession& Session);
 /** Editor diagnostics: the `diagnostics` source (FUnrealMcpEditorDiagnostics). */
 void UnrealMcpRqlAddDiagnostics(FUnrealMcpRqlSession& Session);
 
+/** World Partition actors that are not loaded: the `unloadedActors` source (UnrealMcpRqlWorldPartition.cpp). */
+void UnrealMcpRqlAddWorldPartition(FUnrealMcpRqlSession& Session);
+
 /** Level Sequences: bindings, tracks, sections and channel keys in display frames; the `levelSequences` source. */
 void UnrealMcpRqlAddSequences(FUnrealMcpRqlSession& Session);

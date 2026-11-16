@@ -221,6 +221,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Render_ReadOnlyCallsInRqlMutateShowEveryRow()
+        {
+            // range(0, 120) | call landscape.Surface(...) through rql-mutate: the plugin marks a call of read-only operations
+            // "readOnly", whose rows are the answer (a grid of heights), not a receipt cut at 50 rows.
+            var rows = string.Join(",", Enumerable.Range(0, 120).Select(i =>
+                $"[\"Api#1\",\"Probe(Vector Point)\",\"({i}, 0, 0)\"]"));
+            string Json(bool readOnly) => "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"method\",\"result\"],\"rows\":[" + rows + "]"
+                + (readOnly ? ",\"readOnly\":true" : "") + "}";
+            var read = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(Json(true))));
+            Assert.StartsWith("120 results\nmethod: Probe(Vector Point)\n", read); // compact: the method once
+            Assert.Contains("(119, 0, 0)", read);
+            Assert.DoesNotContain("more row(s) not shown", read);
+            Assert.Equal(Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(Json(true)))), read); // rql-query renders it alike
+            var receipt = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(Json(false))));
+            Assert.Contains("… 70 more row(s) not shown", receipt); // a change keeps its 50-row receipt
+        }
+
+        [Fact]
         public void Render_Scalars()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":3}";

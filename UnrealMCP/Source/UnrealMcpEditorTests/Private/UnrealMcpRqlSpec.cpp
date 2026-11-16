@@ -37,6 +37,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "UnrealMcpRqlSpecHelpers.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -391,6 +392,28 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("destroy ok (%s)"), *Codes(Destroyed)), IsOk(Destroyed));
 			TestEqual(TEXT("the original is gone"), CountLamps(), 0);
+		});
+
+		It("refuses Destroy of an actor the editor's Delete refuses (CanDeleteSelectedActor), with its reason, destroying nothing", [this]()
+		{
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!TestNotNull(TEXT("editor world"), World))
+				return;
+			SpawnLamp();
+			AActor* Undeletable = World->SpawnActor<AUnrealMcpRqlSpecUndeletableActor>();
+			if (!TestNotNull(TEXT("spawned"), Undeletable))
+				return;
+			Undeletable->SetActorLabel(TEXT("RqlSpecLampUndeletable"));
+			ON_SCOPE_EXIT { if (IsValid(Undeletable)) World->EditorDestroyActor(Undeletable, true); };
+			// actors | where Label starts-with "RqlSpecLamp" | call Destroy()
+			const TSharedPtr<FJsonObject> Refused = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Refused));
+			TestTrue(*FString::Printf(TEXT("with the actor's reason (%s)"), *Codes(Refused)),
+				Codes(Refused).Contains(TEXT("RqlSpecLampUndeletable cannot be deleted: it still has 3 spec proxies")) && Codes(Refused).Contains(TEXT("nothing was changed")));
+			TestTrue(TEXT("nothing destroyed, the deletable lamp included (all or nothing)"), IsValid(Undeletable) && CountLamps() == 1);
+			// actors | where Label == "RqlSpecLamp" | call Destroy(): others still go
+			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a deletable actor is destroyed (%s)"), *Codes(Destroyed)), IsOk(Destroyed) && CountLamps() == 0);
 		});
 
 		It("duplicates an actor at its own world transform plus the offset", [this]()

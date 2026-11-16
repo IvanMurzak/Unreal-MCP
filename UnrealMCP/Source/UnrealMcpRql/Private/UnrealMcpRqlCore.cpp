@@ -4,6 +4,7 @@
 #include "UnrealMcpRqlSession.h"
 #include "UnrealMcpRqlEditorApi.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlWorldPartition.h"
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlUtil.h"
 #include "IUnrealMcpRqlModule.h"
@@ -987,7 +988,18 @@ namespace UnrealMcpRqlCoreLocal
 			return ErrorValue("type-mismatch", TEXT("unreal.find(label) expects an actor label, name or path"));
 		const FString Key = UnrealMcpRqlFromStd(Args[0].as_string());
 		AActor* Actor = FUnrealMcpObjectRef::ResolveActor(Key);
-		return Actor ? Types.WrapObject(Actor) : ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
+		if (Actor)
+			return Types.WrapObject(Actor);
+		// A World Partition actor that is not loaded has a descriptor, not an actor: name it and how to load it.
+		for (const FUnrealMcpUnloadedActor& Row : UnrealMcpRqlWorldPartition::Unloaded(EditorWorld()))
+		{
+			const FString Wanted = Key.TrimStartAndEnd();
+			if (Row.Label.Equals(Wanted, ESearchCase::IgnoreCase) || Row.Name.Equals(Wanted, ESearchCase::IgnoreCase))
+				return ErrorValue("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
+					"rql-query editor | call LoadActors([\"%s\"]) (changes nothing saved), then unreal.find(\"%s\") finds it"),
+					*Row.Label, *Row.Class, *Row.Label, *Row.Label));
+		}
+		return ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
 			*Key, *OpenLevelPath(), *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint())));
 	}
 
@@ -1233,6 +1245,27 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	UnrealMcpRqlAddWidgets(Session);
 	UnrealMcpRqlAddSequences(Session);
 	UnrealMcpRqlAddDiagnostics(Session);
+	UnrealMcpRqlAddWorldPartition(Session);
+
+	// Actor.Destroy() deletes as the editor's Delete does, so it refuses what Delete refuses (AActor::CanDeleteSelectedActor):
+	// a World Partition landscape with streaming proxies left (its delete would orphan them), and the like. Checked for
+	// every planned Destroy before the first runs (a call cannot be rolled back).
+	Session.AddBatchValidator([Types](const std::vector<rql::MutationRecord>& Records) -> FString
+	{
+		for (const rql::MutationRecord& Record : Records)
+		{
+			if (!Record.method || Record.method->name != "Destroy")
+				continue;
+			const AActor* Actor = Cast<AActor>(Types->AsObject(Record.item));
+			FText Reason;
+			if (Actor && !Actor->CanDeleteSelectedActor(Reason))
+				return FString::Printf(TEXT("%s cannot be deleted: %s (the editor's Delete refuses it too). Delete what it still depends on "
+					"first, e.g. a landscape's LandscapeStreamingProxy actors; World Partition actors that are not loaded are in unloadedActors "
+					"(editor | call LoadActors([...]) loads them)"), *Actor->GetActorNameOrLabel(),
+					Reason.IsEmpty() ? TEXT("the actor refuses it") : *Reason.ToString());
+		}
+		return FString();
+	});
 
 	// Object references from text, as an edit field accepts them: an asset path ("/Game/Meshes/SM_Cube"), a class name
 	// for class references ("PointLight"), an actor label / name / path for actors. Only coerce: the adapter shapes no

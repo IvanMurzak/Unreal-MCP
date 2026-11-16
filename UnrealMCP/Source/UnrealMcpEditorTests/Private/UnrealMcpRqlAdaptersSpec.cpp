@@ -829,6 +829,28 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			const TSharedPtr<FJsonObject> Many = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":300}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("300 reads pass the 200-target default of mutations (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Many)),
 				UnrealMcpRqlSpecHelpers::IsOk(Many) && Api->Probes == 334);
+			TestEqual(*FString::Printf(TEXT("a read's rows are its answer: all 300 (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Many)),
+				UnrealMcpRqlSpecHelpers::RowCount(Many), 300);
+			// rql-mutate takes the read ceiling too (no max_targets needed for a read): range(0, 300) | call rqlSpecApi.Probe([$, 0, 0])
+			const TSharedPtr<FJsonObject> ManyMutate = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":300}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("300 reads in rql-mutate pass the 200-target limit of changes (%s)"), *UnrealMcpRqlSpecHelpers::Codes(ManyMutate)),
+				UnrealMcpRqlSpecHelpers::IsOk(ManyMutate) && Api->Probes == 634 && UnrealMcpRqlSpecHelpers::RowCount(ManyMutate) == 300);
+			// The sidecar renders an rql-mutate answer as a receipt cut at 50 rows unless the plugin marks it a read.
+			TestTrue(TEXT("a call of read-only operations is marked readOnly (the sidecar then shows every row)"),
+				ManyMutate.IsValid() && ManyMutate->HasTypedField<EJson::Boolean>(TEXT("readOnly")) && ManyMutate->GetBoolField(TEXT("readOnly")));
+			// range(0, 1001) | call rqlSpecApi.Probe([$, 0, 0]): over the read ceiling, a read-limit, not a refused change
+			const FString TooMany = TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1001}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL");
+			for (const bool bMutate : { false, true })
+			{
+				const TSharedPtr<FJsonObject> Over = UnrealMcpRqlSpecHelpers::Exec(*this, TooMany, bMutate);
+				const FString Said = UnrealMcpRqlSpecHelpers::Codes(Over) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Over);
+				TestTrue(*FString::Printf(TEXT("%s: 1001 reads are a read-limit (%s)"), bMutate ? TEXT("rql-mutate") : TEXT("rql-query"), *Said),
+					!UnrealMcpRqlSpecHelpers::IsOk(Over) && Said.Contains(TEXT("read-limit: more than 1000 items reach the read-only 'Probe' call: at most 1000 per call"))
+					&& Said.Contains(TEXT("| skip 1000 | first 1000 | call Probe(")));
+				TestFalse(*FString::Printf(TEXT("worded as a read, not a refused change (%s)"), *Said),
+					Said.Contains(TEXT("mutation-limit")) || Said.Contains(TEXT("nothing was changed")) || Said.Contains(TEXT("max_targets")));
+			}
+			TestEqual(TEXT("and nothing ran"), Api->Probes, 634);
 			TestEqual(TEXT("read-only calls open no undo step (rql-query and rql-mutate)"), Trans ? Trans->GetQueueLength() : 0, UndoSteps);
 			TestFalse(TEXT("and mark nothing unsaved"), Level && Level->IsDirty());
 
@@ -842,6 +864,10 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("identical rows of a mutating operation are refused, naming the calls (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Twice)),
 				!UnrealMcpRqlSpecHelpers::IsOk(Twice) && UnrealMcpRqlSpecHelpers::Codes(Twice).Contains(TEXT("would run twice with the same arguments (calls 1 and 2"))
 				&& Api->Marks == 0);
+			// rqlSpecApi | call Mark([5, 0, 0], [[0, 0, 0]]): a change keeps its receipt (no readOnly mark)
+			const TSharedPtr<FJsonObject> Marked = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Mark","args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a mutating call is not marked readOnly (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Marked)),
+				UnrealMcpRqlSpecHelpers::IsOk(Marked) && !Marked->HasField(TEXT("readOnly")));
 
 			// rql-schema marks it
 			bool bOk = false;

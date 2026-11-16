@@ -240,6 +240,20 @@ public:
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
 };
 
+/** An actor the editor's Delete refuses (as a World Partition landscape with streaming proxies left): RQL Destroy must too. */
+UCLASS()
+class AUnrealMcpRqlSpecUndeletableActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	virtual bool CanDeleteSelectedActor(FText& OutReason) const override
+	{
+		OutReason = INVTEXT("it still has 3 spec proxies");
+		return false;
+	}
+};
+
 /**
  * A pawn with no movement component, a blocking box that moves itself (as a game's simple vehicle does): W drives it
  * forward with a sweep, A turns it, E lifts it for 15 ticks and lowers it again. Its GetVelocity() stays 0, however it moves.

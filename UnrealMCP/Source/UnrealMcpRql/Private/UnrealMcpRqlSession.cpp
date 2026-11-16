@@ -9,6 +9,7 @@
 #include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlWorldPartition.h"
 
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -196,6 +197,48 @@ namespace UnrealMcpRqlSessionLocal
 		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level%s"),
 			*UnrealMcpRqlUtil::OpenLevelPath(), Partitioned);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
+	}
+
+	/**
+	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
+	 * agents never found a lake or orphaned proxies outside the loaded regions and spent dozens of Python calls loading
+	 * them. While some are not loaded, the answer says how many, names a few and how to list and load them.
+	 */
+	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	{
+		const rql::ExprPtr& Source = Plan.source;
+		if (!Result.ok || !Source || Source->kind != rql::ExprKind::Path || Source->on || Source->segments.empty()
+			|| Source->segments[0].kind != rql::SegmentKind::Member)
+			return;
+		const std::string& Name = Source->segments[0].name;
+		if (Name != "actors" && Name != "levels" && Name != "world")
+			return;
+		FString Message;
+		FString Hint;
+		if (UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint))
+			Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
+	}
+
+	/**
+	 * A read-only call over more input than one call takes failed with RQL's mutation-limit ("... nothing was changed, pass
+	 * max_targets"), which reads as a refused change. It is a read: say so, and how to split it. Reads keep the 1000 ceiling
+	 * on purpose: every item is one result row, and 1000 rows already fill the 64 KB answer.
+	 */
+	void RewordReadLimit(rql::QueryResult& Result, const std::string& Method, int32 Limit)
+	{
+		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.code != "mutation-limit")
+				continue;
+			const std::string& Old = Diagnostic.message;
+			const size_t Digits = Old.find_first_not_of("0123456789");
+			const std::string Count = Digits > 0 && Digits != std::string::npos ? Old.substr(0, Digits) : "more than " + std::to_string(Limit);
+			const std::string N = std::to_string(Limit);
+			Diagnostic.code = "read-limit";
+			Diagnostic.message = Count + " items reach the read-only '" + Method + "' call: at most " + N + " per call (one result row each)";
+			Diagnostic.hint = "split the input: ... | first " + N + " | call " + Method + "(...), then ... | skip " + N + " | first " + N
+				+ " | call " + Method + "(...); or sample fewer points";
+		}
 	}
 
 	/**
@@ -585,11 +628,17 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
 		// through); anything else is refused like any call in rql-query, before it runs (first: the
 		// refusal is rql-query's permission-denied, whatever else the batch would fail on).
-		if (bReadOnlyCallRequest && !AllReadOnlyCalls(Records))
+		bReadOnlyCalls = AllReadOnlyCalls(Records);
+		if (bReadOnlyCallRequest && !bReadOnlyCalls)
 		{
 			bRefusedReadOnlyCall = true;
 			return std::string("not a read-only operation");
 		}
+		// rql-mutate raised the limit for a read-only operation's name: a same-named call that changes something keeps the
+		// editor's limit.
+		if (bReadOnlyLimit && Records.size() > static_cast<size_t>(DefaultMaxTargets) && !AllReadOnlyCalls(Records))
+			return UnrealMcpRqlToStd(FString::Printf(TEXT("%d calls, more than the limit of %d for a change (pass max_targets = %d)"),
+				static_cast<int32>(Records.size()), DefaultMaxTargets, static_cast<int32>(Records.size())));
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
 		// extensions' operations) are class defaults by design and stay callable.
@@ -925,6 +974,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	Types().SetMutationRequest(bAllowMutation);
 	bReadOnlyCallRequest = false;
 	bRefusedReadOnlyCall = false;
+	bReadOnlyLimit = false;
+	bReadOnlyCalls = false;
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;
@@ -939,15 +990,20 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		// rql-query may call read-only operations (meta = (RqlReadOnly)): the engine allows the call stage, and the batch
 		// check refuses every planned call that is not one (a same-named operation of another type) before any runs. Any
 		// other call keeps the engine's own permission-denied, before its target is evaluated.
-		bReadOnlyCallRequest = !bAllowMutation && bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(Plan.stages.back().method));
+		const bool bReadOnlyName = bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(Plan.stages.back().method));
+		bReadOnlyCallRequest = !bAllowMutation && bReadOnlyName;
 		rql::QueryOptions Options;
 		Options.allow_mutation = bAllowMutation || bReadOnlyCallRequest;
 		Options.dry_run = bDryRun;
 		rql::Budgets Budgets;
+		// A read-only call changes nothing, so the editor's mutation limit does not apply: it takes the ceiling in both tools
+		// (rql-query has no max_targets). In rql-mutate a same-named operation that is not read-only is held to the
+		// default limit by the batch check (bReadOnlyLimit).
+		bReadOnlyLimit = bReadOnlyName && !MaxTargets.IsSet();
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
-		else if (bReadOnlyCallRequest)
-			Budgets.max_mutation_targets = HardMaxTargets; // rql-query has no max_targets: reads take the ceiling
+		else if (bReadOnlyLimit)
+			Budgets.max_mutation_targets = HardMaxTargets;
 		if (bCall)
 			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
@@ -955,15 +1011,23 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
 		else if (bCall)
 			AddCallResultListNote(Result);
+		if (bReadOnlyLimit)
+			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, Plan, bAllowMutation);
 	UnrealMcpRqlSessionLocal::AddOpenLevelHint(Result, Plan, bAllowMutation);
+	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
 	bOutOk = Result.ok;
-	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
+	rql::Json Answer = Result.to_json(/*include_stats*/ false);
+	// The sidecar renders an rql-mutate answer as a receipt (its first 50 rows and a count): a read's rows are its answer
+	// (a grid of sampled heights), so "readOnly" asks for every row, as rql-query shows them (within the 64 KB answer).
+	if (Result.ok && bReadOnlyCalls)
+		Answer.set("readOnly", true);
+	return UnrealMcpRqlFromStd(Answer.dump());
 }
 
 bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure)

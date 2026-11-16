@@ -120,6 +120,10 @@ private:
 	bool bReadOnlyCallRequest = false;
 	/** The batch check refused a call in a read-only request: Execute answers with rql-query's permission-denied. */
 	bool bRefusedReadOnlyCall = false;
+	/** The call names a read-only operation and the caller gave no max_targets: the request runs at the ceiling. */
+	bool bReadOnlyLimit = false;
+	/** Every planned call of the request is a read-only operation's: its answer is a read, not a receipt. */
+	bool bReadOnlyCalls = false;
 	/** A call record of an operation that declares itself read-only (meta = (RqlReadOnly)). */
 	bool IsReadOnlyCall(const rql::MutationRecord& Record) const;
 	/** @p Records is a non-empty batch of read-only calls only. */
