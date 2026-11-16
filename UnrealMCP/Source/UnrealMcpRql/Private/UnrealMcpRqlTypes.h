@@ -159,6 +159,12 @@ public:
 	void AddApiClass(UClass* Class, const FString& TypeName);
 	/** Whether @p Class was registered with AddApiClass (its class default object is an operations object). */
 	bool IsApiClass(const UClass* Class) const { return Class && ApiClasses.Contains(const_cast<UClass*>(Class)); }
+	/** An operation of an operations class that declares `meta = (RqlReadOnly)` (IUnrealMcpRqlModule::AddApiClass). */
+	bool IsReadOnlyOperation(const UClass* Class, const UFunction* Function) const;
+	/** The operation @p Method (case-insensitive; K2_ prefix dropped, as `call` names it) of @p Class is read-only. */
+	bool IsReadOnlyOperation(const UClass* Class, const FString& Method) const;
+	/** Some operations class has a read-only operation named @p Method: rql-query may run a `call` of it. */
+	bool HasReadOnlyOperation(const FString& Method) const;
 	void ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable);
 
 	/** Add or replace a member of a descriptor (hooks use it). */
@@ -197,6 +203,6 @@ private:
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);
 	void FillStruct(rql::TypeDescriptor& Descriptor, UScriptStruct* Struct);
 	void AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable);
-	void AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function);
+	void AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function, bool bReadOnly);
 	bool IsCallable(UClass* Class, UFunction* Function) const;
 };

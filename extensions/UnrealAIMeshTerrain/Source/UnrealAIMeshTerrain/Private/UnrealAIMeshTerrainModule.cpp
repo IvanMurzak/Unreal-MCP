@@ -287,7 +287,7 @@ meshTerrainModifiers | where Kind == "Noise" | select $ref Modifier
 Modifiers apply layer by layer (the definition's `PriorityLayers`, first to last), then by `Priority` (sub-priority,
 higher later) within a layer. A terrain rebuilds after every change in the background: read heights with `Surface`, which
 waits for that build, rather than with line traces, and call `WaitForBuild` after `set` on a modifier before reading
-`Build` or rendering a screenshot.
+`Build` or rendering a screenshot. `Surface`, `SurfacePoints` and `WaitForBuild` are read-only: they work in rql-query.
 
 ```
 meshTerrain | call Surface(unreal.find("Terrain"), [1200, -800, 0])      {Inside, Height, Slope, Location, Normal, Channels}

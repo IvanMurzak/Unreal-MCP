@@ -276,6 +276,11 @@ private:
 	// the reader thread in HandleHandshake (under ConnectionMutex with bHandshakeOk), read on the reader thread
 	// in the Push*ManifestLocked gate — same thread, so a plain int suffices.
 	int32 NegotiatedIpcVersion = 0;
+	// What the sidecar's handshake said it renders (`rqlRenderer`, 0 when absent: a bridge older than the field) and its
+	// release version (`bridgeVersion`, empty when absent). Written in HandleHandshake, copied onto every tool call;
+	// both on the reader thread.
+	int32 SidecarRqlRenderer = 0;
+	FString SidecarBridgeVersion;
 	FThreadSafeCounter LastActivitySeconds; // wall-clock seconds of last inbound activity
 
 	mutable FCriticalSection WriteMutex;     // serializes all socket sends (§1.2)

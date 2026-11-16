@@ -131,6 +131,24 @@ void FUnrealAIMeshTerrainSpec::Define()
 			{
 				TestTrue(*FString::Printf(TEXT("schema lists %s (%s)"), Method, *Schema.Left(400)), Schema.Contains(Method));
 			}
+			// The reads are read-only (rql-query can call them); Rebuild invalidates the sections, so it is not.
+			for (const TCHAR* Read : { TEXT("[read-only] the built surface"), TEXT("[read-only] Surface at every point"), TEXT("[read-only] wait (at most") })
+				TestTrue(*FString::Printf(TEXT("schema marks %s"), Read), Schema.Contains(Read));
+			TestFalse(TEXT("Rebuild is not read-only"), Schema.Contains(TEXT("[read-only] rebuild")));
+		});
+
+		It("returns its guide for any spelling of its name or extension id", [this]()
+		{
+			for (const TCHAR* Key : { TEXT("MeshTerrain"), TEXT("mesh-terrain"), TEXT("Mesh Terrain"), TEXT("mesh_terrain"),
+				TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), TEXT("unreal-ai-mesh-terrain"), TEXT("meshTerrains") })
+			{
+				bool bOk = false;
+				const FString Guide = UnrealMcpRqlTools::Schema(FString(), Key, bOk);
+				TestTrue(*FString::Printf(TEXT("guide '%s' (%s)"), Key, *Guide.Left(200)), bOk && Guide.Contains(TEXT("\"name\":\"MeshTerrain\"")));
+			}
+			bool bOk = true;
+			UnrealMcpRqlTools::Schema(FString(), TEXT("mesh-terrainx"), bOk);
+			TestFalse(TEXT("another name is still unknown"), bOk);
 		});
 
 		It("adds the terrain and modifier members", [this]()
@@ -254,6 +272,16 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Surface off the terrain"), UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Surface"), Label, TEXT(R"({"list":[{"lit":-900000},{"lit":0},{"lit":0}]})")), true, &Result));
 			const TSharedPtr<FJsonObject> Off = MeshTerrainSpecCallResult(Result);
 			TestTrue(TEXT("off the terrain Inside is false"), Off.IsValid() && !Off->GetBoolField(TEXT("Inside")));
+
+			// Read-only operations: rql-query runs them (no rql-mutate needed to read the ground).
+			TestTrue(*FString::Printf(TEXT("Surface in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Surface"), Label, TEXT(R"({"list":[{"lit":-800500},{"lit":700},{"lit":0}]})")), false, &Result));
+			TestTrue(*FString::Printf(TEXT("SurfacePoints in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("SurfacePoints"), Label, TEXT(R"({"list":[{"list":[{"lit":-800500},{"lit":700},{"lit":0}]},{"list":[{"lit":-800500},{"lit":700},{"lit":0}]}]})")), false, &Result));
+			TestTrue(*FString::Printf(TEXT("WaitForBuild in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("WaitForBuild"), Label), false, &Result));
+			TestFalse(TEXT("Rebuild is refused in rql-query"), UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Rebuild"), Label), false, &Result));
+			TestTrue(*FString::Printf(TEXT("as permission-denied (%s)"), *MeshTerrainSpecJson(Result)), MeshTerrainSpecJson(Result).Contains(TEXT("permission-denied")));
 		});
 
 		It("returns from WaitForBuild with a modifier applied: Surface, a world trace and the evaluated stack agree; disabling it with set flattens it again", [this]()

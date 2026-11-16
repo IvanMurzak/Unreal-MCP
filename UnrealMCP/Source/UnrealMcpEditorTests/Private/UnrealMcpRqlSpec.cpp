@@ -249,6 +249,34 @@ void FUnrealMcpRqlSpec::Define()
 				Collector.Shutdown();
 		});
 
+		It("refuses rql-schema through a bridge whose RQL renderer is older than the plugin's answers, with a plain-text error", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpRqlTools::Register(Registry);
+			auto Call = [&Registry](int32 Renderer, const FString& BridgeVersion)
+			{
+				TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+				Args->SetStringField(TEXT("guide"), TEXT("no-such-guide"));
+				FUnrealMcpToolCall ToolCall(Args);
+				ToolCall.SidecarRqlRenderer = Renderer;
+				ToolCall.SidecarBridgeVersion = BridgeVersion;
+				return Registry.Execute(TEXT("rql-schema"), ToolCall);
+			};
+			// A 0.32.0 bridge sends no rqlRenderer (0): it would render the guide as an empty success.
+			const FUnrealMcpToolResult Old = Call(0, TEXT("0.32.0"));
+			TestFalse(TEXT("an old bridge gets an error"), Old.bSuccess);
+			TestTrue(*FString::Printf(TEXT("naming both versions and the fix (%s)"), *Old.Message), Old.Message.StartsWith(TEXT("error bridge-outdated: the Unreal MCP bridge 0.32.0 is older than the plugin: it renders RQL answers at level 0"))
+				&& Old.Message.Contains(TEXT("UNREAL_MCP_BRIDGE_PATH")));
+			TestFalse(TEXT("as plain text, which an old bridge passes through unchanged"), Old.Message.StartsWith(TEXT("{")));
+			TestTrue(TEXT("a bridge that did not report its version"), Call(0, FString()).Message.StartsWith(TEXT("error bridge-outdated: the Unreal MCP bridge is older than the plugin")));
+			// The current renderer, and a call from no sidecar (INDEX_NONE), get the schema answer (here: unknown-guide JSON).
+			for (const int32 Renderer : { UnrealMcpRqlTools::RequiredRqlRenderer, static_cast<int32>(INDEX_NONE) })
+			{
+				const FUnrealMcpToolResult Current = Call(Renderer, TEXT("0.33.0"));
+				TestTrue(*FString::Printf(TEXT("renderer %d gets the schema answer (%s)"), Renderer, *Current.Message), Current.Message.Contains(TEXT("unknown-guide")));
+			}
+		});
+
 		It("answers a call without a parsed plan with an unsupported diagnostic", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;

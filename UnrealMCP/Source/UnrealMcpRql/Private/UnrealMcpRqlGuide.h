@@ -179,7 +179,7 @@ Widgets and sequences:
 	{
 		return "Run a read-only RQL query against the live Unreal Editor world and return compact rows. One precise query beats many "
 			"exploratory calls; several queries separated by ; run in one call, each with its own [i/n] result block. Changes need "
-			"rql-mutate." UNREAL_MCP_RQL_DOCS_LINE;
+			"rql-mutate; call works here only on read-only operations (rql-schema marks them [read-only], e.g. an extension's Surface)." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	inline const char* MutateIntro()

@@ -242,6 +242,8 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("schema ok"), bOk);
 			for (const TCHAR* Method : { TEXT("Create"), TEXT("Sculpt"), TEXT("Paint"), TEXT("CreateLayerMaterial"), TEXT("Surface"), TEXT("Rebuild") })
 				TestTrue(*FString::Printf(TEXT("lists %s"), Method), Schema.Contains(FString(Method) + TEXT("(")));
+			TestTrue(TEXT("marks Surface read-only (rql-query can call it)"), Schema.Contains(TEXT("[read-only] the ground of a landscape")));
+			TestFalse(TEXT("and no shaping operation"), Schema.Contains(TEXT("[read-only] raise")));
 		});
 
 		It("creates a landscape with a layer material, raises a hill and paints a layer; refuses bad input", [this]()
@@ -433,6 +435,25 @@ void FUnrealAILandscapeSpec::Define()
 			const TSharedRef<FJsonObject> Corner = Surface(OriginX + 1000.0, 1000.0);
 			TestTrue(*FString::Printf(TEXT("the far corner is on the landscape (%s)"), *Text(Corner)), Corner->HasTypedField<EJson::Boolean>(TEXT("Inside")) && Corner->GetBoolField(TEXT("Inside"))
 				&& FMath::Abs(Number(Corner, TEXT("Height"))) < 1.0);
+
+			{
+				// Ground reads are read-only: rql-query runs them, one per row, repeated points included.
+				// range(0, 30) | call landscape.Surface(unreal.find("@LABEL@"), [399100 + $ * 60, 0, 0])
+				TSharedPtr<FJsonObject> Rows;
+				const bool bRows = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":30}]},"stages":[{"op":"call","method":"Surface","on":{"path":["landscape"]},"args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"op":"+","args":[{"lit":399100},{"op":"*","args":[{"path":[]},{"lit":60}]}]},{"lit":0},{"lit":0}]}]}]})RQL"), false, &Rows);
+				const TArray<TSharedPtr<FJsonValue>>* RowList = nullptr;
+				TestTrue(*FString::Printf(TEXT("30 per-row Surface reads run in rql-query (%s)"), *LandscapeSpecJson(Rows).Left(400)),
+					bRows && Rows.IsValid() && Rows->TryGetArrayField(TEXT("rows"), RowList) && RowList->Num() == 30);
+				// [[400000, 0], [400000, 0]] | call landscape.Surface(unreal.find("@LABEL@"), [$[0], $[1], 0])
+				TSharedPtr<FJsonObject> Same;
+				TestTrue(*FString::Printf(TEXT("the same point twice is read twice (%s)"), *LandscapeSpecJson(Same).Left(400)),
+					Run(TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":400000},{"lit":0}]},{"list":[{"lit":400000},{"lit":0}]}]},"stages":[{"op":"call","method":"Surface","on":{"path":["landscape"]},"args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"path":[{"index":0}]},{"path":[{"index":1}]},{"lit":0}]}]}]})RQL"), false, &Same));
+				// landscape | call Sculpt(unreal.find("@LABEL@"), [400000, 0, 0], 300, 100): a change still needs rql-mutate
+				TSharedPtr<FJsonObject> Sculpt;
+				TestFalse(TEXT("Sculpt is refused in rql-query"), Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Sculpt","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"list":[{"lit":400000},{"lit":0},{"lit":0}]},{"lit":300},{"lit":100}]}]})RQL"), false, &Sculpt));
+				TestTrue(*FString::Printf(TEXT("with permission-denied naming rql-mutate (%s)"), *LandscapeSpecJson(Sculpt).Left(400)),
+					LandscapeSpecJson(Sculpt).Contains(TEXT("permission-denied")) && LandscapeSpecJson(Sculpt).Contains(TEXT("rql-mutate")));
+			}
 
 			if (!FApp::CanEverRender())
 			{

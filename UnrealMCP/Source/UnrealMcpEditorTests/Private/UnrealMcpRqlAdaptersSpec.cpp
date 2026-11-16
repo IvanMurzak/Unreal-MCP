@@ -14,6 +14,7 @@
 
 #include "Components/PointLightComponent.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -793,6 +794,62 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 
 	Describe("extension seam", [this]()
 	{
+		It("lets rql-query call read-only operations (meta RqlReadOnly) with no undo step and no duplicate guard; others stay refused", [this]()
+		{
+			FUnrealMcpRqlAdaptersSpecModule Module;
+			UUnrealMcpRqlSpecFixture* Current = Fixture;
+			Module.Fixture = [Current]() -> UObject* { return Current; };
+			IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module);
+			ON_SCOPE_EXIT { IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module); };
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Probes = 0;
+			Api->Marks = 0;
+			const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+			const int32 UndoSteps = Trans ? Trans->GetQueueLength() : 0;
+			UPackage* Level = UnrealMcpRql::EditorWorld() ? UnrealMcpRql::EditorWorld()->GetOutermost() : nullptr;
+			if (Level)
+				Level->SetDirtyFlag(false);
+
+			const FString Probe = /* rqlSpecApi | call Probe([1, 2, 3]) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Probe","args":[{"list":[{"lit":1},{"lit":2},{"lit":3}]}]}]})RQL");
+			const TSharedPtr<FJsonObject> Query = UnrealMcpRqlSpecHelpers::Exec(*this, Probe);
+			TestTrue(*FString::Printf(TEXT("rql-query calls a read-only operation (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Query)),
+				UnrealMcpRqlSpecHelpers::IsOk(Query) && Api->Probes == 1 && UnrealMcpRqlSpecHelpers::CellText(Query, 0, 2).Contains(TEXT("1")));
+			const TSharedPtr<FJsonObject> Mutate = UnrealMcpRqlSpecHelpers::Exec(*this, Probe, true);
+			TestTrue(*FString::Printf(TEXT("and rql-mutate still does (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Mutate)), UnrealMcpRqlSpecHelpers::IsOk(Mutate) && Api->Probes == 2);
+
+			// [[0, 0, 0], [0, 0, 0]] | call rqlSpecApi.Probe($): repeating a read is harmless, both run
+			const TSharedPtr<FJsonObject> Same = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"path":[]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("identical rows of a read-only operation both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Same)),
+				UnrealMcpRqlSpecHelpers::IsOk(Same) && Api->Probes == 4 && UnrealMcpRqlSpecHelpers::RowCount(Same) == 2);
+			// range(0, 30) | call rqlSpecApi.Probe([$ * 100, 0, 0]): one read per row
+			const TSharedPtr<FJsonObject> Thirty = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":30}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"*","args":[{"path":[]},{"lit":100}]},{"lit":0},{"lit":0}]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("30 per-row reads all run in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Thirty)),
+				UnrealMcpRqlSpecHelpers::IsOk(Thirty) && Api->Probes == 34 && UnrealMcpRqlSpecHelpers::RowCount(Thirty) == 30);
+			// range(0, 300) | call rqlSpecApi.Probe([$, 0, 0]): rql-query has no max_targets, reads go to the 1000 ceiling
+			const TSharedPtr<FJsonObject> Many = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":300}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("300 reads pass the 200-target default of mutations (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Many)),
+				UnrealMcpRqlSpecHelpers::IsOk(Many) && Api->Probes == 334);
+			TestEqual(TEXT("read-only calls open no undo step (rql-query and rql-mutate)"), Trans ? Trans->GetQueueLength() : 0, UndoSteps);
+			TestFalse(TEXT("and mark nothing unsaved"), Level && Level->IsDirty());
+
+			// rqlSpecApi | call Add(1): not read-only, refused in rql-query with the mutation hint, before it runs
+			const TSharedPtr<FJsonObject> Add = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Add","args":[{"lit":1}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a call of another operation in rql-query is permission-denied, naming rql-mutate (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Add)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Add) && UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("permission-denied"))
+				&& UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("'call' requires a mutation request: run it with rql-mutate")));
+			// [1, 2] | call rqlSpecApi.Mark([5, 0, 0], [[0, 0, 0]]): a mutating operation with identical rows is still refused
+			const TSharedPtr<FJsonObject> Twice = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("identical rows of a mutating operation are refused, naming the calls (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Twice)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Twice) && UnrealMcpRqlSpecHelpers::Codes(Twice).Contains(TEXT("would run twice with the same arguments (calls 1 and 2"))
+				&& Api->Marks == 0);
+
+			// rql-schema marks it
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("RqlSpecApi"), bOk);
+			TestTrue(*FString::Printf(TEXT("rql-schema marks the read-only operation (%s)"), *Schema.Left(600)), bOk && Schema.Contains(TEXT("[read-only] returns its point")));
+			TestFalse(TEXT("and only it"), Schema.Contains(TEXT("[read-only] add two numbers")));
+		});
+
 		It("registers sources, members, operations and guides of an IUnrealMcpRqlModule", [this]()
 		{
 			FUnrealMcpRqlAdaptersSpecModule Module;
@@ -850,9 +907,12 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("calls differing only in a vector argument both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Points)), UnrealMcpRqlSpecHelpers::IsOk(Points) && Api->Marks == 2);
 			const TSharedPtr<FJsonObject> Paths = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[[0, 0, 0]], [[0, 0, 0.5]]] | call rqlSpecApi.Mark([0, 0, 0], $) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0.5}]}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"path":[]}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("calls differing only in a nested list both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paths)), UnrealMcpRqlSpecHelpers::IsOk(Paths) && Api->Marks == 4);
+			// Per-row points built from the row ($[0], $[1] inside a list), as an agent reads a surface along a line.
+			const TSharedPtr<FJsonObject> Rows = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[0,0],[1000,0]] | call rqlSpecApi.Mark([$[0],$[1],0], [[0,0,0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":0}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[{"index":0}]},{"path":[{"index":1}]},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls whose vector is built from the row ($[0], $[1]) both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Rows)), UnrealMcpRqlSpecHelpers::IsOk(Rows) && Api->Marks == 6);
 			const TSharedPtr<FJsonObject> Same = UnrealMcpRqlSpecHelpers::Exec(*this, /* [1, 2] | call rqlSpecApi.Mark([5, 0, 0], [[0, 0, 0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("identical vector arguments are still refused before anything runs (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Same)),
-				!UnrealMcpRqlSpecHelpers::IsOk(Same) && UnrealMcpRqlSpecHelpers::Codes(Same).Contains(TEXT("would run twice")) && Api->Marks == 4);
+				!UnrealMcpRqlSpecHelpers::IsOk(Same) && UnrealMcpRqlSpecHelpers::Codes(Same).Contains(TEXT("would run twice")) && Api->Marks == 6);
 
 			// A list-valued call result lists every item up to 1000 (RQL lists 20 per list in plain queries, then "…+N").
 			const auto CallResultList = [](const TSharedPtr<FJsonObject>& Result) -> TArray<TSharedPtr<FJsonValue>>
@@ -906,8 +966,9 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestEqual(TEXT("the api type points at its module's guide"), Schema.IsValid() ? Schema->GetStringField(TEXT("guideCall")) : FString(),
 				FString(TEXT("rql-schema {\"guide\": \"RqlAdaptersSpec\"}")));
 
-			// The guide in-band (any MCP client, no skill installed): by module name and by one of its sources.
-			for (const TCHAR* Key : { TEXT("RqlAdaptersSpec"), TEXT("rqlspecapi") })
+			// The guide in-band (any MCP client, no skill installed): by module name and by one of its sources, whatever the
+			// case, hyphens, underscores and spaces.
+			for (const TCHAR* Key : { TEXT("RqlAdaptersSpec"), TEXT("rqlspecapi"), TEXT("rql-adapters-spec"), TEXT("Rql Adapters Spec"), TEXT("RQL_SPEC_API") })
 			{
 				bool bGuideOk = false;
 				const TSharedPtr<FJsonObject> Guide = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), Key, bGuideOk));

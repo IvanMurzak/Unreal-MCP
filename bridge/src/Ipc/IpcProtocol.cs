@@ -8,6 +8,7 @@
 └───────────────────────────────────────────────────────────────────┘
 */
 
+using System.Reflection;
 using System.Text.Json;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
@@ -62,6 +63,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// </summary>
         public static bool SupportsPromptsResources(int negotiatedVersion) =>
             negotiatedVersion >= PromptsResourcesMinVersion;
+
+        /// <summary>This bridge's release version: the csproj Version, without the "+commit" build metadata.</summary>
+        public static readonly string BridgeVersion =
+            (typeof(IpcProtocol).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? typeof(IpcProtocol).Assembly.GetName().Version?.ToString() ?? "unknown").Split('+')[0];
 
         /// <summary>Max NDJSON line length (§1.2). A peer aborts the connection on violation.</summary>
         public const int MaxLineBytes = 64 * 1024 * 1024;

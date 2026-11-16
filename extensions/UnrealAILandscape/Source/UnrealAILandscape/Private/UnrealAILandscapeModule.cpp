@@ -342,7 +342,7 @@ landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on i
 streaming proxies behind.
 Created materials and layer infos are unsaved: `editor | call SaveAll()`.
 
-Read the ground back with `Surface` (rql-mutate, read-only) and `Bounds` instead of line traces: Create, Sculpt and
+Read the ground back with `Surface` (read-only: works in rql-query, changes nothing) and `Bounds` instead of line traces: Create, Sculpt and
 Paint return with the landscape merged, so its collision, `Surface` and the rendered surface agree at once.
 
 ```

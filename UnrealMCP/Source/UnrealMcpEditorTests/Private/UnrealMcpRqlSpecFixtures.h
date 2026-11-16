@@ -231,7 +231,12 @@ public:
 		return Out;
 	}
 
+	/** returns its point, counting its calls (a read-only operation: rql-query may call it) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	FVector Probe(FVector Point) { ++Probes; return Point; }
+
 	UPROPERTY() int32 Marks = 0;
+	UPROPERTY() int32 Probes = 0;
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
 };
 

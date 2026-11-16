@@ -102,6 +102,10 @@ namespace UnrealMcpRqlToolsLocal
 			.ReadOnlyHint(true).DestructiveHint(false).IdempotentHint(true).OpenWorldHint(false)
 			.Handle([](const FUnrealMcpToolCall& Call)
 			{
+				// An older bridge drops parts of this answer (an extension guide renders as nothing): say so instead.
+				const FString Outdated = UnrealMcpRqlTools::OutdatedBridgeError(Call);
+				if (!Outdated.IsEmpty())
+					return FUnrealMcpToolResult::Error(Outdated);
 				bool bOk = false;
 				const FString Json = UnrealMcpRqlTools::Schema(Call.GetString(TEXT("type")), Call.GetString(TEXT("guide")), bOk);
 				return bOk ? FUnrealMcpToolResult::Success(Json) : FUnrealMcpToolResult::Error(Json);
@@ -169,6 +173,18 @@ namespace UnrealMcpRqlTools
 	FString Schema(const FString& TypeName, bool& bOutOk)
 	{
 		return Schema(TypeName, FString(), bOutOk);
+	}
+
+	FString OutdatedBridgeError(const FUnrealMcpToolCall& Call)
+	{
+		if (Call.SidecarRqlRenderer == INDEX_NONE || Call.SidecarRqlRenderer >= RequiredRqlRenderer)
+			return FString();
+		const FString Bridge = Call.SidecarBridgeVersion.IsEmpty() ? FString() : TEXT(" ") + Call.SidecarBridgeVersion;
+		return FString::Printf(TEXT("error bridge-outdated: the Unreal MCP bridge%s is older than the plugin: it renders RQL answers at "
+			"level %d, plugin %s needs %d, so it would show this answer incomplete or empty. Update the bridge to the plugin's version: "
+			"unset UNREAL_MCP_BRIDGE_PATH to use the bridge the plugin ships, or point it at a bridge built from the same "
+			"source, then reconnect the editor."), *Bridge, Call.SidecarRqlRenderer,
+			*UnrealMcpRql::PluginVersion(TEXT("UnrealMCP")), RequiredRqlRenderer);
 	}
 
 	FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk)

@@ -51,6 +51,19 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Handshake_CarriesTheBridgeVersionAndItsRqlRenderer()
+        {
+            // The plugin refuses RQL answers an older renderer would drop (an extension guide rendered as empty text), so the
+            // handshake says what this bridge renders and which release it is; a bridge older than the fields sends neither.
+            var json = JsonNode.Parse(JsonSerializer.Serialize(new HandshakeMessage { SidecarVersion = "0.1.0", Token = "t" }, IpcProtocol.JsonOptions))!.AsObject();
+            Assert.Equal(com.IvanMurzak.Unreal.MCP.Bridge.Tools.RqlBridge.RendererVersion, json["rqlRenderer"]!.GetValue<int>());
+            Assert.True(com.IvanMurzak.Unreal.MCP.Bridge.Tools.RqlBridge.RendererVersion >= 1);
+            var version = json["bridgeVersion"]!.GetValue<string>();
+            Assert.Equal(typeof(IpcProtocol).Assembly.GetName().Version!.ToString(3), version);
+            Assert.DoesNotContain("+", version);
+        }
+
+        [Fact]
         public void PromptManifest_RoundTripsThroughTheSharedSerializer()
         {
             var manifest = new PromptManifestMessage

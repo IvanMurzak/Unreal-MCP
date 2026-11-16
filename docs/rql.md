@@ -126,10 +126,19 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   once before anything runs, dry runs included, and a refusal is `invalid-value` with nothing changed: class default
   objects are read-only (except settings objects and API objects), a settings write must hit a config property, and one
   object reached twice by the same `call` (`actors | get Parent | call Destroy()` over siblings) is refused (`| distinct`
-  first) — a call cannot be rolled back, so running it twice would break all-or-nothing. Hints never advise
+  first) — a call cannot be rolled back, so running it twice would break all-or-nothing; an operation (`editor`, an
+  extension's) is a duplicate only with the same arguments (the refusal names the two calls), a spawn never, and a
+  read-only operation never. Hints never advise
   `budgets.*` (the tools take no budgets), a `ref("Name")` hint names `unreal.find("…")`, a hint that sends the
   caller to the type list names `rql-schema` (`Engine::schema_hint`), and a `set` / `call` sent to `rql-query` is
   `permission-denied` with a hint naming `rql-mutate` (`Engine::mutate_hint`).
+- **Read-only operations**: an operation that changes nothing declares `meta = (RqlReadOnly)` on its UFUNCTION (an
+  operations class, `AddApiClass`; e.g. the Landscape and Mesh Terrain `Surface` reads). `rql-query` may `call` it: the
+  session lets the call stage through when an operations class has a read-only operation of that name, and its batch
+  check refuses every planned call that is not one with `rql-query`'s usual `permission-denied` before any runs.
+  Read-only calls (in `rql-query` or `rql-mutate`) open no undo step, mark nothing unsaved, skip the modules' committed
+  hooks and the duplicate check; in `rql-query` up to the 1000-target ceiling (it has no `max_targets`). `rql-schema`
+  prefixes their description with `[read-only]`.
 - **Target limit**: `rql-mutate` changes at most 200 targets per statement by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit of each statement of one call up to the ceiling of 1000
   (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`; passed only when the caller gives it, and
@@ -467,10 +476,16 @@ Reflection already exposes every type the extension's engine plugin defines, so 
   parameters are required unless their C++ default is `nullptr`);
 - members: `ExposeProperties` (properties reflection hides), `AddJsonMember`, `AddObjectMember`, `AddObjectListMember`;
 - `AddGuide(topic, markdown)`, rendered into the `unreal-rql` skill and returned in-band by `rql-schema` with `guide` (the
-  module name, its extension id, one of its sources or their type: `{"guide": "landscape"}`) with the module's sources, for
+  module name, its extension id, the id's last segment with or without `unreal-ai-`, one of its sources or their type;
+  case, hyphens, underscores and spaces ignored: `{"guide": "landscape"}`, `"mesh-terrain"`) with the module's sources, for
   clients that never install a skill. The `rql-schema` overview lists every installed module with its sources and that
   call; one of a module's source types names it too; the rql-query / rql-mutate descriptions name the installed modules
-  (built at registration, so the module re-registration above refreshes them).
+  (built at registration, so the module re-registration above refreshes them). An operation that only reads declares
+  `meta = (RqlReadOnly)` (see Read-only operations).
+- The sidecar renders these answers: its handshake sends `rqlRenderer` (what its renderer understands) and
+  `bridgeVersion`. `rql-schema` through a bridge whose renderer is older than `UnrealMcpRqlTools::RequiredRqlRenderer`
+  (a bridge that sends no `rqlRenderer`, e.g. 0.32.0) answers with a plain-text `error bridge-outdated` naming both
+  versions, which an old bridge passes through, instead of a guide rendered as an empty success.
 
 `IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's
 lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core

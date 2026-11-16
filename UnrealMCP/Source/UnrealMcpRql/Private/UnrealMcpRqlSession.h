@@ -116,6 +116,14 @@ private:
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;
+	/** rql-query running a `call` of a read-only operation: the engine allows the call, the batch check refuses any other. */
+	bool bReadOnlyCallRequest = false;
+	/** The batch check refused a call in a read-only request: Execute answers with rql-query's permission-denied. */
+	bool bRefusedReadOnlyCall = false;
+	/** A call record of an operation that declares itself read-only (meta = (RqlReadOnly)). */
+	bool IsReadOnlyCall(const rql::MutationRecord& Record) const;
+	/** @p Records is a non-empty batch of read-only calls only. */
+	bool AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const;
 	/** Subobjects create_for_literal built for the running query: kept alive until it ends. */
 	TArray<TStrongObjectPtr<UObject>> LiteralObjects;
 	FString UndoTitle = TEXT("RQL mutation");
@@ -124,8 +132,13 @@ private:
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);
 	/** {"type": descriptor, "shared": its base, whose members the sidecar summarises once} for rql-schema. */
 	rql::Json Describe(const rql::TypeDescriptor* Type);
-	/** The module @p Key names (module name, extension id, one of its sources or its operations type; case-insensitive), or null. */
-	const FModuleInfo* FindModuleInfo(const FString& Key) const;
+	/**
+	 * The module @p Name names, or null: its module name, extension id, the id's last segment with or without "unreal-ai-",
+	 * one of its sources or its operations type; case, hyphens, underscores and spaces ignored (GuideKey).
+	 */
+	const FModuleInfo* FindModuleInfo(const FString& Name) const;
+	/** @p Name lower-cased without hyphens, underscores and whitespace: how rql-schema's guide argument is matched. */
+	static FString GuideKey(const FString& Name);
 	/** The module with a guide whose operations class @p Type is, or null. */
 	const FModuleInfo* ModuleOfType(const rql::TypeDescriptor* Type) const;
 	bool IsApiType(const FModuleInfo& Info, const rql::TypeDescriptor* Type) const;

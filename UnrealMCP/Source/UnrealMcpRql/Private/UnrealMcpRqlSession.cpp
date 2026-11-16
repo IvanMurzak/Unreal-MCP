@@ -3,6 +3,8 @@
 
 #include "UnrealMcpRqlSession.h"
 
+#include <algorithm>
+
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpRqlGuide.h"
@@ -592,19 +594,36 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 						TEXT("%s is a class default object, read-only through RQL (edit the class or Blueprint instead)"), *Object->GetName()));
 			}
 		}
+		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
+		// through); anything else is refused like any call in rql-query, before it runs.
+		if (bReadOnlyCallRequest)
+		{
+			for (const rql::MutationRecord& Record : Records)
+			{
+				if (!IsReadOnlyCall(Record))
+				{
+					bRefusedReadOnlyCall = true;
+					return std::string("not a read-only operation");
+				}
+			}
+		}
 		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
 		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
-		// all-or-nothing promise. Refuse the duplicate before anything runs.
-		TSet<TPair<const void*, FString>> Called;
-		for (const rql::MutationRecord& Record : Records)
+		// all-or-nothing promise. Refuse the duplicate before anything runs. A read-only operation changes nothing, so
+		// running it twice is harmless: it is never a duplicate.
+		TMap<TPair<const void*, FString>, int32> Called;
+		for (int32 Index = 0; Index < static_cast<int32>(Records.size()); ++Index)
 		{
-			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
+			const rql::MutationRecord& Record = Records[Index];
+			if (!Record.method || !Record.item.is_object() || !Record.item.ptr() || IsReadOnlyCall(Record))
 				continue;
 			// An operations object (`editor`, an extension's) is called once per stream item by design (range(0, 300) | call
 			// editor.SpawnActor(...) creates 300 actors): the same operation twice with the same arguments is the duplicate
 			// (DeleteAsset("/Game/X") twice), except a spawn, where identical arguments still mean another actor.
 			FString Key = UnrealMcpRqlFromStd(Record.method->name).ToLower();
-			if (const UObject* Receiver = TypeProvider->AsObject(Record.item); Receiver && TypeProvider->IsApiClass(Receiver->GetClass()))
+			const UObject* Receiver = TypeProvider->AsObject(Record.item);
+			const bool bOperation = Receiver && TypeProvider->IsApiClass(Receiver->GetClass());
+			if (bOperation)
 			{
 				if (Key.StartsWith(TEXT("spawn")))
 					continue;
@@ -617,16 +636,20 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 				// Hashed: an argument can be a whole heightmap or vertex list, and every key stays alive for the batch.
 				Key += FSHA1::HashBuffer(Arguments.data(), Arguments.size()).ToString();
 			}
-			bool bTwice = false;
-			Called.Add({ Record.item.ptr(), Key }, &bTwice);
-			if (bTwice)
+			const TPair<const void*, FString> CallKey(Record.item.ptr(), Key);
+			if (const int32* First = Called.Find(CallKey))
 			{
-				const UObject* Object = TypeProvider->AsObject(Record.item);
-				const AActor* Actor = Cast<AActor>(Object);
-				const FString Name = Actor ? Actor->GetActorLabel() : Object ? Object->GetName() : FString(TEXT("one object"));
+				const FString Method = UnrealMcpRqlFromStd(Record.method->name);
+				// An operation: two stream items gave it the same arguments.
+				if (bOperation)
+					return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice with the same arguments (calls %d and %d, "
+						"counting from 1: remove the repeated item, or add | distinct before call)"), *Method, *First + 1, Index + 1));
+				const AActor* Actor = Cast<AActor>(Receiver);
+				const FString Name = Actor ? Actor->GetActorLabel() : Receiver ? Receiver->GetName() : FString(TEXT("one object"));
 				return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice on %s (it is in the stream more than once: "
-					"add | distinct before call)"), *UnrealMcpRqlFromStd(Record.method->name), *Name));
+					"add | distinct before call)"), *Method, *Name));
 			}
+			Called.Add(CallKey, Index);
 		}
 		for (const FBatchValidator& Validator : BatchValidators)
 		{
@@ -756,6 +779,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Calls of read-only operations change nothing: no undo step, nothing to snapshot.
+		if (AllReadOnlyCalls(Records))
+			return;
 		// Also when a call ended it (StartPlay / StopPlay close it before PIE starts or ends): later writes of the same
 		// query still get an undo step.
 		if (GEditor && (TransactionIndex == INDEX_NONE || !GEditor->IsTransactionActive()))
@@ -772,6 +798,9 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// Property writes already ran the editor's PreEditChange / PostEditChangeProperty; mark what changed as unsaved.
 	Policy.committed = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Calls of read-only operations changed nothing: nothing to mark unsaved, no change for the modules' hooks.
+		if (AllReadOnlyCalls(Records))
+			return;
 		for (const rql::MutationRecord& Record : Records)
 		{
 			UObject* Owner = OwnerOf(Record);
@@ -781,6 +810,19 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		for (const FMutationHook& Hook : CommittedHooks)
 			Hook(Records);
 	};
+}
+
+bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) const
+{
+	if (!Record.method)
+		return false;
+	const UObject* Receiver = TypesPtr->AsObject(Record.item);
+	return Receiver && TypesPtr->IsReadOnlyOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
+}
+
+bool FUnrealMcpRqlSession::AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const
+{
+	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record) { return IsReadOnlyCall(Record); });
 }
 
 void FUnrealMcpRqlSession::ConfigureModules()
@@ -882,6 +924,8 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, TOptional<int32> MaxTargets)
 {
 	Types().SetMutationRequest(bAllowMutation);
+	bReadOnlyCallRequest = false;
+	bRefusedReadOnlyCall = false;
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;
@@ -892,17 +936,25 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	}
 	else if (!FunctionSource(Plan, Result))
 	{
+		const bool bCall = EndsWithCall(Plan);
+		// rql-query may call read-only operations (meta = (RqlReadOnly)): the engine allows the call stage, and the batch
+		// check refuses every planned call that is not one (a same-named operation of another type) before any runs. Any
+		// other call keeps the engine's own permission-denied, before its target is evaluated.
+		bReadOnlyCallRequest = !bAllowMutation && bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(Plan.stages.back().method));
 		rql::QueryOptions Options;
-		Options.allow_mutation = bAllowMutation;
+		Options.allow_mutation = bAllowMutation || bReadOnlyCallRequest;
 		Options.dry_run = bDryRun;
 		rql::Budgets Budgets;
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
-		const bool bCall = EndsWithCall(Plan);
+		else if (bReadOnlyCallRequest)
+			Budgets.max_mutation_targets = HardMaxTargets; // rql-query has no max_targets: reads take the ceiling
 		if (bCall)
 			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
-		if (bCall)
+		if (bRefusedReadOnlyCall)
+			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
+		else if (bCall)
 			AddCallResultListNote(Result);
 	}
 	CloseTransaction();
@@ -1039,12 +1091,38 @@ rql::Json FUnrealMcpRqlSession::ModuleJson(const FModuleInfo& Info)
 	return Item;
 }
 
-const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(const FString& Key) const
+FString FUnrealMcpRqlSession::GuideKey(const FString& Name)
 {
+	FString Key;
+	Key.Reserve(Name.Len());
+	for (const TCHAR Char : Name)
+	{
+		if (Char != TEXT('-') && Char != TEXT('_') && !FChar::IsWhitespace(Char))
+			Key.AppendChar(FChar::ToLower(Char));
+	}
+	return Key;
+}
+
+const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(const FString& Name) const
+{
+	// Case, hyphens, underscores and spaces do not matter: "mesh-terrain", "Mesh Terrain" and "meshTerrain" name one module.
+	const FString Key = GuideKey(Name);
+	if (Key.IsEmpty())
+		return nullptr;
 	for (const FModuleInfo& Info : ModuleInfos)
 	{
-		if (Info.Name.Equals(Key, ESearchCase::IgnoreCase) || Info.ExtensionId.Equals(Key, ESearchCase::IgnoreCase))
-			return &Info;
+		// The module name, its extension id (com.ivanmurzak.unreal-ai-mesh-terrain), the id's last segment
+		// (unreal-ai-mesh-terrain) and that segment without the first-party "unreal-ai-" prefix (mesh-terrain).
+		FString LastSegment;
+		if (!Info.ExtensionId.Split(TEXT("."), nullptr, &LastSegment, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+			LastSegment = Info.ExtensionId;
+		FString Short = GuideKey(LastSegment);
+		Short.RemoveFromStart(TEXT("unrealai"));
+		for (const FString& Candidate : { GuideKey(Info.Name), GuideKey(Info.ExtensionId), GuideKey(LastSegment), Short })
+		{
+			if (!Candidate.IsEmpty() && Candidate == Key)
+				return &Info;
+		}
 	}
 	for (const FModuleInfo& Info : ModuleInfos)
 	{
@@ -1053,8 +1131,7 @@ const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(co
 			// A source by name, or an operations source by its type (MeshTerrainOperations); a source typed by a shared
 			// engine class (Light, StaticMesh) does not make that class this module's.
 			const FEntry& Source = SourceEntries[Index];
-			if (Source.Name.Equals(Key, ESearchCase::IgnoreCase)
-				|| (IsApiType(Info, Source.Type) && UnrealMcpRqlFromStd(Source.Type->name).Equals(Key, ESearchCase::IgnoreCase)))
+			if (GuideKey(Source.Name) == Key || (IsApiType(Info, Source.Type) && GuideKey(UnrealMcpRqlFromStd(Source.Type->name)) == Key))
 				return &Info;
 		}
 	}
@@ -1281,7 +1358,7 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 	Out += TEXT("# RQL - query and change the Unreal Editor\n\n");
 	Out += TEXT("RQL is one pipeline language for the whole editor: find actors and assets, read members, filter, aggregate, and change "
 		"them in one call. Prefer one precise query over many exploratory calls.\n\n");
-	Out += TEXT("- `rql-query` - read-only queries, compact table results.\n");
+	Out += TEXT("- `rql-query` - read-only queries, compact table results; `call` of read-only operations (rql-schema marks them [read-only]).\n");
 	Out += TEXT("- `rql-mutate` - queries ending with `set` / `call`; all-or-nothing, one undo step (Ctrl+Z), `dry_run: true` previews. "
 		"Several queries separated by `;` run in order, each its own change and undo step; the first that fails stops the rest. "
 		"Changes are not saved to disk until `editor | call SaveAll()` (or SaveLevel / SaveAsset).\n");

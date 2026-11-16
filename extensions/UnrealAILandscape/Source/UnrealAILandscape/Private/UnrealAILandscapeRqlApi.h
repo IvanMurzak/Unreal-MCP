@@ -77,7 +77,7 @@ public:
 	UMaterial* CreateLayerMaterial(const FString& Path, const FString& Layers);
 
 	/** the ground of a landscape at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point on the ground) and Normal; read-only; a point outside the landscape gives Inside false */
-	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAILandscapeSurface Surface(ALandscapeProxy* Landscape, FVector Point);
 
 	/** delete a whole landscape: its landscape actor and every streaming proxy of a World Partition map, loaded or not (Destroy on the landscape actor alone leaves the proxies behind); one undo step; returns how many actors were deleted */

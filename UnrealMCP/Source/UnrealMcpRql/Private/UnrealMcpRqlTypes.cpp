@@ -670,6 +670,46 @@ void FUnrealMcpRqlTypes::AddApiClass(UClass* Class, const FString& TypeName)
 		ApiClasses.Add(Class, TypeName);
 }
 
+namespace UnrealMcpRqlTypesLocal
+{
+	/** The meta key an operation declares itself read-only with (IUnrealMcpRqlModule::AddApiClass). */
+	const FName ReadOnlyMeta(TEXT("RqlReadOnly"));
+
+	/** The UFUNCTION of @p Class that `call` names @p Method: its name without the K2_ prefix, case-insensitively. */
+	const UFunction* FindOperation(const UClass* Class, const FString& Method)
+	{
+		for (TFieldIterator<UFunction> It(Class); It; ++It)
+		{
+			FString Name = It->GetName();
+			if (Name.StartsWith(TEXT("K2_")))
+				Name.RightChopInline(3);
+			if (Name.Equals(Method, ESearchCase::IgnoreCase))
+				return *It;
+		}
+		return nullptr;
+	}
+}
+
+bool FUnrealMcpRqlTypes::IsReadOnlyOperation(const UClass* Class, const UFunction* Function) const
+{
+	return Function && IsApiClass(Class) && Function->HasMetaData(UnrealMcpRqlTypesLocal::ReadOnlyMeta);
+}
+
+bool FUnrealMcpRqlTypes::IsReadOnlyOperation(const UClass* Class, const FString& Method) const
+{
+	return Class && IsReadOnlyOperation(Class, UnrealMcpRqlTypesLocal::FindOperation(Class, Method));
+}
+
+bool FUnrealMcpRqlTypes::HasReadOnlyOperation(const FString& Method) const
+{
+	for (const TPair<UClass*, FString>& Api : ApiClasses)
+	{
+		if (IsReadOnlyOperation(Api.Key, Method))
+			return true;
+	}
+	return false;
+}
+
 void FUnrealMcpRqlTypes::ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable)
 {
 	if (!Owner)
@@ -797,7 +837,7 @@ void FUnrealMcpRqlTypes::FillClass(rql::TypeDescriptor& Descriptor, UClass* Clas
 	for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::ExcludeSuper); It; ++It)
 	{
 		if (IsCallable(Class, *It))
-			AddFunctionMethod(Descriptor, *It);
+			AddFunctionMethod(Descriptor, *It, IsReadOnlyOperation(Class, *It));
 	}
 	TArray<FClassHook*> ClassHooks;
 	Hooks.MultiFindPointer(Class, ClassHooks, /*bMaintainOrder*/ true);
@@ -899,7 +939,7 @@ bool FUnrealMcpRqlTypes::IsCallable(UClass* Class, UFunction* Function) const
 	return Function->HasMetaData(TEXT("CallInEditor")) && Function->NumParms == 0;
 }
 
-void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function)
+void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function, bool bReadOnly)
 {
 	rql::MethodDescriptor Method;
 	FString Name = Function->GetName();
@@ -909,7 +949,8 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 	FString ToolTip = Function->GetMetaData(TEXT("ToolTip"));
 	ToolTip.ReplaceInline(TEXT("\r"), TEXT(" "));
 	ToolTip.ReplaceInline(TEXT("\n"), TEXT(" "));
-	Method.description = UnrealMcpRqlToStd(ToolTip.TrimStartAndEnd());
+	// rql-schema prints the description after the signature: a read-only operation says so first.
+	Method.description = UnrealMcpRqlToStd((bReadOnly ? TEXT("[read-only] ") : TEXT("")) + ToolTip.TrimStartAndEnd());
 
 	TArray<FProperty*> Inputs;
 	TArray<FProperty*> Outputs;

@@ -87,6 +87,12 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolCall
 	int32 TimeoutMs = 0;
 	/** When the call arrived (FPlatformTime::Seconds()), so a handler bounds its work by the time left; 0 when unknown. */
 	double ReceivedSeconds = 0.0;
+	/**
+	 * What the sidecar that sent this call renders RQL answers at (its handshake's `rqlRenderer`; 0: a bridge older than
+	 * the field), and its release version (empty when it did not say). INDEX_NONE when the call came from no sidecar (tests).
+	 */
+	int32 SidecarRqlRenderer = INDEX_NONE;
+	FString SidecarBridgeVersion;
 
 	FUnrealMcpToolCall() : Arguments(MakeShared<FJsonObject>()) {}
 	explicit FUnrealMcpToolCall(const TSharedPtr<FJsonObject>& InArgs)

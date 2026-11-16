@@ -39,6 +39,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public const string QueryArgument = "query";
         public const string PlanArgument = "plan";
 
+        /// <summary>
+        /// The RQL answers this renderer understands, sent in the handshake (<c>rqlRenderer</c>). 1: rql-schema's
+        /// installed extensions (<c>modules</c>) and extension guides (<c>guide</c>, <c>unknown-guide</c>). Raise it when the
+        /// plugin starts sending something an older renderer would drop, together with the plugin's
+        /// <c>UnrealMcpRqlTools::RequiredRqlRenderer</c>.
+        /// </summary>
+        public const int RendererVersion = 1;
+
         /// <summary>Whether a tool of this RQL role takes RQL text that the sidecar parses into a plan.</summary>
         public static bool ParsesQuery(string? role) => role == QueryRole || role == MutateRole;
 
