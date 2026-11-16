@@ -158,12 +158,28 @@ namespace UnrealAIMeshTerrain
 		}
 	}
 
+	namespace
+	{
+		/**
+		 * Whether the actor of @p Instance was deleted in this session: its descriptor stays until the level is saved, its
+		 * package stays in memory, dirty (deleted on save) and without the actor. Unloaded actors' packages are not in memory
+		 * or not dirty (World Partition does not unload dirty actors).
+		 */
+		bool IsDeletedActor(const FWorldPartitionActorDescInstance& Instance)
+		{
+			if (Instance.IsLoaded())
+				return false;
+			const UPackage* Package = FindObject<UPackage>(nullptr, *Instance.GetActorPackage().ToString());
+			return Package && Package->IsDirty();
+		}
+	}
+
 	int32 LoadTerrainActors(const AMeshPartition* Terrain)
 	{
 		TArray<FGuid> Unloaded;
 		ForEachTerrainActorDesc(Terrain, [&Unloaded](const FWorldPartitionActorDescInstance& Instance)
 		{
-			if (!Instance.IsLoaded())
+			if (!Instance.IsLoaded() && !IsDeletedActor(Instance))
 				Unloaded.Add(Instance.GetGuid());
 		});
 		if (!Unloaded.IsEmpty())
@@ -390,6 +406,8 @@ namespace UnrealAIMeshTerrain
 		// A modifier that loaded (World Partition) or was spawned joins the build when the editor component lists it.
 		ForEachTerrainActorDesc(Terrain, [Terrain, &State, &Current](const FWorldPartitionActorDescInstance& Instance)
 		{
+			if (IsDeletedActor(Instance))
+				return;
 			++State.Actors;
 			if (const AActor* Actor = Instance.IsLoaded() ? Instance.GetActor(/*bEvenIfPendingKill*/ false) : nullptr; IsValid(Actor))
 			{
@@ -493,7 +511,7 @@ namespace UnrealAIMeshTerrain
 		}
 	}
 
-	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds)
+	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds, bool bFailOnTimeout)
 	{
 		TArray<FRegionMesh> Out;
 		const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
@@ -518,7 +536,8 @@ namespace UnrealAIMeshTerrain
 			{
 				for (UE::MeshPartition::FBuildTaskHandle& Handle : Handles)
 					Handle.Cancel();
-				UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
+				if (bFailOnTimeout)
+					UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
 				return {};
 			}
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -594,7 +613,8 @@ namespace UnrealAIMeshTerrain
 				Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
 				// The evaluated face's normal: a trace that lands on an edge of the collision (a section seam, the terrain's
 				// border) reports the edge's normal (45 degrees or more on flat ground), not the ground's.
-				const FVector Face = Part.Transform.TransformVectorNoScale(Part.Mesh->GetTriNormal(Triangle)).GetSafeNormal();
+				// (the inverse transpose of the terrain's transform: right under a non-uniform scale too)
+				const FVector Face = Part.Transform.GetRotation().RotateVector(Part.Mesh->GetTriNormal(Triangle) * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D())).GetSafeNormal();
 				if (!Face.IsNearlyZero())
 					Out.Normal = Face;
 				return true;
@@ -605,14 +625,20 @@ namespace UnrealAIMeshTerrain
 		TArray<FRegionMesh>& Parts = Evaluated ? *Evaluated : Local;
 		if (HitIn(Parts))
 			return Out;
-		// Keep only the region that hit (or the widest, on a miss): the smaller ones lie inside it.
+		// Each step builds whole sections (the region only filters them): stop once a region covers the whole terrain, and
+		// treat a timeout as a miss (no Channels). Keep only the region that hit (or the widest, on a miss): the smaller ones
+		// lie inside it; at most MaxCachedRegions of them for scattered points.
+		constexpr int32 MaxCachedRegions = 32;
 		TArray<FRegionMesh> Around;
 		for (const double Half : { 250.0, 2500.0, 25000.0, 250000.0 })
 		{
-			Around = BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
-			if (HitIn(Around))
+			const FBox Region(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0));
+			Around = BuildRegion(Terrain, Region, DefaultBuildTimeoutSeconds, /*bFailOnTimeout*/ false);
+			if (HitIn(Around) || (Region.Min.X <= Bounds.Min.X && Region.Min.Y <= Bounds.Min.Y && Region.Max.X >= Bounds.Max.X && Region.Max.Y >= Bounds.Max.Y))
 				break;
 		}
+		if (Parts.Num() >= MaxCachedRegions)
+			Parts.RemoveAt(0, Parts.Num() - MaxCachedRegions + 1);
 		Parts.Append(MoveTemp(Around));
 		return Out;
 	}

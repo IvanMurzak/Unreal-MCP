@@ -203,9 +203,10 @@ namespace UnrealAIMeshTerrain
 	/**
 	 * Evaluate @p Terrain's modifier stack (its bases and every modifier, in build order) for the base-mesh groups that
 	 * intersect the world box @p Region, synchronously (UE::MeshPartition::Build::LaunchBuilds, BuildType Request, cached):
-	 * the full-resolution mesh with its weight channels, independent of the preview sections. Empty after Fail (timeout).
+	 * the full-resolution mesh with its weight channels, independent of the preview sections. Empty on a timeout (after Fail
+	 * with @p bFailOnTimeout).
 	 */
-	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
+	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = DefaultBuildTimeoutSeconds, bool bFailOnTimeout = true);
 
 	// ---- Create (shared with the create operations and the specs) ------------------------------------------------------
 

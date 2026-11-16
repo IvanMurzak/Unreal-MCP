@@ -598,7 +598,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 					Sample.bInside && Red && *Red >= 0.9f);
 			}
 			const UnrealAIMeshTerrain::FSurfaceSample Outside = UnrealAIMeshTerrain::SampleSurface(Terrain, X0 + 75000.0, Y0 + 75000.0);
-			TestTrue(TEXT("not painted outside"), Outside.bInside && Outside.Channels.FindRef(TEXT("Red")) <= 0.1f);
+			TestTrue(TEXT("not painted outside"), Outside.bInside && Outside.Channels.Contains(TEXT("Red")) && Outside.Channels.FindRef(TEXT("Red")) <= 0.1f);
 			// A plateau as high as the dome on the flat ground beside it: 300 m above the ground there. (A Patch moves the
 			// vertices within its radius: on the dome's 100+ m triangles a small pad has none to move.)
 			// meshTerrainModifier | call AddPatch(unreal.find("<label>"), [X0 + 70000, Y0 + 70000, 30000], 3000, 1000, "<label>_Plateau")
