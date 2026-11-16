@@ -460,6 +460,27 @@ namespace UnrealAILandscapeRqlApiLocal
 			Info->Layers[Index].LayerInfoObj = LayerInfo;
 		return LayerInfo;
 	}
+
+	/** The plane z = C[0] + C[1] u + C[2] v that fits points in least squares, from its normal equations (sums of 1, u, v, uu, uv, vv, z, uz, vz); the mean when degenerate. */
+	void FitPlane(double N, double Su, double Sv, double Suu, double Suv, double Svv, double Sz, double Suz, double Svz, double C[3])
+	{
+		const double M[3][3] = { { N, Su, Sv }, { Su, Suu, Suv }, { Sv, Suv, Svv } };
+		const double V[3] = { Sz, Suz, Svz };
+		const auto Det = [](const double A[3][3]) { return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]); };
+		const double D = Det(M);
+		C[0] = N > 0.0 ? Sz / N : 0.0;
+		C[1] = C[2] = 0.0;
+		if (FMath::Abs(D) <= UE_SMALL_NUMBER)
+			return;
+		for (int32 Col = 0; Col < 3; ++Col)
+		{
+			double Mc[3][3];
+			for (int32 Row = 0; Row < 3; ++Row)
+				for (int32 K = 0; K < 3; ++K)
+					Mc[Row][K] = K == Col ? V[Row] : M[Row][K];
+			C[Col] = Det(Mc) / D;
+		}
+	}
 }
 
 using namespace UnrealAILandscapeRqlApiLocal;
@@ -688,23 +709,8 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 	if (N < 3)
 		return UnrealMcpRql::Failed<int32>(TEXT("the circle has no ground around it on the landscape: move Center onto it or make Radius smaller"));
 	{
-		// Least squares z = A + B dx + C dy (normal equations, Cramer's rule); a degenerate ring falls back to its mean.
-		const double M[3][3] = { { N, Sx, Sy }, { Sx, Sxx, Sxy }, { Sy, Sxy, Syy } };
-		const double V[3] = { Sz, Sxz, Syz };
-		const auto Det = [](const double A[3][3]) { return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]); };
-		const double D0 = Det(M);
-		double Coef[3] = { Sz / N, 0.0, 0.0 };
-		if (FMath::Abs(D0) > UE_SMALL_NUMBER)
-		{
-			for (int32 Col = 0; Col < 3; ++Col)
-			{
-				double Mc[3][3];
-				for (int32 Row = 0; Row < 3; ++Row)
-					for (int32 K = 0; K < 3; ++K)
-						Mc[Row][K] = K == Col ? V[Row] : M[Row][K];
-				Coef[Col] = Det(Mc) / D0;
-			}
-		}
+		double Coef[3];
+		FitPlane(N, Sx, Sy, Sxx, Sxy, Syy, Sz, Sxz, Syz, Coef);
 		for (int32 Y = 0; Y < H; ++Y)
 			for (int32 X = 0; X < W; ++X)
 				if (Free[Y * W + X])
@@ -886,14 +892,9 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 			const double Suu = S[CII] - 2.0 * I * S[CI] + N * I * I, Svv = S[CJJ] - 2.0 * J * S[CJ] + N * J * J;
 			const double Suv = S[CIJ] - J * S[CI] - I * S[CJ] + N * I * J;
 			const double Sz = S[CZ], Suz = S[CIZ] - I * S[CZ], Svz = S[CJZ] - J * S[CZ];
-			const double M[3][3] = { { N, Su, Sv }, { Su, Suu, Suv }, { Sv, Suv, Svv } };
-			const double Det = M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
-			double A = Sz / N;
-			if (FMath::Abs(Det) > UE_SMALL_NUMBER)
-			{
-				const double DetA = Sz * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (Suz * M[2][2] - M[1][2] * Svz) + M[0][2] * (Suz * M[2][1] - M[1][1] * Svz);
-				A = DetA / Det;
-			}
+			double Plane[3];
+			FitPlane(N, Su, Sv, Suu, Suv, Svv, Sz, Suz, Svz, Plane);
+			const double A = Plane[0];
 			Residual[J * GW + I] = Z[J * GW + I] - A;
 		}
 	}
