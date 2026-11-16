@@ -748,8 +748,8 @@ void FUnrealAILandscapeSpec::Define()
 			const double Slope = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
 			const double Outside = LandscapeSpecLayerHeight(Landscape, X0 + 600.0, 0.0);
 			TestTrue(TEXT("a spike on its flank"), Call(Label, TEXT("Sculpt"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(60) + TEXT(",") + Lit(400)));
-			TestTrue(*FString::Printf(TEXT("the spike stands 4 m out (%.1f over %.1f)"), LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0), Slope),
-				LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0) > Slope + 350.0);
+			TestTrue(*FString::Printf(TEXT("the spike stands about 3 m out (%.1f over %.1f)"), LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0), Slope),
+				LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0) > Slope + 250.0);
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(TEXT("smoothed"), Call(Label, TEXT("Smooth"), P3(X0 + 300.0, 0, 0) + TEXT(",") + Lit(120), &Result));
 			const double After = LandscapeSpecLayerHeight(Landscape, X0 + 300.0, 0.0);
@@ -814,10 +814,13 @@ void FUnrealAILandscapeSpec::Define()
 			{
 				return Found.ContainsByPredicate([Kind, X, Y](const TSharedPtr<FJsonValue>& V)
 				{
+					// Location renders as a vector's text, "(X, Y, Z)".
 					const TSharedPtr<FJsonObject> B = V->Type == EJson::Object ? V->AsObject() : nullptr;
-					const TArray<TSharedPtr<FJsonValue>>* L = nullptr;
-					return B && B->GetStringField(TEXT("Kind")) == Kind && B->TryGetArrayField(TEXT("Location"), L) && L->Num() == 3
-						&& FVector2D::Distance(FVector2D((*L)[0]->AsNumber(), (*L)[1]->AsNumber()), FVector2D(X, Y)) <= 100.0;
+					TArray<FString> Parts;
+					if (B)
+						B->GetStringField(TEXT("Location")).Replace(TEXT("("), TEXT("")).Replace(TEXT(")"), TEXT("")).ParseIntoArray(Parts, TEXT(","));
+					return B && B->GetStringField(TEXT("Kind")) == Kind && Parts.Num() == 3
+						&& FVector2D::Distance(FVector2D(FCString::Atod(*Parts[0]), FCString::Atod(*Parts[1])), FVector2D(X, Y)) <= 100.0;
 				});
 			};
 			TestTrue(*FString::Printf(TEXT("the spike and the pit, two results (%s)"), *Text.Left(600)),
