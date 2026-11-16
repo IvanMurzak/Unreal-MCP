@@ -684,10 +684,11 @@ FUnrealAILandscapeSurface UUnrealAILandscapeRqlApi::Surface(ALandscapeProxy* Lan
 		constexpr double Edge = 1e-3; // quads
 		if (Local.X < Whole.Min.X - Edge || Local.Y < Whole.Min.Y - Edge || Local.X > Whole.Max.X + Edge || Local.Y > Whole.Max.Y + Edge)
 			return TOptional<FVector>();
+		// Within Edge of a seam on either side (a world coordinate converts to 62.9999999 as easily as to 63): just past it.
 		const auto OffSeam = [ComponentQuads](double Value)
 		{
-			const double Into = Value - FMath::FloorToDouble(Value / ComponentQuads) * ComponentQuads;
-			return Into < Edge ? Value + Edge : Value;
+			const double Seam = FMath::RoundToDouble(Value / ComponentQuads) * ComponentQuads;
+			return FMath::Abs(Value - Seam) < Edge ? Seam + Edge : Value;
 		};
 		Local.X = FMath::Clamp(OffSeam(Local.X), static_cast<double>(Whole.Min.X), Whole.Max.X - Edge);
 		Local.Y = FMath::Clamp(OffSeam(Local.Y), static_cast<double>(Whole.Min.Y), Whole.Max.Y - Edge);
