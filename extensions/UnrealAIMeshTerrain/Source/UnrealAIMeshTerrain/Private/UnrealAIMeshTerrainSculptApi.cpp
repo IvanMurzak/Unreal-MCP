@@ -474,8 +474,10 @@ namespace UnrealAIMeshTerrainSculptLocal
 			// triangles (a Boolean shape keeps its mesh's, 100+ m across for a large sphere). (No vertex at all: Nearest is Max.)
 			const bool bCoarseGround = Nearest < TNumericLimits<double>::Max() && Nearest > Stroke.Radius && Spacing < Stroke.Radius;
 			return Abandon(bCoarseGround
-				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, such as a Boolean shape's: use a Radius above %.0f cm, or shape that ground with modifiers"),
-					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, Nearest)
+				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, such as a Boolean shape's: %s"),
+					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, *(Nearest < MaxRadius
+						? FString::Printf(TEXT("use a Radius above %.0f cm, or shape that ground with modifiers"), Nearest)
+						: FString(TEXT("a stroke cannot reach them (Radius at most 25000 cm): shape that ground with modifiers"))))
 				: FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
 					Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
 		}

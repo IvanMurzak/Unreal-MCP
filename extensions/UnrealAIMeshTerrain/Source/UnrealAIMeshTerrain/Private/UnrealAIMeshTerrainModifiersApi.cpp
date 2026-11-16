@@ -327,7 +327,9 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		const double Above = Built.IsValid ? FMath::Max(Built.Max.Z - Location.Z, 0.0) : 0.0; // ground above the patch
 		const double Below = Built.IsValid ? FMath::Max(Location.Z - Built.Min.Z, 0.0) : 0.0; // and below it
 		const double Reach = FMath::Abs(Height) + ReachSpare;
-		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), Above + Reach) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), Below + Reach);
+		// The extents are in the patch's own space: a patch scaled down on Z needs larger ones for the same world heights.
+		const double ScaleZ = FMath::Max(FMath::Abs(Patch->GetComponentScale().Z), UE_KINDA_SMALL_NUMBER);
+		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), (Above + Reach) / ScaleZ) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), (Below + Reach) / ScaleZ);
 	}
 
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
