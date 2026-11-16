@@ -26,7 +26,7 @@
 #include "AssetCompilingManager.h"
 #include "Containers/Ticker.h"
 #include "Misc/App.h"
-#include "EngineDefines.h" // UE_LARGE_WORLD_MAX
+#include "EngineDefines.h" // UE_LARGE_HALF_WORLD_MAX
 #include "Misc/Paths.h"
 #include "WorldPartition/ActorPartition/PartitionActorDesc.h"
 #include "WorldPartition/WorldPartition.h"
@@ -471,9 +471,9 @@ ALandscape* UUnrealAILandscapeRqlApi::Create(const FString& Label, FVector Locat
 	if (!(MaxHeightMeters >= 1.0 && MaxHeightMeters <= 10000.0))
 		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("MaxHeightMeters %g is outside 1 .. 10000"), MaxHeightMeters));
 	// Beyond the engine's large-world bound the renderer loses precision (an ensure every frame, CheckMatrixPrecision).
-	constexpr double MaxCoordinate = UE_LARGE_WORLD_MAX * 0.5;
-	if (Location.ContainsNaN() || Location.GetAbsMax() > MaxCoordinate - SizeMeters * 50.0)
-		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("Location must be finite numbers within +-%.0f cm (the engine's world bound)"), MaxCoordinate - SizeMeters * 50.0));
+	const double MaxCoordinate = UE_LARGE_HALF_WORLD_MAX - SizeMeters * 50.0; // the corner stays inside too
+	if (Location.ContainsNaN() || Location.GetAbsMax() > MaxCoordinate)
+		return UnrealMcpRql::Failed<ALandscape*>(FString::Printf(TEXT("Location must be finite numbers within +-%.0f cm (the engine's world bound)"), MaxCoordinate));
 	// Z scale 100 (Landscape mode's default) holds +-256 m in 0.78 cm steps; more room needs a larger scale, coarser steps.
 	const double ZScale = FMath::Max(100.0, FMath::CeilToDouble(MaxHeightMeters / 2.56));
 	// Whole components (at most 8 per side), then a horizontal scale that makes the side exactly SizeMeters.
