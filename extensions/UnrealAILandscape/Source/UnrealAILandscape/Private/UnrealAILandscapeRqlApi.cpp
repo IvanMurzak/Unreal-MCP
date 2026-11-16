@@ -851,9 +851,14 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 			const double Seam = FMath::RoundToDouble(V / ComponentQuads) * ComponentQuads;
 			return FMath::Clamp(FMath::Abs(V - Seam) < 1e-3 ? Seam + 1e-3 : V, Min, Max - 1e-3);
 		};
-		const FVector At = ToWorld.TransformPosition(FVector(Inside(X, Whole.Min.X, Whole.Max.X), Inside(Y, Whole.Min.Y, Whole.Max.Y), 0.0));
-		const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
-		return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(At, EHeightfieldSource::Complex);
+		const auto Read = [Landscape](const FVector& At)
+		{
+			const TOptional<float> Editor = Landscape->GetHeightAtLocation(At, EHeightfieldSource::Editor);
+			return Editor.IsSet() ? Editor : Landscape->GetHeightAtLocation(At, EHeightfieldSource::Complex);
+		};
+		const TOptional<float> Height = Read(ToWorld.TransformPosition(FVector(Inside(X, Whole.Min.X, Whole.Max.X), Inside(Y, Whole.Min.Y, Whole.Max.Y), 0.0)));
+		// No component past the seam (a landscape that is not a full rectangle): the one before it holds the vertex too.
+		return Height.IsSet() ? Height : Read(ToWorld.TransformPosition(FVector(FMath::Clamp(X - 1e-3, double(Whole.Min.X), double(Whole.Max.X)), FMath::Clamp(Y - 1e-3, double(Whole.Min.Y), double(Whole.Max.Y)), 0.0)));
 	};
 	// Sample I at vertex Min + I * Step, the last one on the far edge (Width need not be a multiple of Step).
 	const int32 GW = FMath::DivideAndRoundUp(Whole.Width(), Step) + 1, GH = FMath::DivideAndRoundUp(Whole.Height(), Step) + 1;
@@ -916,7 +921,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 				for (int32 C = 0; C < CN; ++C)
 					S[C] = Sat[C][J1 * (GW + 1) + I1] - Sat[C][J0 * (GW + 1) + I1] - Sat[C][J1 * (GW + 1) + I0] + Sat[C][J0 * (GW + 1) + I0];
 				const double N = S[C1];
-				if (N < 3.0)
+				if (N < 3.0 || (Pass == 1 && N < 0.25 * (I1 - I0) * (J1 - J0)))
 					continue; // the second pass keeps the first's residual where too few ordinary samples remain
 				// Centred on this sample: u = i - I, v = j - J; fit z = A + Bu u + Bv v, the plane's height here is A.
 				const double Su = S[CI] - N * I, Sv = S[CJ] - N * J;
@@ -931,6 +936,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 	}
 	// Connected places (8 neighbours) where the ground stands MinHeight above (or below) that plane, one result each.
 	FBumps Out;
+	TArray<TArray<int32>> RegionCells; // per result, its samples
 	TBitArray<> Seen(false, GW * GH);
 	TArray<int32> Stack;
 	for (int32 Start = 0; Start < GW * GH; ++Start)
@@ -987,6 +993,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 				}
 			}
 		}
+		RegionCells.Add(Cells);
 		FUnrealAILandscapeBump& Bump = Out.AddDefaulted_GetRef();
 		Bump.Kind = Sign > 0.0 ? TEXT("Bump") : TEXT("Pit");
 		const FVector World = ToWorld.TransformPosition(FVector(Best.X, Best.Y, 0.0));
@@ -994,21 +1001,38 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		Bump.Height = FMath::RoundToDouble((Residual[Peak] + (BestZ - Z[Peak])) * 10.0) / 10.0;
 		Bump.Radius = FMath::RoundToDouble((Reach + 1.0) * Step * Quad);
 	}
-	Out.Sort([](const FUnrealAILandscapeBump& A, const FUnrealAILandscapeBump& B) { return FMath::Abs(A.Height) > FMath::Abs(B.Height); });
-	// A smaller result on a larger one's rim (within 1.5 x its Radius) is that one's edge, not a place of its own.
-	FBumps Kept;
-	for (const FUnrealAILandscapeBump& Bump : Out)
+	TArray<int32> Order;
+	for (int32 Index = 0; Index < Out.Num(); ++Index)
+		Order.Add(Index);
+	Order.Sort([&Out](int32 A, int32 B) { return FMath::Abs(Out[A].Height) > FMath::Abs(Out[B].Height); });
+	// The plane fitted beside a big pit stands above it (and beside a big mound below it), so its rim can show as a low
+	// result of the opposite kind: one within the taller result's Radius of its samples and under a quarter of its height is
+	// that rim, not a place of its own (a real spike next to a pit of similar size stays).
+	TArray<int32> Kept;
+	for (const int32 Index : Order)
 	{
-		const bool bRim = Kept.ContainsByPredicate([&Bump](const FUnrealAILandscapeBump& Larger)
+		const FUnrealAILandscapeBump& Bump = Out[Index];
+		const bool bRim = Kept.ContainsByPredicate([&](int32 TallerIndex)
 		{
-			return FVector2D::Distance(FVector2D(Bump.Location), FVector2D(Larger.Location)) < 1.5 * Larger.Radius;
+			const FUnrealAILandscapeBump& Taller = Out[TallerIndex];
+			if (Taller.Kind == Bump.Kind || FMath::Abs(Bump.Height) >= 0.25 * FMath::Abs(Taller.Height))
+				return false;
+			const double Reach = Taller.Radius / (Quad * Step); // samples
+			for (const int32 Cell : RegionCells[Index])
+				for (const int32 Other : RegionCells[TallerIndex])
+					if (FMath::Square(Cell % GW - Other % GW) + FMath::Square(Cell / GW - Other / GW) <= Reach * Reach)
+						return true;
+			return false;
 		});
 		if (!bRim)
-			Kept.Add(Bump);
+			Kept.Add(Index);
 		if (Kept.Num() == 50)
 			break;
 	}
-	return Kept;
+	FBumps Result;
+	for (const int32 Index : Kept)
+		Result.Add(Out[Index]);
+	return Result;
 }
 
 UMaterial* UUnrealAILandscapeRqlApi::CreateLayerMaterial(const FString& Path, const FString& Layers)
