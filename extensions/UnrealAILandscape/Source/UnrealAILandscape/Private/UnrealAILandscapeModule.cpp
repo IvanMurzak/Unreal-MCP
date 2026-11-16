@@ -147,7 +147,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -368,7 +368,9 @@ Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z)
   path, then banks rising 1:1 back to the ground for at most 2 x Width (on steeper ground the bank ends in a step); it
   only lowers ground, so it follows hills (a ditch, not a level road).
 A paint layer shows when the material
-blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Delete a whole
+blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Where a layer is painted:
+`landscape | call Coverage(unreal.find("Terrain"), "Rock")` (read-only) lists its areas, largest first, with their middle,
+box (Min / Max) and Area; repaint one with Paint of another layer over it (that layer takes the weight). Delete a whole
 landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition
 streaming proxies behind.
 Created materials and layer infos are unsaved: `editor | call SaveAll()`.

@@ -67,6 +67,33 @@ struct FUnrealAILandscapeBump
 	double Radius = 0.0;
 };
 
+/** One result of `landscape | call Coverage(landscape, layer)`: a connected area where a paint layer is painted. */
+USTRUCT(BlueprintType)
+struct FUnrealAILandscapeCoverage
+{
+	GENERATED_BODY()
+
+	/** the area's middle on the ground: [X, Y, Z] */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FVector Location = FVector::ZeroVector;
+
+	/** the corner of its box with the lowest X and Y: [X, Y, 0] */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FVector Min = FVector::ZeroVector;
+
+	/** the corner of its box with the highest X and Y: [X, Y, 0] */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FVector Max = FVector::ZeroVector;
+
+	/** how much ground it covers, square metres */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Area = 0.0;
+
+	/** the layer's mean weight there (0..1) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Weight = 0.0;
+};
+
 /**
  * The `landscape` RQL source (type "LandscapeOperations"): create, sculpt and paint landscapes, e.g.
  * `landscape | call Create("Terrain", [0, 0, 0], 100)`. Every UFUNCTION here is callable from rql-mutate (Unreal-MCP's
@@ -110,6 +137,10 @@ public:
 	/** find where the ground stands out of its surroundings: spikes, pits, mounds and holes at least MinHeight cm (default 300) above or below the ground's plane within Scale cm (default 5000) around them; read-only (works in rql-query; loads the whole landscape on a World Partition map); returns the largest 50 first, each {Kind (Bump or Pit), Location, Height, Radius}; slopes are not bumps, and a smooth hill or valley several times wider than Scale is not one */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<FUnrealAILandscapeBump> Bumps(ALandscapeProxy* Landscape, double MinHeight = 300.0, double Scale = 5000.0);
+
+	/** where a paint layer is painted: the connected areas whose Layer weight is at least MinWeight (default 0.5), largest first (at most 50), each {Location (its middle), Min and Max (its box), Area (m2), Weight (mean)}; read-only (works in rql-query; loads the whole landscape on a World Partition map); an unknown layer fails naming the landscape's layers */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	TArray<FUnrealAILandscapeCoverage> Coverage(ALandscapeProxy* Landscape, const FString& Layer, double MinWeight = 0.5);
 
 	/** create a landscape material at Path ("/Game/Landscape/M_Terrain") that blends one paint layer per entry of Layers, each a name with an optional colour: "Grass #3a7d2c, Rock #808080"; assign it with Create or set LandscapeMaterial, then Paint the layers; returns the material (unsaved) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
