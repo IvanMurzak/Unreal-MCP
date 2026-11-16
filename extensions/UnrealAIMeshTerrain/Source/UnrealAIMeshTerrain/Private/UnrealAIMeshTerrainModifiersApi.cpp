@@ -158,9 +158,9 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 * Wait for @p Terrain's pending build, then fail unless the XY box @p Footprint overlaps its ground: a modifier placed off
 	 * the terrain changes nothing, which is always a mistake (a wrong terrain or a wrong unit).
 	 */
-	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint)
+	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint, double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 	{
-		if (!WaitForBuild(Terrain))
+		if (!WaitForBuild(Terrain, TimeoutSeconds))
 			return false;
 		const FBox2D Area = TerrainArea(Terrain);
 		if (!Area.bIsValid || Area.Intersect(Footprint))
@@ -705,7 +705,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Falloff = Width;
 	if (!FMath::IsFinite(Falloff) || Falloff < 10.0 || Falloff > 100000.0)
 		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Falloff %g is outside 10 .. 100000 cm (-1: Width)"), Falloff));
-	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff)))
+	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff), TimeoutSeconds)) // the terrain may still rebuild a remeshed hill
 		return FRoadResult();
 
 	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
