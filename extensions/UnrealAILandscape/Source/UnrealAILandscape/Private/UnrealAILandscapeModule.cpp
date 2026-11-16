@@ -147,7 +147,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -343,7 +343,9 @@ landscapes | select Label PaintLayers Sections
 ```
 
 Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
-hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius), largest first; `Smooth` replaces the
+hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius, Length), largest first; a long narrow
+one (4 x longer than wide) is a `Channel` (a riverbed, ditch or road cut: a long Carve leaves one) or a `Ridge`, not a
+place to Smooth away; `Smooth` replaces the
 ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
 stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
@@ -353,7 +355,7 @@ stretch that climbs more steeply and says how long it needs to be. A steep climb
 give a point every few metres (each corner of the line tilts the road a little across).
 
 ```
-landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius}, ...]
+landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius, Length}, ...]
 landscape | call Smooth(unreal.find("Terrain"), [-3000, 3000, 0], 2500)                    a 15 m spike at [-3000, 3000] gone (radius 1.5 x its Radius)
 ```
 
@@ -368,7 +370,9 @@ Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z)
   path, then banks rising 1:1 back to the ground for at most 2 x Width (on steeper ground the bank ends in a step); it
   only lowers ground, so it follows hills (a ditch, not a level road).
 A paint layer shows when the material
-blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Delete a whole
+blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Where a layer is painted:
+`landscape | call Coverage(unreal.find("Terrain"), "Rock")` (read-only) lists its areas, largest first, with their middle,
+box (Min / Max) and Area; repaint one with Paint of another layer over it (that layer takes the weight). Delete a whole
 landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition
 streaming proxies behind.
 Created materials and layer infos are unsaved: `editor | call SaveAll()`.

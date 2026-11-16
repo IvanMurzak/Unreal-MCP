@@ -783,6 +783,77 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("and changing nothing"), FMath::IsNearlyEqual(LandscapeSpecLayerHeight(Landscape, X0, 0.0), Mid, 0.5));
 		});
 
+		It("Coverage lists where a paint layer is painted, in rql-query, and names the layers for an unknown one", [this]()
+		{
+			const FString Label = TEXT("RqlSpecCoverage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 740000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			const auto Paint = [&Label](const TCHAR* Layer, double X, double Radius)
+			{
+				// landscape | call Paint(unreal.find("@LABEL@"), "@LAYER@", [X, 0, 0], Radius)
+				return UnrealMcpRqlTools::RunPlan(FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Paint","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LABEL@"}]},{"lit":"@LAYER@"},{"list":[{"lit":@X@},{"lit":0},{"lit":0}]},{"lit":@R@}]}]})RQL"))
+					.Replace(TEXT("@LABEL@"), *Label).Replace(TEXT("@LAYER@"), Layer).Replace(TEXT("@X@"), *FString::SanitizeFloat(X)).Replace(TEXT("@R@"), *FString::SanitizeFloat(Radius)), true);
+			};
+			TestTrue(TEXT("grass everywhere"), Paint(TEXT("Grass"), X0, 0.0));
+			TestTrue(TEXT("rock in one place"), Paint(TEXT("Rock"), X0 + 400.0, 300.0));
+			TSharedPtr<FJsonObject> Unknown;
+			TestFalse(TEXT("an unknown layer fails"), Call(Label, TEXT("Coverage"), TEXT(R"({"lit":"Sand"})"), &Unknown, /*bQuery*/ true));
+			TestTrue(*FString::Printf(TEXT("naming the landscape's layers (%s)"), *LandscapeSpecJson(Unknown).Left(300)),
+				LandscapeSpecJson(Unknown).Contains(TEXT("Grass")) && LandscapeSpecJson(Unknown).Contains(TEXT("Rock")));
+			if (!FApp::CanEverRender())
+			{
+				AddInfo(TEXT("this editor does not render (-nullrhi): painted weights merge only in a rendering editor"));
+				return;
+			}
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("Coverage runs in rql-query"), Call(Label, TEXT("Coverage"), TEXT(R"({"lit":"Rock"})"), &Result, /*bQuery*/ true));
+			const FString Text = LandscapeSpecJson(Result);
+			const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+			TArray<TSharedPtr<FJsonValue>> Areas;
+			if (Result.IsValid() && Result->TryGetArrayField(TEXT("rows"), Rows) && Rows->Num() && (*Rows)[0]->Type == EJson::Array)
+			{
+				for (const TSharedPtr<FJsonValue>& Cell : (*Rows)[0]->AsArray())
+					if (Cell->Type == EJson::Array)
+						Areas = Cell->AsArray();
+			}
+			bool bNear = false;
+			if (Areas.Num() == 1 && Areas[0]->Type == EJson::Object)
+			{
+				// Location renders as a vector's text, "(X, Y, Z)".
+				TArray<FString> Parts;
+				Areas[0]->AsObject()->GetStringField(TEXT("Location")).Replace(TEXT("("), TEXT("")).Replace(TEXT(")"), TEXT("")).ParseIntoArray(Parts, TEXT(","));
+				bNear = Parts.Num() == 3 && FVector2D::Distance(FVector2D(FCString::Atod(*Parts[0]), FCString::Atod(*Parts[1])), FVector2D(X0 + 400.0, 0.0)) <= 100.0
+					&& Areas[0]->AsObject()->GetNumberField(TEXT("Area")) > 1.0;
+			}
+			TestTrue(*FString::Printf(TEXT("one Rock area around where it was painted (%s)"), *Text.Left(500)), bNear);
+		});
+
+		It("Bumps calls a long narrow cut a Channel", [this]()
+		{
+			if (!FApp::CanEverRender())
+			{
+				AddInfo(TEXT("this editor does not render (-nullrhi): Bumps reads the merged ground, checked only in a rendering editor"));
+				return;
+			}
+			const FString Label = TEXT("RqlSpecChannel_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 770000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// 16 m long, 1 m wide, 4 m deep, clear of the landscape's edges: far longer than wide at any MinHeight cut.
+			const FString Points = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 800.0, 0, 0), *P3(X0 + 800.0, 0, 0));
+			TestTrue(TEXT("a ditch carved"), Call(Label, TEXT("Carve"), Points + TEXT(",") + Lit(100) + TEXT(",") + Lit(400)));
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("Bumps runs"), Call(Label, TEXT("Bumps"), Lit(100) + TEXT(",") + Lit(500), &Result, /*bQuery*/ true));
+			const FString Text = LandscapeSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("one Channel about 16 m long, no Pit (%s)"), *Text.Left(500)),
+				Text.Contains(TEXT("\"Kind\":\"Channel\"")) && !Text.Contains(TEXT("\"Kind\":\"Pit\"")));
+		});
+
 		It("Bumps finds a spike and a pit (not the hill they sit on) and runs in rql-query", [this]()
 		{
 			if (!FApp::CanEverRender())
