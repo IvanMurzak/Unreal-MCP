@@ -36,23 +36,44 @@ namespace UnrealMcpRqlWorldPartitionLocal
 		const FTopLevelAssetPath Base = Instance.GetBaseClass();
 		return (Base.IsValid() ? Base : Instance.GetNativeClass()).GetAssetName().ToString();
 	}
+
+	FString LabelOf(const FWorldPartitionActorDescInstance& Instance)
+	{
+		const FName Label = Instance.GetActorLabel();
+		return (Label.IsNone() ? Instance.GetActorName() : Label).ToString();
+	}
+
+	/** Each actor descriptor of @p World's World Partition whose actor is not loaded (see Unloaded). */
+	void ForEachUnloaded(UWorld* World, TFunctionRef<void(const FWorldPartitionActorDescInstance&)> Func)
+	{
+		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
+		if (!Partition)
+			return;
+		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, AActor::StaticClass(), [&](const FWorldPartitionActorDescInstance* Instance)
+		{
+			if (Instance && !Instance->IsLoaded() && !Instance->GetActorIsRuntimeOnly() && !IsDeletedActor(*Instance))
+				Func(*Instance);
+			return true;
+		});
+	}
+}
+
+bool UnrealMcpRqlWorldPartition::Matches(const FUnrealMcpUnloadedActor& Row, const FString& Key)
+{
+	return Row.Label.Equals(Key, ESearchCase::IgnoreCase) || Row.Name.Equals(Key, ESearchCase::IgnoreCase)
+		|| Row.Guid.Equals(Key, ESearchCase::IgnoreCase) || Row.Package.Equals(Key, ESearchCase::IgnoreCase);
 }
 
 TArray<FUnrealMcpUnloadedActor> UnrealMcpRqlWorldPartition::Unloaded(UWorld* World, TArray<FGuid>* OutGuids)
 {
 	using namespace UnrealMcpRqlWorldPartitionLocal;
 	TArray<FUnrealMcpUnloadedActor> Rows;
-	UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
-	if (!Partition)
-		return Rows;
-	FWorldPartitionHelpers::ForEachActorDescInstance(Partition, AActor::StaticClass(), [&](const FWorldPartitionActorDescInstance* Instance)
+	ForEachUnloaded(World, [&](const FWorldPartitionActorDescInstance& Desc)
 	{
-		if (!Instance || Instance->IsLoaded() || Instance->GetActorIsRuntimeOnly() || IsDeletedActor(*Instance))
-			return true;
+		const FWorldPartitionActorDescInstance* Instance = &Desc;
 		FUnrealMcpUnloadedActor& Row = Rows.AddDefaulted_GetRef();
-		const FName Label = Instance->GetActorLabel();
 		Row.Name = Instance->GetActorName().ToString();
-		Row.Label = Label.IsNone() ? Row.Name : Label.ToString();
+		Row.Label = LabelOf(*Instance);
 		Row.Class = ClassName(*Instance);
 		Row.Guid = Instance->GetGuid().ToString();
 		Row.Package = Instance->GetActorPackage().ToString();
@@ -64,7 +85,6 @@ TArray<FUnrealMcpUnloadedActor> UnrealMcpRqlWorldPartition::Unloaded(UWorld* Wor
 			Row.DataLayers.Add(Layer.ToString());
 		if (OutGuids)
 			OutGuids->Add(Instance->GetGuid());
-		return true;
 	});
 	return Rows;
 }
@@ -106,19 +126,29 @@ TArray<AActor*> UnrealMcpRqlWorldPartition::Actors(UWorld* World, const TArray<F
 
 bool UnrealMcpRqlWorldPartition::UnloadedNote(UWorld* World, FString& OutMessage, FString& OutHint)
 {
-	const TArray<FUnrealMcpUnloadedActor> Rows = Unloaded(World);
-	if (Rows.IsEmpty())
-		return false;
+	// Runs after every query over the world's actors: count them all, describe only the few it names.
+	using namespace UnrealMcpRqlWorldPartitionLocal;
 	constexpr int32 Named = 5;
+	int32 Count = 0;
+	FString First;
 	TArray<FString> Examples;
-	for (int32 Index = 0; Index < FMath::Min(Named, Rows.Num()); ++Index)
-		Examples.Add(FString::Printf(TEXT("%s (%s)"), *Rows[Index].Label, *Rows[Index].Class));
-	if (Rows.Num() > Named)
-		Examples.Add(FString::Printf(TEXT("+%d more"), Rows.Num() - Named));
+	ForEachUnloaded(World, [&](const FWorldPartitionActorDescInstance& Instance)
+	{
+		if (Count++ < Named)
+		{
+			Examples.Add(FString::Printf(TEXT("%s (%s)"), *LabelOf(Instance), *ClassName(Instance)));
+			if (First.IsEmpty())
+				First = LabelOf(Instance);
+		}
+	});
+	if (Count == 0)
+		return false;
+	if (Count > Named)
+		Examples.Add(FString::Printf(TEXT("+%d more"), Count - Named));
 	OutMessage = FString::Printf(TEXT("%d World Partition actor(s) are not loaded (only loaded actors are listed): %s"),
-		Rows.Num(), *FString::Join(Examples, TEXT(", ")));
+		Count, *FString::Join(Examples, TEXT(", ")));
 	OutHint = FString::Printf(TEXT("list them: rql-query unloadedActors | select Label Class Location Bounds; load them (changes nothing saved, "
-		"rql-query): editor | call LoadActors([\"%s\"]) or editor | call LoadRegion([minX, minY], [maxX, maxY])"), *Rows[0].Label);
+		"rql-query): editor | call LoadActors([\"%s\"]) or editor | call LoadRegion([minX, minY], [maxX, maxY])"), *First);
 	return true;
 }
 
@@ -163,9 +193,7 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadActors(const TArray<FString>& Actors
 		bool bMatched = false;
 		for (int32 Index = 0; Index < Rows.Num(); ++Index)
 		{
-			const FUnrealMcpUnloadedActor& Row = Rows[Index];
-			if (Row.Label.Equals(Wanted, ESearchCase::IgnoreCase) || Row.Name.Equals(Wanted, ESearchCase::IgnoreCase)
-				|| Row.Guid.Equals(Wanted, ESearchCase::IgnoreCase) || Row.Package.Equals(Wanted, ESearchCase::IgnoreCase))
+			if (UnrealMcpRqlWorldPartition::Matches(Rows[Index], Wanted))
 			{
 				ToLoad.AddUnique(Guids[Index]);
 				bMatched = true;
@@ -213,7 +241,7 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadRegion(FVector2D Min, FVector2D Max)
 		// A descriptor without bounds (an actor with no primitive) is placed at its location.
 		const FBox2D Footprint = Bounds.IsValid ? FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max))
 			: FBox2D(FVector2D(Rows[Index].Location), FVector2D(Rows[Index].Location));
-		if (Footprint.Min.X <= Region.Max.X && Footprint.Max.X >= Region.Min.X && Footprint.Min.Y <= Region.Max.Y && Footprint.Max.Y >= Region.Min.Y)
+		if (Region.Intersect(Footprint))
 			ToLoad.Add(Guids[Index]);
 	}
 	return LoadAndCollect(World, ToLoad);

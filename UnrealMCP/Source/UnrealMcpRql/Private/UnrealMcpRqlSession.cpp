@@ -201,8 +201,7 @@ namespace UnrealMcpRqlSessionLocal
 
 	/**
 	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
-	 * agents never found a lake or orphaned proxies outside the loaded regions and spent dozens of Python calls loading
-	 * them. While some are not loaded, the answer says how many, names a few and how to list and load them.
+	 * while some are not loaded, the answer says how many, names a few and how to list and load them.
 	 */
 	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
 	{
@@ -657,7 +656,7 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		// rql-mutate raised the limit for a read-only operation's name: a same-named call that changes something keeps the
 		// editor's limit.
-		if (bReadOnlyLimit && Records.size() > static_cast<size_t>(DefaultMaxTargets) && !AllReadOnlyCalls(Records))
+		if (bReadOnlyLimit && Records.size() > static_cast<size_t>(DefaultMaxTargets) && !bReadOnlyCalls)
 			return UnrealMcpRqlToStd(FString::Printf(TEXT("%d calls, more than the limit of %d for a change (pass max_targets = %d)"),
 				static_cast<int32>(Records.size()), DefaultMaxTargets, static_cast<int32>(Records.size())));
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an

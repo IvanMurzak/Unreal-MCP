@@ -22,6 +22,9 @@ namespace UnrealMcpRqlWorldPartition
 	 */
 	TArray<FUnrealMcpUnloadedActor> Unloaded(UWorld* World, TArray<FGuid>* OutGuids = nullptr);
 
+	/** @p Key names @p Row: its label, name, GUID or package, case-insensitively. */
+	bool Matches(const FUnrealMcpUnloadedActor& Row, const FString& Key);
+
 	/**
 	 * Load the actors @p Guids of the editor world's World Partition through the editor's actor-list loader
 	 * (UWorldPartitionBlueprintLibrary::LoadActors: no saved change, no undo step; they stay loaded until the world goes).

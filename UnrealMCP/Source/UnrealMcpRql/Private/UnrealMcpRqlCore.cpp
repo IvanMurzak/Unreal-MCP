@@ -991,10 +991,10 @@ namespace UnrealMcpRqlCoreLocal
 		if (Actor)
 			return Types.WrapObject(Actor);
 		// A World Partition actor that is not loaded has a descriptor, not an actor: name it and how to load it.
+		const FString Wanted = Key.TrimStartAndEnd();
 		for (const FUnrealMcpUnloadedActor& Row : UnrealMcpRqlWorldPartition::Unloaded(EditorWorld()))
 		{
-			const FString Wanted = Key.TrimStartAndEnd();
-			if (Row.Label.Equals(Wanted, ESearchCase::IgnoreCase) || Row.Name.Equals(Wanted, ESearchCase::IgnoreCase))
+			if (UnrealMcpRqlWorldPartition::Matches(Row, Wanted))
 				return ErrorValue("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
 					"rql-query editor | call LoadActors([\"%s\"]) (changes nothing saved), then unreal.find(\"%s\") finds it"),
 					*Row.Label, *Row.Class, *Row.Label, *Row.Label));
