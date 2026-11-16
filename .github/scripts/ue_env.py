@@ -22,6 +22,7 @@ runner-local paths every later step uses, and appends them to GITHUB_ENV:
                  certificates there, so its HTTPS downloads would fail to verify.
   DEVELOPER_DIR  macOS only, and only when the machine's selected Xcode is outside the engine's
                  supported range: a side-by-side /Applications/Xcode*.app that fits.
+  PATH           Linux only: a `chmod` shim first (CHMOD_SHIM), so Build.sh works on a read-only engine.
 
 The link is a directory junction on Windows and a symlink elsewhere. The job's cleanup step removes it
 with `--remove-link`, never with a recursive delete: that would follow the link into the engine install.
@@ -127,6 +128,37 @@ def developer_dir(root: Path, version: str):
     return pick[1] / "Contents/Developer"
 
 
+# UE 5.5/5.6 Linux SetupDotnet.sh runs `chmod u+x <engine>/.../DotNet/<ver>/linux-x64/dotnet` unconditionally, and Build.sh
+# runs it under `set -e`, so the build dies on a read-only engine install ("Read-only file system"). UE 5.7+ guards the
+# call with `[ ! -x ]`. The engine is never written to: this shim, first on the job's PATH, skips that one no-op call
+# (the file is already executable) and runs the real chmod for anything else.
+CHMOD_SHIM = """#!/bin/sh
+# ue_env.py: skip `chmod u+x FILE` when FILE is already executable (UE 5.7+ SetupDotnet.sh behaviour).
+if [ "$#" -eq 2 ] && [ "$1" = "u+x" ] && [ -f "$2" ] && [ -x "$2" ]; then exit 0; fi
+for chmod in /usr/bin/chmod /bin/chmod; do
+    if [ -x "$chmod" ]; then exec "$chmod" "$@"; fi
+done
+echo "chmod shim: no chmod in /usr/bin or /bin" >&2
+exit 127
+"""
+
+
+def add_job_path(folder: Path) -> None:
+    with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as handle:
+        handle.write(f"{folder}\n")
+    print(f"ue-env: PATH+={folder}", flush=True)
+
+
+def install_chmod_shim() -> Path:
+    """Write the chmod shim (CHMOD_SHIM) under RUNNER_TEMP and return its folder."""
+    folder = Path(os.environ["RUNNER_TEMP"]) / "ue-shims"
+    folder.mkdir(parents=True, exist_ok=True)
+    shim = folder / "chmod"
+    shim.write_text(CHMOD_SHIM, encoding="utf-8", newline="\n")
+    shim.chmod(0o755)
+    return folder
+
+
 def link_python() -> str:
     """Link this interpreter's folder (not just the binary, so it finds its stdlib) to a space-free path."""
     link = link_path()
@@ -179,6 +211,8 @@ def resolve(version: str) -> None:
         add_job_env("DEVELOPER_DIR", str(developer))
     if ca_bundle:
         add_job_env("SSL_CERT_FILE", ca_bundle)
+    if UE_PLATFORM == "Linux":
+        add_job_path(install_chmod_shim())
 
 
 def main() -> int:

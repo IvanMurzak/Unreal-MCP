@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -325,6 +326,26 @@ class CiStepTests(unittest.TestCase):
 
 
 class UeEnvTests(unittest.TestCase):
+    def test_chmod_shim_skips_only_an_already_executable_u_plus_x(self):
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            github_path = temp / "github_path"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": folder, "GITHUB_PATH": str(github_path)}):
+                ue_env.add_job_path(ue_env.install_chmod_shim())
+            shims = temp / "ue-shims"
+            self.assertEqual(github_path.read_text(encoding="utf-8"), f"{shims}\n")
+            shim = (shims / "chmod").read_bytes()
+            self.assertTrue(shim.startswith(b"#!/bin/sh\n") and b"\r" not in shim)
+            sh = shutil.which("sh")
+            if sh is None or os.name == "nt":
+                return  # the shim's behaviour runs where Build.sh does (POSIX)
+            tool = temp / "dotnet"
+            tool.write_text("")
+            tool.chmod(0o555)
+            self.assertEqual(subprocess.run([sh, str(shims / "chmod"), "u+x", str(tool)]).returncode, 0)
+            self.assertEqual(subprocess.run([sh, str(shims / "chmod"), "644", str(tool)]).returncode, 0)  # passed on
+            self.assertEqual(tool.stat().st_mode & 0o777, 0o644)
+
     def test_xcode_versions_compare_as_three_parts(self):
         self.assertEqual(ue_env.xcode3("15.2"), (15, 2, 0))
         self.assertLess(ue_env.xcode3("16.4"), ue_env.xcode3("16.9.0"))
