@@ -255,23 +255,25 @@ an entirely manual operator step (no CI job submits — see the checklist at the
 - **C1c — copyright comment in every code file.** `fab-zip` stamps the vendored RQL and Code-Exec sources (the repo
   keeps them verbatim) and fails on any other code file without one.
 - **C5 — one project file per engine, `EngineVersion` set.** Epic's review requires the key in what it compiles,
-  while every other asset must stay unpinned (UE treats it as an exact match). Download the release's `-fab-` zip
-  into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>` at the release's commit
-  or later, and submit the `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` it writes as that engine's project
-  version. They also take the checkout's `ThirdPartyNotices.txt` and descriptor `Description`. Outside CI, set `RUNNER_TEMP` to a scratch folder. Keep the listing's third-party box ticked and
+  while every other asset must stay unpinned (UE treats it as an exact match). The release builds them
+  (`ue_ci.py fab-engine-zips` in `build-plugin-zip`) and attaches `unreal-mcp-plugin-fab-<version>-ue<engine>.zip`
+  for every engine in `FAB_ENGINES`; `verify-release` fails if one is missing. They also take the checkout's
+  `ThirdPartyNotices.txt` and descriptor `Description`. To correct that text for an already released version, download
+  the release's `-fab-` zip into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>`
+  (outside CI, set `RUNNER_TEMP` to a scratch folder) and replace the release assets. Keep the listing's third-party box ticked and
   file Epic's Third Party Software form whenever `Source/ThirdParty` or the sidecar's components change.
 - **C4 — module `PlatformAllowList` (#187).** Both modules in `UnrealMCP.uplugin` declare
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET
   sidecar), which Fab review expects.
 
-**Manual Fab submission (operator):** submit the per-engine zips built from the release-produced
-`unreal-mcp-plugin-fab-<version>.zip` (C5) — never the `-source-` zip. Epic's Fab technical review rejects any
-executable ("only source files are accepted"), and the `-source-` zip bundles the four bridge binaries for the
-CLI path. The `-fab-` zip is the same test-free source with no executable, plus
-`Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`; on first launch the editor downloads `unreal-mcp-bridge-<rid>.zip`
-for its own version from the GitHub Release and verifies it against that file (`docs/ARCHITECTURE.md` §6.8), so
-the release must stay published with its bridge zips. Verify the downloaded `-fab-` zip before building from it:
-`minisign -Vm unreal-mcp-plugin-fab-<version>.zip -P <MINISIGN_PUBLIC_KEY>`. `fab-engine-zips` then refuses any executable. **Do not bump `VersionName` for a Fab submission** unless
+**Fab update (operator):** in the Fab portal, point each engine's File Link at the release's
+`unreal-mcp-plugin-fab-<version>-ue<engine>.zip` asset (C5) and submit the listing for review — never the
+`-source-` zip. Epic's Fab technical review rejects any executable ("only source files are accepted"), and the
+`-source-` zip bundles the four bridge binaries for the CLI path. The Fab zips are the same test-free source with no
+executable; Fab users download `unreal-mcp-bridge-<rid>.zip` by hand from the plugin version's GitHub Release
+(C1b, `docs/ARCHITECTURE.md` §6.8), so the release must stay published with its bridge zips. Keep the listing text
+version-free (it points users at the plugin's "Get bridge" button), so an update changes only the File Links.
+**Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
 **Self-hosted runner Live Coding gotcha (UE 5.8+):** the unattended host-project rebuilds inside
