@@ -452,8 +452,10 @@ markdown}]`. `unreal-skill-generate` writes every shipped skill as `<name>/SKILL
 The editor's skills (`unreal-rql`, one per tool) are written by its sidecar only: the panel's **Generate skill files**
 button, the per-agent **auto-generate** setting (on each connection and after the tool / module set or tool visibility
 changes, debounced; `UnrealMcpEditor/Private/Skills/UnrealMcpSkillAutoGenerator`), `unreal-skill-generate`, and
-`unreal-mcp-cli setup-skills` while the editor answers (it calls `unreal-skill-generate`, keeping a same-named skill
-someone else wrote unless `--force`; offline it writes only its own skills).
+`unreal-mcp-cli setup-skills` while the editor answers (it calls `unreal-skill-generate` into a staging folder under the
+editor's project `Saved/UnrealMcp/skills-staging/` and copies the skills into `<path>`'s agent folder, so an editor of
+another project never writes into its own; a same-named skill someone else wrote is kept unless `--force`; offline it
+writes only its own skills).
 The skill's name, description and body live in the plugin (`UnrealMcpRqlGuide.h`, the session's skill markdown).
 The rql-query and rql-mutate descriptions and the skill append RQL's shared language rules (`rql::language_rules_with(...)` from `rql/guide.hpp`,
 with `editor.SpawnActor` examples; the grid example is the whole `range(0, 150) | call editor.SpawnActor(...)` pipeline,

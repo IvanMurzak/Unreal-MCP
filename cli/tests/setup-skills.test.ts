@@ -145,20 +145,74 @@ describe('the unreal-mcp-cli skill', () => {
     expect(all).not.toMatch(/\b(Arena|Crate|Platform|Level1|EnemyStats|GameMath)\b/);
   });
 
+  /** An editor whose project is @p editorRoot: unreal-skill-generate writes its skills below that root, as the sidecar does. */
+  function editorAt(editorRoot: string, skills: Record<string, string> = { 'unreal-rql': 'rql guide', 'rql-query': 'tool' }) {
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    systemToolMock.mockImplementation(async (opts) => {
+      const folder = path.join(editorRoot, (opts.input as { path: string }).path);
+      for (const [name, body] of Object.entries(skills)) {
+        fs.mkdirSync(path.join(folder, name), { recursive: true });
+        fs.writeFileSync(path.join(folder, name, 'SKILL.md'), `---\nname: ${name}\nmetadata:\n  generated-by: unreal-mcp\n---\n${body}\n`);
+      }
+      return { kind: 'success', success: true, endpoint: 'x', httpStatus: 200,
+        data: { status: 'success', structured: { skillsPath: folder, filesWritten: Object.keys(skills).length, filesPruned: 0, toolsConsidered: 40 } } };
+    });
+  }
+
   it('asks a running editor for its skills (unreal-rql, tools) with the agent\'s folder, then writes the offline skills', async () => {
     const dir = tmp();
-    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
-    systemToolMock.mockResolvedValue({
-      kind: 'success', success: true, endpoint: 'x', httpStatus: 200,
-      data: { status: 'success', structured: { skillsPath: '/p/.cursor/skills', filesWritten: 41, filesPruned: 2, toolsConsidered: 40 } },
-    });
+    editorAt(dir);
     const r = await setupSkills({ projectDir: dir, agentId: 'cursor', url: 'http://localhost:1234' });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     expect(systemToolMock).toHaveBeenCalledTimes(1);
-    expect(systemToolMock.mock.calls[0][0]).toMatchObject({ toolName: 'unreal-skill-generate', url: 'http://localhost:1234', input: { path: '.cursor/skills' } });
-    expect(r.editorSkills).toEqual({ generated: true, message: '41 file(s) written, 2 stale pruned in /p/.cursor/skills' });
+    expect(systemToolMock.mock.calls[0][0]).toMatchObject({ toolName: 'unreal-skill-generate', url: 'http://localhost:1234' });
+    expect((systemToolMock.mock.calls[0][0].input as { path: string }).path.startsWith('Saved/UnrealMcp/skills-staging/')).toBe(true);
+    expect(r.editorSkills).toEqual({ generated: true, message: `2 file(s) written in ${path.join(dir, '.cursor', 'skills')}` });
+    expect(read(path.join(dir, '.cursor', 'skills', 'unreal-rql', 'SKILL.md'))).toContain('rql guide');
     expect(fs.existsSync(path.join(dir, '.cursor', 'skills', 'unreal-mcp-cli', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'Saved', 'UnrealMcp', 'skills-staging')), 'the staging folder is removed').toBe(false);
+  });
+
+  it('writes the skills of an editor serving ANOTHER project into <path>, never into that editor\'s project', async () => {
+    const dir = tmp();
+    const editorProject = tmp();
+    editorAt(editorProject);
+    const r = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(r.kind === 'success' && r.editorSkills).toMatchObject({ generated: true });
+    expect(read(skillsOf(dir, 'unreal-rql', 'SKILL.md'))).toContain('rql guide');
+    expect(read(skillsOf(dir, 'rql-query', 'SKILL.md'))).toContain('tool');
+    expect(fs.existsSync(path.join(editorProject, '.claude')), 'nothing lands in the editor\'s own skills folder').toBe(false);
+    expect(fs.readdirSync(editorProject).filter((n) => n !== 'Saved'), 'nothing else either').toEqual([]);
+    expect(fs.existsSync(path.join(editorProject, 'Saved', 'UnrealMcp', 'skills-staging'))).toBe(false);
+  });
+
+  it('prunes editor skills the editor no longer generates, keeps its own and other skills, and is idempotent', async () => {
+    const dir = tmp();
+    const stale = skillsOf(dir, 'old-tool', 'SKILL.md');
+    const other = skillsOf(dir, 'notes', 'SKILL.md');
+    fs.mkdirSync(path.dirname(stale), { recursive: true });
+    fs.writeFileSync(stale, '---\nname: old-tool\nmetadata:\n  generated-by: unreal-mcp\n---\n');
+    fs.mkdirSync(path.dirname(other), { recursive: true });
+    fs.writeFileSync(other, '---\nname: notes\n---\nmine\n');
+    editorAt(tmp());
+    const first = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(first.kind === 'success' && first.editorSkills).toMatchObject({ generated: true, message: expect.stringContaining('1 stale pruned') });
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(read(other)).toContain('mine');
+    expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'SKILL.md'))).toBe(true);
+    const second = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(second.kind === 'success' && second.editorSkills).toEqual({ generated: true, message: `0 file(s) written in ${skillsOf(dir)}` });
+    expect(second.kind === 'success' && second.written).toBe(false);
+  });
+
+  it('says so when the editor wrote its skills on another machine', async () => {
+    const dir = tmp();
+    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
+    systemToolMock.mockResolvedValue({ kind: 'success', success: true, endpoint: 'x', httpStatus: 200,
+      data: { status: 'success', structured: { skillsPath: '/nowhere/on/this/machine', filesWritten: 41 } } });
+    const r = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
+    expect(r.kind === 'success' && r.editorSkills).toMatchObject({ generated: false, reachable: true, reason: expect.stringContaining('not on this machine') });
   });
 
   it('without an editor writes the offline skills and says unreal-rql needs the editor', async () => {
@@ -187,12 +241,8 @@ describe('the unreal-mcp-cli skill', () => {
     const mine = skillsOf(dir, 'unreal-rql', 'SKILL.md');
     fs.mkdirSync(path.dirname(mine), { recursive: true });
     fs.writeFileSync(mine, '---\nname: unreal-rql\n---\nmy own notes\n');
-    probeMock.mockResolvedValue({ ok: true, baseUrl: 'http://localhost:1234', httpStatus: 200, data: {} });
-    // The editor's generator overwrites the folder, as unreal-skill-generate does.
-    systemToolMock.mockImplementation(async () => {
-      fs.writeFileSync(mine, '---\nname: unreal-rql\nmetadata:\n  generated-by: unreal-mcp\n---\nthe editor\'s\n');
-      return { kind: 'success', success: true, endpoint: 'x', httpStatus: 200, data: { status: 'success', structured: { filesWritten: 1 } } };
-    });
+    // The editor's skill of the same name replaces the folder.
+    editorAt(tmp(), { 'unreal-rql': "the editor's" });
     const kept = await setupSkills({ projectDir: dir, url: 'http://localhost:1234' });
     expect(read(mine)).toContain('my own notes');
     expect(kept.warnings.join('\n')).toContain('the editor\'s version was not kept');
