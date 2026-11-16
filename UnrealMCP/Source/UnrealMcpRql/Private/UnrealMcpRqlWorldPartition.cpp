@@ -43,6 +43,12 @@ namespace UnrealMcpRqlWorldPartitionLocal
 		return (Label.IsNone() ? Instance.GetActorName() : Label).ToString();
 	}
 
+	/** A descriptor whose actor is not loaded and can be: not runtime-only (HLODs), not deleted in this session. */
+	bool IsLoadable(const FWorldPartitionActorDescInstance& Instance)
+	{
+		return !Instance.IsLoaded() && !Instance.GetActorIsRuntimeOnly() && !IsDeletedActor(Instance);
+	}
+
 	/** Each actor descriptor of @p World's World Partition whose actor is not loaded (see Unloaded). */
 	void ForEachUnloaded(UWorld* World, TFunctionRef<void(const FWorldPartitionActorDescInstance&)> Func)
 	{
@@ -51,10 +57,19 @@ namespace UnrealMcpRqlWorldPartitionLocal
 			return;
 		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, AActor::StaticClass(), [&](const FWorldPartitionActorDescInstance* Instance)
 		{
-			if (Instance && !Instance->IsLoaded() && !Instance->GetActorIsRuntimeOnly() && !IsDeletedActor(*Instance))
+			if (Instance && IsLoadable(*Instance))
 				Func(*Instance);
 			return true;
 		});
+	}
+
+	/**
+	 * The editor world's World Partition, or null (no World Partition, or a play world is active: the engine's loader loads
+	 * into the editor world only, so a play world's streamed-out actors are none of its business).
+	 */
+	UWorldPartition* EditorPartition(UWorld* World)
+	{
+		return World && World->WorldType == EWorldType::Editor ? World->GetWorldPartition() : nullptr;
 	}
 }
 
@@ -170,7 +185,7 @@ namespace UnrealMcpRqlWorldPartitionLocal
 	TArray<AActor*> LoadAndCollect(UWorld* World, const TArray<FGuid>& Guids)
 	{
 		FString Error;
-		if (!UnrealMcpRqlWorldPartition::Load(Guids, Error))
+		if (!UnrealMcpRql::LoadWorldPartitionActors(Guids, &Error))
 			return UnrealMcpRql::Failed<TArray<AActor*>>(Error);
 		return UnrealMcpRqlWorldPartition::Actors(World, Guids);
 	}
@@ -226,25 +241,67 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadActors(const TArray<FString>& Actors
 TArray<AActor*> UUnrealMcpRqlEditorApi::LoadRegion(FVector2D Min, FVector2D Max)
 {
 	using namespace UnrealMcpRqlWorldPartitionLocal;
-	if (Min.X > Max.X || Min.Y > Max.Y)
-		return UnrealMcpRql::Failed<TArray<AActor*>>(FString::Printf(TEXT("Min (%g, %g) must not exceed Max (%g, %g) on either axis"), Min.X, Min.Y, Max.X, Max.Y));
-	UWorld* World = PartitionedEditorWorld();
-	if (!World)
+	if (!PartitionedEditorWorld())
 		return {};
-	TArray<FGuid> Guids;
-	const TArray<FUnrealMcpUnloadedActor> Rows = UnrealMcpRqlWorldPartition::Unloaded(World, &Guids);
-	const FBox2D Region(Min, Max);
+	TArray<AActor*> Loaded;
+	FString Error;
+	if (!UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(Min, Max), &Loaded, &Error))
+		return UnrealMcpRql::Failed<TArray<AActor*>>(Error);
+	return Loaded;
+}
+
+bool UnrealMcpRql::LoadWorldPartitionActors(const TArray<FGuid>& Guids, FString* OutError)
+{
+	using namespace UnrealMcpRqlWorldPartitionLocal;
+	UWorldPartition* Partition = EditorPartition(UnrealMcpRql::EditorWorld());
+	if (!Partition)
+		return true; // nothing the editor's loader can load
+	// Only unloaded, loadable actors: the loader would pin a loaded one (a region unload then keeps it) and try to load one
+	// deleted in this session from its dirty package.
 	TArray<FGuid> ToLoad;
-	for (int32 Index = 0; Index < Rows.Num(); ++Index)
+	for (const FGuid& Guid : Guids)
 	{
-		const FBox& Bounds = Rows[Index].Bounds;
-		// A descriptor without bounds (an actor with no primitive) is placed at its location.
-		const FBox2D Footprint = Bounds.IsValid ? FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max))
-			: FBox2D(FVector2D(Rows[Index].Location), FVector2D(Rows[Index].Location));
-		if (Region.Intersect(Footprint))
-			ToLoad.Add(Guids[Index]);
+		const FWorldPartitionActorDescInstance* Instance = Partition->GetActorDescInstance(Guid);
+		if (Instance && IsLoadable(*Instance))
+			ToLoad.AddUnique(Guid);
 	}
-	return LoadAndCollect(World, ToLoad);
+	FString Error;
+	const bool bLoaded = UnrealMcpRqlWorldPartition::Load(ToLoad, Error);
+	if (!bLoaded && OutError)
+		*OutError = Error;
+	return bLoaded;
+}
+
+bool UnrealMcpRql::LoadWorldPartitionRegion(const FBox2D& Region, TArray<AActor*>* OutLoaded, FString* OutError)
+{
+	using namespace UnrealMcpRqlWorldPartitionLocal;
+	if (OutLoaded)
+		OutLoaded->Reset();
+	if (!Region.bIsValid || Region.Min.X > Region.Max.X || Region.Min.Y > Region.Max.Y)
+	{
+		if (OutError)
+			*OutError = FString::Printf(TEXT("the region (%g, %g) .. (%g, %g) is not a valid box: Min must not exceed Max on either axis"),
+				Region.Min.X, Region.Min.Y, Region.Max.X, Region.Max.Y);
+		return false;
+	}
+	UWorld* World = UnrealMcpRql::EditorWorld();
+	if (!EditorPartition(World))
+		return true;
+	TArray<FGuid> ToLoad;
+	ForEachUnloaded(World, [&](const FWorldPartitionActorDescInstance& Instance)
+	{
+		const FBox Bounds = Instance.GetEditorBounds();
+		// A descriptor without bounds (an actor with no primitive) is placed at its location.
+		const FVector2D Location(Instance.GetActorTransform().GetLocation());
+		const FBox2D Footprint = Bounds.IsValid ? FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)) : FBox2D(Location, Location);
+		if (Region.Intersect(Footprint))
+			ToLoad.Add(Instance.GetGuid());
+	});
+	if (!LoadWorldPartitionActors(ToLoad, OutError))
+		return false;
+	if (OutLoaded)
+		*OutLoaded = UnrealMcpRqlWorldPartition::Actors(World, ToLoad);
+	return true;
 }
 
 void UnrealMcpRqlAddWorldPartition(FUnrealMcpRqlSession& Session)

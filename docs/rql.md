@@ -534,7 +534,11 @@ Reflection already exposes every type the extension's engine plugin defines, so 
 
 `IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's
 lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core
-operations' rules (docs/EXTENSIONS.md).
+operations' rules (docs/EXTENSIONS.md). `UnrealMcpRql::LoadWorldPartitionActors(guids)` and
+`LoadWorldPartitionRegion(box2D, &loaded)` load World Partition actors that are not loaded, as `editor | call
+LoadActors` / `LoadRegion` do (the editor's actor-list loader: nothing marked unsaved, no undo step, synchronous;
+loaded, deleted and runtime-only actors are skipped, editor world only), so an extension that needs actors outside the
+loaded regions does not call the engine's loader itself.
 
 **Extensions an agent does not have yet** (`UnrealMcpRql/Public/UnrealMcpAvailableExtensions.h`). The editor bundles
 the first-party extensions (id, name, plugin, what they add, the identifier prefixes of their domain); the online
@@ -567,7 +571,8 @@ of that domain. A new first-party extension adds its entry to the bundled list
   produces for its query (in the comment above it).
 - `UnrealMcpRqlWorldPartitionSpec.cpp` (`UnrealMcp.Tools.Rql.WorldPartition`): a World Partition level from the Open
   World template with a cube far outside every loaded region, saved and reopened: the warning, `unloadedActors`,
-  `unreal.find`'s not-loaded, `LoadActors` / `LoadRegion` (no unsaved package, no undo step), and a plain level.
+  `unreal.find`'s not-loaded, `LoadActors` / `LoadRegion` and the public `UnrealMcpRql::LoadWorldPartitionActors` /
+  `LoadWorldPartitionRegion` (no unsaved package, no undo step, skips, invalid boxes), and a plain level.
 - `bridge/tests/RqlBridgeTests.cs`: plans, result and schema rendering, the descriptor fields, the proxy wiring, the
   shipped skill file.
 - `UnrealMcpExtensionsSpec.cpp` (`UnrealMcp.Extensions`): the module pass (records, disabled set, enabled ids).

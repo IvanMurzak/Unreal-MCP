@@ -13,6 +13,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlSpecHelpers.h"
 #include "UnrealMcpRqlTools.h"
 #include "UObject/Package.h"
@@ -94,6 +95,39 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlWorldPartitionSpec, "UnrealMcp.Tools.Rql.WorldPar
 		}
 	}
 
+	/**
+	 * A World Partition level from the Open World template with the cube "WpSpecFar" far outside every loaded region,
+	 * saved and reopened (no region loads on open, so the cube is not loaded). False after a test error.
+	 */
+	bool MakeFarCubeLevel()
+	{
+		using namespace UnrealMcpRqlSpecHelpers;
+		RemoveMapFiles();
+		// editor | call NewLevel("/Game/UnrealMcpWpSpec/WpSpecMap", "/Engine/Maps/Templates/OpenWorld")
+		const TSharedPtr<FJsonObject> Created = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":"/Game/UnrealMcpWpSpec/WpSpecMap"},{"lit":"/Engine/Maps/Templates/OpenWorld"}]}]})RQL"), true);
+		if (!TestTrue(*FString::Printf(TEXT("a World Partition level from the Open World template (%s)"), *Said(Created)), IsOk(Created)))
+			return false;
+		UWorld* World = GEditor->GetEditorWorldContext().World();
+		if (!TestTrue(TEXT("it has World Partition"), World && World->GetWorldPartition()))
+			return false;
+		// editor | call SpawnActor("/Engine/BasicShapes/Cube", "WpSpecFar", [400000, 400000, 0])
+		const TSharedPtr<FJsonObject> Spawned = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/BasicShapes/Cube"},{"lit":"WpSpecFar"},{"list":[{"lit":400000},{"lit":400000},{"lit":0}]}]}]})RQL"), true);
+		TestTrue(*FString::Printf(TEXT("cube placed far away (%s)"), *Said(Spawned)), IsOk(Spawned));
+		// editor | call SaveLevel()
+		const TSharedPtr<FJsonObject> Saved = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SaveLevel","args":[]}]})RQL"), true);
+		return TestTrue(*FString::Printf(TEXT("saved (%s)"), *Said(Saved)), IsOk(Saved)) && Reopen()
+			&& TestEqual(TEXT("the cube is not loaded after reopening"), CountUnloadedFar(), 1.0);
+	}
+
+	/** Leave a plain level open and drop the spec's files. */
+	void LeaveLevel()
+	{
+		// editor | call NewLevel()
+		Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[]}]})RQL"), true);
+		CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+		RemoveMapFiles();
+	}
+
 END_DEFINE_SPEC(FUnrealMcpRqlWorldPartitionSpec)
 
 void FUnrealMcpRqlWorldPartitionSpec::Define()
@@ -101,28 +135,8 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 	It("warns about unloaded actors, lists them in unloadedActors and loads them by name or region, unsaved changes none", [this]()
 	{
 		using namespace UnrealMcpRqlSpecHelpers;
-		RemoveMapFiles();
-		ON_SCOPE_EXIT
-		{
-			// editor | call NewLevel(): leave a plain level open, then drop the spec's files
-			Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[]}]})RQL"), true);
-			CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
-			RemoveMapFiles();
-		};
-
-		// editor | call NewLevel("/Game/UnrealMcpWpSpec/WpSpecMap", "/Engine/Maps/Templates/OpenWorld")
-		const TSharedPtr<FJsonObject> Created = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"NewLevel","args":[{"lit":"/Game/UnrealMcpWpSpec/WpSpecMap"},{"lit":"/Engine/Maps/Templates/OpenWorld"}]}]})RQL"), true);
-		if (!TestTrue(*FString::Printf(TEXT("a World Partition level from the Open World template (%s)"), *Said(Created)), IsOk(Created)))
-			return;
-		UWorld* World = GEditor->GetEditorWorldContext().World();
-		if (!TestTrue(TEXT("it has World Partition"), World && World->GetWorldPartition()))
-			return;
-		// editor | call SpawnActor("/Engine/BasicShapes/Cube", "WpSpecFar", [400000, 400000, 0])
-		const TSharedPtr<FJsonObject> Spawned = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/BasicShapes/Cube"},{"lit":"WpSpecFar"},{"list":[{"lit":400000},{"lit":400000},{"lit":0}]}]}]})RQL"), true);
-		TestTrue(*FString::Printf(TEXT("cube placed far away (%s)"), *Said(Spawned)), IsOk(Spawned));
-		// editor | call SaveLevel()
-		const TSharedPtr<FJsonObject> Saved = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SaveLevel","args":[]}]})RQL"), true);
-		if (!TestTrue(*FString::Printf(TEXT("saved (%s)"), *Said(Saved)), IsOk(Saved)) || !Reopen())
+		ON_SCOPE_EXIT { LeaveLevel(); };
+		if (!MakeFarCubeLevel())
 			return;
 
 		// The cube is not loaded: actors misses it and says so.
@@ -177,7 +191,53 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		TestTrue(*FString::Printf(TEXT("an inverted rectangle fails (%s)"), *Said(Inverted)), !IsOk(Inverted) && Said(Inverted).Contains(TEXT("must not exceed Max")));
 	});
 
-	It("stays quiet on a level without World Partition, where LoadActors says why it has nothing to do", [this]()
+	It("loads by GUID and by region through the public API for RQL modules, unsaved changes none", [this]()
+	{
+		using namespace UnrealMcpRqlSpecHelpers;
+		ON_SCOPE_EXIT { LeaveLevel(); };
+		if (!MakeFarCubeLevel())
+			return;
+		const TArray<FString> DirtyBefore = DirtyPackages();
+		const int32 StepsBefore = UndoSteps();
+		// A region beside the cube loads nothing; one over it loads it.
+		TArray<AActor*> Loaded;
+		FString Error;
+		const FBox2D OverCube(FVector2D(399000, 399000), FVector2D(401000, 401000));
+		bool bOk = UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(-1000, -1000), FVector2D(1000, 1000)), &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("a region away from the cube (%s)"), *Error), bOk);
+		TestFalse(TEXT("does not load it"), Loaded.ContainsByPredicate([](const AActor* A) { return A && A->GetActorLabel() == TEXT("WpSpecFar"); }));
+		FBox2D Inverted(FVector2D(1, 1), FVector2D(0, 0));
+		Inverted.bIsValid = true;
+		bOk = UnrealMcpRql::LoadWorldPartitionRegion(Inverted, &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("an inverted box is refused (%s)"), *Error), !bOk && Error.Contains(TEXT("not a valid box")) && Loaded.IsEmpty());
+		TestFalse(TEXT("an unset box is refused"), UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(ForceInit), &Loaded));
+		TestTrue(TEXT("an empty GUID list is nothing to do"), UnrealMcpRql::LoadWorldPartitionActors({}));
+		bOk = UnrealMcpRql::LoadWorldPartitionRegion(OverCube, &Loaded, &Error);
+		TestTrue(*FString::Printf(TEXT("a region over the cube (%s)"), *Error), bOk);
+		TestTrue(TEXT("returns it"), Loaded.Num() == 1 && Loaded[0] && Loaded[0]->GetActorLabel() == TEXT("WpSpecFar"));
+		TestEqual(TEXT("actors lists it"), CountFar(), 1.0);
+		TestTrue(TEXT("the same region again loads nothing new"), UnrealMcpRql::LoadWorldPartitionRegion(OverCube, &Loaded) && Loaded.IsEmpty());
+		TestEqual(*FString::Printf(TEXT("nothing marked unsaved (%s)"), *FString::Join(DirtyPackages(), TEXT(", "))), DirtyPackages(), DirtyBefore);
+		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBefore);
+
+		// By GUID (unloadedActors | where Label == "WpSpecFar" | select Guid), after a fresh open.
+		if (!Reopen())
+			return;
+		const TSharedPtr<FJsonObject> Row = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["unloadedActors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"WpSpecFar"}]}},{"op":"select","fields":[{"name":"Guid","expr":{"path":["Guid"]}}]}]})RQL"));
+		FGuid Guid;
+		if (!TestTrue(*FString::Printf(TEXT("its GUID (%s)"), *CellText(Row)), FGuid::Parse(CellText(Row), Guid)))
+			return;
+		const TArray<FString> DirtyBeforeGuid = DirtyPackages();
+		const int32 StepsBeforeGuid = UndoSteps();
+		bOk = UnrealMcpRql::LoadWorldPartitionActors({ Guid, Guid, FGuid::NewGuid() }, &Error);
+		TestTrue(*FString::Printf(TEXT("loads by GUID, skipping a repeat and an unknown one (%s)"), *Error), bOk);
+		TestEqual(TEXT("actors lists it"), CountFar(), 1.0);
+		TestTrue(TEXT("a loaded actor's GUID is nothing to do"), UnrealMcpRql::LoadWorldPartitionActors({ Guid }));
+		TestEqual(TEXT("nothing marked unsaved"), DirtyPackages(), DirtyBeforeGuid);
+		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBeforeGuid);
+	});
+
+	It("stays quiet on a level without World Partition, where LoadActors says why it has nothing to do and the public API loads nothing", [this]()
 	{
 		using namespace UnrealMcpRqlSpecHelpers;
 		// editor | call NewLevel()
@@ -192,6 +252,10 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		// editor | call LoadActors(["Anything"])
 		const TSharedPtr<FJsonObject> Load = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"LoadActors","args":[{"list":[{"lit":"Anything"}]}]}]})RQL"));
 		TestTrue(*FString::Printf(TEXT("LoadActors explains (%s)"), *Said(Load)), !IsOk(Load) && Said(Load).Contains(TEXT("has no World Partition: every actor is loaded")));
+		// The public API has nothing to load there: success, nothing loaded.
+		TArray<AActor*> Loaded;
+		TestTrue(TEXT("LoadWorldPartitionActors without World Partition"), UnrealMcpRql::LoadWorldPartitionActors({ FGuid::NewGuid() }));
+		TestTrue(TEXT("LoadWorldPartitionRegion without World Partition"), UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(0, 0), FVector2D(1, 1)), &Loaded) && Loaded.IsEmpty());
 	});
 }
 
