@@ -844,12 +844,13 @@ void FUnrealAILandscapeSpec::Define()
 			if (!TestNotNull(TEXT("landscape created"), Landscape))
 				return;
 			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
-			const FString Points = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 900.0, 0, 0), *P3(X0 + 900.0, 0, 0));
-			TestTrue(TEXT("a ditch carved"), Call(Label, TEXT("Carve"), Points + TEXT(",") + Lit(100) + TEXT(",") + Lit(200)));
+			// 16 m long, 1 m wide, 4 m deep, clear of the landscape's edges: far longer than wide at any MinHeight cut.
+			const FString Points = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *P3(X0 - 800.0, 0, 0), *P3(X0 + 800.0, 0, 0));
+			TestTrue(TEXT("a ditch carved"), Call(Label, TEXT("Carve"), Points + TEXT(",") + Lit(100) + TEXT(",") + Lit(400)));
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(TEXT("Bumps runs"), Call(Label, TEXT("Bumps"), Lit(100) + TEXT(",") + Lit(500), &Result, /*bQuery*/ true));
 			const FString Text = LandscapeSpecJson(Result);
-			TestTrue(*FString::Printf(TEXT("one Channel about 18 m long, no Pit (%s)"), *Text.Left(500)),
+			TestTrue(*FString::Printf(TEXT("one Channel about 16 m long, no Pit (%s)"), *Text.Left(500)),
 				Text.Contains(TEXT("\"Kind\":\"Channel\"")) && !Text.Contains(TEXT("\"Kind\":\"Pit\"")));
 		});
 
