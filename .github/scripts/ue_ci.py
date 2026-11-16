@@ -485,11 +485,12 @@ def fab_zip(args) -> None:
 
 
 def fab_engine_zips(args) -> None:
-    """One Fab project file per engine: unreal-mcp-plugin-fab-<version>-ue<engine>.zip, from the released Fab asset.
+    """One Fab project file per engine: unreal-mcp-plugin-fab-<version>-ue<engine>.zip, from dist/'s Fab zip.
 
     Epic's Fab review requires EngineVersion in the .uplugin of what it compiles, while every other asset must stay
-    unpinned (UE treats the key as an exact match). So only these operator-built zips carry it, and only they take
-    the checkout's ThirdPartyNotices.txt and Description, so a released version gets corrected text without a release.
+    unpinned (UE treats the key as an exact match), so only these zips carry it. The release builds and attaches
+    them; they take the checkout's ThirdPartyNotices.txt and Description, so rerunning this on a released version's
+    Fab zip corrects that text without a release. In CI the zip names go to the step output `fab_engine_zips`.
     """
     source = ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip"
     if not source.is_file():
@@ -504,10 +505,14 @@ def fab_engine_zips(args) -> None:
     description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
     require_fab_build(stage)
-    for engine in FAB_ENGINES:
+    names = [f"unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip" for engine in FAB_ENGINES]
+    for engine, name in zip(FAB_ENGINES, names):
         pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
-        zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip", prefix="UnrealMCP/")
+        zip_dir(stage, ROOT / "dist" / name, prefix="UnrealMCP/")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"fab_engine_zips={' '.join(names)}\n")
     print(f"Fab project files for UE {', '.join(FAB_ENGINES)}: {count_files(stage)} file(s) each, no executable.")
 
 

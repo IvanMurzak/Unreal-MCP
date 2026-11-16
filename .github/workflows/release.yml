@@ -589,6 +589,8 @@ jobs:
     if: vars.UNREAL_RUNNER_READY == 'true'
     # Windows only: this is the Fab Win64 package. The engine label must match the ue-env version below.
     runs-on: [self-hosted, windows, unreal-5-8]
+    outputs:
+      fab_engine_zips: ${{ steps.fab_engine_zips.outputs.fab_engine_zips }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -631,7 +633,7 @@ jobs:
           path: ./bridge-staging/win-x64
       # The per-RID release zips (the exact bytes publish-release attaches): stage-bridge writes their SHA-256 into
       # the plugin (Source/ThirdParty/UnrealMcpBridge/SHA256SUMS), the trust anchor the editor verifies a downloaded
-      # bridge against when the plugin ships without one (the Fab asset, docs/ARCHITECTURE.md §6.8).
+      # bridge against (docs/ARCHITECTURE.md §6.8).
       - name: Download bridge release zips (osx + linux)
         uses: actions/download-artifact@v8
         with:
@@ -664,6 +666,7 @@ jobs:
       # The Fab project files: one zip per engine with EngineVersion pinned (docs/RELEASING.md C5), built from the
       # Fab zip above, so a Fab update only needs these release assets as the listing's File Links.
       - name: Build per-engine Fab zips
+        id: fab_engine_zips
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py fab-engine-zips --version ${{ needs.check-version.outputs.version }}
       # Machine-wide UE serialization (#293) — see the plugin job. The source zip above runs no UE.
       - name: Acquire machine-wide UE lock
@@ -1178,7 +1181,7 @@ jobs:
   # the CLI / consumers download.
   verify-release:
     name: verify published release
-    needs: [check-version, publish-npm, publish-release]
+    needs: [check-version, build-plugin-zip, publish-npm, publish-release]
     if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -1211,9 +1214,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-version.outputs.tag }}
           VERSION: ${{ needs.check-version.outputs.version }}
+          # One name per FAB_ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
+          FAB_ENGINE_ZIPS: ${{ needs.build-plugin-zip.outputs.fab_engine_zips }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${FAB_ENGINE_ZIPS:-}" ]; then
+            echo "::error::build-plugin-zip reported no per-engine Fab zips."
+            exit 1
+          fi
           release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
           tag_name="$(jq -r '.tagName' <<<"$release_json")"
           is_draft="$(jq -r '.isDraft' <<<"$release_json")"
@@ -1233,10 +1242,7 @@ jobs:
             "unreal-mcp-plugin-source-${VERSION}.zip.minisig" \
             "unreal-mcp-plugin-fab-${VERSION}.zip" \
             "unreal-mcp-plugin-fab-${VERSION}.zip.minisig" \
-            "unreal-mcp-plugin-fab-${VERSION}-ue5.5.zip" \
-            "unreal-mcp-plugin-fab-${VERSION}-ue5.6.zip" \
-            "unreal-mcp-plugin-fab-${VERSION}-ue5.7.zip" \
-            "unreal-mcp-plugin-fab-${VERSION}-ue5.8.zip" \
+            ${FAB_ENGINE_ZIPS} \
             "unreal-mcp-bridge-win-x64.zip" \
             "unreal-mcp-bridge-osx-arm64.zip" \
             "unreal-mcp-bridge-osx-x64.zip" \
@@ -1249,7 +1255,7 @@ jobs:
             fi
           done
           exit "$missing"
-      # A Fab install downloads the attached bridge zips and accepts them only if they match the SHA256SUMS shipped
+      # The editor's bridge download accepts the attached bridge zips only if they match the SHA256SUMS shipped
       # inside the plugin (docs/ARCHITECTURE.md §6.8): prove the published bytes and the shipped digests agree.
       - name: Verify the bridge zips match the plugin's SHA256SUMS
         env:

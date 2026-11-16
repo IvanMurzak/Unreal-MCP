@@ -217,7 +217,11 @@ class CiStepTests(unittest.TestCase):
             self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 0)
             (plugin / "ThirdPartyNotices.txt").write_text("corrected")
             (plugin / "UnrealMCP.uplugin").write_text(json.dumps({"Description": "corrected"}))
-            self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
+            github_output = self.runner_temp / "github_output"
+            with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+                self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
+        names = [f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip" for engine in ci.FAB_ENGINES]
+        self.assertEqual(github_output.read_text(encoding="utf-8"), "fab_engine_zips=" + " ".join(names) + "\n")
         dist = plugin.parent / "dist"
         for engine in ci.FAB_ENGINES:
             with zipfile.ZipFile(dist / f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip") as archive:
