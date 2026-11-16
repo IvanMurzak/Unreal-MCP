@@ -170,7 +170,7 @@ namespace UnrealMcpRqlWorldPartitionLocal
 	TArray<AActor*> LoadAndCollect(UWorld* World, const TArray<FGuid>& Guids)
 	{
 		FString Error;
-		if (!UnrealMcpRqlWorldPartition::Load(Guids, Error))
+		if (!UnrealMcpRql::LoadWorldPartitionActors(Guids, &Error))
 			return UnrealMcpRql::Failed<TArray<AActor*>>(Error);
 		return UnrealMcpRqlWorldPartition::Actors(World, Guids);
 	}
@@ -252,18 +252,16 @@ bool UnrealMcpRql::LoadWorldPartitionActors(const TArray<FGuid>& Guids, FString*
 bool UnrealMcpRql::LoadWorldPartitionRegion(const FBox2D& Region, TArray<AActor*>* OutLoaded, FString* OutError)
 {
 	UWorld* World = UnrealMcpRql::EditorWorld();
-	TArray<FGuid> Guids;
-	const TArray<FUnrealMcpUnloadedActor> Rows = UnrealMcpRqlWorldPartition::Unloaded(World, &Guids);
 	TArray<FGuid> ToLoad;
-	for (int32 Index = 0; Index < Rows.Num(); ++Index)
+	UnrealMcpRqlWorldPartitionLocal::ForEachUnloaded(World, [&](const FWorldPartitionActorDescInstance& Instance)
 	{
-		const FBox& Bounds = Rows[Index].Bounds;
+		const FBox Bounds = Instance.GetEditorBounds();
 		// A descriptor without bounds (an actor with no primitive) is placed at its location.
-		const FBox2D Footprint = Bounds.IsValid ? FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max))
-			: FBox2D(FVector2D(Rows[Index].Location), FVector2D(Rows[Index].Location));
+		const FVector2D Location(Instance.GetActorTransform().GetLocation());
+		const FBox2D Footprint = Bounds.IsValid ? FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)) : FBox2D(Location, Location);
 		if (Region.Intersect(Footprint))
-			ToLoad.Add(Guids[Index]);
-	}
+			ToLoad.Add(Instance.GetGuid());
+	});
 	if (!LoadWorldPartitionActors(ToLoad, OutError))
 		return false;
 	if (OutLoaded)
