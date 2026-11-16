@@ -43,6 +43,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 
 	/** Sizes, radii and widths beyond 100 km are typos, not terrain features. */
 	constexpr double MaxLength = 10000000.0;
+	/** A remesh far finer than the ground it covers makes millions of triangles: at most this many. */
+	constexpr double MaxRemeshTriangles = 4000000.0;
 	/** The component tag a shape's mesh component carries ("MeshTerrainShape:Box"), so Edit can resize it. */
 	const TCHAR* ShapeTagPrefix = TEXT("MeshTerrainShape:");
 
@@ -538,6 +540,22 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return true;
 	}
 
+	/** A Remesh box's coverage (Size, cm) and edge length, as AddRemesh and AddRoad set them. */
+	bool SetRemesh(UModifierComponent* Remesh, const FVector& Size, double EdgeLength)
+	{
+		return SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
+			&& SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength);
+	}
+
+	/** A spline modifier's flat half-width, falloff, paint channel ("" none) and path, as AddSpline and AddRoad set them. */
+	bool SetSpline(AMeshPartition* Terrain, UModifierComponent* Spline, const TArray<FVector>& Points, double Plateau, double Falloff, const FString& Channel, bool bClosed)
+	{
+		return SetNumber(Spline, TEXT("PlateauDistance"), Plateau) && SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
+			&& SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
+				: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
+			&& ApplySplinePoints(Spline, Points, bClosed);
+	}
+
 	// ---- Lattices ----------------------------------------------------------------------------------------------------
 
 	/**
@@ -668,10 +686,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(U
 	FTerrainTransaction Transaction(LOCTEXT("AddSpline", "Add Mesh Terrain Spline"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Points[0], FRotator::ZeroRotator, Label);
-	if (!Spline || !SetNumber(Spline, TEXT("PlateauDistance"), Width / 2.0) || !SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
-		|| !SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
-			: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
-		|| !ApplySplinePoints(Spline, Points, Closed))
+	if (!Spline || !SetSpline(Terrain, Spline, Points, Width / 2.0, Falloff, Channel, Closed))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -693,6 +708,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff)))
 		return FRoadResult();
 
+	const double RoadEdge = FMath::Clamp(Width / 6.0, 50.0, 300.0); // remesh edges under a road
 	// The path every few metres (at most 1000 points: the spline's limit).
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
@@ -725,14 +741,13 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	// climbing early enough), as close to the ground as that allows. Otherwise it follows the ground from the start as far up
 	// as it can. Then at most the grade per step, forwards and backwards.
 	const double Tan = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9));
-	const double Total = Along.Last();
-	const bool bFits = FMath::Abs(Ground.Last() - Ground[0]) <= Total * Tan;
+	const bool bFits = FMath::Abs(Ground.Last() - Ground[0]) <= Length * Tan;
 	TArray<double> Z = Ground;
 	if (bFits)
 	{
 		for (int32 Index = 0; Index < Z.Num(); ++Index)
 		{
-			const double FromStart = Along[Index] * Tan, FromEnd = (Total - Along[Index]) * Tan;
+			const double FromStart = Along[Index] * Tan, FromEnd = (Length - Along[Index]) * Tan;
 			Z[Index] = FMath::Clamp(Ground[Index], FMath::Max(Ground[0] - FromStart, Ground.Last() - FromEnd), FMath::Min(Ground[0] + FromStart, Ground.Last() + FromEnd));
 		}
 	}
@@ -781,20 +796,17 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Box.Min.Z = FMath::Min(Built.Min.Z, Box.Min.Z) - 1000.0;
 		Box.Max.Z = FMath::Max(Built.Max.Z, Box.Max.Z) + 1000.0;
 		const FVector Size = Box.GetSize();
-		// Edges a sixth of the road's width, longer when that would pass about 4M triangles (AddRemesh's limit).
-		const double Edge = FMath::Max(FMath::Clamp(Width / 6.0, 50.0, 300.0), FMath::Sqrt(2.0 * Size.X * Size.Y / 4000000.0));
+		// Edges a sixth of the road's width, longer when that would pass AddRemesh's triangle limit.
+		const double Edge = FMath::Max(RoadEdge, FMath::Sqrt(2.0 * Size.X * Size.Y / MaxRemeshTriangles));
 		UModifierComponent* Remesh = Remeshed.Spawn(ModifierClassOf(TEXT("Remesh")), Box.GetCenter(), FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Remesh"));
-		if (!Remesh || !SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
-			|| !SetNumber(Remesh, TEXT("TargetEdgeLength"), Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
+		if (!Remesh || !SetRemesh(Remesh, Size, Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
 			return FRoadResult();
 		RemeshLabel = Remesh->GetOwner()->GetActorNameOrLabel();
 	}
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
 	// Flat 1 m past each edge, so the whole Width is flat (the banks start outside it).
-	if (!Spline || !SetNumber(Spline, TEXT("PlateauDistance"), Width / 2.0 + 100.0) || !SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
-		|| !SetProperty(Spline, TEXT("WeightChannels"), TEXT("()")) || !SetNumber(Spline, TEXT("Priority"), Order + 2.0)
-		|| !ApplySplinePoints(Spline, Road, /*bClosed*/ false))
+	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetSpline(Terrain, Spline, Road, Width / 2.0 + 100.0, Falloff, FString(), /*bClosed*/ false))
 		return FRoadResult();
 	Remeshed.bKept = true;
 	const FModifierOpResult Built = Placed.Keep();
@@ -832,7 +844,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	}
 	else if (Out.MaxSlope > MaxSlope + 0.5)
 	{
-		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, FMath::Clamp(Width / 6.0, 50.0, 300.0));
+		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, RoadEdge);
 	}
 	Out.Seconds = SecondsSince(Start);
 	return Out;
@@ -977,17 +989,15 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(U
 		return Fail(FString::Printf(TEXT("Size %s must be above 0 and at most 10000000 cm on each axis"), *Text(Size)));
 	if (!FMath::IsFinite(EdgeLength) || EdgeLength < 10.0 || EdgeLength > 100000.0)
 		return Fail(FString::Printf(TEXT("EdgeLength %g is outside 10 .. 100000 cm"), EdgeLength));
-	// A remesh far finer than the ground it covers makes millions of triangles: keep it within ~4M.
 	const double Triangles = 2.0 * (Size.X / EdgeLength) * (Size.Y / EdgeLength);
-	if (Triangles > 4000000.0)
-		return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: use longer edges or a smaller Size (at most 4000000)"), Size.X, Size.Y, EdgeLength, Triangles));
+	if (Triangles > MaxRemeshTriangles)
+		return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: use longer edges or a smaller Size (at most %.0f)"), Size.X, Size.Y, EdgeLength, Triangles, MaxRemeshTriangles));
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddRemesh", "Add Mesh Terrain Remesh"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Remesh = Placed.Spawn(ModifierClassOf(TEXT("Remesh")), Location, FRotator::ZeroRotator, Label);
-	if (!Remesh || !SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
-		|| !SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength))
+	if (!Remesh || !SetRemesh(Remesh, Size, EdgeLength))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -1099,8 +1109,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 			const FNumericProperty* Edge = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength")));
 			const double EdgeLength = Edge ? Edge->GetFloatingPointPropertyValue(Edge->ContainerPtrToValuePtr<void>(Modifier)) : 0.0;
 			const double Triangles = EdgeLength > 0.0 ? 2.0 * (NewSize.X / EdgeLength) * (NewSize.Y / EdgeLength) : 0.0;
-			if (Triangles > 4000000.0)
-				return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: at most 4000000"), NewSize.X, NewSize.Y, EdgeLength, Triangles));
+			if (Triangles > MaxRemeshTriangles)
+				return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: at most %.0f"), NewSize.X, NewSize.Y, EdgeLength, Triangles, MaxRemeshTriangles));
 		}
 		else if (Lattice)
 		{
