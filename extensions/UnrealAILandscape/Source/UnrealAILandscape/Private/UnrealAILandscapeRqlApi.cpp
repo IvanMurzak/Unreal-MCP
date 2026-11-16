@@ -1140,10 +1140,10 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 				Distance = FVector2D::Distance(At, FVector2D(Edit.Points[0])) - Edit.Radius;
 			for (int32 P = 0; P + 1 < Edit.Points.Num(); ++P)
 			{
-				const FVector2D A(Edit.Points[P]), B(Edit.Points[P + 1]);
-				const FVector2D AB = B - A;
-				const double T = FMath::Clamp(FVector2D::DotProduct(At - A, AB) / FMath::Max(AB.SizeSquared(), UE_SMALL_NUMBER), 0.0, 1.0);
-				Distance = FMath::Min(Distance, FVector2D::Distance(At, A + AB * T) - Edit.Width * 0.5);
+				const FVector2D From(Edit.Points[P]), To(Edit.Points[P + 1]);
+				const FVector2D Along = To - From;
+				const double T = FMath::Clamp(FVector2D::DotProduct(At - From, Along) / FMath::Max(Along.SizeSquared(), UE_SMALL_NUMBER), 0.0, 1.0);
+				Distance = FMath::Min(Distance, FVector2D::Distance(At, From + Along * T) - Edit.Width * 0.5);
 			}
 			if (Distance <= Bump.Radius)
 				Bump.Edit = Edit.Label.IsEmpty() ? FString::Printf(TEXT("%s #%d"), *Edit.Op, Index) : FString::Printf(TEXT("%s '%s' #%d"), *Edit.Op, *Edit.Label, Index);
