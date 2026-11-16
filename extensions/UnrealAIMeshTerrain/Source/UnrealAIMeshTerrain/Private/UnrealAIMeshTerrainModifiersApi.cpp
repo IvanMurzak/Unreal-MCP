@@ -1200,12 +1200,12 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::
 	const FString Label = Owner->GetActorNameOrLabel();
 	const FString Kind = ModifierKind(Modifier);
 	FTerrainTransaction Transaction(LOCTEXT("RemoveModifier", "Remove Mesh Terrain Modifier"));
-	// A modifier actor holding only this modifier (what the palette and these operations place), or the actor of a base mesh
-	// left behind by a deleted terrain, goes as a whole; a modifier component on any other actor (the terrain itself, a
-	// Blueprint, a second modifier) goes alone, with the shape mesh AddShape gave it.
+	// A modifier actor holding only this modifier (what the palette and these operations place), or a base mesh's own actor
+	// (the base mesh is its root: what Create made) left behind by a deleted terrain, goes as a whole; a modifier component on
+	// any other actor (the terrain itself, a Blueprint, a second modifier) goes alone, with the shape mesh AddShape gave it.
 	TArray<UModifierComponent*> Siblings;
 	Owner->GetComponents(Siblings);
-	if ((Cast<UE::MeshPartition::AModifierActor>(Owner) || Modifier->IsBase()) && Siblings.Num() == 1)
+	if ((Cast<UE::MeshPartition::AModifierActor>(Owner) || (Modifier->IsBase() && Owner->GetRootComponent() == Modifier)) && Siblings.Num() == 1)
 	{
 		if (!Owner->GetWorld()->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true))
 			return Fail(FString::Printf(TEXT("could not delete %s"), *Label));

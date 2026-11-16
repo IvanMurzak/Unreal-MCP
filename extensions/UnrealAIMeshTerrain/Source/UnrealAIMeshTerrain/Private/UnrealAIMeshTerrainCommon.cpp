@@ -361,10 +361,12 @@ namespace UnrealAIMeshTerrain
 		return Box;
 	}
 
-	bool GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, FVector& OutHighest, FVector& OutLowest)
+	void GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, TOptional<FVector>& OutHighest, TOptional<FVector>& OutLowest)
 	{
+		OutHighest.Reset();
+		OutLowest.Reset();
 		if (!Base.IsValid)
-			return false;
+			return;
 		// The highest and lowest vertices of the sections' collision, a few candidates each way: a vertex can lie under an
 		// overhang (the underside of a Union shape past the terrain's edge), which no vertical trace reaches, so the first
 		// candidate the trace from above lands on is the ground's extreme. Within the terrain's own area: the collision also
@@ -408,21 +410,27 @@ namespace UnrealAIMeshTerrain
 				}
 			}
 		}
-		auto FirstOnGround = [Terrain, &ByZ](TArray<FVector>& Best, bool bHighest, FVector& Out)
+		// The trace at the vertex itself, then 5 cm beside it (diagonally too): a pit's floor corner sits right under the rim of
+		// one or two vertical walls.
+		auto FirstOnGround = [Terrain, &ByZ](TArray<FVector>& Best, bool bHighest, TOptional<FVector>& Out)
 		{
 			Best.Sort(ByZ(bHighest));
 			for (const FVector& Point : Best)
 			{
-				const FSurfaceSample Ground = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false);
-				if (Ground.bInside && FMath::IsNearlyEqual(Ground.Height, Point.Z, 2.0))
+				for (const FVector2D Offset : { FVector2D(0.0), FVector2D(5.0, 0.0), FVector2D(-5.0, 0.0), FVector2D(0.0, 5.0), FVector2D(0.0, -5.0),
+					FVector2D(5.0, 5.0), FVector2D(5.0, -5.0), FVector2D(-5.0, 5.0), FVector2D(-5.0, -5.0) })
 				{
-					Out = FVector(Point.X, Point.Y, Ground.Height);
-					return true;
+					const FSurfaceSample Ground = SampleSurface(Terrain, Point.X + Offset.X, Point.Y + Offset.Y, /*bChannels*/ false);
+					if (Ground.bInside && FMath::IsNearlyEqual(Ground.Height, Point.Z, 2.0))
+					{
+						Out = FVector(Point.X + Offset.X, Point.Y + Offset.Y, Ground.Height);
+						return;
+					}
 				}
 			}
-			return false;
 		};
-		return FirstOnGround(High, true, OutHighest) && FirstOnGround(Low, false, OutLowest);
+		FirstOnGround(High, true, OutHighest);
+		FirstOnGround(Low, false, OutLowest);
 	}
 
 	FString FBuildState::Describe() const

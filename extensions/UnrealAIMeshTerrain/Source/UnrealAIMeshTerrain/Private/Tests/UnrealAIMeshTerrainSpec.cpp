@@ -264,8 +264,11 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TSharedPtr<FJsonObject> Result;
 			TestTrue(*FString::Printf(TEXT("AddShape (%s)"), *MeshTerrainSpecJson(Result)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Sphere"},{"list":[{"lit":-898500},{"lit":0},{"lit":0}]},{"list":[{"lit":2000},{"lit":2000},{"lit":1000}]},{"lit":"Union"}]}]})RQL"), *Label), true, &Result));
 
-			FVector Highest, Lowest;
-			TestTrue(TEXT("the built ground has extremes"), UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), Highest, Lowest));
+			TOptional<FVector> High, Low;
+			UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), High, Low);
+			if (!TestTrue(TEXT("the built ground has extremes"), High.IsSet() && Low.IsSet()))
+				return;
+			const FVector Highest = *High, Lowest = *Low;
 			TestTrue(*FString::Printf(TEXT("highest ground on the dome's top (%s)"), *Highest.ToString()), FMath::IsNearlyEqual(Highest.Z, 500.0, 5.0)
 				&& FVector2D::Distance(FVector2D(Highest), FVector2D(-898500.0, 0.0)) <= 300.0);
 			const FBox Base = UnrealAIMeshTerrain::BaseBounds(Terrain);
@@ -282,6 +285,13 @@ void FUnrealAIMeshTerrainSpec::Define()
 			const FString Json = MeshTerrainSpecJson(Result);
 			TestTrue(*FString::Printf(TEXT("Bounds.Base in metres (%s)"), *Json), Json.Contains(TEXT("\"Base\":{\"Min\":[-902000,-2000,")) && Json.Contains(TEXT("\"SizeMeters\":[40,40]}")));
 			TestTrue(TEXT("Bounds.Highest and Lowest"), Json.Contains(TEXT("\"Highest\":[")) && Json.Contains(TEXT("\"Lowest\":[")));
+
+			// A box pit with vertical walls: its floor corners sit right under the rim, still the lowest ground.
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Box", [-901000, 0, 0], [1000, 1000, 1000], "Subtract")
+			TestTrue(TEXT("box pit"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Box"},{"list":[{"lit":-901000},{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":1000},{"lit":1000}]},{"lit":"Subtract"}]}]})RQL"), *Label), true, &Result));
+			UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), High, Low);
+			TestTrue(*FString::Printf(TEXT("lowest ground on the pit's floor (%s)"), Low ? *Low->ToString() : TEXT("unset")), Low.IsSet() && FMath::IsNearlyEqual(Low->Z, -500.0, 2.0)
+				&& FVector2D::Distance(FVector2D(*Low), FVector2D(-901000.0, 0.0)) <= 710.0);
 		});
 
 		It("reads the flat ground with Surface: height, slope, location; off the terrain Inside is false", [this]()

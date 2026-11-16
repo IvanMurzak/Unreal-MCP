@@ -172,7 +172,8 @@ move the terrain's vertices within their radius; a Boolean shape's surface is ma
 Sphere's are 100+ m across), so a pad or stroke smaller than those finds no vertex to move there.
 
 Leftovers: `meshTerrainModifiers | where Terrain == null` lists the modifiers bound to no terrain and the base meshes a
-deleted terrain left behind (the terrain actor deleted alone, e.g. in the Outliner); `Bind` or `Remove` them. A stray brush
+deleted terrain left behind (the terrain actor deleted alone, e.g. in the Outliner); `Bind` the modifiers to a terrain or
+`Remove` them; base meshes can only be removed. A stray brush
 stroke is cancelled exactly by the opposite stroke (Raise / Lower) at the same point with the same radius, height and
 falloff: a brush stores offsets.
 

@@ -114,12 +114,12 @@ namespace UnrealAIMeshTerrainModuleLocal
 		{
 			const FBox Base = BaseBounds(Terrain);
 			Fields->SetField(TEXT("Base"), BoxJson(Base));
-			FVector Highest, Lowest;
-			if (GroundExtremes(Terrain, Base, Highest, Lowest))
-			{
-				Fields->SetArrayField(TEXT("Highest"), Vector({ Highest.X, Highest.Y, Highest.Z }));
-				Fields->SetArrayField(TEXT("Lowest"), Vector({ Lowest.X, Lowest.Y, Lowest.Z }));
-			}
+			TOptional<FVector> Highest, Lowest;
+			GroundExtremes(Terrain, Base, Highest, Lowest);
+			if (Highest)
+				Fields->SetArrayField(TEXT("Highest"), Vector({ Highest->X, Highest->Y, Highest->Z }));
+			if (Lowest)
+				Fields->SetArrayField(TEXT("Lowest"), Vector({ Lowest->X, Lowest->Y, Lowest->Z }));
 		}
 		return Out;
 	}
@@ -393,8 +393,8 @@ them in order); the Boolean modifier may log "reported errors ... cracks" for bo
 own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller than those changes nothing there (`AddRemesh`
 over the shape first gives it finer triangles).
 
-Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` them to a
-terrain or `Remove` them (a deleted terrain's base meshes too); `meshTerrainCreate | call Delete(terrain)` deletes a whole
+Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` a modifier to
+a terrain or `Remove` it; a deleted terrain's base meshes (`Modifier.IsBase`) can only be removed; `meshTerrainCreate | call Delete(terrain)` deletes a whole
 terrain with its modifiers. A pad at the wrong height: `Move` it (its location Z). A stray brush stroke: the opposite stroke
 (Raise / Lower) at the same point with the same radius, height and falloff cancels it exactly (the brush stores offsets), or
 `Remove` its brush when it holds no other stroke.)MD"));
