@@ -147,7 +147,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength, label, within) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -375,9 +375,24 @@ landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)           
 landscapes | select Label PaintLayers Sections
 ```
 
+Paint by the ground instead of circles with `PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength,
+label, within)`: every vertex whose slope (degrees) and world height (cm) fall in the ranges, with soft edges (2 degrees past
+the slope bounds, 50 cm past the height bounds); `within` ([minX, minY, maxX, maxY] world cm, optional) limits it to a
+box. Each call takes its weight from the layers painted before it, so paint the base layer first, then one rule per layer,
+the one that must win last; a Paint circle afterwards paints over a rule (and a rule over a circle) the same way.
+
+```
+landscape | call Paint(unreal.find("Island"), "Grass", [0, 0, 0], 0)                                   grass everywhere
+landscape | call PaintWhere(unreal.find("Island"), "Sand", 0, 15, -100000, 300)                         beaches: flat-ish ground up to 3 m above the sea (Z 0)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90)                                      every slope steeper than 30 degrees
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 0, 90, 22000)                                everything above 220 m (a mountain top)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 100000, 1, "mountain rock", [-20000, 20000, 20000, 70000])   slopes on the mountain only
+```
+
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
-Ramp, RoadBetween, Paint, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
-Index, Op, Label, Points, Radius, Width, Height, Layer, Time). Give a call an optional last argument `Label` ("river", "road to the
+Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
+Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
+switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional last argument `Label` ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
 made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
 place with no `Edit` was most likely made outside these operations (or before the log, or past its last 1000 records).

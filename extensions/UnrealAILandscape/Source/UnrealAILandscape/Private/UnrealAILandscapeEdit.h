@@ -52,12 +52,23 @@ namespace UnrealAILandscapeRqlApiLocal
 	/** How many records a landscape's edit log keeps (the oldest go first). */
 	constexpr int32 MaxEdits = 1000;
 
+	/** A logged path keeps the points that hold it within this distance of the real one (cm) ... */
+	constexpr double LogPathTolerance = 50.0;
+	/** ... and at most this many (a coarser tolerance when it needs more). */
+	constexpr int32 MaxLogPathPoints = 1000;
+	/** The points of all records together (the oldest records go first): a long session must not bloat the level file. */
+	constexpr int32 MaxLogPoints = 100000;
+
+	/** @p Points thinned to the fewest that keep the path within @p Tolerance cm (Douglas-Peucker), its ends included. */
+	TArray<FVector> ThinPath(const TArray<FVector>& Points, double Tolerance);
+
 	/**
 	 * Append a record to the edit log of @p Landscape's landscape actor (creating the editor-only log component the first
-	 * time), inside the current operation's undo step; the oldest records go beyond MaxEdits.
+	 * time), inside the current operation's undo step; a path is thinned to LogPathTolerance (at most MaxLogPathPoints); the
+	 * oldest records go beyond MaxEdits records or MaxLogPoints points. @p Rule describes a rule edit (PaintWhere).
 	 */
 	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
-		double Width, double Height, const FString& Layer = FString());
+		double Width, double Height, const FString& Layer = FString(), const FString& Rule = FString());
 
 	/** The edit log of @p Landscape's landscape actor, oldest first (empty when it has none). */
 	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape);

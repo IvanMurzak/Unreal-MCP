@@ -863,6 +863,104 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("the log is editor-only (not cooked)"), Landscape->FindComponentByClass<UUnrealAILandscapeEditLog>() && Landscape->FindComponentByClass<UUnrealAILandscapeEditLog>()->IsEditorOnly());
 		});
 
+		It("keeps a logged path within 50 cm of the real one (switchback corners kept), at most MaxLogPathPoints per record and MaxLogPoints in all", [this]()
+		{
+			const FString Label = TEXT("RqlSpecLogPath_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 810000.0;
+			ALandscape* Landscape = Create(Label, X0);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			using namespace UnrealAILandscapeRqlApiLocal;
+			// A road up a hill: 8 switchback legs of 60 m, a point every 2 m (as RoadBetween returns it), climbing 1 m per leg.
+			TArray<FVector> Road;
+			for (int32 Leg = 0; Leg < 8; ++Leg)
+			{
+				for (int32 Step = 0; Step < 30; ++Step)
+					Road.Add(FVector(X0 + Leg * 400.0, (Leg % 2 ? 6000.0 - Step * 200.0 : Step * 200.0), Leg * 100.0 + Step * 3.3));
+			}
+			{
+				FScopedTransaction Transaction(FText::FromString(TEXT("log path")));
+				RecordEdit(Landscape, TEXT("RoadBetween"), TEXT("switchbacks"), Road, 500.0, 400.0, 0.0);
+			}
+			const TArray<FVector>& Kept = EditLog(Landscape).Last().Points;
+			double Worst = 0.0;
+			for (const FVector& Real : Road)
+			{
+				double Nearest = TNumericLimits<double>::Max();
+				for (int32 Index = 0; Index + 1 < Kept.Num(); ++Index)
+					Nearest = FMath::Min(Nearest, static_cast<double>(FMath::PointDistToSegment(Real, Kept[Index], Kept[Index + 1])));
+				Worst = FMath::Max(Worst, Nearest);
+			}
+			// 64 evenly spaced points (the old log) cut every corner by metres
+			TestTrue(*FString::Printf(TEXT("every real point within 50 cm (+1 cm rounding) of the logged path (worst %.1f cm, %d of %d points kept)"), Worst, Kept.Num(), Road.Num()),
+				Worst <= 51.0 && Kept.Num() >= 16 && Kept.Num() < Road.Num());
+			TestTrue(TEXT("its ends are kept"), Kept.Num() && Kept[0].Equals(Road[0], 1.0) && Kept.Last().Equals(Road.Last(), 1.0));
+
+			// A path that needs more than MaxLogPathPoints at 50 cm is thinned more coarsely, never stored whole.
+			TArray<FVector> Wiggle;
+			for (int32 Index = 0; Index < 3000; ++Index)
+				Wiggle.Add(FVector(X0 + Index * 100.0, (Index % 2) * 300.0, 0.0));
+			{
+				FScopedTransaction Transaction(FText::FromString(TEXT("log wiggle")));
+				RecordEdit(Landscape, TEXT("Carve"), TEXT("wiggle"), Wiggle, 0.0, 200.0, 100.0);
+			}
+			TestTrue(*FString::Printf(TEXT("at most MaxLogPathPoints (%d)"), EditLog(Landscape).Last().Points.Num()), EditLog(Landscape).Last().Points.Num() <= MaxLogPathPoints);
+
+			// The whole log keeps at most MaxLogPoints: the oldest records go first, the newest stays.
+			{
+				FScopedTransaction Transaction(FText::FromString(TEXT("log bound")));
+				for (int32 Record = 0; Record < MaxLogPoints / MaxLogPathPoints + 10; ++Record)
+					RecordEdit(Landscape, TEXT("Carve"), FString::Printf(TEXT("w%d"), Record), Wiggle, 0.0, 200.0, 100.0);
+			}
+			int32 Stored = 0;
+			for (const FUnrealAILandscapeEdit& Each : EditLog(Landscape))
+				Stored += Each.Points.Num();
+			TestTrue(*FString::Printf(TEXT("all records together at most MaxLogPoints (%d points in %d records)"), Stored, EditLog(Landscape).Num()), Stored <= MaxLogPoints);
+			TestEqual(TEXT("the newest record stays"), EditLog(Landscape).Last().Label, FString::Printf(TEXT("w%d"), MaxLogPoints / MaxLogPathPoints + 9));
+			TestTrue(TEXT("the oldest went first"), EditLog(Landscape)[0].Label != TEXT("switchbacks"));
+		});
+
+		It("PaintWhere paints by slope and height, only inside Within, takes its weight from the other layers and logs its Rule", [this]()
+		{
+			const FString Label = TEXT("RqlSpecPaintWhere_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 830000.0;
+			ALandscape* Landscape = Create(Label, X0, 40);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// A hill 15 m high, 15 m radius: about 57 degrees halfway up its flank, flat on top and around it.
+			TestTrue(TEXT("a steep hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(1500) + TEXT(",") + Lit(1500)));
+			TestTrue(TEXT("grass everywhere"), Call(Label, TEXT("Paint"), TEXT(R"({"lit":"Grass"},)") + P3(X0, 0, 0) + TEXT(",") + Lit(0)));
+			// landscape | call PaintWhere(unreal.find("@LABEL@"), "Rock", 30, 90)
+			TestTrue(TEXT("rock on every slope over 30 degrees"), Call(Label, TEXT("PaintWhere"), TEXT(R"({"lit":"Rock"},)") + Lit(30) + TEXT(",") + Lit(90)));
+			const int32 Flank = LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0 + 750.0, 0);
+			const int32 FlankGrass = LandscapeSpecLayerWeight(Landscape, TEXT("Grass"), X0 + 750.0, 0);
+			TestTrue(*FString::Printf(TEXT("rock on the flank, taking its weight from grass (rock %d, grass %d)"), Flank, FlankGrass), Flank >= 240 && FMath::Abs(Flank + FlankGrass - 255) <= 1);
+			TestEqual(TEXT("no rock on the flat top"), LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, 0), 0);
+			TestEqual(TEXT("no rock on the flat ground around"), LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0 + 1800.0, 1800.0), 0);
+			// landscape | call PaintWhere(unreal.find("@LABEL@"), "Sand", 0, 15, -100000, 200, 1, "beach", [X0 - 2000, -2000, X0, 2000])
+			TestTrue(TEXT("sand on low flat ground in the west half"), Call(Label, TEXT("PaintWhere"), TEXT(R"({"lit":"Sand"},)") + Lit(0) + TEXT(",") + Lit(15) + TEXT(",") + Lit(-100000)
+				+ TEXT(",") + Lit(200) + TEXT(",") + Lit(1) + TEXT(R"(,{"lit":"beach"},{"list":[)") + Lit(X0 - 2000.0) + TEXT(",") + Lit(-2000) + TEXT(",") + Lit(X0) + TEXT(",") + Lit(2000) + TEXT("]}")));
+			TestTrue(*FString::Printf(TEXT("sand on the low ground inside Within (%d)"), LandscapeSpecLayerWeight(Landscape, TEXT("Sand"), X0 - 1800.0, 1800.0)),
+				LandscapeSpecLayerWeight(Landscape, TEXT("Sand"), X0 - 1800.0, 1800.0) >= 240);
+			TestEqual(TEXT("no sand on the same low ground outside Within"), LandscapeSpecLayerWeight(Landscape, TEXT("Sand"), X0 + 1800.0, 1800.0), 0);
+			TestEqual(TEXT("no sand on the hilltop (too high)"), LandscapeSpecLayerWeight(Landscape, TEXT("Sand"), X0 - 100.0, 0), 0);
+			const FUnrealAILandscapeEdit& Last = UnrealAILandscapeRqlApiLocal::EditLog(Landscape).Last();
+			TestTrue(*FString::Printf(TEXT("logged with its rule, layer and box (%s, %s, %s, %d points)"), *Last.Op, *Last.Rule, *Last.Layer, Last.Points.Num()),
+				Last.Op == TEXT("PaintWhere") && Last.Label == TEXT("beach") && Last.Layer == TEXT("Sand") && Last.Rule.Contains(TEXT("0.0..15.0 deg")) && Last.Rule.Contains(TEXT("..200.0 cm")) && Last.Points.Num() == 2);
+			TestFalse(TEXT("MaxSlope past 90 is refused"), Call(Label, TEXT("PaintWhere"), TEXT(R"({"lit":"Rock"},)") + Lit(30) + TEXT(",") + Lit(95)));
+			const auto WithinArgs = [](std::initializer_list<double> Values)
+			{
+				FString Out = TEXT(R"(,{"lit":"Rock"},{"lit":30},{"lit":90},{"lit":-1e9},{"lit":1e9},{"lit":1},{"lit":""},{"list":[)");
+				for (const double Value : Values)
+					Out += FString::Printf(TEXT(R"(%s{"lit":%.0f})"), Out.EndsWith(TEXT("[")) ? TEXT("") : TEXT(","), Value);
+				return Out.RightChop(1) + TEXT("]}");
+			};
+			TestFalse(TEXT("a Within of two numbers is refused"), Call(Label, TEXT("PaintWhere"), WithinArgs({ X0, 0.0 })));
+			TestFalse(TEXT("a Within off the landscape is refused"), Call(Label, TEXT("PaintWhere"), WithinArgs({ X0 + 90000.0, 0.0, X0 + 95000.0, 5000.0 })));
+		});
+
 		It("Coverage lists where a paint layer is painted, in rql-query, and names the layers for an unknown one", [this]()
 		{
 			const FString Label = TEXT("RqlSpecCoverage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);

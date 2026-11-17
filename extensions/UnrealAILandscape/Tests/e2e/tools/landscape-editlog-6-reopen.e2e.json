@@ -5,6 +5,6 @@
     "query": "editor | call OpenLevel(\"/Game/E2E/LsEditLog\")"
   },
   "assert": {
-    "pattern": "LsEditLog"
+    "pattern": "World#\\d+\\(LsEditLog\\)"
   }
 }
