@@ -897,26 +897,32 @@ void FUnrealAILandscapeSpec::Define()
 				Worst <= 51.0 && Kept.Num() >= 16 && Kept.Num() < Road.Num());
 			TestTrue(TEXT("its ends are kept"), Kept.Num() && Kept[0].Equals(Road[0], 1.0) && Kept.Last().Equals(Road.Last(), 1.0));
 
-			// A path that needs more than MaxLogPathPoints at 50 cm is thinned more coarsely, never stored whole.
-			TArray<FVector> Wiggle;
+			// A path that needs more than MaxLogPathPoints at 50 cm (a wave of 20 m, a point a metre) is thinned more coarsely.
+			TArray<FVector> Wave;
 			for (int32 Index = 0; Index < 3000; ++Index)
-				Wiggle.Add(FVector(X0 + Index * 100.0, (Index % 2) * 300.0, 0.0));
+				Wave.Add(FVector(X0 + Index * 100.0, 2000.0 * FMath::Sin(Index * UE_TWO_PI / 20.0), 0.0));
 			{
-				FScopedTransaction Transaction(FText::FromString(TEXT("log wiggle")));
-				RecordEdit(Landscape, TEXT("Carve"), TEXT("wiggle"), Wiggle, 0.0, 200.0, 100.0);
+				FScopedTransaction Transaction(FText::FromString(TEXT("log wave")));
+				RecordEdit(Landscape, TEXT("Carve"), TEXT("wave"), Wave, 0.0, 200.0, 100.0);
 			}
-			TestTrue(*FString::Printf(TEXT("at most MaxLogPathPoints (%d)"), EditLog(Landscape).Last().Points.Num()), EditLog(Landscape).Last().Points.Num() <= MaxLogPathPoints);
+			const int32 WaveKept = EditLog(Landscape).Last().Points.Num();
+			TestTrue(*FString::Printf(TEXT("thinned to at most MaxLogPathPoints, still its shape (%d points)"), WaveKept), WaveKept <= MaxLogPathPoints && WaveKept > 300);
 
-			// The whole log keeps at most MaxLogPoints: the oldest records go first, the newest stays.
+			// The whole log keeps at most MaxLogPoints: the oldest records go first, the newest stays. A zigzag of 1000 points 3 m
+			// apart across keeps all of them, so 110 records hold 110,000.
+			TArray<FVector> Zigzag;
+			for (int32 Index = 0; Index < MaxLogPathPoints; ++Index)
+				Zigzag.Add(FVector(X0 + Index * 100.0, (Index % 2) * 300.0, 0.0));
 			{
 				FScopedTransaction Transaction(FText::FromString(TEXT("log bound")));
 				for (int32 Record = 0; Record < MaxLogPoints / MaxLogPathPoints + 10; ++Record)
-					RecordEdit(Landscape, TEXT("Carve"), FString::Printf(TEXT("w%d"), Record), Wiggle, 0.0, 200.0, 100.0);
+					RecordEdit(Landscape, TEXT("Carve"), FString::Printf(TEXT("w%d"), Record), Zigzag, 0.0, 200.0, 100.0);
 			}
+			TestEqual(TEXT("a zigzag keeps every point"), EditLog(Landscape).Last().Points.Num(), MaxLogPathPoints);
 			int32 Stored = 0;
 			for (const FUnrealAILandscapeEdit& Each : EditLog(Landscape))
 				Stored += Each.Points.Num();
-			TestTrue(*FString::Printf(TEXT("all records together at most MaxLogPoints (%d points in %d records)"), Stored, EditLog(Landscape).Num()), Stored <= MaxLogPoints);
+			TestTrue(*FString::Printf(TEXT("all records together at most MaxLogPoints (%d points in %d records)"), Stored, EditLog(Landscape).Num()), Stored <= MaxLogPoints && Stored > MaxLogPoints - MaxLogPathPoints);
 			TestEqual(TEXT("the newest record stays"), EditLog(Landscape).Last().Label, FString::Printf(TEXT("w%d"), MaxLogPoints / MaxLogPathPoints + 9));
 			TestTrue(TEXT("the oldest went first"), EditLog(Landscape)[0].Label != TEXT("switchbacks"));
 		});

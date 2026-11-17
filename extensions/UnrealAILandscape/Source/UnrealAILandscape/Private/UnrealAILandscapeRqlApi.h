@@ -79,7 +79,7 @@ struct FUnrealAILandscapeEdit
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Layer;
 
-	/** PaintWhere's rule ("slope 30..90 deg, height any"); empty for the other operations */
+	/** PaintWhere's rule ("slope 30.0..90.0 deg, height any"); empty for the other operations */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Rule;
 

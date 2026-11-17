@@ -321,6 +321,27 @@ namespace UnrealAILandscapeRqlApiLocal
 		return Ground;
 	}
 
+	/** Which vertices of @p R (row by row) have a loaded component under them (the rest of a ReadGround reads 0, not ground). */
+	TBitArray<> GroundVertices(const ULandscapeInfo* Info, const FIntRect& R)
+	{
+		const int32 W = R.Width() + 1, H = R.Height() + 1;
+		TBitArray<> Valid(false, W * H);
+		const int32 ComponentQuads = Info->ComponentSizeQuads;
+		const auto Has = [Info](int32 CX, int32 CY) { return Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
+				const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
+				// A vertex on a seam belongs to the components on both sides: any of them will do.
+				Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
+					|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
+			}
+		}
+		return Valid;
+	}
+
 	/**
 	 * Read the vertices of @p R through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
 	 * change each one given its vertex X, Y (true when it changed), let @p BeforeWrite check the new values of the rectangle
@@ -845,12 +866,14 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	FIntRect R = Area.Rect;
 	if (Box.bIsValid)
 	{
-		// The box in vertices: the vertices inside it.
-		const FVector A = ToWorld.InverseTransformPosition(FVector(Box.Min, 0.0)), B = ToWorld.InverseTransformPosition(FVector(Box.Max, 0.0));
-		R.Min.X = FMath::Max(R.Min.X, FMath::CeilToInt(FMath::Min(A.X, B.X)));
-		R.Min.Y = FMath::Max(R.Min.Y, FMath::CeilToInt(FMath::Min(A.Y, B.Y)));
-		R.Max.X = FMath::Min(R.Max.X, FMath::FloorToInt(FMath::Max(A.X, B.X)));
-		R.Max.Y = FMath::Min(R.Max.Y, FMath::FloorToInt(FMath::Max(A.Y, B.Y)));
+		// The vertex rectangle around the box's four corners (a rotated landscape: each vertex is tested against the box below).
+		FBox2D Local(ForceInit);
+		for (const FVector2D& Corner : { Box.Min, Box.Max, FVector2D(Box.Min.X, Box.Max.Y), FVector2D(Box.Max.X, Box.Min.Y) })
+			Local += FVector2D(ToWorld.InverseTransformPosition(FVector(Corner, 0.0)));
+		R.Min.X = FMath::Max(R.Min.X, FMath::FloorToInt(Local.Min.X));
+		R.Min.Y = FMath::Max(R.Min.Y, FMath::FloorToInt(Local.Min.Y));
+		R.Max.X = FMath::Min(R.Max.X, FMath::CeilToInt(Local.Max.X));
+		R.Max.Y = FMath::Min(R.Max.Y, FMath::CeilToInt(Local.Max.Y));
 		if (R.Min.X > R.Max.X || R.Min.Y > R.Max.Y)
 			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Within does not overlap %s"), *Landscape->GetActorNameOrLabel()));
 	}
@@ -868,8 +891,11 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 		FIntPoint(FMath::Min(Whole.Max.X, R.Max.X + 1), FMath::Min(Whole.Max.Y, R.Max.Y + 1)));
 	const int32 GW = G.Width() + 1;
 	const TArray<uint16> Ground = ReadGround(Landscape, Area.Info, HeightLayer, G);
-	const FVector Scale = ToWorld.GetScale3D();
+	const TBitArray<> Valid = GroundVertices(Area.Info, G);
+	const FVector Scale = ToWorld.GetScale3D().GetAbs();
 	const auto LocalZ = [&](int32 X, int32 Y) { return LandscapeDataAccess::GetLocalHeight(Ground[(Y - G.Min.Y) * GW + (X - G.Min.X)]); };
+	// A neighbour in a hole of the landscape (no component) is no ground: the slope is taken one-sided there.
+	const auto Inside = [&](int32 X, int32 Y) { return Valid[(Y - G.Min.Y) * GW + (X - G.Min.X)]; };
 	// 1 inside [Low, High], a cosine to 0 over Edge past either bound.
 	const auto Band = [](double Value, double Low, double High, double Edge)
 	{
@@ -878,12 +904,17 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	TAlphamapAccessor<false> Accessor(Area.Info, LayerInfo);
 	const int32 Changed = EditRect<uint8>(Landscape, Accessor, R, [&](uint8& Value, int32 X, int32 Y)
 	{
-		const int32 X0 = FMath::Max(G.Min.X, X - 1), X1 = FMath::Min(G.Max.X, X + 1);
-		const int32 Y0 = FMath::Max(G.Min.Y, Y - 1), Y1 = FMath::Min(G.Max.Y, Y + 1);
-		const double DzDx = (LocalZ(X1, Y) - LocalZ(X0, Y)) * Scale.Z / FMath::Max((X1 - X0) * Scale.X, UE_KINDA_SMALL_NUMBER);
-		const double DzDy = (LocalZ(X, Y1) - LocalZ(X, Y0)) * Scale.Z / FMath::Max((Y1 - Y0) * Scale.Y, UE_KINDA_SMALL_NUMBER);
+		if (!Inside(X, Y))
+			return false;
+		const int32 X0 = X > G.Min.X && Inside(X - 1, Y) ? X - 1 : X, X1 = X < G.Max.X && Inside(X + 1, Y) ? X + 1 : X;
+		const int32 Y0 = Y > G.Min.Y && Inside(X, Y - 1) ? Y - 1 : Y, Y1 = Y < G.Max.Y && Inside(X, Y + 1) ? Y + 1 : Y;
+		const double DzDx = X1 > X0 ? (LocalZ(X1, Y) - LocalZ(X0, Y)) * Scale.Z / ((X1 - X0) * Scale.X) : 0.0;
+		const double DzDy = Y1 > Y0 ? (LocalZ(X, Y1) - LocalZ(X, Y0)) * Scale.Z / ((Y1 - Y0) * Scale.Y) : 0.0;
 		const double Slope = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(DzDx * DzDx + DzDy * DzDy)));
-		const double Height = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y))).Z;
+		const FVector World = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y)));
+		if (Box.bIsValid && !Box.IsInsideOrOn(FVector2D(World)))
+			return false;
+		const double Height = World.Z;
 		const double Weight = Strength * Band(Slope, MinSlope, MaxSlope, 2.0) * Band(Height, MinHeight, MaxHeight, 50.0);
 		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Weight), 0, 255));
 		if (Target <= Value)
@@ -930,20 +961,7 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 	// The ground (ReadGround); the change is then added to the layer edits are written to, as Carve and Ramp do.
 	TArray<uint16> Ground = ReadGround(Landscape, Area.Info, EditLayer, R);
 	// Vertices with a loaded component under them (the rest of the rectangle reads as 0, not ground).
-	TBitArray<> Valid(false, W * H);
-	const int32 ComponentQuads = Area.Info->ComponentSizeQuads;
-	for (int32 Y = 0; Y < H; ++Y)
-	{
-		for (int32 X = 0; X < W; ++X)
-		{
-			const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
-			const auto Has = [&Area, ComponentQuads](int32 CX, int32 CY) { return Area.Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
-			const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
-			// A vertex on a seam belongs to the components on both sides: any of them will do.
-			Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
-				|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
-		}
-	}
+	const TBitArray<> Valid = GroundVertices(Area.Info, R);
 	// Inside the circle the ground is unknown; around it, fixed. The fill is the smoothest surface (Laplace's equation, solved by
 	// over-relaxation) that meets the ground at the circle's edge: a plane or a hill's flank stays one, a spike or pit is gone.
 	TArray<double> Fill;
