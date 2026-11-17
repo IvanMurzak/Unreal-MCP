@@ -883,7 +883,9 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("no streaming entry added"), W->GetStreamingLevels().Num(), StreamingBefore);
 			// editor | call AddSublevel("@PKG@")
 			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
-			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(TEXT("its own sublevel"))));
+			// An untitled world the full suite left open (NewLevel("")) has no saved map to name: it is refused as such.
+			const TCHAR* OwnLevel = FPackageName::IsTempPackage(Package) ? TEXT("no saved level") : TEXT("its own sublevel");
+			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(OwnLevel)));
 			// levels | where IsPersistent | set IsVisible = false
 			const TSharedPtr<FJsonObject> Hide = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":false}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("hidden (%s)"), *Codes(Hide)), IsOk(Hide) && !W->PersistentLevel->bIsVisible);

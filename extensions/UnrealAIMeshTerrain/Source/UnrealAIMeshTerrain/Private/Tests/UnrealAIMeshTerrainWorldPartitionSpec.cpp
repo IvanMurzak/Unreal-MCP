@@ -165,13 +165,17 @@ void FUnrealAIMeshTerrainWorldPartitionSpec::Define()
 
 		// meshTerrain | call Surface(unreal.find("WpSpecTerrain"), [400000, 400000, 0]) in rql-query: the read loads the pad
 		const int32 UndoBefore = WpUndoSteps();
+		// Packages other specs of the full suite left unsaved are not this load's doing.
+		const TArray<FString> DirtyBefore = WpDirtyPackages();
 		TSharedPtr<FJsonObject> Read;
 		WpRun(TEXT("Surface runs read-only"), FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrain"]},"stages":[{"op":"call","method":"Surface","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"list":[{"lit":%.17g},{"lit":%.17g},{"lit":0}]}]}]})RQL"), *Label, X, Y), false, &Read);
 		TestEqual(TEXT("Surface loaded the pad's actor"), WpModifierActors(Pad), 1);
 		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, X, Y, false);
 		TestTrue(*FString::Printf(TEXT("the terrain is built with the pad: 300 cm at its centre (got %.2f)"), Sample.Height), Sample.bInside && FMath::IsNearlyEqual(Sample.Height, 300.0, 1.0));
 		TestEqual(TEXT("loading added no undo step"), WpUndoSteps(), UndoBefore);
-		TestTrue(*FString::Printf(TEXT("loading left nothing unsaved (%s)"), *FString::Join(WpDirtyPackages(), TEXT(", "))), WpDirtyPackages().IsEmpty());
+		TArray<FString> DirtiedByLoad = WpDirtyPackages();
+		DirtiedByLoad.RemoveAll([&DirtyBefore](const FString& Name) { return DirtyBefore.Contains(Name); });
+		TestTrue(*FString::Printf(TEXT("loading left nothing unsaved (%s)"), *FString::Join(DirtiedByLoad, TEXT(", "))), DirtiedByLoad.IsEmpty());
 
 		// meshTerrainModifier | call Remove(unreal.find("WpSpecPad").Modifier), unsaved: the next load must not bring it back
 		if (!WpRun(TEXT("pad removed"), FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"Remove","args":[{"path":["Modifier"],"on":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]}}]}]})RQL"), *Pad)))
