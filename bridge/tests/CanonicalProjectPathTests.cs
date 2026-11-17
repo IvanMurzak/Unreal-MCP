@@ -12,7 +12,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using com.IvanMurzak.McpPlugin.AgentConfig;
+using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Host;
+using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
@@ -38,6 +40,28 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 Assert.Equal(viaReal.HostlessPort, viaLink.HostlessPort);
                 // FPaths::ProjectDir() ends with '/': the same folder, the same pin.
                 Assert.Equal(viaReal.Pin, ProjectConnectionResolver.Resolve(link + "/", instanceId: "c").Pin);
+            });
+        }
+
+        [Fact]
+        public void Configure_SymlinkedProject_WritesThePinAndPortTheSidecarRegistersAndBinds()
+        {
+            WithLinkedProject(link: CreateSymlink, (real, link) =>
+            {
+                // The editor's Configure request carries the folder as the editor reported it, with a port-less host
+                // (level 3 of the port precedence: the derived port decides on both sides).
+                var settings = AgentConfigService.MapSettings(new AgentSettingsDto
+                {
+                    ProjectRootPath = link + "/",
+                    Host = "http://localhost/mcp",
+                    ConnectionMode = "Local",
+                });
+                var sidecar = ProjectConnectionResolver.Resolve(link + "/", instanceId: "a", localHost: "http://localhost");
+
+                Assert.Equal(sidecar.Pin, settings.ProjectPin);
+                var written = new Uri(settings.PinnedHttpUrl);
+                Assert.Equal(sidecar.Port, written.Port);
+                Assert.EndsWith("/p/" + sidecar.Pin, written.AbsolutePath, StringComparison.Ordinal);
             });
         }
 
