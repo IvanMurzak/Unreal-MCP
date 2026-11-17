@@ -515,7 +515,8 @@ BOUNDS = ('MeshPartition : Actor {{Bounds object? ro (the built ground\'s world 
           'and highest ground), SizeMeters [X, Y]{0})}}')
 ISLAND = ('An island with the sea all around: Mesh Terrain has no water, so the sea is a height, world Z 0 (sea level) by convention.\n'
           '```\nmeshTerrainCreate | call Create("Island", [0, 0, -2000], 2400)    2.4 km of seabed at -20 m\n'
-          'meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], {0}, 15000, "Land")\n```')
+          'meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], {0}, 15000, "Land")\n'
+          'actors | where Label == "Sea" | get StaticMeshComponent | set BodyInstance.CollisionProfileName = "NoCollision"\n```')
 STRUCTURE = ('Read a terrain\'s structure through these sources and members, not with Python: ...\n'
              'meshTerrainModifiers | {0} | select $ref Modifier   leftovers (see Repairs)')
 AUTHORING.update({

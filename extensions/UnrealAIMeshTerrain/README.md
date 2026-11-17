@@ -41,7 +41,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `meshTerrains`, `meshTerrainModifiers`, `meshTerrain`, `meshTerrainCreate`, `meshTerrainBrush`, `meshTerrainModifier` |
-| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete`; `meshTerrainBrush`: `Sculpt`, `Paint`, `Erase` |
+| Operations (`call`) | `meshTerrain`: `Rebuild`, `WaitForBuild`, `Surface`, `SurfacePoints`, `EnableMeshTerrain`; `meshTerrainCreate`: `Create`, `ImportHeightmap`, `Delete`; `meshTerrainBrush`: `Sculpt`, `Paint`, `Erase`, `PaintWhere` |
 | Modifier operations (`call`) | `meshTerrainModifier`: `AddNoise`, `AddPatch`, `AddWeight`, `AddSpline`, `AddShape`, `AddLattice`, `AddTexturePatch`, `AddRemesh`, `Add`, `Edit`, `Move`, `SetSplinePoints`, `SetLatticePoints`, `SetOrder`, `Enable`, `Disable`, `Bind`, `Remove` |
 | Modifier members | `LatticeModifier.LatticePoints` |
 | Members | `MeshPartition.Definition`, `MeshPartition.PriorityLayers`, `MeshPartition.Channels`, `MeshPartition.Bounds`, `MeshPartition.Build`, `MeshPartition.Sections`, `MeshPartition.Modifiers`, `MeshPartition.BaseMeshes`, `ModifierComponent.Terrain`, `ModifierComponent.Kind`, `ModifierComponent.Label`, `ModifierComponent.Bounds`, `ModifierComponent.Disabled`, `ModifierComponent.Modifier` |
@@ -104,8 +104,8 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
 - An island with the sea all around: Mesh Terrain has no water, so the sea is a height (world Z 0 by convention). The guide's
   recipe: `Create` the terrain larger than the island with its ground below sea level (`Create("Island", [0, 0, -2000], 2400)`),
   raise the land with `AddPatch` (Radius = the flat land, Falloff = the beach slope down to the seabed, Radius + Falloff in cm
-  under half the terrain's shorter side), shape mountains on top, and optionally place a plane at Z 0 as the sea surface (it
-  blocks traces and walking there).
+  under half the terrain's shorter side), shape mountains on top, and optionally place a plane at Z 0 as the sea surface (turn its
+  collision off: `set BodyInstance.CollisionProfileName = "NoCollision"` on its StaticMeshComponent).
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
   ("Unsaved Mesh Partition Modifiers"). Place terrains side by side, not overlapping: the editor builds overlapping
   terrains fine, but Play In Editor's section build of one loads the other's actors and logs `LogLinker` warnings
@@ -113,6 +113,14 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
 - `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
   within `radius` cm (1..25000) with a soft edge (`falloff` 0..1). `Raise` / `Lower` move the ground `height` cm at the
   centre, `Flatten` pulls it to world Z `height`, `Smooth` evens it out; `strength` (0 exclusive) ..1 scales the stroke.
+- `PaintWhere(terrain, channel, minSlope = 0, maxSlope = 90, minHeight = -1e7, maxHeight = 1e7, strength = 1, label, within = [])`: paint a
+  channel wherever the ground's slope (degrees) and height (world Z, cm) are in range, over the whole terrain or the
+  `[MinX, MinY, MaxX, MaxY]` box (cm): sand on beaches, rock on cliffs, grass on flat ground. In range the channel moves to
+  `strength`, with soft edges 2 degrees and 50 cm past the bounds; the rest keeps its weight. The slope and height are the
+  ground's when the call runs (paint after shaping). Stored in brush modifiers like strokes, one per tile of at most
+  600 x 600 m (`<terrain>_Paint` or `label`), at most 64 tiles; a later call over the same tiles reuses them. Returns
+  `Brushes`, `NewBrushes`, `Vertices` (changed), `Matched` (in range), `Ready`, `State`, `Note` (tiles left unpainted, e.g.
+  over very dense remeshed ground: pass a smaller Within there), `Seconds`.
 - `Paint(terrain, channel, point, radius, weight = 1, falloff = 0.5)` / `Erase(terrain, channel, point, radius, falloff = 0.5)`:
   move a paint channel of the terrain's definition (`Channels`, e.g. `Red`) towards `weight` 0..1 (Erase: 0). The channels
   are generic slots (the default definition's Red, Green, Blue, Yellow; its material decides how each looks; the default
