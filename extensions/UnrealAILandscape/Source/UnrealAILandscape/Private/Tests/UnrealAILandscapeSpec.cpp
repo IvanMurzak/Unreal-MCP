@@ -1336,7 +1336,7 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("lists name:ComponentCount"), Schema.Contains(TEXT("\"name\":\"ComponentCount\"")));
 			TestTrue(TEXT("lists name:PaintLayers"), Schema.Contains(TEXT("\"name\":\"PaintLayers\"")));
 			TestTrue(TEXT("lists name:Bounds"), Schema.Contains(TEXT("\"name\":\"Bounds\"")));
-			TestTrue(TEXT("the Edits member says where hand edits show (Bumps)"), Schema.Contains(TEXT("nor in the undo history: to find them")));
+			TestTrue(TEXT("the Edits member says where hand edits show (Bumps)"), Schema.Contains(TEXT("the undo history is no record of them")));
 		});
 
 		It("describes WaterBody with its Water member", [this]()
