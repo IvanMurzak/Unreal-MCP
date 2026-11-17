@@ -464,12 +464,13 @@ mountains and hills on top (modifiers added later apply on top of the Patch):
 meshTerrainCreate | call Create("Island", [0, 0, -2000], 2400)                                    2.4 km of seabed at -20 m
 meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], 90000, 15000, "Land")    land at +2 m out to 900 m, a 150 m beach slope to the seabed
 editor | call SpawnActor({ClassName: "/Engine/BasicShapes/Plane", Label: "Sea", Location: [0, 0, 0], Scale: [2400, 2400, 1]})   optional sea surface
+actors | where Label == "Sea" | get StaticMeshComponent | set BodyInstance.CollisionProfileName = "NoCollision"          so nothing walks on it
 ```
 
 A Patch's Radius is its flat part and its Falloff the slope beyond (both cm): centred on the terrain, keep Radius + Falloff
 under half its shorter side (90000 + 15000 < 120000 cm), so a ring of seabed stays all around. The plane is only a flat
-surface at sea level (a Water plugin ocean looks better where the project has one); it blocks traces and walking at Z 0:
-read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
+surface at sea level (a Water plugin ocean looks better where the project has one); turn its collision off as above, or it
+blocks traces and walking at Z 0. Read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
 	}
 };
 
