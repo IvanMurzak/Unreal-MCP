@@ -697,13 +697,17 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	const auto On = [&](const FVector2D& At) { return At.X >= Grid.Rect.Min.X && At.Y >= Grid.Rect.Min.Y && At.X <= Grid.Rect.Max.X && At.Y <= Grid.Rect.Max.Y && GroundAt(At.X, At.Y).IsSet(); };
 	if (!On(StartAt) || !On(EndAt) || !GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
 		return UnrealMcpRql::Failed<bool>(TEXT("Start and End must be on the (loaded) landscape"));
-	// Moves in 48 directions (offsets up to 4 nodes), so the route can follow a steep hill's contours closely.
+	// Moves in 176 directions (offsets up to 8 nodes, 2 to 7 degrees apart). On a flank far steeper than MaxSlope only
+	// headings within a few degrees of the contour climb no more than it allows: with 48 directions (7.5 degrees apart) few of
+	// them did, and roads up a 44 degree hill ran four to six times longer than the climb needs.
+	constexpr int32 Reach = 8;
 	TArray<FIntPoint> Moves;
-	for (int32 DY = -4; DY <= 4; ++DY)
-		for (int32 DX = -4; DX <= 4; ++DX)
+	for (int32 DY = -Reach; DY <= Reach; ++DY)
+		for (int32 DX = -Reach; DX <= Reach; ++DX)
 			if ((DX || DY) && FMath::GreatestCommonDivisor(FMath::Abs(DX), FMath::Abs(DY)) == 1)
 				Moves.Add(FIntPoint(DX, DY));
 	const double Limit = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9)); // a margin for the grading between nodes
+	constexpr double MaxCut = 150.0; // cm the grading may cut or fill under one move
 	const double NodeCm = Step * Grid.QuadCm;
 	TArray<double> Cost;
 	Cost.Init(TNumericLimits<double>::Max(), GW * GH);
@@ -740,24 +744,28 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 				continue;
 			if (!In.IsZero() && FVector2D::DotProduct(In, FVector2D(Move).GetSafeNormal()) < 0.5 && J * GW + I != GoalNode)
 				continue; // the last step onto End may turn as it must
-			// The ground along the move (4 stretches) must climb gently enough.
+			// The move climbs gently enough from end to end, and the ground under it stays near that straight line (the grading
+			// cuts and fills at most MaxCut): a chord along a curved contour dips a little in the middle, which a stretch-by-stretch
+			// slope check read as too steep, so long contour moves were refused and roads wandered.
 			const double Length = FVector2D(Move).Size() * NodeCm;
-			double Prev = Here, Worst = 0.0;
-			bool bOk = true;
-			for (int32 K = 1; K <= 4 && bOk; ++K)
+			const int32 Stretches = FMath::Max(FMath::Abs(Move.X), FMath::Abs(Move.Y));
+			const TOptional<double> There = GroundAt(VX(NI + Move.X), VY(NJ + Move.Y));
+			if (!There.IsSet())
+				continue;
+			const double Worst = FMath::Abs(There.GetValue() - Here) / Length;
+			bool bOk = Worst <= Limit;
+			for (int32 K = 1; K < Stretches && bOk; ++K)
 			{
-				const TOptional<double> Z = GroundAt(VX(NI + Move.X * K / 4.0), VY(NJ + Move.Y * K / 4.0));
-				bOk = Z.IsSet();
-				if (bOk)
-				{
-					Worst = FMath::Max(Worst, FMath::Abs(Z.GetValue() - Prev) / (Length / 4.0));
-					Prev = Z.GetValue();
-				}
+				const double T = double(K) / Stretches;
+				const TOptional<double> Z = GroundAt(VX(NI + Move.X * T), VY(NJ + Move.Y * T));
+				bOk = Z.IsSet() && FMath::Abs(Z.GetValue() - FMath::Lerp(Here, There.GetValue(), T)) <= MaxCut;
 			}
-			if (!bOk || Worst > Limit)
+			if (!bOk)
 				continue;
 			const int32 Next = J * GW + I;
-			const double NewCost = Cost[Node] + Length * (1.0 + Worst / FMath::Max(Limit, UE_SMALL_NUMBER)); // gentler routes preferred
+			// Length, a little more for steeper ground: a road climbs near its limit rather than wandering over gentle ground (a
+			// cost of up to twice the length for a steep move made routes four to six times longer than the climb needs).
+			const double NewCost = Cost[Node] + Length * (1.0 + 0.1 * Worst / FMath::Max(Limit, UE_SMALL_NUMBER));
 			if (NewCost < Cost[Next])
 			{
 				Cost[Next] = NewCost;

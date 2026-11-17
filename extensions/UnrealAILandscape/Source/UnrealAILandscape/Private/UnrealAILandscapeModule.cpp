@@ -147,7 +147,7 @@ public:
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength, label, within) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -237,7 +237,7 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Edits"),
-			TEXT("the landscape's edit log, newest first (the last 1000): each shaping or paint operation of this extension {Index, Op, Label, Points, Radius, Width, Height, Layer, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it"),
+			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TArray<TSharedPtr<FJsonValue>> Out;
@@ -375,12 +375,27 @@ landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)           
 landscapes | select Label PaintLayers Sections
 ```
 
+Paint by the ground instead of circles with `PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength,
+label, within)`: every vertex whose slope (degrees) and world height (cm) fall in the ranges, with soft edges (2 degrees past
+the slope bounds, 50 cm past the height bounds); `within` ([minX, minY, maxX, maxY] world cm, optional) limits it to a
+box. Each call takes its weight from the layers painted before it, so paint the base layer first, then one rule per layer,
+the one that must win last; a Paint circle afterwards paints over a rule (and a rule over a circle) the same way.
+
+```
+landscape | call Paint(unreal.find("Island"), "Grass", [0, 0, 0], 0)                                   grass everywhere
+landscape | call PaintWhere(unreal.find("Island"), "Sand", 0, 15, -100000, 300)                         beaches: flat-ish ground up to 3 m above the sea (Z 0)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90)                                      every slope steeper than 30 degrees
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 0, 90, 22000)                                everything above 220 m (a mountain top)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 100000, 1, "mountain rock", [-20000, 20000, 20000, 70000])   slopes on the mountain only
+```
+
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
-Ramp, RoadBetween, Paint, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
-Index, Op, Label, Points, Radius, Width, Height, Layer, Time). Give a call an optional last argument `Label` ("river", "road to the
+Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 5000, newest first:
+Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
+switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional last argument `Label` ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
 made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
-place with no `Edit` was most likely made outside these operations (or before the log, or past its last 1000 records).
+place with no `Edit` was most likely made outside these operations (or before the log, or past its last 5000 records / 100,000 path points).
 
 ```
 landscapes | where IsPrimary and Label == "Terrain" | select Edits                              what was done here, newest first
@@ -396,7 +411,8 @@ stays a slope (unlike Flatten, which makes it level); a curved surface comes bac
 radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
 points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
 stretch that climbs more steeply and says how long it needs to be. `RoadBetween` builds a road between two places by
-itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around steep ground),
+itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around steep ground;
+it cuts or fills up to 1.5 m where the ground is uneven under the route),
 grades it like Ramp and returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}; Reached false means it found no
 route that climbs there within MaxSlope (the road goes as far as it found one: allow a larger MaxSlope or pick another end). Use
 RoadBetween for a road up a hill or across rough ground; use Ramp when you choose the route yourself (a ramp to a pad,

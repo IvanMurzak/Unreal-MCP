@@ -301,20 +301,60 @@ namespace UnrealAILandscapeRqlApiLocal
 	}
 
 	/**
-	 * Read the circle's vertices through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
-	 * change each one given its distance from the centre in vertices (true when it changed), let @p BeforeWrite check the
-	 * new values of the rectangle (false after Fail: nothing is written) or adjust what goes with them, write them back and
-	 * refresh; how many changed.
+	 * The ground's heights over @p R (row by row): with one height edit layer that layer (@p EditLayer, the one edits are
+	 * written to), with several their sum (the merged heights).
+	 */
+	TArray<uint16> ReadGround(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R)
+	{
+		int32 HeightLayers = 0;
+		if (const ALandscape* Primary = Landscape->GetLandscapeActor())
+		{
+			for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+				HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
+		}
+		TArray<uint16> Ground;
+		Ground.SetNumZeroed((R.Width() + 1) * (R.Height() + 1));
+		FHeightmapAccessor<false> Reader(Info);
+		if (HeightLayers <= 1)
+			Reader.SetEditLayer(EditLayer);
+		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
+		return Ground;
+	}
+
+	/** Which vertices of @p R (row by row) have a loaded component under them (the rest of a ReadGround reads 0, not ground). */
+	TBitArray<> GroundVertices(const ULandscapeInfo* Info, const FIntRect& R)
+	{
+		const int32 W = R.Width() + 1, H = R.Height() + 1;
+		TBitArray<> Valid(false, W * H);
+		const int32 ComponentQuads = Info->ComponentSizeQuads;
+		const auto Has = [Info](int32 CX, int32 CY) { return Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
+				const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
+				// A vertex on a seam belongs to the components on both sides: any of them will do.
+				Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
+					|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
+			}
+		}
+		return Valid;
+	}
+
+	/**
+	 * Read the vertices of @p R through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
+	 * change each one given its vertex X, Y (true when it changed), let @p BeforeWrite check the new values of the rectangle
+	 * (false after Fail: nothing is written) or adjust what goes with them, write them back and refresh; how many changed.
 	 */
 	template <typename T, typename TAccessor>
-	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit,
-		TFunctionRef<bool(const FGuid&, const FIntRect&, const TArray<T>&)> BeforeWrite = [](const FGuid&, const FIntRect&, const TArray<T>&) { return true; })
+	int32 EditRect(ALandscapeProxy* Landscape, TAccessor& Accessor, const FIntRect& R, TFunctionRef<bool(T&, int32, int32)> Edit,
+		TFunctionRef<bool(const FGuid&, const FIntRect&, const TArray<T>&)> BeforeWrite)
 	{
 		const FGuid EditLayer = EditLayerGuid(Landscape, std::is_same_v<T, uint16> ? ELandscapeToolTargetType::Heightmap : ELandscapeToolTargetType::Weightmap);
 		if (!EditLayer.IsValid())
 			return 0;
 		Accessor.SetEditLayer(EditLayer);
-		const FIntRect& R = Circle.Rect;
 		const int32 Width = R.Max.X - R.Min.X + 1;
 		TArray<T> Data;
 		Data.SetNumZeroed(Width * (R.Max.Y - R.Min.Y + 1));
@@ -323,7 +363,7 @@ namespace UnrealAILandscapeRqlApiLocal
 		for (int32 Y = R.Min.Y; Y <= R.Max.Y; ++Y)
 		{
 			for (int32 X = R.Min.X; X <= R.Max.X; ++X)
-				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], FVector2D::Distance(FVector2D(X, Y), Circle.Center)) ? 1 : 0;
+				Changed += Edit(Data[(Y - R.Min.Y) * Width + (X - R.Min.X)], X, Y) ? 1 : 0;
 		}
 		if (Changed == 0 || !BeforeWrite(EditLayer, R, Data))
 			return 0;
@@ -332,6 +372,17 @@ namespace UnrealAILandscapeRqlApiLocal
 		Accessor.Flush();
 		MergeNow(Landscape, std::is_same_v<T, uint16> ? ELandscapeLayerUpdateMode::Update_Heightmap_All : ELandscapeLayerUpdateMode::Update_Weightmap_All);
 		return Changed;
+	}
+
+	/** EditRect over a circle's rectangle, @p Edit given each vertex's distance from the centre in vertices. */
+	template <typename T, typename TAccessor>
+	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit,
+		TFunctionRef<bool(const FGuid&, const FIntRect&, const TArray<T>&)> BeforeWrite = [](const FGuid&, const FIntRect&, const TArray<T>&) { return true; })
+	{
+		return EditRect<T>(Landscape, Accessor, Circle.Rect, [&Circle, &Edit](T& Value, int32 X, int32 Y)
+		{
+			return Edit(Value, FVector2D::Distance(FVector2D(X, Y), Circle.Center));
+		}, BeforeWrite);
 	}
 
 	/**
@@ -536,10 +587,10 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/** @p Changed (an operation's changed vertices), after logging the operation when it changed anything. */
 	int32 Logged(int32 Changed, ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
-		double Width, double Height, const FString& Layer = FString())
+		double Width, double Height, const FString& Layer = FString(), const FString& Rule = FString())
 	{
 		if (Changed > 0)
-			RecordEdit(Landscape, Op, Label, Points, Radius, Width, Height, Layer);
+			RecordEdit(Landscape, Op, Label, Points, Radius, Width, Height, Layer, Rule);
 		return Changed;
 	}
 
@@ -551,8 +602,46 @@ namespace UnrealAILandscapeRqlApiLocal
 		return Log ? Log->Edits : None;
 	}
 
+	TArray<FVector> ThinPath(const TArray<FVector>& Points, double Tolerance)
+	{
+		if (Points.Num() <= 2)
+			return Points;
+		TBitArray<> Keep(false, Points.Num());
+		Keep[0] = true;
+		Keep[Points.Num() - 1] = true;
+		// Douglas-Peucker without recursion: keep the farthest point of a span when it is off the chord by more than Tolerance.
+		TArray<TPair<int32, int32>> Spans{ { 0, Points.Num() - 1 } };
+		while (!Spans.IsEmpty())
+		{
+			const TPair<int32, int32> Span = Spans.Pop();
+			double Farthest = Tolerance;
+			int32 At = INDEX_NONE;
+			for (int32 Index = Span.Key + 1; Index < Span.Value; ++Index)
+			{
+				const double Off = FMath::PointDistToSegment(Points[Index], Points[Span.Key], Points[Span.Value]);
+				if (Off > Farthest)
+				{
+					Farthest = Off;
+					At = Index;
+				}
+			}
+			if (At == INDEX_NONE)
+				continue;
+			Keep[At] = true;
+			Spans.Add({ Span.Key, At });
+			Spans.Add({ At, Span.Value });
+		}
+		TArray<FVector> Out;
+		for (int32 Index = 0; Index < Points.Num(); ++Index)
+		{
+			if (Keep[Index])
+				Out.Add(Points[Index]);
+		}
+		return Out;
+	}
+
 	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
-		double Width, double Height, const FString& Layer)
+		double Width, double Height, const FString& Layer, const FString& Rule)
 	{
 		ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
 		if (!Primary)
@@ -571,21 +660,29 @@ namespace UnrealAILandscapeRqlApiLocal
 		FUnrealAILandscapeEdit& Edit = Log->Edits.AddDefaulted_GetRef();
 		Edit.Op = Op;
 		Edit.Label = Label.TrimStartAndEnd();
-		// A long path (a river is one point per vertex) keeps 64 evenly spaced points, its ends included.
-		constexpr int32 MaxPoints = 64;
-		const int32 Count = FMath::Min(Points.Num(), MaxPoints);
-		for (int32 Index = 0; Index < Count; ++Index)
-		{
-			const FVector& Point = Points[Count == Points.Num() ? Index : FMath::RoundToInt(static_cast<double>(Index) * (Points.Num() - 1) / (Count - 1))];
+		// A path (a river is one point per vertex, a road one every few metres) keeps the points that hold it within
+		// LogPathTolerance of the real one: a reader of the log sees the path's real corners and slopes.
+		TArray<FVector> Kept = ThinPath(Points, LogPathTolerance);
+		for (double Tolerance = LogPathTolerance * 2.0; Kept.Num() > MaxLogPathPoints; Tolerance *= 2.0)
+			Kept = ThinPath(Points, Tolerance);
+		for (const FVector& Point : Kept)
 			Edit.Points.Add(FVector(FMath::RoundToDouble(Point.X), FMath::RoundToDouble(Point.Y), FMath::RoundToDouble(Point.Z)));
-		}
 		Edit.Radius = Radius;
 		Edit.Width = Width;
 		Edit.Height = Height;
 		Edit.Layer = Layer;
+		Edit.Rule = Rule;
 		Edit.Time = FDateTime::UtcNow().ToIso8601();
-		if (Log->Edits.Num() > MaxEdits)
-			Log->Edits.RemoveAt(0, Log->Edits.Num() - MaxEdits);
+		int32 Stored = 0;
+		for (const FUnrealAILandscapeEdit& Each : Log->Edits)
+			Stored += Each.Points.Num();
+		int32 Drop = FMath::Max(0, Log->Edits.Num() - MaxEdits);
+		for (int32 Index = 0; Index < Drop; ++Index)
+			Stored -= Log->Edits[Index].Points.Num();
+		while (Stored > MaxLogPoints && Drop < Log->Edits.Num() - 1)
+			Stored -= Log->Edits[Drop++].Points.Num();
+		if (Drop > 0)
+			Log->Edits.RemoveAt(0, Drop);
 	}
 }
 
@@ -738,6 +835,109 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	return Logged(Changed, Landscape, TEXT("Paint"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength, Name);
 }
 
+int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope, double MinHeight,
+	double MaxHeight, double Strength, const FString& Label, const TArray<double>& Within)
+{
+	const FString Name = Layer.TrimStartAndEnd();
+	if (!ValidLayerName(Name, Layer))
+		return 0;
+	if (!(Strength > 0.0 && Strength <= 1.0))
+		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
+	if (!(MinSlope >= 0.0 && MaxSlope <= 90.0 && MinSlope <= MaxSlope))
+		return UnrealMcpRql::Failed<int32>(TEXT("MinSlope and MaxSlope must be within 0 .. 90 degrees, MinSlope at most MaxSlope"));
+	if (!(MinHeight <= MaxHeight))
+		return UnrealMcpRql::Failed<int32>(TEXT("MinHeight must be at most MaxHeight (world Z, cm)"));
+	if (Within.Num() != 0 && Within.Num() != 4)
+		return UnrealMcpRql::Failed<int32>(TEXT("Within is [MinX, MinY, MaxX, MaxY] (world cm), or empty for the whole landscape"));
+	if (Within.ContainsByPredicate([](double Value) { return !FMath::IsFinite(Value); }))
+		return UnrealMcpRql::Failed<int32>(TEXT("Within must be finite numbers"));
+	FCircle Area;
+	FBox2D Box(ForceInit);
+	if (Within.Num() == 4)
+	{
+		Box += FVector2D(Within[0], Within[1]);
+		Box += FVector2D(Within[2], Within[3]);
+		if (!Circle(Landscape, FVector(Box.GetCenter(), 0.0), FMath::Max(Box.GetExtent().Size(), 1.0), Area))
+			return 0;
+	}
+	else if (!Circle(Landscape, FVector::ZeroVector, 0.0, Area))
+		return 0;
+	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
+	FIntRect R = Area.Rect;
+	if (Box.bIsValid)
+	{
+		// The vertex rectangle around the box's four corners (a rotated landscape: each vertex is tested against the box below).
+		FBox2D Local(ForceInit);
+		for (const FVector2D& Corner : { Box.Min, Box.Max, FVector2D(Box.Min.X, Box.Max.Y), FVector2D(Box.Max.X, Box.Min.Y) })
+			Local += FVector2D(ToWorld.InverseTransformPosition(FVector(Corner, 0.0)));
+		R.Min.X = FMath::Max(R.Min.X, FMath::FloorToInt(Local.Min.X));
+		R.Min.Y = FMath::Max(R.Min.Y, FMath::FloorToInt(Local.Min.Y));
+		R.Max.X = FMath::Min(R.Max.X, FMath::CeilToInt(Local.Max.X));
+		R.Max.Y = FMath::Min(R.Max.Y, FMath::CeilToInt(Local.Max.Y));
+		if (R.Min.X > R.Max.X || R.Min.Y > R.Max.Y)
+			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Within does not overlap %s"), *Landscape->GetActorNameOrLabel()));
+	}
+	ULandscapeLayerInfoObject* LayerInfo = LayerInfoFor(Landscape, Area.Info, FName(*Name));
+	if (!LayerInfo)
+		return 0;
+
+	// The ground over the rectangle and one vertex around it (the slopes at its edge).
+	const FGuid HeightLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
+	if (!HeightLayer.IsValid())
+		return 0;
+	FIntRect Whole;
+	Area.Info->GetLandscapeExtent(Whole);
+	const FIntRect G(FIntPoint(FMath::Max(Whole.Min.X, R.Min.X - 1), FMath::Max(Whole.Min.Y, R.Min.Y - 1)),
+		FIntPoint(FMath::Min(Whole.Max.X, R.Max.X + 1), FMath::Min(Whole.Max.Y, R.Max.Y + 1)));
+	const int32 GW = G.Width() + 1;
+	const TArray<uint16> Ground = ReadGround(Landscape, Area.Info, HeightLayer, G);
+	const TBitArray<> Valid = GroundVertices(Area.Info, G);
+	const FVector Scale = ToWorld.GetScale3D().GetAbs();
+	const auto LocalZ = [&](int32 X, int32 Y) { return LandscapeDataAccess::GetLocalHeight(Ground[(Y - G.Min.Y) * GW + (X - G.Min.X)]); };
+	// A neighbour in a hole of the landscape (no component) is no ground: the slope is taken one-sided there.
+	const auto Inside = [&](int32 X, int32 Y) { return Valid[(Y - G.Min.Y) * GW + (X - G.Min.X)]; };
+	// 1 inside [Low, High], a cosine to 0 over Edge past either bound.
+	const auto Band = [](double Value, double Low, double High, double Edge)
+	{
+		return Value < Low ? Cosine((Low - Value) / Edge) : Value > High ? Cosine((Value - High) / Edge) : 1.0;
+	};
+	TAlphamapAccessor<false> Accessor(Area.Info, LayerInfo);
+	const int32 Changed = EditRect<uint8>(Landscape, Accessor, R, [&](uint8& Value, int32 X, int32 Y)
+	{
+		if (!Inside(X, Y))
+			return false;
+		const int32 X0 = X > G.Min.X && Inside(X - 1, Y) ? X - 1 : X, X1 = X < G.Max.X && Inside(X + 1, Y) ? X + 1 : X;
+		const int32 Y0 = Y > G.Min.Y && Inside(X, Y - 1) ? Y - 1 : Y, Y1 = Y < G.Max.Y && Inside(X, Y + 1) ? Y + 1 : Y;
+		const double DzDx = X1 > X0 ? (LocalZ(X1, Y) - LocalZ(X0, Y)) * Scale.Z / ((X1 - X0) * Scale.X) : 0.0;
+		const double DzDy = Y1 > Y0 ? (LocalZ(X, Y1) - LocalZ(X, Y0)) * Scale.Z / ((Y1 - Y0) * Scale.Y) : 0.0;
+		const double Slope = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(DzDx * DzDx + DzDy * DzDy)));
+		const FVector World = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y)));
+		if (Box.bIsValid && !Box.IsInsideOrOn(FVector2D(World)))
+			return false;
+		const double Height = World.Z;
+		const double Weight = Strength * Band(Slope, MinSlope, MaxSlope, 2.0) * Band(Height, MinHeight, MaxHeight, 50.0);
+		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Weight), 0, 255));
+		if (Target <= Value)
+			return false;
+		Value = Target;
+		return true;
+	}, [&Area, LayerInfo](const FGuid& EditLayer, const FIntRect& Rect, const TArray<uint8>& Weights)
+	{
+		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, Rect, Weights);
+		return true;
+	});
+	const auto Range = [](double Low, double High, double Any, const TCHAR* Unit)
+	{
+		return Low <= -Any && High >= Any ? FString(TEXT("any")) : FString::Printf(TEXT("%s..%s %s"),
+			Low <= -Any ? TEXT("any") : *FString::SanitizeFloat(Low), High >= Any ? TEXT("any") : *FString::SanitizeFloat(High), Unit);
+	};
+	const FString Rule = FString::Printf(TEXT("slope %s, height %s"),
+		*(MinSlope <= 0.0 && MaxSlope >= 90.0 ? FString(TEXT("any")) : FString::Printf(TEXT("%s..%s deg"), *FString::SanitizeFloat(MinSlope), *FString::SanitizeFloat(MaxSlope))),
+		*Range(MinHeight, MaxHeight, 1.0e8, TEXT("cm")));
+	return Logged(Changed, Landscape, TEXT("PaintWhere"), Label, Box.bIsValid ? TArray<FVector>{ FVector(Box.Min, 0.0), FVector(Box.Max, 0.0) } : TArray<FVector>(),
+		0.0, 0.0, Strength, Name, Rule);
+}
+
 int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength, const FString& Label)
 {
 	if (!(Radius > 0.0 && Radius <= 30000.0))
@@ -758,37 +958,10 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return 0;
 	const FIntRect& R = Area.Rect;
 	const int32 W = R.Width() + 1, H = R.Height() + 1;
-	// The ground: with one height layer that layer, with several their sum (the merged heights); the change is then added to
-	// the layer edits are written to, as Carve and Ramp do.
-	int32 HeightLayers = 0;
-	if (const ALandscape* Primary = Landscape->GetLandscapeActor())
-	{
-		for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
-			HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
-	}
-	TArray<uint16> Ground;
-	Ground.SetNumZeroed(W * H);
-	{
-		FHeightmapAccessor<false> Reader(Area.Info);
-		if (HeightLayers <= 1)
-			Reader.SetEditLayer(EditLayer);
-		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
-	}
+	// The ground (ReadGround); the change is then added to the layer edits are written to, as Carve and Ramp do.
+	TArray<uint16> Ground = ReadGround(Landscape, Area.Info, EditLayer, R);
 	// Vertices with a loaded component under them (the rest of the rectangle reads as 0, not ground).
-	TBitArray<> Valid(false, W * H);
-	const int32 ComponentQuads = Area.Info->ComponentSizeQuads;
-	for (int32 Y = 0; Y < H; ++Y)
-	{
-		for (int32 X = 0; X < W; ++X)
-		{
-			const int32 VX = R.Min.X + X, VY = R.Min.Y + Y;
-			const auto Has = [&Area, ComponentQuads](int32 CX, int32 CY) { return Area.Info->XYtoComponentMap.Contains(FIntPoint(CX, CY)); };
-			const int32 CX = FMath::FloorToInt(static_cast<double>(VX) / ComponentQuads), CY = FMath::FloorToInt(static_cast<double>(VY) / ComponentQuads);
-			// A vertex on a seam belongs to the components on both sides: any of them will do.
-			Valid[Y * W + X] = Has(CX, CY) || (VX % ComponentQuads == 0 && Has(CX - 1, CY)) || (VY % ComponentQuads == 0 && Has(CX, CY - 1))
-				|| (VX % ComponentQuads == 0 && VY % ComponentQuads == 0 && Has(CX - 1, CY - 1));
-		}
-	}
+	const TBitArray<> Valid = GroundVertices(Area.Info, R);
 	// Inside the circle the ground is unknown; around it, fixed. The fill is the smoothest surface (Laplace's equation, solved by
 	// over-relaxation) that meets the ground at the circle's edge: a plane or a hill's flank stays one, a spike or pit is gone.
 	TArray<double> Fill;

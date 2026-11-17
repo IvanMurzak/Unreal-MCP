@@ -51,7 +51,7 @@ struct FUnrealAILandscapeEdit
 {
 	GENERATED_BODY()
 
-	/** the operation: Sculpt, Flatten, Carve, Smooth, Ramp, Paint or CreateRiverBetween */
+	/** the operation: Sculpt, Flatten, Carve, Smooth, Ramp, RoadBetween, Paint, PaintWhere or CreateRiverBetween */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Op;
 
@@ -59,7 +59,7 @@ struct FUnrealAILandscapeEdit
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Label;
 
-	/** where: the centre ([X, Y, 0]) of a circle edit, or the path's points */
+	/** where: the centre ([X, Y, 0]) of a circle edit, the path's points (within 50 cm of the real path), or PaintWhere's Within box */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	TArray<FVector> Points;
 
@@ -75,9 +75,13 @@ struct FUnrealAILandscapeEdit
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	double Height = 0.0;
 
-	/** Paint's layer */
+	/** Paint's and PaintWhere's layer */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
 	FString Layer;
+
+	/** PaintWhere's rule ("slope 30.0..90.0 deg, height any"); empty for the other operations */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString Rule;
 
 	/** when (UTC, ISO 8601) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
@@ -218,6 +222,15 @@ public:
 	/** paint a layer by name ("Grass") onto a landscape around Center (world X and Y) within Radius (cm; 0 = the whole landscape) with a soft edge; Strength 0..1 (1 = only this layer at the centre); the layer is added to the landscape (its layer info asset saved beside the level) when it has none of that name; it shows when the landscape material blends a layer of that name (CreateLayerMaterial); Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius = 0.0, double Strength = 1.0, const FString& Label = TEXT(""));
+
+	/** paint a layer by name onto every vertex of a landscape whose ground matches a rule: slope MinSlope .. MaxSlope degrees (0 .. 90) and world height MinHeight .. MaxHeight cm (default: any), only inside Within ([MinX, MinY, MaxX, MaxY] world cm; empty: the whole landscape); soft edges (2 degrees past the slope bounds, 50 cm past the height bounds); Strength 0..1; weight-blended like Paint (it takes its weight from the other layers), adding a layer that has none of that name; sand on beaches, grass on flat ground, rock on slopes: Paint the base layer with radius 0 first, then one PaintWhere per rule; Label (optional, "" for none) names the edit in the edit log (its Rule records the ranges); returns how many vertices changed */
+	// UHT reads no default for an array, and C++ wants one on every parameter after a defaulted one: the defaults RQL
+	// offers are written as the metadata UHT would write (CPP_Default_*; an empty text is the type's zero value).
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", CPP_Default_MinSlope = "0",
+		CPP_Default_MaxSlope = "90", CPP_Default_MinHeight = "-1000000000", CPP_Default_MaxHeight = "1000000000", CPP_Default_Strength = "1",
+		CPP_Default_Label = "", CPP_Default_Within = ""))
+	int32 PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope, double MinHeight, double MaxHeight,
+		double Strength, const FString& Label, const TArray<double>& Within);
 
 	/** replace the ground within Radius (cm) of Center (world X and Y) by a smooth surface fitted to the ground around that circle, so a spike, pit, bump or hole disappears into its surroundings (a slope stays a slope); Strength 0..1 (1: all the way); fails without changing anything when the result leaves the height range; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))

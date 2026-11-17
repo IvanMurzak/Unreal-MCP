@@ -49,15 +49,29 @@ namespace UnrealAILandscapeRqlApiLocal
 	 */
 	void LoadAll(UClass* Class);
 
-	/** How many records a landscape's edit log keeps (the oldest go first). */
-	constexpr int32 MaxEdits = 1000;
+	/**
+	 * How many records a landscape's edit log keeps (the oldest go first). A painting session of small circles makes hundreds
+	 * (wave 3: 1000 records evicted the session's road and river); MaxLogPoints bounds the size, a record is ~100 bytes.
+	 */
+	constexpr int32 MaxEdits = 5000;
+
+	/** A logged path keeps the points that hold it within this distance of the real one (cm) ... */
+	constexpr double LogPathTolerance = 50.0;
+	/** ... and at most this many (a coarser tolerance when it needs more). */
+	constexpr int32 MaxLogPathPoints = 1000;
+	/** The points of all records together (the oldest records go first): a long session must not bloat the level file. */
+	constexpr int32 MaxLogPoints = 100000;
+
+	/** @p Points thinned to the fewest that keep the path within @p Tolerance cm (Douglas-Peucker), its ends included. */
+	TArray<FVector> ThinPath(const TArray<FVector>& Points, double Tolerance);
 
 	/**
 	 * Append a record to the edit log of @p Landscape's landscape actor (creating the editor-only log component the first
-	 * time), inside the current operation's undo step; the oldest records go beyond MaxEdits.
+	 * time), inside the current operation's undo step; a path is thinned to LogPathTolerance (at most MaxLogPathPoints); the
+	 * oldest records go beyond MaxEdits records or MaxLogPoints points. @p Rule describes a rule edit (PaintWhere).
 	 */
 	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
-		double Width, double Height, const FString& Layer = FString());
+		double Width, double Height, const FString& Layer = FString(), const FString& Rule = FString());
 
 	/** The edit log of @p Landscape's landscape actor, oldest first (empty when it has none). */
 	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape);
@@ -66,8 +80,9 @@ namespace UnrealAILandscapeRqlApiLocal
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
 
 	/**
-	 * RoadBetween's route: a path from Start to End (world) whose ground climbs no more than MaxSlope (with a margin), found by
-	 * an A* search on a grid of nodes Width / 2 apart (at most 400 x 400), then resampled every few metres with each point's Z the ground
+	 * RoadBetween's route: a path from Start to End (world) whose moves climb no more than MaxSlope end to end (with a margin)
+	 * over ground within 150 cm of each move's straight line (the grading cuts or fills that much), found by an A* search on
+	 * a grid of nodes Width / 2 apart (at most 400 x 400, 176 move directions), then resampled every few metres with each point's Z the ground
 	 * limited to MaxSlope between neighbours (both ends on the ground when that is possible). False after Fail; bReached
 	 * false when the road does not get to End's ground (the search could not reach it: the path then ends nearest to it).
 	 */

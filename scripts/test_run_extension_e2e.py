@@ -507,7 +507,7 @@ AUTHORING.update({
     'landscape-editlog-5-other-level.e2e.json': (
         pcg_receipt(f'{NEW_LEVEL}|World#9300(LsEditLogOther)'), pcg_receipt(f'{NEW_LEVEL}|World#9100(LsEditLog)')),
     'landscape-editlog-6-reopen.e2e.json': (
-        pcg_receipt(f'{OPEN_LEVEL}|World#9400(LsEditLog)'), pcg_receipt(f'{OPEN_LEVEL}|World#9300(Untitled_2)')),
+        pcg_receipt(f'{OPEN_LEVEL}|World#9400(LsEditLog)'), pcg_receipt(f'{OPEN_LEVEL}|World#9300(LsEditLogOther)')),
     'landscape-editlog-7-read.e2e.json': (text_result(EDIT_LOG), text_result('1 result\nEdits\n[]')),
 })
 # The Mesh Terrain schema and guide texts: per check, the text the extension registers and an older or wrong one.
