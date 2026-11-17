@@ -99,7 +99,8 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/**
 	 * Load the World Partition actors of the editor world's descs @p Wanted accepts (only unloaded ones are offered), as the
-	 * editor's region loading does; false after Fail when the engine cannot load them.
+	 * editor's region loading does, through the core loader (it skips actors deleted in this session and adds no undo step
+	 * and no unsaved change); false after Fail when the engine cannot load them.
 	 */
 	bool LoadDescs(UClass* Class, TFunctionRef<bool(const FWorldPartitionActorDescInstance*)> Wanted)
 	{
@@ -114,17 +115,8 @@ namespace UnrealAILandscapeRqlApiLocal
 				ToLoad.Add(Instance->GetGuid());
 			return true;
 		});
-		if (ToLoad.IsEmpty())
-			return true;
-		// UWorldPartitionBlueprintLibrary::LoadActors (the editor's pinned actor list; UnloadActors releases them) is not
-		// exported from the Engine module: call it through reflection.
-		static UClass* const Library = FindObject<UClass>(nullptr, TEXT("/Script/Engine.WorldPartitionBlueprintLibrary"));
-		static UFunction* const Load = Library ? Library->FindFunctionByName(TEXT("LoadActors")) : nullptr;
-		if (!Load)
-			return UnrealMcpRql::Failed<bool>(TEXT("this engine has no WorldPartitionBlueprintLibrary.LoadActors: load the regions in the World Partition window first"));
-		struct { TArray<FGuid> InActorsToLoad; } Params{ MoveTemp(ToLoad) };
-		Library->GetDefaultObject()->ProcessEvent(Load, &Params);
-		return true;
+		FString Error;
+		return ToLoad.IsEmpty() || UnrealMcpRql::LoadWorldPartitionActors(ToLoad, &Error) || UnrealMcpRql::Failed<bool>(Error);
 	}
 
 	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
