@@ -237,7 +237,7 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Edits"),
-			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it"),
+			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it, nor in the undo history: to find them (\"I edited the terrain myself, check it\") call landscape | call Bumps(landscape): a place with no Edit was made outside these operations"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TArray<TSharedPtr<FJsonValue>> Out;
@@ -396,6 +396,9 @@ switchbacks, a river's bends: at most 1000 points; a query shows the first 20, r
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
 made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
 place with no `Edit` was most likely made outside these operations (or before the log, or past its last 5000 records / 100,000 path points).
+To check a landscape someone edited by hand ("I played with the terrain, check nothing is broken"), call `Bumps`: neither
+the log nor the editor's undo history shows such an edit (a Python or import edit leaves no undo step), and spot heights
+miss a hill between them; report each place without an `Edit` with its Location and Height before changing it.
 
 ```
 landscapes | where IsPrimary and Label == "Terrain" | select Edits                              what was done here, newest first
@@ -482,7 +485,9 @@ water | call EnableWater()                                                      
 
 Land above the ocean's height hides it, so one ocean surrounds an island. `CreateRiverBetween` follows the lowest
 ground from source to mouth, keeps the water flowing downhill and (Depth > 0, cm) carves its bed into the landscape, so
-it shows even across a rise; keep the mouth a little inside the landscape. A water body's surface is its spline's Z: a
+it shows even across a rise; keep the mouth a little inside the landscape. Its bed (and a Carve) cuts through whatever
+lies on its route, a road or path included: where the route crosses one (compare the river's Path with the road's logged
+Points), re-grade the crossing with Ramp or place a bridge, and say so. A water body's surface is its spline's Z: a
 lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render.
 The first water material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
 	}

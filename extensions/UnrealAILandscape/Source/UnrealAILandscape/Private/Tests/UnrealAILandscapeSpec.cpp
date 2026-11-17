@@ -204,6 +204,11 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("| `waterBodies` |"), Skill.Contains(TEXT("| `waterBodies` |")));
 			TestTrue(TEXT("| `waterZones` |"), Skill.Contains(TEXT("| `waterZones` |")));
 			TestTrue(TEXT("## Landscape and Water"), Skill.Contains(TEXT("## Landscape and Water")));
+			// Wave 3: an agent asked to check a human's terrain edit read the log and the undo history, found nothing and said
+			// the edit was gone; the guide sends it to Bumps.
+			TestTrue(TEXT("the guide sends a check of a hand edit to Bumps"), Skill.Contains(TEXT("To check a landscape someone edited by hand")));
+			// Wave 3: in every mode the river was carved across the summit trail (32-39 degrees at the crossing), once unnoticed.
+			TestTrue(TEXT("the guide says a river bed cuts a road it crosses"), Skill.Contains(TEXT("cuts through whatever")));
 		});
 	});
 
@@ -1331,6 +1336,7 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(TEXT("lists name:ComponentCount"), Schema.Contains(TEXT("\"name\":\"ComponentCount\"")));
 			TestTrue(TEXT("lists name:PaintLayers"), Schema.Contains(TEXT("\"name\":\"PaintLayers\"")));
 			TestTrue(TEXT("lists name:Bounds"), Schema.Contains(TEXT("\"name\":\"Bounds\"")));
+			TestTrue(TEXT("the Edits member says where hand edits show (Bumps)"), Schema.Contains(TEXT("nor in the undo history: to find them")));
 		});
 
 		It("describes WaterBody with its Water member", [this]()
