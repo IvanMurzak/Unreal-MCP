@@ -200,32 +200,6 @@ namespace UnrealMcpRqlSessionLocal
 	}
 
 	/**
-	 * A failed request whose diagnostic names a host function's error value by its code only ("argument 'Terrain': value is
-	 * error(not-found)", RQL's text for an error value passed as an argument) gets that error's message back: the
-	 * suggestions of unreal.find("Islnd") must reach the agent wherever the call sits.
-	 */
-	void RestoreErrorValueMessages(rql::QueryResult& Result, const std::vector<rql::Diagnostic>& Errors)
-	{
-		if (Result.ok)
-			return;
-		const size_t Reported = Result.diagnostics.size();
-		for (const rql::Diagnostic& Error : Errors)
-		{
-			const std::string ByCode = "error(" + Error.code + ")";
-			bool bCodeOnly = false;
-			bool bShown = false;
-			for (size_t Index = 0; Index < Reported; ++Index)
-			{
-				const rql::Diagnostic& Existing = Result.diagnostics[Index];
-				bCodeOnly |= Existing.message.find(ByCode) != std::string::npos;
-				bShown |= Existing.message.find(Error.message) != std::string::npos;
-			}
-			if (bCodeOnly && !bShown)
-				Result.diagnostics.push_back(Error);
-		}
-	}
-
-	/**
 	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
 	 * while some are not loaded, the answer says how many, names a few and how to list and load them.
 	 */
@@ -1150,7 +1124,6 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
-	UnrealMcpRqlSessionLocal::RestoreErrorValueMessages(Result, Types().TakeErrorValues());
 	if (bReadOnlyCalls && !Plan.stages.empty())
 		UnrealMcpRqlSessionLocal::RewordReadTruncation(Result, Plan.stages.back().method);
 	bOutOk = Result.ok;

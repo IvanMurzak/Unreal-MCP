@@ -1003,19 +1003,13 @@ namespace UnrealMcpRqlCoreLocal
 		AActor* Actor = FUnrealMcpObjectRef::ResolveActor(Key);
 		if (Actor)
 			return Types.WrapObject(Actor);
-		// Passed as an operation argument, an error value reaches the answer by its code only: the session restores the message.
-		auto Fail = [&Types](const char* Code, const FString& Message)
-		{
-			Types.AddErrorValue(rql::Diagnostic::error(Code, UnrealMcpRqlToStd(Message)));
-			return ErrorValue(Code, Message);
-		};
 		// A World Partition actor that is not loaded has a descriptor, not an actor: name it and how to load it.
 		const FString Wanted = Key.TrimStartAndEnd();
 		const TArray<FUnrealMcpUnloadedActor> Unloaded = UnrealMcpRqlWorldPartition::Unloaded(EditorWorld());
 		for (const FUnrealMcpUnloadedActor& Row : Unloaded)
 		{
 			if (UnrealMcpRqlWorldPartition::Matches(Row, Wanted))
-				return Fail("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
+				return ErrorValue("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
 					"rql-query editor | call LoadActors([\"%s\"]) (changes nothing saved), then unreal.find(\"%s\") finds it"),
 					*Row.Label, *Row.Class, *Row.Label, *Row.Label));
 		}
@@ -1023,7 +1017,7 @@ namespace UnrealMcpRqlCoreLocal
 		const FString Similar = UnrealMcpRqlSimilarActors(Key, nullptr, &Unloaded);
 		const FString Message = FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
 			*Key, *OpenLevelPath(), Similar.IsEmpty() ? *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint()) : *Similar);
-		return Fail("not-found", Message);
+		return ErrorValue("not-found", Message);
 	}
 
 	/**

@@ -272,9 +272,9 @@ to three nearest labels (`UnrealMcpRqlSimilarActors`, `UnrealMcpRqlSimilarActors
   `not-loaded` with its exact label and the `LoadActors` call. (A label written for a typed reference, `set Parent =
   "Island "`, is trimmed, as an edit field trims it.)
 - No close label: no suggestion line; the message names the open level and `editor | call OpenLevel(...)` instead.
-- Passed on (an operation argument, a `set` value), RQL reports an error value by its code only (`argument 'Terrain':
-  value is error(not-found)`); the session appends the original message (`RestoreErrorValueMessages`), so the suggestions
-  reach the agent wherever the call sits. `editor | call LoadActors([...])` names the nearest labels the same way.
+- Passed on (an operation argument, a `set` value), the error keeps its message: RQL names an error value with its detail
+  (`argument 'Terrain': value is error(not-found: no actor … did you mean 'Island' …)`, at most 300 characters), so the
+  suggestions reach the agent wherever the call sits. `editor | call LoadActors([...])` names the nearest labels the same way.
 
 ### World Partition
 

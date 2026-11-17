@@ -132,22 +132,6 @@ public:
 	}
 	std::vector<rql::Diagnostic> TakeWarnings() { return std::exchange(RequestWarnings, {}); }
 	/**
-	 * An error value a host function returned, kept with its message: RQL reports an error value passed as an operation
-	 * argument by its code only ("argument 'Terrain': value is error(not-found)"), so the session puts the message back.
-	 */
-	void AddErrorValue(rql::Diagnostic Error)
-	{
-		if (RequestErrors.size() >= 8)
-			return;
-		for (const rql::Diagnostic& Existing : RequestErrors)
-		{
-			if (Existing.message == Error.message)
-				return;
-		}
-		RequestErrors.push_back(std::move(Error));
-	}
-	std::vector<rql::Diagnostic> TakeErrorValues() { return std::exchange(RequestErrors, {}); }
-	/**
 	 * The one struct coercion (property writes, method arguments, the math-struct adapters): a struct value of the type, a
 	 * math-struct literal ("(1, 2, 3)", [1, 2, 3], "#ff8800") or a {Member: value} literal written over @p Out. Throws
 	 * std::runtime_error when the value does not fit.
@@ -220,7 +204,6 @@ private:
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;
 	std::vector<rql::Diagnostic> RequestWarnings;
-	std::vector<rql::Diagnostic> RequestErrors;
 	void OnObjectsReplaced(const TMap<UObject*, UObject*>& OldToNew);
 
 	rql::TypeDescriptor& Shell(const void* Key, const FString& Name, rql::TypeKind Kind);
