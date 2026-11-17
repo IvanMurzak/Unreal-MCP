@@ -447,6 +447,14 @@ class ConnectionSmokeLogTests(unittest.TestCase):
             self.assertTrue(marks["bridge_download_failed"], failure)
 
 
+class ConnectionSmokeMetaTests(unittest.TestCase):
+    def test_the_engine_version_is_major_minor_even_for_a_hotfix_install_path(self):
+        smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
+        self.assertEqual(smoke.record_meta(Path("/opt/runner-manager-unreal/UE_5.8.4"))["engine_version"], "5.8")
+        self.assertEqual(smoke.record_meta(Path("/Users/Shared/Epic Games/UE_5.8"))["engine_version"], "5.8")
+        self.assertEqual(smoke.record_meta(Path(r"C:\Program Files\Epic Games\UE_5.5"))["engine_version"], "5.5")
+
+
 class ConnectionSmokeKillTests(unittest.TestCase):
     """The pre-launch stop reaches only the editor of the exact project, never one that shares its name."""
 
