@@ -99,6 +99,17 @@ struct FUnrealMcpRqlSpecBag
 	UPROPERTY(EditAnywhere, Category = "Spec") TMap<FString, int32> Counts;
 };
 
+/** A struct inside a struct (UnrealMcpRqlStructWritesSpec): `set Nest.Inner.Damage` writes two levels down. */
+USTRUCT()
+struct FUnrealMcpRqlSpecNest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecRow Inner;
+	/** Reset to 0 by the fixture's PostEditChangeProperty (a value the owner derives, as a collision profile does). */
+	UPROPERTY(EditAnywhere, Category = "Spec") int32 Locked = 0;
+};
+
 UCLASS()
 class UUnrealMcpRqlSpecFixture : public UObject
 {
@@ -153,13 +164,24 @@ public:
 	/** Not exposed by reflection (no Edit / Blueprint flags): IUnrealMcpRqlModule::ExposeProperties makes it a member. */
 	UPROPERTY() int32 HiddenValue = 0;
 
+	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecNest Nest;
+	/** Reset to 1 by PostEditChangeProperty: a write of it never stays. */
+	UPROPERTY(EditAnywhere, Category = "Spec") int32 Pinned = 1;
+
 	/** PostEditChangeProperty calls (writes go through the editor's property-change path). */
 	int32 PostEditCount = 0;
+	/** The last edit's changed property and member property, as the Details panel names them ("Damage" in "Nest"). */
+	FName LastEditProperty;
+	FName LastEditMember;
 
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override
 	{
 		Super::PostEditChangeProperty(Event);
 		++PostEditCount;
+		LastEditProperty = Event.Property ? Event.Property->GetFName() : NAME_None;
+		LastEditMember = Event.MemberProperty ? Event.MemberProperty->GetFName() : NAME_None;
+		Nest.Locked = 0;
+		Pinned = 1;
 	}
 };
 
