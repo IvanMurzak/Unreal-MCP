@@ -116,7 +116,7 @@ namespace UnrealAILandscapeRqlApiLocal
 			return true;
 		});
 		FString Error;
-		return ToLoad.IsEmpty() || UnrealMcpRql::LoadWorldPartitionActors(ToLoad, &Error) || UnrealMcpRql::Failed<bool>(Error);
+		return UnrealMcpRql::LoadWorldPartitionActors(ToLoad, &Error) || UnrealMcpRql::Failed<bool>(Error);
 	}
 
 	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
