@@ -1460,10 +1460,13 @@ static void UnrealMcpRqlApplyStructSetters(UObject* Owner, const FProperty* Prop
 	FBodyInstance& Body = *static_cast<FBodyInstance*>(Live);
 	const FName NewProfile = Profile->GetPropertyValue_InContainer(Live);
 	const FName OldProfile = Profile->GetPropertyValue_InContainer(Before);
-	const bool bCollisionEdited = NewProfile != OldProfile || !Enabled->Identical_InContainer(Live, Before)
-		|| !ObjectType->Identical_InContainer(Live, Before);
-	UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Owner);
-	if (bCollisionEdited && Mesh && Live == &Mesh->BodyInstance && Mesh->bUseDefaultCollision)
+	const uint8 NewEnabled = Enabled->GetPropertyValue_InContainer(Live);
+	const uint8 OldEnabled = Enabled->GetPropertyValue_InContainer(Before);
+	const uint8 NewObjectType = ObjectType->GetPropertyValue_InContainer(Live);
+	const uint8 OldObjectType = ObjectType->GetPropertyValue_InContainer(Before);
+	if (NewProfile == OldProfile && NewEnabled == OldEnabled && NewObjectType == OldObjectType)
+		return;
+	if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Owner); Mesh && Live == &Mesh->BodyInstance)
 		Mesh->bUseDefaultCollision = false;
 	if (NewProfile != OldProfile)
 	{
@@ -1471,15 +1474,11 @@ static void UnrealMcpRqlApplyStructSetters(UObject* Owner, const FProperty* Prop
 		Body.SetCollisionProfileName(NewProfile); // an unknown name ends as Custom, which the receipt then shows
 		return;
 	}
-	const uint8 NewEnabled = Enabled->GetPropertyValue_InContainer(Live);
-	const uint8 OldEnabled = Enabled->GetPropertyValue_InContainer(Before);
 	if (NewEnabled != OldEnabled)
 	{
 		Enabled->SetPropertyValue_InContainer(Live, OldEnabled);
 		Body.SetCollisionEnabled(static_cast<ECollisionEnabled::Type>(NewEnabled), /*bUpdatePhysicsFilterData*/ false);
 	}
-	const uint8 NewObjectType = ObjectType->GetPropertyValue_InContainer(Live);
-	const uint8 OldObjectType = ObjectType->GetPropertyValue_InContainer(Before);
 	if (NewObjectType != OldObjectType)
 	{
 		ObjectType->SetPropertyValue_InContainer(Live, OldObjectType);
