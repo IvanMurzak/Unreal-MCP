@@ -1014,10 +1014,13 @@ namespace UnrealMcpRqlCoreLocal
 					*Row.Label, *Row.Class, *Row.Label, *Row.Label));
 		}
 		// The key is matched as given (a trailing space is no typo to forgive silently): the nearest labels are named instead.
+		// The suggestions come before the level path: passed on as an argument, RQL shows at most 300 characters of the message.
 		const FString Similar = UnrealMcpRqlSimilarActors(Key, nullptr, &Unloaded);
-		const FString Message = FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
-			*Key, *OpenLevelPath(), Similar.IsEmpty() ? *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint()) : *Similar);
-		return ErrorValue("not-found", Message);
+		if (!Similar.IsEmpty())
+			return ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s'; %s (in the level open in the editor, \"%s\")"),
+				*Key, *Similar, *OpenLevelPath()));
+		return ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
+			*Key, *OpenLevelPath(), *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint())));
 	}
 
 	/**
