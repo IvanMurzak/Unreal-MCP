@@ -247,12 +247,58 @@ std::string to_text(const Value& v) {
     }
 }
 
+namespace {
+
+/// The longest error detail a message shows, in UTF-16 code units (spec §10); a longer one is cut and ends with "…".
+constexpr size_t kErrorDetailMaxUnits = 300;
+
+/// An error value for messages (spec §10): its code and, when it has one, its detail, cut and escaped.
+std::string describe_error(const Value& v) {
+    const std::string& detail = v.error_detail();
+    if (detail.empty()) return "error(" + v.error_code() + ")";
+    std::string out = "error(" + v.error_code() + ": ";
+    size_t units = 0;
+    int open = 0;  // continuation bytes the current UTF-8 sequence still expects
+    for (size_t i = 0; i < detail.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(detail[i]);
+        if ((c & 0xC0) == 0x80 && open > 0) {
+            --open;
+        } else {  // a character starts (a stray byte counts as one): count it in UTF-16 code units, never cut inside one
+            open = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+            units += c >= 0xF0 ? 2 : 1;
+            if (units > kErrorDetailMaxUnits) {
+                out += "\xE2\x80\xA6";  // …
+                break;
+            }
+        }
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    static const char hex[] = "0123456789ABCDEF";
+                    out += "\\u00";
+                    out += hex[c >> 4];
+                    out += hex[c & 0xF];
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out + ")";
+}
+
+}  // namespace
+
 std::string describe_value(const Value& v) {
     switch (v.kind()) {
         case Value::Kind::Null: return "null";
         case Value::Kind::Missing: return "missing";
         case Value::Kind::Unknown: return "unknown";
-        case Value::Kind::Error: return "error(" + v.error_code() + ")";
+        case Value::Kind::Error: return describe_error(v);
         case Value::Kind::String: return "\"" + v.as_string() + "\"";
         default: return type_name_of(v);
     }

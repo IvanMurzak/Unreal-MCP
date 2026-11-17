@@ -266,8 +266,8 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
 that names none fails with `not-found`, and agents used to spend turns listing actors after a typo, so the error names up
 to three nearest labels (`UnrealMcpRqlSimilarActors`, `UnrealMcpRqlSimilarActors.cpp`):
 
-    not-found: no actor with the label, name or path 'Islnd' in the level open in the editor, "/Game/Maps/Main";
-    did you mean 'Island' (Landscape), 'Island_old' (Landscape)?
+    not-found: no actor with the label, name or path 'Islnd'; did you mean 'Island' (Landscape),
+    'Island_old' (Landscape)? (in the level open in the editor, "/Game/Maps/Main")
 
 - Order: labels equal but for case and whitespace, then typos of the whole label (edit distance up to 1 for keys of
   up to 5 characters, 2 up to 8, else 3), then (keys of 4+ characters) typos of its start (`Islnd` → `Island_old`),
@@ -281,9 +281,9 @@ to three nearest labels (`UnrealMcpRqlSimilarActors`, `UnrealMcpRqlSimilarActors
   `not-loaded` with its exact label and the `LoadActors` call. (A label written for a typed reference, `set Parent =
   "Island "`, is trimmed, as an edit field trims it.)
 - No close label: no suggestion line; the message names the open level and `editor | call OpenLevel(...)` instead.
-- Passed on (an operation argument, a `set` value), RQL reports an error value by its code only (`argument 'Terrain':
-  value is error(not-found)`); the session appends the original message (`RestoreErrorValueMessages`), so the suggestions
-  reach the agent wherever the call sits. `editor | call LoadActors([...])` names the nearest labels the same way.
+- Passed on (an operation argument, a `set` value), the error keeps its message: RQL names an error value with its detail
+  (`argument 'Terrain': value is error(not-found: no actor … did you mean 'Island' …)`, at most 300 characters, so the
+  suggestions come first), and they reach the agent wherever the call sits. `editor | call LoadActors([...])` names the nearest labels the same way.
 
 ### World Partition
 
