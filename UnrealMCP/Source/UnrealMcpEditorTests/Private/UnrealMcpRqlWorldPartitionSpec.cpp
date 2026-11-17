@@ -159,9 +159,14 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		TestTrue(*FString::Printf(TEXT("unreal.find says it is not loaded and how to load it (%s)"), *Said(Find)),
 			!IsOk(Find) && Said(Find).Contains(TEXT("not-loaded")) && Said(Find).Contains(TEXT("LoadActors([\"WpSpecFar\"])")));
 
+		// unreal.find("WpSpecFr") | select Label: a typo of an unloaded label names it
+		const TSharedPtr<FJsonObject> Typo = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"WpSpecFr"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
+		TestTrue(*FString::Printf(TEXT("a typo suggests the unloaded actor (%s)"), *Said(Typo)),
+			!IsOk(Typo) && Said(Typo).Contains(TEXT("not-found")) && Said(Typo).Contains(TEXT("'WpSpecFar' (StaticMeshActor, not loaded)")));
+
 		// editor | call LoadActors(["NoSuchWpActor"]): nothing loads on a typo
-		const TSharedPtr<FJsonObject> Typo = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"LoadActors","args":[{"list":[{"lit":"WpSpecFar"},{"lit":"NoSuchWpActor"}]}]}]})RQL"));
-		TestTrue(*FString::Printf(TEXT("an unknown name fails (%s)"), *Said(Typo)), !IsOk(Typo) && Said(Typo).Contains(TEXT("no World Partition actor 'NoSuchWpActor'")));
+		const TSharedPtr<FJsonObject> LoadTypo = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"LoadActors","args":[{"list":[{"lit":"WpSpecFar"},{"lit":"NoSuchWpActor"}]}]}]})RQL"));
+		TestTrue(*FString::Printf(TEXT("an unknown name fails (%s)"), *Said(LoadTypo)), !IsOk(LoadTypo) && Said(LoadTypo).Contains(TEXT("no World Partition actor 'NoSuchWpActor'")));
 		TestEqual(TEXT("and loads nothing"), CountFar(), 0.0);
 
 		// rql-query editor | call LoadActors(["WpSpecFar"]): a read, no unsaved change, no undo step

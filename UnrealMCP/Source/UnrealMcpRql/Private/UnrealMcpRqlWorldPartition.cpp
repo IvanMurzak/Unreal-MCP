@@ -222,15 +222,10 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadActors(const TArray<FString>& Actors
 			AlreadyLoaded.AddUnique(Loaded);
 			continue;
 		}
-		TArray<FString> Similar;
-		for (const FUnrealMcpUnloadedActor& Row : Rows)
-		{
-			if (Similar.Num() < 5 && (Row.Label.Contains(Wanted) || Wanted.Contains(Row.Label)))
-				Similar.Add(Row.Label);
-		}
+		const FString Similar = UnrealMcpRqlSimilarActors(Wanted, nullptr, &Rows);
 		return UnrealMcpRql::Failed<TArray<AActor*>>(FString::Printf(TEXT("no World Partition actor '%s' in \"%s\" (loaded or not)%s; nothing was "
 			"loaded. List the unloaded ones: unloadedActors | select Label Class Location"), *Wanted, *World->GetOutermost()->GetName(),
-			Similar.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (did you mean %s?)"), *FString::Join(Similar, TEXT(", ")))));
+			Similar.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s)"), *Similar)));
 	}
 	TArray<AActor*> Result = LoadAndCollect(World, ToLoad);
 	for (AActor* Actor : AlreadyLoaded)

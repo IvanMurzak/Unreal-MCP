@@ -205,7 +205,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole`, `Undo(Steps = 1)` / `Redo(Steps = 1)` (as Ctrl+Z / Ctrl+Y: return the titles of the steps they took, refuse with nothing done when fewer steps exist, add no undo step of their own: `meta = (RqlOwnUndo)` keeps the session's transaction out), `LoadActors` / `LoadRegion` ([World Partition](#world-partition)) |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `diagnostics` | the editor's current warnings and errors (`Sequence`, `Source`, `Severity`, `Message`, `Count`, `FirstSeen`, `LastSeen`; see [Editor diagnostics](#editor-diagnostics)) |
-| `unreal.find(label)` | an actor by label, name or path |
+| `unreal.find(label)` | an actor by label, name or path (see [Finding actors](#finding-actors)) |
 | `unreal.asset(path)`, `unreal.assets(class, path?)` | one asset; assets of a class (at most 200, loaded as read; without a path: `/Game`, or in rql-query every content root (engine, plugins) when the project has none of the class). A path with no asset is empty (`| count` is 0) with an `asset-not-found` warning naming similar assets, or the shell that rewrote the path |
 | `unreal.classes(base?, filter?)` | classes deriving from a base |
 | `dataTables` | the project's DataTables (see [DataTables](#datatables)) |
@@ -250,6 +250,31 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
   `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
+
+### Finding actors
+
+`unreal.find(key)` resolves an actor of the open level by its label (exact, then in any case), object name or path. A key
+that names none fails with `not-found`, and agents used to spend turns listing actors after a typo, so the error names up
+to three nearest labels (`UnrealMcpRqlSimilarActors`, `UnrealMcpRqlSimilarActors.cpp`):
+
+    not-found: no actor with the label, name or path 'Islnd' in the level open in the editor, "/Game/Maps/Main";
+    did you mean 'Island' (Landscape), 'Island_old' (Landscape)?
+
+- Order: labels equal but for case and whitespace, then typos of the whole label (edit distance up to 1 for keys of
+  up to 5 characters, 2 up to 8, else 3), then (keys of 4+ characters) typos of its start (`Islnd` → `Island_old`),
+  then labels containing the key. When a type is implied (a label written for an actor parameter or member,
+  `set Parent = "Islnd"`, an extension operation's `Terrain` argument), actors of that class come first.
+- Candidates: the loaded actors and the World Partition actors that are not loaded (`'Lake' (WaterBodyLake, not
+  loaded)`), at most 20000 labels per lookup; labels over 128 characters are skipped. A request scans once per key and
+  class (RQL calls `unreal.find` again for every row of a predicate).
+- Whitespace: `unreal.find` does **not** trim the key. `"Island "` fails and suggests `'Island'`: a silent match would hide
+  an off-by-one label in a script. An unloaded actor is still found trimmed and case-insensitively, so it reports
+  `not-loaded` with its exact label and the `LoadActors` call. (A label written for a typed reference, `set Parent =
+  "Island "`, is trimmed, as an edit field trims it.)
+- No close label: no suggestion line; the message names the open level and `editor | call OpenLevel(...)` instead.
+- Passed on (an operation argument, a `set` value), RQL reports an error value by its code only (`argument 'Terrain':
+  value is error(not-found)`); the session appends the original message (`RestoreErrorValueMessages`), so the suggestions
+  reach the agent wherever the call sits. `editor | call LoadActors([...])` names the nearest labels the same way.
 
 ### World Partition
 
@@ -569,9 +594,12 @@ of that domain. A new first-party extension adds its entry to the bundled list
   mutations (set, dry run, read-only, permission), components, calls (spawn, add component, duplicate, destroy), refs,
   selection, levels, console, assets, schema. The C++ runtime has no parser, so each case carries the plan Rql.Parser
   produces for its query (in the comment above it).
+- `UnrealMcpRqlFindSuggestionsSpec.cpp` (`UnrealMcp.Tools.Rql.FindSuggestions`): `unreal.find`'s suggestions for a
+  typo, a trailing space, another case, no close label, and an error value used as a `set` value, an operation argument
+  and a label written for a reference.
 - `UnrealMcpRqlWorldPartitionSpec.cpp` (`UnrealMcp.Tools.Rql.WorldPartition`): a World Partition level from the Open
   World template with a cube far outside every loaded region, saved and reopened: the warning, `unloadedActors`,
-  `unreal.find`'s not-loaded, `LoadActors` / `LoadRegion` and the public `UnrealMcpRql::LoadWorldPartitionActors` /
+  `unreal.find`'s not-loaded and its suggestion of an unloaded label, `LoadActors` / `LoadRegion` and the public `UnrealMcpRql::LoadWorldPartitionActors` /
   `LoadWorldPartitionRegion` (no unsaved package, no undo step, skips, invalid boxes), and a plain level.
 - `bridge/tests/RqlBridgeTests.cs`: plans, result and schema rendering, the descriptor fields, the proxy wiring, the
   shipped skill file.

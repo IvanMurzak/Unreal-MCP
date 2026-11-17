@@ -38,6 +38,7 @@
   "UnrealMcp.Tools.Python": 5,
   "UnrealMcp.Tools.Registry": 7,
   "UnrealMcp.Tools.Rql": 23,
+  "UnrealMcp.Tools.Rql.FindSuggestions": 5,
   "UnrealMcp.Tools.Rql.Play": 7,
   "UnrealMcp.Tools.Rql.WorldPartition": 3,
   "UnrealMcp.Tools.Screenshot": 25,
