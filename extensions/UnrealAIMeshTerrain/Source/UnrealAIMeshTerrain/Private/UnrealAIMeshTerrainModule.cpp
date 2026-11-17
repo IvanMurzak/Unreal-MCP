@@ -442,7 +442,22 @@ timeoutSeconds)` reads a 16-bit grayscale `.png` or a `.r16` / `.raw` (little-en
 is `location` Z and one step is `heightScale / 128` cm (a Landscape's Z scale; 100 gives -256 .. +256 m); one quad per pixel
 step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Place terrains side by side, not
 overlapping: Play In Editor's section build then warns about the other terrain's actors. Save the level before Play In Editor:
-the engine asks about unsaved Mesh Terrain base meshes otherwise.)MD"));
+the engine asks about unsaved Mesh Terrain base meshes otherwise.
+
+An island with the sea all around: Mesh Terrain has no water, so the sea is a height, world Z 0 (sea level) by convention.
+Create the terrain larger than the island with its ground on the seabed, raise the land with a Patch, then shape the
+mountains and hills on top (modifiers added later apply on top of the Patch):
+
+```
+meshTerrainCreate | call Create("Island", [0, 0, -2000], 2400)                                    2.4 km of seabed at -20 m
+meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], 90000, 15000, "Land")    land at +2 m out to 900 m, a 150 m beach slope to the seabed
+editor | call SpawnActor({ClassName: "/Engine/BasicShapes/Plane", Label: "Sea", Location: [0, 0, 0], Scale: [2400, 2400, 1]})   optional sea surface
+```
+
+A Patch's Radius is its flat part and its Falloff the slope beyond (both cm): centred on the terrain, keep Radius + Falloff
+under half its shorter side (90000 + 15000 < 120000 cm), so a ring of seabed stays all around. The plane is only a flat
+surface at sea level (a Water plugin ocean looks better where the project has one); it blocks traces and walking at Z 0:
+read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
 	}
 };
 
