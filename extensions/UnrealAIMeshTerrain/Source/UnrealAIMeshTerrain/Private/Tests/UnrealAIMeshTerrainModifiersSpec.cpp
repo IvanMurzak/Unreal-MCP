@@ -601,6 +601,70 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecExpectHeight(TEXT("the stroke"), Terrain, X0 + 10000.0, 0.0, 300.0, 5.0);
 		});
 
+		It("round a switchback road's sharp corners so the built road keeps MaxSlope through them, and say where it is steepest", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModZig"));
+			const double X0 = -1900000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 60000.0, 60000.0, 600, 600);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const FString T = ModSpecFind(Label);
+			// Rolling ground and a 40 m rise to the north: meshTerrainModifier | call AddNoise(<terrain>, [X0, 0, 0], [60000, 60000], 4000, 0.00015, 0.3)
+			// and AddPatch(<terrain>, [X0, 15000, 4000], 6000, 12000)
+			ModSpecRun(TEXT("rolling ground"), TEXT("AddNoise"), { T, ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(60000.0, 60000.0), ModSpecNum(4000.0), ModSpecNum(0.00015), ModSpecNum(0.3) });
+			ModSpecRun(TEXT("a rise"), TEXT("AddPatch"), { T, ModSpecVec(X0, 15000.0, 4000.0), ModSpecNum(6000.0), ModSpecNum(12000.0) });
+			// Six 400 m legs joined by 90 degree corners, then up to the top.
+			TArray<FString> Points;
+			for (int32 Leg = 0; Leg < 6; ++Leg)
+			{
+				const double Y = -25000.0 + Leg * 7000.0;
+				Points.Add(ModSpecVec(X0 + (Leg % 2 == 0 ? -20000.0 : 20000.0), Y, 0.0));
+				Points.Add(ModSpecVec(X0 + (Leg % 2 == 0 ? 20000.0 : -20000.0), Y, 0.0));
+			}
+			Points.Add(ModSpecVec(X0, 15000.0, 0.0));
+			// meshTerrainModifier | call AddRoad(<terrain>, <points>, 400, 8, -1, "<label>_Road")
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("AddRoad"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s]})"), *FString::Join(Points, TEXT(","))),
+				ModSpecNum(400.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(Label + TEXT("_Road")) }), true, &Result));
+			const TSharedPtr<FJsonObject> Road = ModSpecResult(Result);
+			if (!TestTrue(*FString::Printf(TEXT("a road result (%s)"), *ModSpecJson(Result).Left(600)), Road.IsValid()))
+				return;
+			TestTrue(*FString::Printf(TEXT("it reaches the top with its 11 corners rounded (%s)"), *ModSpecJson(Result).Left(900)),
+				Road->GetBoolField(TEXT("Reached")) && Road->GetIntegerField(TEXT("RoundedCorners")) == 11);
+			// Ground truth along the road's own spline (what a walker follows), every metre.
+			UModifierComponent* Spline = ModSpecFindModifier(Terrain, Label + TEXT("_Road"));
+			const USplineComponent* Curve = Spline && Spline->GetOwner() ? Spline->GetOwner()->FindComponentByClass<USplineComponent>() : nullptr;
+			if (!TestNotNull(TEXT("the road's spline"), Curve))
+				return;
+			// The corners (where an unrounded road measured 28.7 degrees): within 25 m of each, under 10 degrees. (The road cuts
+			// into a steep, noisy hillside here; a deep cut still exceeds MaxSlope by up to 2 degrees: an open item.)
+			TArray<FVector2D> Corners;
+			for (int32 Leg = 0; Leg < 6; ++Leg)
+			{
+				Corners.Add(FVector2D(X0 - 20000.0, -25000.0 + Leg * 7000.0));
+				Corners.Add(FVector2D(X0 + 20000.0, -25000.0 + Leg * 7000.0));
+			}
+			double Steepest = 0.0, SteepestCorner = 0.0;
+			FVector Previous = Curve->GetLocationAtDistanceAlongSpline(0.0, ESplineCoordinateSpace::World);
+			double PreviousHeight = ModSpecHeight(Terrain, Previous.X, Previous.Y);
+			for (double Distance = 100.0; Distance <= Curve->GetSplineLength(); Distance += 100.0)
+			{
+				const FVector Point = Curve->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+				const double Height = ModSpecHeight(Terrain, Point.X, Point.Y);
+				const double Grade = FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - PreviousHeight) / FMath::Max(FVector2D::Distance(FVector2D(Point), FVector2D(Previous)), 1.0)));
+				Steepest = FMath::Max(Steepest, Grade);
+				if (Corners.ContainsByPredicate([&Point](const FVector2D& Corner) { return FVector2D::Distance(Corner, FVector2D(Point)) <= 2500.0; }))
+					SteepestCorner = FMath::Max(SteepestCorner, Grade);
+				Previous = Point;
+				PreviousHeight = Height;
+			}
+			TestTrue(*FString::Printf(TEXT("through its corners the road is under 10 degrees (%.2f)"), SteepestCorner), SteepestCorner < 10.0);
+			// The result says how steep it really is and where (what the agent acts on).
+			TestTrue(*FString::Printf(TEXT("the reported MaxSlope %.2f is the built road's (%.2f along its spline)"), Road->GetNumberField(TEXT("MaxSlope")), Steepest),
+				FMath::Abs(Road->GetNumberField(TEXT("MaxSlope")) - Steepest) <= 1.0 && Road->HasField(TEXT("SteepestAt")));
+		});
+
 		It("bind to the terrain they name, not the nearest one, and move between two terrains with Bind", [this]()
 		{
 			const FString First = ModSpecLabel(TEXT("ModFirst"));

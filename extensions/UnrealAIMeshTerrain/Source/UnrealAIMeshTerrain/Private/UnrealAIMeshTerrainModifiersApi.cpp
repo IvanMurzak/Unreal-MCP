@@ -525,8 +525,11 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return Spline;
 	}
 
-	/** Make @p Modifier's spline pass through @p Points (world), then let the modifier re-read it. */
-	bool ApplySplinePoints(UModifierComponent* Modifier, const TArray<FVector>& Points, bool bClosed)
+	/**
+	 * Make @p Modifier's spline pass through @p Points (world), then let the modifier re-read it. @p bLinear: straight between
+	 * the points (a road: a curve overshoots in Z between points where the profile turns, steeper than its grade).
+	 */
+	bool ApplySplinePoints(UModifierComponent* Modifier, const TArray<FVector>& Points, bool bClosed, bool bLinear = false)
 	{
 		USplineComponent* Spline = SplineOf(Modifier, /*bCreate*/ true);
 		if (!Spline)
@@ -535,6 +538,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		Spline->ClearSplinePoints(/*bUpdateSpline*/ false);
 		for (const FVector& Point : Points)
 			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::World, /*bUpdateSpline*/ false);
+		for (int32 Index = 0; bLinear && Index < Points.Num(); ++Index)
+			Spline->SetSplinePointType(Index, ESplinePointType::Linear, /*bUpdateSpline*/ false);
 		Spline->SetClosedLoop(bClosed, /*bUpdateSpline*/ false);
 		Spline->UpdateSpline();
 		// A closed spline modifier fills its inside (a plateau outline), an open one is a path.
@@ -557,13 +562,14 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			&& SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength);
 	}
 
-	/** A spline modifier's flat half-width, falloff, paint channel ("" none) and path, as AddSpline and AddRoad set them. */
-	bool SetSpline(AMeshPartition* Terrain, UModifierComponent* Spline, const TArray<FVector>& Points, double Plateau, double Falloff, const FString& Channel, bool bClosed)
+	/** A spline modifier's flat half-width, falloff, paint channel ("" none) and path, as AddSpline and AddRoad (bLinear) set them. */
+	bool SetSpline(AMeshPartition* Terrain, UModifierComponent* Spline, const TArray<FVector>& Points, double Plateau, double Falloff, const FString& Channel, bool bClosed,
+		bool bLinear = false)
 	{
 		return SetNumber(Spline, TEXT("PlateauDistance"), Plateau) && SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
 			&& SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
 				: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
-			&& ApplySplinePoints(Spline, Points, bClosed);
+			&& ApplySplinePoints(Spline, Points, bClosed, bLinear);
 	}
 
 	// ---- Lattices ----------------------------------------------------------------------------------------------------
@@ -721,30 +727,63 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
 	// Flat past each edge by more than a triangle, so no bank vertex tilts the road's edge (the banks start outside it).
 	const double Plateau = Width / 2.0 + FMath::Max(100.0, 1.5 * RoadEdge);
-	// The path every few metres (at most 1000 points: the spline's limit).
-	double Length = 0.0;
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
 	{
-		const double Segment = FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index]));
-		if (Segment < 1.0) // the path is X, Y: points apart only in Z are the same place
+		if (FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index])) < 1.0) // the path is X, Y: points apart only in Z are the same place
 			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("points %d and %d are the same X, Y: remove the duplicate"), Index - 1, Index));
-		Length += Segment;
 	}
-	auto Samples = [&Points](double Step)
+	// Corners rounded: a spline road with a flat width and banks cannot keep its grade through a sharp corner (its two legs'
+	// widths meet at different heights: a 90 degree switchback measured 13 degrees at MaxSlope 8). Every turn over 20 degrees
+	// becomes an arc of radius 2.5 x (Plateau + Falloff) (smaller only where the legs are too short for it): measured on a
+	// 4 m road, Plateau + Falloff alone still left 11.5 degrees at MaxSlope 8 on a hillside corner.
+	const double TurnRadius = 2.5 * (Plateau + Falloff);
+	TArray<FVector2D> Line = { FVector2D(Points[0]) };
+	TArray<FVector2D> TightTurns; // corners that got less than TurnRadius
+	int32 Rounded = 0;
+	for (int32 Index = 1; Index + 1 < Points.Num(); ++Index)
+	{
+		const FVector2D A(Points[Index - 1]), P(Points[Index]), B(Points[Index + 1]);
+		const FVector2D U = (P - A).GetSafeNormal(), V = (B - P).GetSafeNormal();
+		const double Turn = FMath::Acos(FMath::Clamp(FVector2D::DotProduct(U, V), -1.0, 1.0));
+		if (Turn < FMath::DegreesToRadians(20.0) || Turn > FMath::DegreesToRadians(179.0))
+		{
+			Line.Add(P);
+			continue;
+		}
+		const double HalfTan = FMath::Tan(Turn / 2.0);
+		const double MaxTrim = 0.45 * FMath::Min(FVector2D::Distance(A, P), FVector2D::Distance(P, B));
+		const double Radius = FMath::Min(TurnRadius, MaxTrim / HalfTan);
+		const double Trim = Radius * HalfTan;
+		if (Radius < TurnRadius - 1.0)
+			TightTurns.Add(P);
+		const double Side = FVector2D::CrossProduct(U, V) > 0.0 ? 1.0 : -1.0; // left turn: the centre is on the left
+		const FVector2D From = P - U * Trim;
+		const FVector2D Centre = From + FVector2D(-U.Y, U.X) * Side * Radius;
+		const int32 Pieces = FMath::Max(2, FMath::CeilToInt(Radius * Turn / FMath::Max(Width / 2.0, 100.0)));
+		for (int32 Piece = 0; Piece <= Pieces; ++Piece)
+			Line.Add(Centre + (From - Centre).GetRotated(FMath::RadiansToDegrees(Side * Turn * Piece / Pieces)));
+		++Rounded;
+	}
+	Line.Add(FVector2D(Points.Last()));
+	// The path every few metres (at most 1000 points: the spline's limit).
+	double Length = 0.0;
+	for (int32 Index = 1; Index < Line.Num(); ++Index)
+		Length += FVector2D::Distance(Line[Index - 1], Line[Index]);
+	auto Samples = [&Line](double Step)
 	{
 		int32 Count = 1;
-		for (int32 Index = 1; Index < Points.Num(); ++Index)
-			Count += FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index])) / Step));
+		for (int32 Index = 1; Index < Line.Num(); ++Index)
+			Count += FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Line[Index - 1], Line[Index]) / Step));
 		return Count;
 	};
 	double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
 	while (Samples(Step) > 1000)
 		Step *= 1.1;
-	TArray<FVector2D> Path = { FVector2D(Points[0]) };
+	TArray<FVector2D> Path = { Line[0] };
 	TArray<double> Along = { 0.0 };
-	for (int32 Index = 1; Index < Points.Num(); ++Index)
+	for (int32 Index = 1; Index < Line.Num(); ++Index)
 	{
-		const FVector2D From(Points[Index - 1]), To(Points[Index]);
+		const FVector2D From(Line[Index - 1]), To(Line[Index]);
 		const double Segment = FVector2D::Distance(From, To);
 		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Segment / Step));
 		for (int32 Piece = 1; Piece <= Pieces; ++Piece)
@@ -867,7 +906,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
 	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetNumber(Spline, TEXT("MaxZDistance"), FMath::Max(2000.0, Deepest + 1000.0))
-		|| !SetSpline(Terrain, Spline, Road, Plateau, Falloff, FString(), /*bClosed*/ false))
+		|| !SetSpline(Terrain, Spline, Road, Plateau, Falloff, FString(), /*bClosed*/ false, /*bLinear*/ true))
 		return FRoadResult();
 	Remeshed.bKept = true;
 	Cored.bKept = true;
@@ -903,19 +942,40 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
 		return Out;
 	}
-	// The built road: its grade along the centre line, from the collision.
-	double Previous = 0.0;
-	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	// The built road: its grade along the centre line every metre, from the collision.
+	FVector2D Steepest = Path[0];
 	{
-		const double Height = SampleSurface(Terrain, Path[Index].X, Path[Index].Y, /*bChannels*/ false).Height;
-		if (Index > 0 && Along[Index] > Along[Index - 1])
-			Out.MaxSlope = FMath::Max(Out.MaxSlope, FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - Previous) / (Along[Index] - Along[Index - 1]))));
-		Previous = Height;
+		double Previous = SampleSurface(Terrain, Path[0].X, Path[0].Y, /*bChannels*/ false).Height;
+		FVector2D Last = Path[0];
+		for (int32 Index = 1; Index < Path.Num(); ++Index)
+		{
+			const int32 Metres = FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Path[Index - 1], Path[Index]) / 100.0));
+			for (int32 Piece = 1; Piece <= Metres; ++Piece)
+			{
+				const FVector2D Point = FMath::Lerp(Path[Index - 1], Path[Index], double(Piece) / Metres);
+				const double Height = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false).Height;
+				const double Grade = FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - Previous) / FMath::Max(FVector2D::Distance(Point, Last), 1.0)));
+				if (Grade > Out.MaxSlope)
+				{
+					Out.MaxSlope = Grade;
+					Steepest = Point;
+				}
+				Previous = Height;
+				Last = Point;
+			}
+		}
 	}
 	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
+	Out.SteepestAt = Steepest;
+	Out.RoundedCorners = Rounded;
 	if (Out.Reached && Out.MaxSlope > MaxSlope + 0.5)
 	{
-		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, RoadEdge);
+		const FVector2D* Tight = TightTurns.FindByPredicate([&Steepest, Width](const FVector2D& Turn) { return FVector2D::Distance(Turn, Steepest) <= 3.0 * Width + 1000.0; });
+		Out.Note = Tight
+			? FString::Printf(TEXT("the built road is %.1f degrees steep at X %.0f, Y %.0f, at a turn too tight for a road this wide (the legs around the point X %.0f, Y %.0f are too short for a %.0f m curve): give that corner more room (longer legs, a wider switchback), Remove the road and call again"),
+				Out.MaxSlope, Steepest.X, Steepest.Y, Tight->X, Tight->Y, TurnRadius / 100.0)
+			: FString::Printf(TEXT("the built road is %.1f degrees steep at X %.0f, Y %.0f: the ground under it is too coarse there; AddRemesh over that spot (EdgeLength %.0f) and Rebuild"),
+				Out.MaxSlope, Steepest.X, Steepest.Y, RoadEdge);
 	}
 	Out.Seconds = SecondsSince(Start);
 	return Out;
