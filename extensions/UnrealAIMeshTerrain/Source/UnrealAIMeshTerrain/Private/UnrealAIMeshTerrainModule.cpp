@@ -454,9 +454,10 @@ meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], 90000, 1
 editor | call SpawnActor({ClassName: "/Engine/BasicShapes/Plane", Label: "Sea", Location: [0, 0, 0], Scale: [2400, 2400, 1]})   optional sea surface
 ```
 
-A Patch's Radius is its flat part and its Falloff the slope beyond: keep Radius + Falloff inside half the terrain's size, so a
-ring of seabed stays all around. The plane is only a flat surface at sea level (a Water plugin ocean looks better where the
-project has one) and blocks traces at Z 0: read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
+A Patch's Radius is its flat part and its Falloff the slope beyond (both cm): centred on the terrain, keep Radius + Falloff
+under half its shorter side (90000 + 15000 < 120000 cm), so a ring of seabed stays all around. The plane is only a flat
+surface at sea level (a Water plugin ocean looks better where the project has one); it blocks traces and walking at Z 0:
+read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
 	}
 };
 

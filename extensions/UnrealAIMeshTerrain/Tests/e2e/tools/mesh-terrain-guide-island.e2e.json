@@ -5,6 +5,6 @@
     "guide": "mesh-terrain"
   },
   "assert": {
-    "pattern": "sea all around[\\s\\S]*sea level[\\s\\S]*\\[0, 0, -2000\\], 2400\\)[\\s\\S]*AddPatch"
+    "pattern": "sea all around[\\s\\S]*sea level[\\s\\S]*\\[0, 0, -2000\\], 2400\\)[\\s\\S]*AddPatch\\(unreal\\.find\\(.{1,3}Island.{1,3}\\), \\[0, 0, 200\\], 90000, 15000"
   }
 }

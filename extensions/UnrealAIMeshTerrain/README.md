@@ -103,8 +103,9 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   Partition actors first), one undo step.
 - An island with the sea all around: Mesh Terrain has no water, so the sea is a height (world Z 0 by convention). The guide's
   recipe: `Create` the terrain larger than the island with its ground below sea level (`Create("Island", [0, 0, -2000], 2400)`),
-  raise the land with `AddPatch` (Radius = the flat land, Falloff = the beach slope down to the seabed, Radius + Falloff inside
-  half the terrain), shape mountains on top, and optionally place a plane at Z 0 as the sea surface.
+  raise the land with `AddPatch` (Radius = the flat land, Falloff = the beach slope down to the seabed, Radius + Falloff in cm
+  under half the terrain's shorter side), shape mountains on top, and optionally place a plane at Z 0 as the sea surface (it
+  blocks traces and walking there).
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
   ("Unsaved Mesh Partition Modifiers"). Place terrains side by side, not overlapping: the editor builds overlapping
   terrains fine, but Play In Editor's section build of one loads the other's actors and logs `LogLinker` warnings
