@@ -138,6 +138,26 @@ void FUnrealMcpRqlStructWritesSpec::Define()
 			TestTrue(TEXT("the trace hits the cube again"), TraceHits(Actor));
 		});
 
+		It("comes back whole when the mutation fails after it (profile, the mesh's default collision, physics)", [this]()
+		{
+			AStaticMeshActor* Actor = SpawnCube();
+			if (!TestNotNull(TEXT("cube spawned"), Actor))
+				return;
+			UStaticMeshComponent* Mesh = Actor->GetStaticMeshComponent();
+			const FName Profile = Mesh->GetCollisionProfileName();
+			TestTrue(TEXT("a StaticMeshActor takes its collision from the mesh"), Mesh->bUseDefaultCollision);
+
+			// OverriddenLightMapRes is rounded up to a multiple of 4 by the component: 62 comes back as the 64 it has, a reset.
+			/* actors | where Label == "RqlStructMesh" | get StaticMeshComponent | set BodyInstance.CollisionEnabled = "NoCollision", OverriddenLightMapRes = 62 */
+			const TSharedPtr<FJsonObject> Set = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlStructMesh"}]}},{"op":"get","expr":{"path":["StaticMeshComponent"]}},{"op":"set","assign":[{"target":{"path":["BodyInstance","CollisionEnabled"]},"value":{"lit":"NoCollision"}},{"target":{"path":["OverriddenLightMapRes"]},"value":{"lit":62}}]}]})RQL"), true);
+			TestFalse(TEXT("the mutation fails"), IsOk(Set));
+			TestTrue(*FString::Printf(TEXT("on the reset member (%s)"), *Codes(Set)), Codes(Set).Contains(TEXT("OverriddenLightMapRes")));
+			TestEqual(TEXT("the profile is back"), Mesh->GetCollisionProfileName(), Profile);
+			TestTrue(TEXT("so is the mesh's default collision"), Mesh->bUseDefaultCollision);
+			TestEqual(TEXT("and collision"), static_cast<int32>(Mesh->GetCollisionEnabled()), static_cast<int32>(ECollisionEnabled::QueryAndPhysics));
+			TestTrue(TEXT("the trace hits the cube"), TraceHits(Actor));
+		});
+
 		It("runs the editor's follow-up of BodyInstance.bSimulatePhysics (Movable, PhysicsActor)", [this]()
 		{
 			AStaticMeshActor* Actor = SpawnCube();

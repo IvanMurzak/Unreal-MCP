@@ -1441,22 +1441,27 @@ static void UnrealMcpRqlChangedMemberPath(const FProperty* Property, const void*
  * the raw value stays beside a profile that disagrees, and the owner's construction rerun reloads the profile over it.
  * A static mesh component that takes its collision from the mesh asset (bUseDefaultCollision, a StaticMeshActor's
  * default) stops doing so first, as the Details panel's MarkAllBodiesDefaultCollision(false): the mesh's profile would
- * otherwise be loaded over any edit.
+ * otherwise be loaded over any edit. A write that puts a member back to its value before this call's first collision
+ * write (the runtime's rollback of a failed mutation, or an edit undone in the same query) restores the whole collision
+ * state as it was, default collision included: the setters alone would leave the profile at Custom.
+ * Returns whether it turned the static mesh's default collision off (the template's objects follow that too).
  */
-static void UnrealMcpRqlApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before)
+bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before)
 {
 	const FStructProperty* Struct = CastField<FStructProperty>(Property);
 	if (!Struct || Struct->Struct != FBodyInstance::StaticStruct() || Property->ArrayDim != 1)
-		return;
+		return false;
 	// Private members of FBodyInstance: reached through reflection, written through its public setters.
 	static const FName ProfileName(TEXT("CollisionProfileName"));
 	static const FName EnabledName(TEXT("CollisionEnabled"));
 	static const FName ObjectTypeName(TEXT("ObjectType"));
+	static const FName ResponsesName(TEXT("CollisionResponses"));
 	const FNameProperty* Profile = CastField<FNameProperty>(Struct->Struct->FindPropertyByName(ProfileName));
 	const FByteProperty* Enabled = CastField<FByteProperty>(Struct->Struct->FindPropertyByName(EnabledName));
 	const FByteProperty* ObjectType = CastField<FByteProperty>(Struct->Struct->FindPropertyByName(ObjectTypeName));
-	if (!Profile || !Enabled || !ObjectType)
-		return;
+	const FProperty* Responses = Struct->Struct->FindPropertyByName(ResponsesName);
+	if (!Profile || !Enabled || !ObjectType || !Responses)
+		return false;
 	FBodyInstance& Body = *static_cast<FBodyInstance*>(Live);
 	const FName NewProfile = Profile->GetPropertyValue_InContainer(Live);
 	const FName OldProfile = Profile->GetPropertyValue_InContainer(Before);
@@ -1465,14 +1470,43 @@ static void UnrealMcpRqlApplyStructSetters(UObject* Owner, const FProperty* Prop
 	const uint8 NewObjectType = ObjectType->GetPropertyValue_InContainer(Live);
 	const uint8 OldObjectType = ObjectType->GetPropertyValue_InContainer(Before);
 	if (NewProfile == OldProfile && NewEnabled == OldEnabled && NewObjectType == OldObjectType)
-		return;
-	if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Owner); Mesh && Live == &Mesh->BodyInstance)
+		return false;
+	UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Owner);
+	if (Mesh && Live != &Mesh->BodyInstance)
+		Mesh = nullptr;
+
+	if (const FBodySnapshot* First = BodySnapshots.Find(Live))
+	{
+		const void* Original = First->Body->GetStructMemory();
+		const bool bRestores = (NewProfile == OldProfile || NewProfile == Profile->GetPropertyValue_InContainer(Original))
+			&& (NewEnabled == OldEnabled || NewEnabled == Enabled->GetPropertyValue_InContainer(Original))
+			&& (NewObjectType == OldObjectType || NewObjectType == ObjectType->GetPropertyValue_InContainer(Original));
+		if (bRestores)
+		{
+			for (const FProperty* Member : { static_cast<const FProperty*>(Profile), static_cast<const FProperty*>(Enabled),
+					static_cast<const FProperty*>(ObjectType), Responses })
+				Member->CopyCompleteValue_InContainer(Live, Original);
+			if (Mesh)
+				Mesh->bUseDefaultCollision = First->bUseDefaultCollision; // re-registering loads the mesh's profile again
+			return false;
+		}
+	}
+	else
+	{
+		FBodySnapshot& Snapshot = BodySnapshots.Add(Live);
+		Snapshot.Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
+		FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot.Body->GetStructMemory(), Before);
+		Snapshot.bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
+	}
+
+	const bool bDefaultCollisionOff = Mesh && Mesh->bUseDefaultCollision;
+	if (bDefaultCollisionOff)
 		Mesh->bUseDefaultCollision = false;
 	if (NewProfile != OldProfile)
 	{
 		Profile->SetPropertyValue_InContainer(Live, OldProfile);
-		Body.SetCollisionProfileName(NewProfile); // an unknown name ends as Custom, which the receipt then shows
-		return;
+		Body.SetCollisionProfileName(NewProfile);
+		return bDefaultCollisionOff;
 	}
 	if (NewEnabled != OldEnabled)
 	{
@@ -1484,6 +1518,7 @@ static void UnrealMcpRqlApplyStructSetters(UObject* Owner, const FProperty* Prop
 		ObjectType->SetPropertyValue_InContainer(Live, OldObjectType);
 		Body.SetObjectType(static_cast<ECollisionChannel>(NewObjectType));
 	}
+	return bDefaultCollisionOff;
 }
 
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
@@ -1548,9 +1583,10 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 	else
 		Object->PreEditChange(Chain);
 	Property->CopyCompleteValue(Live, Planned.Ptr);
+	bool bDefaultCollisionOff = false;
 	try
 	{
-		UnrealMcpRqlApplyStructSetters(Object, Property, Live, Old.Ptr);
+		bDefaultCollisionOff = ApplyStructSetters(Object, Property, Live, Old.Ptr);
 	}
 	catch (...)
 	{
@@ -1589,6 +1625,10 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 			Instance->Modify();
 		Instance->PreEditChange(Property);
 		UnrealMcpRqlFollowTemplate(Property, Current, Old.Ptr, New, /*bApply*/ true);
+		// The template stopped taking its collision from the mesh asset (ApplyStructSetters): so do the objects that follow
+		// it, or re-registering them loads the mesh's profile over the members they just took.
+		if (UStaticMeshComponent* InstanceMesh = Cast<UStaticMeshComponent>(Instance); bDefaultCollisionOff && InstanceMesh)
+			InstanceMesh->bUseDefaultCollision = false;
 		FPropertyChangedEvent InstanceEvent(Property, EPropertyChangeType::ValueSet);
 		Instance->PostEditChangeProperty(InstanceEvent);
 		Instance->MarkPackageDirty();

@@ -91,7 +91,10 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   chain under the owner's property), so `set BodyInstance.bSimulatePhysics = true` also makes a static mesh Movable.
   FBodyInstance's collision members follow its setters: `set BodyInstance.CollisionProfileName = "NoCollision"` loads
   the profile's settings, and `set BodyInstance.CollisionEnabled = "NoCollision"` (or `ObjectType`) switches the
-  profile to `Custom`, as `SetCollisionEnabled` does; the physics state follows in both cases.
+  profile to `Custom`, as `SetCollisionEnabled` does (a static mesh stops using the mesh asset's default collision, as
+  the Details panel does); the physics state follows in both cases, and a rolled-back mutation restores all of it. On a
+  template (a Blueprint's component) the owner gets the same member event without the chain's propagation: the objects
+  made from it follow member by member instead.
 - **Identity**: `$ref` is `Type#<Id>`, the `Id` of the object's slot in the object array plus that slot's serial number
   (editor-session ids, like Unity's instance ids); `ref(…)` resolves them directly, and a ref to a destroyed object never
   resolves to a new object that reuses the slot. Every object value carries a weak pointer, so destroyed (garbage)

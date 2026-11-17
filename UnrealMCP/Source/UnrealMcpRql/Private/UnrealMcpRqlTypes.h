@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/WeakObjectPtr.h"
 #include "UnrealMcpRqlInclude.h"
 
@@ -109,7 +110,7 @@ public:
 		std::shared_ptr<void> KeepAlive = nullptr);
 	/** Convert and store; throws std::runtime_error with a message for the agent when the value does not fit. */
 	void Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value);
-	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
+	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeChainProperty, naming the changed member). */
 	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
 	/**
 	 * @p Object, or the object that replaced it during this call: an edit of a Blueprint actor's component reruns the
@@ -217,6 +218,14 @@ private:
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
 	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
 	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: replaced object -> its newest replacement
+	/** A body's collision before this call's first write of it (ApplyStructSetters), and its mesh's bUseDefaultCollision. */
+	struct FBodySnapshot
+	{
+		TSharedPtr<FStructOnScope> Body;
+		bool bUseDefaultCollision = false;
+	};
+	TMap<const void*, FBodySnapshot> BodySnapshots; // by the FBodyInstance's memory
+	bool ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before);
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;
 	std::vector<rql::Diagnostic> RequestWarnings;
