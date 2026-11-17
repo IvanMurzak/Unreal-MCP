@@ -1098,6 +1098,7 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, TOptional<int32> MaxTargets)
 {
 	Types().SetMutationRequest(bAllowMutation);
+	UnrealMcpRqlForgetSimilarActors();
 	bReadOnlyCallRequest = false;
 	bRefusedReadOnlyCall = false;
 	bReadOnlyLimit = false;

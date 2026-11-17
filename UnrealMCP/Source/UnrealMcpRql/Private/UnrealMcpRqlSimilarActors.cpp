@@ -64,9 +64,12 @@ namespace UnrealMcpRqlSimilarActorsLocal
 		}
 		OutFull = FMath::Min(Row[Label.Len()], Limit + 1);
 		OutPrefix = Limit + 1;
-		for (const int32 Value : Row)
-			OutPrefix = FMath::Min(OutPrefix, Value);
+		for (int32 J = 1; J <= Label.Len(); ++J) // a non-empty prefix: the empty one is Wanted.Len() from any label
+			OutPrefix = FMath::Min(OutPrefix, Row[J]);
 	}
+
+	/** Keys shorter than this match only whole labels: a short key is close to the start of too many. */
+	constexpr int32 MinPartialKey = 4;
 
 	struct FCandidate
 	{
@@ -78,6 +81,17 @@ namespace UnrealMcpRqlSimilarActorsLocal
 	};
 }
 
+static FString UnrealMcpRqlSimilarActorsScan(UWorld* World, const FString& Wanted, UClass* Preferred, const TArray<FUnrealMcpUnloadedActor>* InUnloaded);
+
+/** The answers of the running request (RQL calls a function again for every row: a misspelt unreal.find in a per-row
+ * predicate must not scan the level once per row). Emptied when a request starts. */
+static TMap<FString, FString> GUnrealMcpRqlSimilarActorsCache;
+
+void UnrealMcpRqlForgetSimilarActors()
+{
+	GUnrealMcpRqlSimilarActorsCache.Reset();
+}
+
 FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred, const TArray<FUnrealMcpUnloadedActor>* InUnloaded)
 {
 	using namespace UnrealMcpRqlSimilarActorsLocal;
@@ -85,12 +99,21 @@ FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred, const 
 	UWorld* World = UnrealMcpRqlUtil::EditorWorld();
 	if (Wanted.IsEmpty() || Wanted.Len() > MaxLabelLength || !World)
 		return FString();
+	const FString CacheKey = Wanted + TEXT("|") + (Preferred ? Preferred->GetPathName() : FString()) + TEXT("|") + World->GetPathName();
+	if (const FString* Hit = GUnrealMcpRqlSimilarActorsCache.Find(CacheKey))
+		return *Hit;
+	return GUnrealMcpRqlSimilarActorsCache.Add(CacheKey, UnrealMcpRqlSimilarActorsScan(World, Wanted, Preferred, InUnloaded));
+}
+
+static FString UnrealMcpRqlSimilarActorsScan(UWorld* World, const FString& Wanted, UClass* Preferred, const TArray<FUnrealMcpUnloadedActor>* InUnloaded)
+{
+	using namespace UnrealMcpRqlSimilarActorsLocal;
 	// Tolerated typos: 1 up to 5 characters, 2 up to 8, then 3.
-	const int32 Limit = FMath::Clamp((Wanted.Len() + 1) / 3, 1, 3);
+	const int32 Limit = FMath::Clamp(Wanted.Len() / 3, 1, 3);
 	TArray<FCandidate> Hits;
 	int32 Scanned = 0;
-	// Score, lower first: the same text but for case or whitespace, a whole-label typo, a typo of the label's start, the
-	// text inside the label.
+	// Score, lower first, by tier then distance: the same text but for case or whitespace, a whole-label typo, a typo of
+	// the label's start, the text inside the label.
 	auto Consider = [&](const FString& Label, const FString& Class, bool bLoaded, bool bPreferred)
 	{
 		++Scanned;
@@ -103,11 +126,11 @@ FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred, const 
 			int32 Full = 0, Prefix = 0;
 			Distances(Wanted, Key, Limit, Full, Prefix);
 			if (Full <= Limit)
-				Score = 1 + 2 * Full;
-			else if (Prefix <= Limit)
-				Score = 2 + 2 * Prefix;
-			else if (Wanted.Len() >= 4 && Key.Contains(Wanted))
-				Score = 3 + 2 * Limit;
+				Score = 10 + Full;
+			else if (Wanted.Len() >= MinPartialKey && Prefix <= Limit)
+				Score = 20 + Prefix;
+			else if (Wanted.Len() >= MinPartialKey && Key.Contains(Wanted))
+				Score = 30;
 			else
 				return;
 		}

@@ -36,9 +36,12 @@ FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
  * close to @p Text, for an actor lookup that found nothing; "" when none is close. The same text but for case and whitespace
  * first, then typos (edit distance), then labels that contain it; actors of @p Preferred (when given) before any other.
  * Reads the loaded actors and the World Partition actors that are not loaded (@p Unloaded when the caller has them), at most
- * 20000 labels in all.
+ * 20000 labels in all. One answer per text and class for the running request.
  */
 FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred = nullptr, const TArray<struct FUnrealMcpUnloadedActor>* Unloaded = nullptr);
+
+/** Forget UnrealMcpRqlSimilarActors' answers, which it keeps for the running request (FUnrealMcpRqlSession::Execute). */
+void UnrealMcpRqlForgetSimilarActors();
 
 /** The same among the assets of every class: for a path with no class to go by. */
 FString UnrealMcpRqlSimilarAssetsOfAnyClass(const FString& Text);

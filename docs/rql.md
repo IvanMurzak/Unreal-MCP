@@ -261,11 +261,12 @@ to three nearest labels (`UnrealMcpRqlSimilarActors`, `UnrealMcpRqlSimilarActors
     did you mean 'Island' (Landscape), 'Island_old' (Landscape)?
 
 - Order: labels equal but for case and whitespace, then typos of the whole label (edit distance up to 1 for keys of
-  up to 5 characters, 2 up to 8, else 3), then typos of its start (`Islnd` → `Island_old`), then labels containing the
-  key (4+ characters). When a type is implied (a label written for an actor parameter or member,
+  up to 5 characters, 2 up to 8, else 3), then (keys of 4+ characters) typos of its start (`Islnd` → `Island_old`),
+  then labels containing the key. When a type is implied (a label written for an actor parameter or member,
   `set Parent = "Islnd"`, an extension operation's `Terrain` argument), actors of that class come first.
 - Candidates: the loaded actors and the World Partition actors that are not loaded (`'Lake' (WaterBodyLake, not
-  loaded)`), at most 20000 labels per lookup; labels over 128 characters are skipped.
+  loaded)`), at most 20000 labels per lookup; labels over 128 characters are skipped. A request scans once per key and
+  class (RQL calls `unreal.find` again for every row of a predicate).
 - Whitespace: `unreal.find` does **not** trim the key. `"Island "` fails and suggests `'Island'`: a silent match would hide
   an off-by-one label in a script. An unloaded actor is still found trimmed and case-insensitively, so it reports
   `not-loaded` with its exact label and the `LoadActors` call. (A label written for a typed reference, `set Parent =
