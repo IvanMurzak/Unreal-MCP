@@ -22,8 +22,9 @@
 
 import { upsertServerTarget } from '../utils/project-marker.js';
 // B5 FIX (auth-fixes design 02 T3): the routing pin is derived with cli-core's
-// v2 ProjectIdentity (`derivePinV2`), which normalizes `\`→`/` before hashing.
-// `path.resolve` (below) yields a Windows backslash root; the legacy v1
+// v2 ProjectIdentity (`derivePinV2`, through `deriveProjectRoutingPin`, which hashes
+// the real path the sidecar hashes), which normalizes `\`→`/` before hashing.
+// A Windows path (resolved or real) has backslashes; the legacy v1
 // `deriveProjectPin` hashed those backslashes verbatim, so the enroll pin never
 // prefix-matched the plugin's forward-slash `projectPathHash` and pinned routing
 // silently failed on Windows. v2 collapses `C:\a\b` and `C:/a/b` to one hash.

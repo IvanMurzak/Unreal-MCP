@@ -43,7 +43,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
     /// <see cref="ProjectConnectionResolver.Resolve"/>), the enrolled <see cref="ServerTarget"/> and the full
     /// <see cref="ProjectPathHash"/> read/derived from the committable project marker + project root, plus the
     /// ready-to-attach <see cref="Metadata"/> handshake payload. Every field is derived deterministically —
-    /// no live socket, no shared state.
+    /// no live socket, no shared state. <c>HashInput</c>: the spelling the pin and hash were derived from, the
+    /// project folder's real path (<see cref="CanonicalProjectPath"/>).
     /// </summary>
     internal sealed record ProjectConnection(
         string Pin,

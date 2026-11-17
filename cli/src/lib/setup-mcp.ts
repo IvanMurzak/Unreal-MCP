@@ -12,9 +12,9 @@
 import * as path from 'path';
 import { platform } from 'os';
 // cli-core owns the T4 pinned-routing policy: `pinUrl` appends the `/p/<pin>`
-// routing segment and `derivePinV2` is the shared v2 ProjectIdentity pin
-// (`\`→`/`-normalized), so the CLI writes the SAME pinned URL the C# Editor
-// Configure and the sibling CLIs write for a given project.
+// routing segment and `derivePinV2` (via `deriveProjectRoutingPin`, of the
+// project's real path) is the shared v2 ProjectIdentity pin (`\`→`/`-normalized),
+// so the CLI writes the SAME pinned URL the sidecar registers under.
 import {
   pinUrl,
   isCloudUrl,
