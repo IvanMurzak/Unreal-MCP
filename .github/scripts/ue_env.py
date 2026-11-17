@@ -22,7 +22,7 @@ runner-local paths every later step uses, and appends them to GITHUB_ENV:
                  certificates there, so its HTTPS downloads would fail to verify.
   DEVELOPER_DIR  macOS only, and only when the machine's selected Xcode is outside the engine's
                  supported range: a side-by-side /Applications/Xcode*.app that fits.
-  PATH           Linux only: a `chmod` shim first (CHMOD_SHIM), so Build.sh works on a read-only engine.
+  PATH           Linux UE 5.5/5.6 only: a `chmod` shim first (CHMOD_SHIM), so Build.sh works on a read-only engine.
 
 The link is a directory junction on Windows and a symlink elsewhere. The job's cleanup step removes it
 with `--remove-link`, never with a recursive delete: that would follow the link into the engine install.
@@ -136,11 +136,18 @@ def developer_dir(root: Path, version: str):
 # UE 5.5/5.6 Linux SetupDotnet.sh runs `chmod u+x <engine>/.../DotNet/<ver>/linux-x64/dotnet` unconditionally, and Build.sh
 # runs it under `set -e`, so the build dies on a read-only engine install ("Read-only file system"). UE 5.7+ guards the
 # call with `[ ! -x ]`. The engine is never written to: this shim, first on the job's PATH, skips that one no-op call
-# (the file is already executable) and runs the real chmod for anything else.
+# (the file is already executable) and runs the real chmod for anything else. Only for those engines: UE 5.8's build
+# (UBA) runs `chmod` after every Linux link and fails on a script found first on PATH ("/bin/sh: 0: cannot open chmod").
+CHMOD_SHIM_VERSIONS = ("5.5", "5.6")
 CHMOD_SHIM = """#!/bin/sh
 if [ "$#" -eq 2 ] && [ "$1" = "u+x" ] && [ -f "$2" ] && [ -x "$2" ]; then exit 0; fi
 exec /bin/chmod "$@"
 """
+
+
+def needs_chmod_shim(version: str, platform: str = UE_PLATFORM) -> bool:
+    """Whether this job puts the chmod shim on PATH: Linux, and only the engines whose SetupDotnet.sh needs it."""
+    return platform == "Linux" and version in CHMOD_SHIM_VERSIONS
 
 
 def install_chmod_shim() -> Path:
@@ -205,7 +212,7 @@ def resolve(version: str) -> None:
         add_job_env("DEVELOPER_DIR", str(developer))
     if ca_bundle:
         add_job_env("SSL_CERT_FILE", ca_bundle)
-    if UE_PLATFORM == "Linux":
+    if needs_chmod_shim(version):
         append_job_file("GITHUB_PATH", str(install_chmod_shim()))
 
 

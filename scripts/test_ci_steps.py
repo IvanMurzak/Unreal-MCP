@@ -351,6 +351,15 @@ class UeEnvTests(unittest.TestCase):
             subprocess.run([str(shims / "chmod"), "644", str(tool)], check=True)  # passed on to the real chmod
             self.assertEqual(tool.stat().st_mode & 0o777, 0o644)
 
+    def test_chmod_shim_only_for_linux_ue_5_5_and_5_6(self):
+        # UE 5.8's Linux build (UBA) fails on a chmod script first on PATH; 5.7+ needs no shim.
+        self.assertTrue(ue_env.needs_chmod_shim("5.5", "Linux"))
+        self.assertTrue(ue_env.needs_chmod_shim("5.6", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.7", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.8", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.5", "Mac"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.6", "Win64"))
+
     def test_xcode_versions_compare_as_three_parts(self):
         self.assertEqual(ue_env.xcode3("15.2"), (15, 2, 0))
         self.assertLess(ue_env.xcode3("16.4"), ue_env.xcode3("16.9.0"))
@@ -436,6 +445,14 @@ class ConnectionSmokeLogTests(unittest.TestCase):
                         "Cannot download the MCP bridge: this UnrealMCP build has no bridge checksum manifest"):
             marks = self.scan(self.NO_BINARY, self.DOWNLOADING, f"LogUnrealMcp: Warning: [Unreal-MCP] {failure}")
             self.assertTrue(marks["bridge_download_failed"], failure)
+
+
+class ConnectionSmokeMetaTests(unittest.TestCase):
+    def test_the_engine_version_is_major_minor_even_for_a_hotfix_install_path(self):
+        smoke = load("connection_smoke", ROOT / "scripts/connection_smoke.py")
+        self.assertEqual(smoke.record_meta(Path("/opt/runner-manager-unreal/UE_5.8.4"))["engine_version"], "5.8")
+        self.assertEqual(smoke.record_meta(Path("/Users/Shared/Epic Games/UE_5.8"))["engine_version"], "5.8")
+        self.assertEqual(smoke.record_meta(Path(r"C:\Program Files\Epic Games\UE_5.5"))["engine_version"], "5.5")
 
 
 class ConnectionSmokeKillTests(unittest.TestCase):

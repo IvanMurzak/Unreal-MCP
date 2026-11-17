@@ -297,7 +297,8 @@ def record_response(result: dict) -> dict:
 
 def record_meta(ue: Path) -> dict:
     """Provenance meta. plugin_version / mcp_plugin_version / recorded_at are masked by `diff`."""
-    m = re.search(r"UE_(\d+(?:\.\d+)*)", str(ue))
+    # <major>.<minor>, the fixture folder's version: a Linux install path names the hotfix too (UE_5.8.4).
+    m = re.search(r"UE_(\d+\.\d+)", str(ue))
     plugin_version = "unknown"
     uplugin = Path(__file__).resolve().parent.parent / "UnrealMCP" / "UnrealMCP.uplugin"
     try:
