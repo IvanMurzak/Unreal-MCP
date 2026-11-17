@@ -1647,7 +1647,18 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 		PlannedLeaf = Member->ContainerPtrToValuePtr<void>(PlannedLeaf);
 		AfterLeaf = AfterLeaf ? Member->ContainerPtrToValuePtr<void>(AfterLeaf) : nullptr;
 	}
-	if (AfterLeaf && !Leaf->Identical(OldLeaf, PlannedLeaf) && Leaf->Identical(AfterLeaf, OldLeaf))
+	// Every element of a fixed-size array member (Identical compares one element).
+	const auto Same = [Leaf](const void* A, const void* B)
+	{
+		for (int32 Index = 0; Index < Leaf->ArrayDim; ++Index)
+		{
+			const SIZE_T Offset = SIZE_T(Leaf->GetElementSize()) * Index;
+			if (!Leaf->Identical(static_cast<const uint8*>(A) + Offset, static_cast<const uint8*>(B) + Offset))
+				return false;
+		}
+		return true;
+	};
+	if (AfterLeaf && !Same(OldLeaf, PlannedLeaf) && Same(AfterLeaf, OldLeaf))
 	{
 		FString Label = Property->GetAuthoredName();
 		for (const FProperty* Member : Path)

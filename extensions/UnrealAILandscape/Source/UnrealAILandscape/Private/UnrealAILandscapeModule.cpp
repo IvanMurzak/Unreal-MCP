@@ -263,6 +263,8 @@ public:
 					Record->SetField(TEXT("Height"), Number(Edit.Height));
 					if (!Edit.Layer.IsEmpty())
 						Record->SetStringField(TEXT("Layer"), Edit.Layer);
+					if (!Edit.Rule.IsEmpty())
+						Record->SetStringField(TEXT("Rule"), Edit.Rule);
 					Record->SetStringField(TEXT("Time"), Edit.Time);
 					Out.Add(MakeShared<FJsonValueObject>(Record));
 				}
@@ -392,9 +394,9 @@ landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 1000
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
 Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 5000, newest first:
 Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
-switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional last argument `Label` ("river", "road to the
+switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional argument `Label` (the last one; PaintWhere: before Within; CreateRiverBetween's edit takes the river's label) ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
-made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
+made each place (`Edit`: "Carve 'river' #3", #3 its `Index`; once the log is full each new record shifts the indexes). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
 place with no `Edit` was most likely made outside these operations (or before the log, or past its last 5000 records / 100,000 path points).
 To check a landscape someone edited by hand ("I played with the terrain, check nothing is broken"), call `Bumps`: the log
 does not show such an edit, the undo history is no record of it (no locations, empty after a restart, not every Python

@@ -89,11 +89,11 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 ### Edit log
 
 Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Paint`, `PaintWhere`, and
-`CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | select Edits`
+`CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | where IsPrimary | select Edits`
 (the last 5000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Rule`, `Time`).
 A path keeps the points that hold it within 50 cm of the real one (at most 1000 per record; the whole log keeps at most
 100,000 points, dropping its oldest records first), so a road's switchbacks and a river's bends read back as built. Each of these
-operations takes an optional last argument `Label` that names the edit. The log is an editor-only component of the landscape
+operations takes an optional argument `Label` that names the edit (the last one; `PaintWhere`: before `Within`; `CreateRiverBetween`'s edit takes the river's label). The log is an editor-only component of the landscape
 actor (`AIEditLog`): saved with the level, changed in the operation's own undo step (undo / redo take the record with the
 edit), stripped from cooked games. `Bumps` names the logged edit that made each place (`Edit`). Edits made any other way
 (Landscape mode, Python, heightmap imports) are not recorded. A level saved with a log and opened without this extension

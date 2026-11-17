@@ -1334,7 +1334,7 @@ TArray<FUnrealAILandscapeBump> UUnrealAILandscapeRqlApi::Bumps(ALandscapeProxy* 
 		for (int32 Index = Edits.Num() - 1; Index >= 0 && Bump.Edit.IsEmpty(); --Index)
 		{
 			const FUnrealAILandscapeEdit& Edit = Edits[Index];
-			if (Edit.Op == TEXT("Paint") || Edit.Points.IsEmpty())
+			if (!Edit.Layer.IsEmpty() || Edit.Points.IsEmpty()) // Paint / PaintWhere change weights, not the ground
 				continue;
 			double Distance = TNumericLimits<double>::Max();
 			// A circle edit made the place only when it is about its size: a 800 m hill's Sculpt covers a spike in it but did

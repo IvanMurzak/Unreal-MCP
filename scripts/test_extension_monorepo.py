@@ -408,6 +408,11 @@ class MonorepoTests(unittest.TestCase):
             with patch.object(suite, 'machine_lock'), patch.object(suite.sys, 'argv', argv), \
                     patch('sys.stderr'), self.assertRaises(SystemExit):
                 suite.main()
+            # A server without a bridge fails before the build, not in automation() after it.
+            argv[-2:] = ['--server', str(root / 's')]
+            with patch.object(suite, 'machine_lock'), patch.object(suite, 'build', lambda *a: self.fail('built before the argument error')), \
+                    patch.object(suite.sys, 'argv', argv), patch('sys.stderr'), self.assertRaises(SystemExit):
+                suite.main()
 
 if __name__ == '__main__':
     unittest.main()

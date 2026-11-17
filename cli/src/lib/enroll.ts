@@ -149,7 +149,14 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
         body: JSON.stringify({ enroll_code: enrollCode }),
       },
       { timeoutMs: PER_REQUEST_TIMEOUT_MS },
-      async (r) => ({ resp: r, text: await r.text() }),
+      // A body that breaks mid-read reads as empty (the status still classifies the failure); a timeout still aborts.
+      async (r) => ({
+        resp: r,
+        text: await r.text().catch((e: unknown) => {
+          if ((e as { name?: string } | null)?.name === 'AbortError') throw e;
+          return '';
+        }),
+      }),
     );
 
     if (!resp.ok) {

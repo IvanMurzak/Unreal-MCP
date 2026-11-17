@@ -51,7 +51,8 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * Load the World Partition streaming proxies of the landscape that overlap @p Area (world X, Y; null: all of them), as
 	 * the editor's region loading does, so an edit or read sees all of the ground and not only the region loaded around the
 	 * camera after a map opens. Nothing to do on a map without World Partition. Loading changes and dirties nothing.
-	 * False after Fail when the regions could not be loaded (an edit must then not run on part of the ground).
+	 * False after Fail when World Partition cannot load at all; actors the loader skips (a data layer that is not loaded,
+	 * runtime-only) stay unloaded and are not reported (UnrealMcpRql::LoadWorldPartitionActors).
 	 */
 	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area = nullptr);
 

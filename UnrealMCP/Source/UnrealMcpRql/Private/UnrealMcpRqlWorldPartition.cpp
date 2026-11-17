@@ -75,8 +75,12 @@ namespace UnrealMcpRqlWorldPartitionLocal
 
 bool UnrealMcpRqlWorldPartition::Matches(const FUnrealMcpUnloadedActor& Row, const FString& Key)
 {
-	return Row.Label.Equals(Key, ESearchCase::IgnoreCase) || Row.Name.Equals(Key, ESearchCase::IgnoreCase)
-		|| Row.Guid.Equals(Key, ESearchCase::IgnoreCase) || Row.Package.Equals(Key, ESearchCase::IgnoreCase);
+	if (Row.Label.Equals(Key, ESearchCase::IgnoreCase) || Row.Name.Equals(Key, ESearchCase::IgnoreCase)
+		|| Row.Guid.Equals(Key, ESearchCase::IgnoreCase) || Row.Package.Equals(Key, ESearchCase::IgnoreCase))
+		return true;
+	// A guid in another format (hyphens, braces), as logs and tools print it.
+	FGuid Parsed;
+	return FGuid::Parse(Key, Parsed) && Row.Guid.Equals(Parsed.ToString(), ESearchCase::IgnoreCase);
 }
 
 TArray<FUnrealMcpUnloadedActor> UnrealMcpRqlWorldPartition::Unloaded(UWorld* World, TArray<FGuid>* OutGuids)
@@ -175,6 +179,9 @@ namespace UnrealMcpRqlWorldPartitionLocal
 		UWorld* World = UnrealMcpRql::EditorWorld();
 		if (!World)
 			return UnrealMcpRql::Failed<UWorld*>(TEXT("no editor world"));
+		if (World->WorldType != EWorldType::Editor)
+			return UnrealMcpRql::Failed<UWorld*>(TEXT("a Play In Editor session is running: World Partition loading acts on the editor world; "
+				"stop play first (editor | call StopPlay())"));
 		if (!World->GetWorldPartition())
 			return UnrealMcpRql::Failed<UWorld*>(FString::Printf(TEXT("the level open in the editor, \"%s\", has no World Partition: every actor "
 				"is loaded (actors lists them all)"), *World->GetOutermost()->GetName()));

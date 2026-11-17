@@ -424,11 +424,12 @@ A road with a grade limit: `AddRoad(terrain, points, width, maxSlope)` takes the
 fills where it is steeper, and remeshes a Boolean shape's coarse surface under it (`Remesh`: medium triangles over the shape,
 `Corridor`: fine ones around the road). Sharp corners of the path become curves (`RoundedCorners`): a wide road cannot keep its
 grade through a hairpin; give switchbacks room (legs longer than the road is wide). Read `Reached`, `MaxSlope` (the built road's,
-measured every metre), `SteepestAt` and `Note` (where it is steeper than asked, and why): a path shorter than `MinLengthMeters`
+measured every metre, every Length / 3000 on roads over 3 km), `SteepestAt` and `Note` (where it is steeper than asked, and why): a path shorter than `MinLengthMeters`
 (about rise / tan(maxSlope), with a margin) ends below the target; wind it (switchbacks, a spiral around a hill), `Remove`
 the road (with its `Remesh` and `Corridor`) and call again.
 
-Waits: every operation waits at most 240 s for the build (the server ends a call after 300 s). A remeshed hill can take
+Waits: an operation waits at most 240 s for each build it needs, the one before its change and the one after (the server ends a
+call after 300 s; AddRoad's TimeoutSeconds bounds both together). A remeshed hill can take
 longer after a change there: the operation then succeeds with `Ready` false and a `State` saying the change is applied and
 still building. Do not repeat the change: call `meshTerrain | call WaitForBuild(terrain)` (again, until `Ready`).
 

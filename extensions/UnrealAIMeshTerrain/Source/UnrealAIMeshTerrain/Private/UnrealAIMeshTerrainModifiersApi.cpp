@@ -823,7 +823,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	// The grade-limited profile (MaxSlope with a margin for the spline's curve and the mesh). When the climb fits the path,
 	// both ends sit on the ground: every point stays within what the start and the end can reach (so the road starts
 	// climbing early enough), as close to the ground as that allows. Otherwise it follows the ground from the start as far up
-	// as it can. Then at most the grade per step, forwards and backwards.
+	// as it can. Then at most the grade per step (one forward pass holds every neighbouring pair to it).
 	const double Tan = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9));
 	const bool bFits = FMath::Abs(Ground.Last() - Ground[0]) <= Length * Tan;
 	TArray<double> Z = Ground;
@@ -839,11 +839,6 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	{
 		const double Rise = (Along[Index] - Along[Index - 1]) * Tan;
 		Z[Index] = FMath::Clamp(Z[Index], Z[Index - 1] - Rise, Z[Index - 1] + Rise);
-	}
-	for (int32 Index = Z.Num() - 2; Index >= 0; --Index)
-	{
-		const double Rise = (Along[Index + 1] - Along[Index]) * Tan;
-		Z[Index] = FMath::Clamp(Z[Index], Z[Index + 1] - Rise, Z[Index + 1] + Rise);
 	}
 	TArray<FVector> Road;
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
@@ -929,7 +924,8 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		return FRoadResult();
 	Remeshed.bKept = true;
 	Cored.bKept = true;
-	const FModifierOpResult Built = Placed.Keep(TimeoutSeconds);
+	// One budget for the call: the wait before placing the road took part of it (the MCP server ends a call after 300 s).
+	const FModifierOpResult Built = Placed.Keep(FMath::Max(MinTimeoutSeconds, TimeoutSeconds - SecondsSince(Start)));
 	if (!Built.Modifier)
 		return FRoadResult();
 
@@ -942,6 +938,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	Out.Ready = Built.Ready;
 	Out.State = Built.State;
 	Out.LengthMeters = Length / 100.0;
+	Out.RoundedCorners = Rounded;
 	Out.StartZ = Z[0];
 	Out.EndZ = Z.Last();
 	Out.EndGroundZ = Ground.Last();
@@ -961,7 +958,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
 		return Out;
 	}
-	// The built road: its grade along the centre line every metre (longer steps past 30 km), from the collision.
+	// The built road: its grade along the centre line every metre (longer steps past 3 km: at most 3000 samples), from the collision.
 	const double Measure = FMath::Max(100.0, Length / 3000.0);
 	FVector2D Steepest = Path[0];
 	{
@@ -987,7 +984,6 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	}
 	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
 	Out.SteepestAt = Steepest;
-	Out.RoundedCorners = Rounded;
 	if (Out.Reached && Out.MaxSlope > MaxSlope + 0.5)
 	{
 		const FVector2D* Tight = TightTurns.FindByPredicate([&Steepest, Width](const FVector2D& Turn) { return FVector2D::Distance(Turn, Steepest) <= 3.0 * Width + 1000.0; });

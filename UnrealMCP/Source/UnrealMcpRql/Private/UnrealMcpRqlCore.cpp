@@ -813,12 +813,12 @@ namespace UnrealMcpRqlCoreLocal
 		return Titles;
 	}
 
+	FString UndoRefusal(bool bRedo, int32 Steps);
+
 	/**
 	 * Spawn checks before the first spawn (RQL call validation, dry runs too): range(0, 300) | call editor.SpawnActor("Typo", ...)
 	 * fails as a whole instead of after 0 spawns or, worse, failing half-way. One resolution per distinct name and call.
 	 */
-	FString UndoRefusal(bool bRedo, int32 Steps);
-
 	void EditorCallChecks(FUnrealMcpRqlTypes&, rql::TypeDescriptor& D)
 	{
 		for (rql::MethodDescriptor& Method : D.methods)

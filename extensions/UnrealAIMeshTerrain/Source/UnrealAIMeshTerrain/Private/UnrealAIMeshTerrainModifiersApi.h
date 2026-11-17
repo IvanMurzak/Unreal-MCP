@@ -79,7 +79,7 @@ struct FUnrealAIMeshTerrainRoadResult
 {
 	GENERATED_BODY()
 
-	/** the road's spline modifier (Remove it to take the road away; its Remesh and Corridor too) */
+	/** the road's spline modifier (Remove it to take the road away, then Remove its Remesh and Corridor: separate modifiers) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	TObjectPtr<UE::MeshPartition::UModifierComponent> Modifier = nullptr;
 
@@ -121,7 +121,7 @@ struct FUnrealAIMeshTerrainRoadResult
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double MinLengthMeters = 0.0;
 
-	/** the steepest grade of the BUILT ground along the road's centre line (degrees, sampled every metre) */
+	/** the steepest grade of the BUILT ground along the road's centre line (degrees, sampled every metre; on roads over 3 km every Length / 3000) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double MaxSlope = 0.0;
 
@@ -176,7 +176,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainModifierResult AddWeight(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Location, double Radius = 1000.0, double Falloff = 1000.0, double Value = 1.0, const FString& Label = TEXT(""));
 
-	/** a road no steeper than MaxSlope degrees along Points (2 .. 1000 world points; their X, Y give the path, Z is ignored): it follows the ground where it can and cuts or fills where the ground is steeper, starting on the ground at the first point; corners sharper than 20 degrees become curves (RoundedCorners); Width (cm, flat across), Falloff (cm, the cut / fill banks; -1: Width). Where the path crosses a Boolean shape's coarse surface it also places a Remesh box over that shape (medium triangles) and a SplineRemesh corridor along the road (fine triangles to cut into, only around the road). When the path is too short to climb to the last point's ground at MaxSlope the road is built as far up as it can go, Reached is false and MinLengthMeters says how long the path must be (wind it: switchbacks or a spiral; Remove the road and call again). One undo step; returns when built (TimeoutSeconds, default 240, for the build before and the one after placing it; a build still running after it returns Ready false with the road placed: WaitForBuild, then read MaxSlope with Surface), with the built MaxSlope along it. */
+	/** a road no steeper than MaxSlope degrees along Points (2 .. 1000 world points; their X, Y give the path, Z is ignored): it follows the ground where it can and cuts or fills where the ground is steeper, starting on the ground at the first point; corners sharper than 20 degrees become curves (RoundedCorners); Width (cm, flat across), Falloff (cm, the cut / fill banks; -1: Width). Where the path crosses a Boolean shape's coarse surface it also places a Remesh box over that shape (medium triangles) and a SplineRemesh corridor along the road (fine triangles to cut into, only around the road). When the path is too short to climb to the last point's ground at MaxSlope the road is built as far up as it can go, Reached is false and MinLengthMeters says how long the path must be (wind it: switchbacks or a spiral; Remove the road and call again). One undo step; returns when built (TimeoutSeconds, default 240, in total for the build before and the one after placing it; a build still running after it returns Ready false with the road placed: WaitForBuild, then read MaxSlope with Surface), with the built MaxSlope along it. */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainRoadResult AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width = 800.0, double MaxSlope = 8.0, double Falloff = -1.0, const FString& Label = TEXT(""), double TimeoutSeconds = 240.0);
 
