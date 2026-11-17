@@ -327,6 +327,23 @@ class CiStepTests(unittest.TestCase):
         state.pid.write_text("999999\nnot-a-start-time")
         self.assertFalse(state.holds_lock())
 
+    def test_chain_smoke_uses_the_public_server_when_the_lock_keeps_it_released(self):
+        with tempfile.TemporaryDirectory() as folder:
+            lock = Path(folder) / "lock.json"
+            def chain(state):
+                lock.write_text(json.dumps({"nodes": {"gamedev-mcp-server": {"state": state, "version": "9.5.4"}}}), encoding="utf-8")
+                with mock.patch.dict(os.environ, {"CHAIN_LOCK_PATH": str(lock)}):
+                    return ci.chain_server_released()
+            self.assertTrue(chain("released"))
+            self.assertFalse(chain("sha"))
+            with mock.patch.dict(os.environ, {"CHAIN_LOCK_PATH": ""}):
+                self.assertFalse(ci.chain_server_released())
+            # A chain-built server lock still needs UNREAL_MCP_SERVER_PATH.
+            lock.write_text(json.dumps({"nodes": {"gamedev-mcp-server": {"state": "sha"}}}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"CHAIN_ACTIVE": "1", "CHAIN_LOCK_PATH": str(lock), "UNREAL_MCP_SERVER_PATH": ""}):
+                with self.assertRaises(ci.StepError):
+                    ci.smoke(None)
+
     def test_fixture_diff_without_a_raw_dump_fails(self):
         self.assertEqual(ci.main(["fixture-diff", "--ue", "5.8"]), 1)
 
