@@ -372,6 +372,68 @@ void FUnrealAIMeshTerrainSculptSpec::Define()
 			TestTrue(TEXT("painted on both sides"), SculptSpecChannel(Terrain, Center.X + Dx, Center.Y + 30.0, TEXT("Yellow")) > 0.95f);
 		}
 	});
+
+	It("paints a channel where the slope and height are in range with PaintWhere, reuses its brushes on the same tiles, refuses bad ranges", [this]()
+	{
+		const FString Label = SculptSpecLabel(TEXT("PaintWhere"));
+		const double X0 = 2600000.0, Y0 = 0.0;
+		// 200 x 200 m, 1 m quads; a pad 10 m up, 30 m flat radius, 10 m steep ring (about 45 degrees and more), flat ground around.
+		AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, Y0, 0.0), 20000.0, 20000.0, 200, 200);
+		ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+		if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+			return;
+		const FString Find = FString::Printf(TEXT(R"({"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]})"), *Label);
+		// meshTerrainModifier | call AddPatch(<terrain>, [X0, Y0, 1000], 3000, 1000)
+		TSharedPtr<FJsonObject> Result;
+		TestTrue(TEXT("pad"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddPatch","args":[%s,{"list":[{"lit":%.17g},{"lit":%.17g},{"lit":1000}]},{"lit":3000},{"lit":1000}]}]})RQL"),
+			*Find, X0, Y0), true, &Result));
+		const auto Where = [&](const FString& Args, FString* OutJson = nullptr)
+		{
+			// meshTerrainBrush | call PaintWhere(<terrain>, <Args>)
+			TSharedPtr<FJsonObject> Call;
+			const bool bOk = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"PaintWhere","args":[%s,%s]}]})RQL"),
+				*Find, *Args), true, &Call);
+			if (OutJson)
+				*OutJson = SculptSpecJson(Call);
+			return bOk ? SculptSpecResult(Call) : nullptr;
+		};
+		const FVector2D Top(X0, Y0), Steep(X0 + 3500.0, Y0), Low(X0 + 7000.0, Y0);
+		const double SteepSlope = UnrealAIMeshTerrain::SampleSurface(Terrain, Steep.X, Steep.Y, false).Normal.Z;
+		TestTrue(*FString::Printf(TEXT("the ring is steeper than 30 degrees (normal Z %.2f)"), SteepSlope), FMath::Abs(SteepSlope) < FMath::Cos(FMath::DegreesToRadians(30.0)));
+
+		// PaintWhere(<terrain>, "Red", 30, 90): rock on the steep ring only (Within left out: the whole terrain)
+		FString Json;
+		TSharedPtr<FJsonObject> Rock = Where(TEXT(R"({"lit":"Red"},{"lit":30},{"lit":90})"), &Json);
+		TestTrue(*FString::Printf(TEXT("PaintWhere Red on slopes over 30 degrees (%s)"), *Json.Left(600)), Rock.IsValid() && Rock->GetBoolField(TEXT("Ready"))
+			&& Rock->GetIntegerField(TEXT("NewBrushes")) >= 1 && Rock->GetIntegerField(TEXT("Vertices")) > 0);
+		TestTrue(*FString::Printf(TEXT("steep: Red %.2f"), SculptSpecChannel(Terrain, Steep.X, Steep.Y, TEXT("Red"))), SculptSpecChannel(Terrain, Steep.X, Steep.Y, TEXT("Red")) >= 0.9f);
+		TestTrue(*FString::Printf(TEXT("flat top: no Red (%.2f)"), SculptSpecChannel(Terrain, Top.X, Top.Y, TEXT("Red"))), SculptSpecChannel(Terrain, Top.X, Top.Y, TEXT("Red")) <= 0.1f);
+		TestTrue(*FString::Printf(TEXT("flat low ground: no Red (%.2f)"), SculptSpecChannel(Terrain, Low.X, Low.Y, TEXT("Red"))), SculptSpecChannel(Terrain, Low.X, Low.Y, TEXT("Red")) <= 0.1f);
+
+		// PaintWhere(<terrain>, "Green", 0, 5, 500, 2000, 1, "", [X0 - 10000, Y0 - 10000, X0 + 10000, Y0 + 10000]): flat and high only, the same tiles
+		Json.Reset();
+		TSharedPtr<FJsonObject> Grass = Where(FString::Printf(TEXT(R"({"lit":"Green"},{"lit":0},{"lit":5},{"lit":500},{"lit":2000},{"lit":1},{"lit":""},{"list":[{"lit":%.17g},{"lit":%.17g},{"lit":%.17g},{"lit":%.17g}]})"),
+			X0 - 10000.0, Y0 - 10000.0, X0 + 10000.0, Y0 + 10000.0), &Json);
+		TestTrue(*FString::Printf(TEXT("PaintWhere Green on flat high ground reuses the tile's brush (%s)"), *Json.Left(600)), Grass.IsValid() && Grass->GetIntegerField(TEXT("NewBrushes")) == 0
+			&& Grass->GetIntegerField(TEXT("Vertices")) > 0);
+		TestTrue(*FString::Printf(TEXT("top: Green %.2f"), SculptSpecChannel(Terrain, Top.X, Top.Y, TEXT("Green"))), SculptSpecChannel(Terrain, Top.X, Top.Y, TEXT("Green")) >= 0.9f);
+		TestTrue(TEXT("low ground: no Green (below MinHeight)"), SculptSpecChannel(Terrain, Low.X, Low.Y, TEXT("Green")) <= 0.1f);
+		TestTrue(TEXT("steep: no Green, still Red"), SculptSpecChannel(Terrain, Steep.X, Steep.Y, TEXT("Green")) <= 0.1f && SculptSpecChannel(Terrain, Steep.X, Steep.Y, TEXT("Red")) >= 0.9f);
+
+		// Refusals change nothing.
+		const int32 Brushes = SculptSpecBrushes(Terrain).Num();
+		for (const TPair<FString, FString>& Bad : TArray<TPair<FString, FString>>{
+			{ TEXT(R"({"lit":"Red"},{"lit":40},{"lit":30})"), TEXT("MinSlope 40") },
+			{ TEXT(R"({"lit":"Red"},{"lit":0},{"lit":90},{"lit":0},{"lit":100},{"lit":1},{"lit":""},{"list":[{"lit":0},{"lit":0},{"lit":1}]})"), TEXT("Within has 3 numbers") },
+			{ TEXT(R"({"lit":"Rock"})"), TEXT("not a paint channel") } })
+		{
+			Json.Reset();
+			TestFalse(*FString::Printf(TEXT("refused: %s"), *Bad.Value), Where(Bad.Key, &Json).IsValid());
+			TestTrue(*FString::Printf(TEXT("says '%s' (%s)"), *Bad.Value, *Json.Left(400)), Json.Contains(Bad.Value));
+		}
+		TestEqual(TEXT("no brush added by a refusal"), SculptSpecBrushes(Terrain).Num(), Brushes);
+	});
+
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

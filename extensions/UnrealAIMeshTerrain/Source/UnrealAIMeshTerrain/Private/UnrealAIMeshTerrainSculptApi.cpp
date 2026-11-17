@@ -8,6 +8,7 @@
 
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "DynamicMesh/MeshNormals.h"
 #include "Engine/World.h"
 #include "ScopedTransaction.h"
 
@@ -512,6 +513,241 @@ namespace UnrealAIMeshTerrainSculptLocal
 		Out.Seconds = SecondsSince(Start);
 		return Out;
 	}
+}
+
+namespace UnrealAIMeshTerrainSculptLocal
+{
+	constexpr int32 MaxPaintTiles = 64;
+	constexpr double SlopeEdgeDegrees = 2.0;
+	constexpr double HeightEdge = 50.0; // cm
+
+	/** 1 inside [Lo, Hi], fading smoothly to 0 over Edge past each bound. */
+	double RangeWeight(double Value, double Lo, double Hi, double Edge)
+	{
+		const double Outside = Value < Lo ? Lo - Value : Value > Hi ? Value - Hi : 0.0;
+		if (Outside <= 0.0)
+			return 1.0;
+		if (Outside >= Edge)
+			return 0.0;
+		const double T = Outside / Edge;
+		return 1.0 - T * T * (3.0 - 2.0 * T);
+	}
+
+	FUnrealAIMeshTerrainPaintWhere PaintWhereFailed(const FString& Message)
+	{
+		return UnrealMcpRql::Failed<FUnrealAIMeshTerrainPaintWhere>(Message);
+	}
+
+	/**
+	 * PaintWhere: the area split into tiles a brush modifier can hold (at most 600 x 600 m and MaxVertices); in each tile a
+	 * brush (the one an earlier PaintWhere left for exactly that tile, when nothing is applied after it there; else a new
+	 * one after every modifier) whose weight attribute for the channel moves to Strength at every vertex in the ranges.
+	 */
+	FUnrealAIMeshTerrainPaintWhere RunPaintWhere(AMeshPartition* Terrain, const FString& ChannelText, double MinSlope, double MaxSlope, double MinHeight, double MaxHeight,
+		double Strength, const FString& Label, const TArray<double>& Within)
+	{
+		const double Start = FPlatformTime::Seconds();
+		for (const double Value : { MinSlope, MaxSlope, MinHeight, MaxHeight, Strength })
+		{
+			if (!FMath::IsFinite(Value))
+				return PaintWhereFailed(TEXT("the slopes, heights and Strength must be finite numbers"));
+		}
+		if (!(MinSlope >= 0.0 && MinSlope <= MaxSlope && MaxSlope <= 90.0))
+			return PaintWhereFailed(FString::Printf(TEXT("MinSlope %g / MaxSlope %g: need 0 <= MinSlope <= MaxSlope <= 90 degrees"), MinSlope, MaxSlope));
+		if (MinHeight > MaxHeight)
+			return PaintWhereFailed(FString::Printf(TEXT("MinHeight %g is above MaxHeight %g (world Z, cm)"), MinHeight, MaxHeight));
+		if (!(Strength >= 0.0 && Strength <= 1.0))
+			return PaintWhereFailed(FString::Printf(TEXT("Strength %g is outside 0 .. 1 (the weight to paint)"), Strength));
+		if (Within.Num() != 0 && Within.Num() != 4)
+			return PaintWhereFailed(FString::Printf(TEXT("Within has %d numbers: pass [MinX, MinY, MaxX, MaxY] (world cm) or [] for the whole terrain"), Within.Num()));
+		if (Within.Num() == 4 && !(Within[0] < Within[2] && Within[1] < Within[3]))
+			return PaintWhereFailed(TEXT("Within must be [MinX, MinY, MaxX, MaxY] with MinX < MaxX and MinY < MaxY (world cm)"));
+		const FName Channel(*ChannelText.TrimStartAndEnd());
+		if (Channel.IsNone())
+			return PaintWhereFailed(TEXT("Channel is empty: name one of the terrain's Channels (meshTerrains | select Label Channels)"));
+		if (!CheckTerrain(Terrain))
+			return FUnrealAIMeshTerrainPaintWhere();
+		const UMeshPartitionDefinition* Definition = Terrain->GetMeshPartitionDefinition();
+		if (!Definition || !Definition->GetChannelNames().Contains(Channel))
+			return PaintWhereFailed(FString::Printf(TEXT("'%s' is not a paint channel of %s: its definition has %s"), *ChannelText, *Terrain->GetActorNameOrLabel(), *ChannelList(Terrain)));
+		if (!WaitForBuild(Terrain))
+			return FUnrealAIMeshTerrainPaintWhere();
+		const FBox Built = BuiltBounds(Terrain);
+		if (!Built.IsValid)
+			return PaintWhereFailed(FString::Printf(TEXT("%s has no built ground to paint"), *Terrain->GetActorNameOrLabel()));
+		const FBox2D Ground(FVector2D(Built.Min), FVector2D(Built.Max));
+		FBox2D Area = Within.Num() == 4 ? FBox2D(FVector2D(Within[0], Within[1]), FVector2D(Within[2], Within[3])) : Ground;
+		if (!Area.Intersect(Ground))
+		{
+			return PaintWhereFailed(FString::Printf(TEXT("Within is off the terrain %s (it spans X %.0f .. %.0f, Y %.0f .. %.0f)"), *Terrain->GetActorNameOrLabel(),
+				Ground.Min.X, Ground.Max.X, Ground.Min.Y, Ground.Max.Y));
+		}
+		Area = Area.Overlap(Ground);
+
+		// Tiles: at most 600 m and MaxVertices of the terrain's base grid each.
+		const double Density = VertexDensity(Terrain, Area);
+		const double Tile = FMath::Min(2.0 * MaxBrushHalfExtent, Density > 0.0 ? FMath::Sqrt(MaxVertices / 2.0 / Density) : 2.0 * MaxBrushHalfExtent);
+		const FVector2D Size = Area.GetSize();
+		const int32 TilesX = FMath::Max(1, FMath::CeilToInt(Size.X / Tile)), TilesY = FMath::Max(1, FMath::CeilToInt(Size.Y / Tile));
+		if (TilesX * TilesY > MaxPaintTiles)
+			return PaintWhereFailed(FString::Printf(TEXT("the area needs %d brush tiles (at most %d): pass a smaller Within"), TilesX * TilesY, MaxPaintTiles));
+		const FVector2D Half(Size.X / TilesX / 2.0, Size.Y / TilesY / 2.0);
+
+		FScopedTransaction Transaction(FText::Format(NSLOCTEXT("UnrealAIMeshTerrain", "PaintWhere", "Paint Mesh Terrain where ({0})"), FText::FromName(Channel)));
+		UWorld* World = Terrain->GetWorld();
+		const TArray<UModifierComponent*> Stack = Modifiers(Terrain);
+		double Last = 0.0; // new brushes go after every modifier there is
+		for (const UModifierComponent* Modifier : Stack)
+		{
+			if (Cast<UProjectMeshLayersModifier>(Modifier))
+				Last = FMath::Max(Last, Modifier->GetPriority() + 1.0);
+		}
+		FStroke Paint;
+		Paint.Kind = EStroke::Paint;
+		Paint.Channel = Channel;
+		FUnrealAIMeshTerrainPaintWhere Out;
+		const float Depth = static_cast<float>(Built.Max.Z - Built.Min.Z + 20000.0);
+		for (int32 TileY = 0; TileY < TilesY; ++TileY)
+		{
+			for (int32 TileX = 0; TileX < TilesX; ++TileX)
+			{
+				const FVector2D Center = Area.Min + FVector2D((2 * TileX + 1) * Half.X, (2 * TileY + 1) * Half.Y);
+				const FBox2D Box(Center - Half, Center + Half);
+				// An earlier PaintWhere's brush for exactly this tile, with nothing applied after it there.
+				UProjectMeshLayersModifier* Brush = nullptr;
+				for (int32 Index = 0; Index < Stack.Num() && !Brush; ++Index)
+				{
+					UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Stack[Index]);
+					if (!Candidate || !CanTakeStroke(Candidate, Paint) || !FVector2D(Candidate->GetComponentLocation()).Equals(Center, 1.0) || !EditExtents(Candidate).Equals(Half, 1.0))
+						continue;
+					bool bCovered = false;
+					for (int32 Later = Index + 1; Later < Stack.Num() && !bCovered; ++Later)
+					{
+						const FBox Bounds = Stack[Later]->ComputeCombinedBounds();
+						bCovered = !Stack[Later]->GetIsDisabledFlag() && Bounds.IsValid && Box.Intersect(FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)));
+					}
+					Brush = bCovered ? nullptr : Candidate;
+				}
+				const bool bNew = Brush == nullptr;
+				AMeshPartition* Previous = nullptr;
+				if (bNew)
+				{
+					const FVector Location(Center, (Built.Min.Z + Built.Max.Z) / 2.0);
+					Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
+						UniqueLabel(World, Label.IsEmpty() ? Terrain->GetActorLabel() + TEXT("_Paint") : Label), Previous));
+					if (!Brush)
+					{
+						Transaction.Cancel();
+						return FUnrealAIMeshTerrainPaintWhere(); // SpawnModifier failed with the reason
+					}
+					Brush->SetPriority(Last);
+					SetProperty(Brush, TEXT("EditExtents"), Half);
+				}
+				AActor* Owner = Brush->GetOwner();
+				Brush->Modify();
+				if (Owner)
+					Owner->Modify();
+				const FObjectProperty* MeshProperty = CastField<FObjectProperty>(Brush->GetClass()->FindPropertyByName(TEXT("MeshObject")));
+				if (UObject* MeshObject = MeshProperty ? MeshProperty->GetObjectPropertyValue_InContainer(Brush) : nullptr)
+					MeshObject->Modify();
+				for (const TCHAR* Name : { TEXT("VerticalExtentUp"), TEXT("VerticalExtentDown") })
+				{
+					const float* Value = PropertyValue<float>(Brush, Name);
+					if (!Value || *Value < Depth)
+						SetProperty(Brush, Name, Depth);
+				}
+				const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
+				if (!ChannelEntry(OldEntries, Channel))
+				{
+					TArray<FSculptLayerModifierWeightAttributeEntry> Entries = OldEntries;
+					Entries.AddDefaulted_GetRef().ChannelName = Channel;
+					Brush->SetChannelEntries(Entries);
+				}
+				UE::MeshPartition::UEditableModifierToolTarget* Target = NewObject<UE::MeshPartition::UEditableModifierToolTarget>();
+				Target->Initialize(Brush);
+				FDynamicMesh3 Mesh = Target->GetDynamicMesh();
+				const auto Drop = [&]()
+				{
+					if (bNew)
+					{
+						if (Owner)
+							World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
+						for (const AMeshPartition* Bound : { Terrain, Previous })
+						{
+							if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
+								Component->UpdateModifierList();
+						}
+					}
+					else
+					{
+						Brush->SetChannelEntries(OldEntries);
+					}
+				};
+				if (Mesh.VertexCount() > MaxVertices * 1.5)
+				{
+					Drop();
+					Transaction.Cancel();
+					return PaintWhereFailed(FString::Printf(TEXT("a %.0f x %.0f m tile holds %d terrain vertices (at most %.0f): pass a smaller Within"), Half.X / 50.0, Half.Y / 50.0,
+						Mesh.VertexCount(), MaxVertices));
+				}
+				UE::Geometry::FDynamicMeshWeightAttribute* Weights = nullptr;
+				UE::Geometry::FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+				for (int32 Index = 0; Attributes && Index < Attributes->NumWeightLayers(); ++Index)
+				{
+					if (Attributes->GetWeightLayer(Index)->GetName() == Channel)
+						Weights = Attributes->GetWeightLayer(Index);
+				}
+				if (!Weights)
+				{
+					Drop();
+					Transaction.Cancel();
+					return PaintWhereFailed(FString::Printf(TEXT("the brush modifier %s has no weight attribute for the channel %s"), Owner ? *Owner->GetActorLabel() : TEXT("?"), *Channel.ToString()));
+				}
+				const FTransform Transform = Target->GetWorldTransform();
+				int32 Changed = 0;
+				for (const int32 Vertex : Mesh.VertexIndicesItr())
+				{
+					const FVector World3 = Transform.TransformPosition(Mesh.GetVertex(Vertex));
+					if (!Area.IsInside(FVector2D(World3)))
+						continue;
+					const FVector Normal = Transform.TransformVectorNoScale(UE::Geometry::FMeshNormals::ComputeVertexNormal(Mesh, Vertex));
+					const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Normal.Z), 0.0, 1.0)));
+					const double Weight = RangeWeight(Slope, MinSlope, MaxSlope, SlopeEdgeDegrees) * RangeWeight(World3.Z, MinHeight, MaxHeight, HeightEdge);
+					if (Weight <= 0.0)
+						continue;
+					Out.Matched += Weight >= 1.0 ? 1 : 0;
+					float Old = 0.0f;
+					Weights->GetValue(Vertex, &Old);
+					const float New = static_cast<float>(FMath::Lerp(static_cast<double>(Old), Strength, Weight));
+					if (New != Old)
+					{
+						Weights->SetValue(Vertex, &New);
+						++Changed;
+					}
+				}
+				if (Changed == 0)
+				{
+					Drop(); // nothing to store: no new brush and no new channel entry (it would pin the channel there)
+					continue;
+				}
+				Target->CommitDynamicMesh(Mesh, IDynamicMeshCommitter::FDynamicMeshCommitInfo());
+				Out.Vertices += Changed;
+				Out.NewBrushes += bNew ? 1 : 0;
+				Out.Brushes.Add(Owner ? Owner->GetActorLabel() : FString());
+			}
+		}
+		FString StillBuilding;
+		Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
+		Out.State = Out.Ready ? FString(TEXT("built")) : StillBuildingState(Terrain, StillBuilding);
+		Out.Seconds = SecondsSince(Start);
+		return Out;
+	}
+}
+
+FUnrealAIMeshTerrainPaintWhere UUnrealAIMeshTerrainSculptApi::PaintWhere(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, double MinSlope, double MaxSlope,
+	double MinHeight, double MaxHeight, double Strength, const FString& Label, const TArray<double>& Within)
+{
+	return UnrealAIMeshTerrainSculptLocal::RunPaintWhere(Terrain, Channel, MinSlope, MaxSlope, MinHeight, MaxHeight, Strength, Label, Within);
 }
 
 FUnrealAIMeshTerrainStroke UUnrealAIMeshTerrainSculptApi::Sculpt(UE::MeshPartition::AMeshPartition* Terrain, const FString& Mode, FVector Point, double Radius, double Height, double Strength, double Falloff)

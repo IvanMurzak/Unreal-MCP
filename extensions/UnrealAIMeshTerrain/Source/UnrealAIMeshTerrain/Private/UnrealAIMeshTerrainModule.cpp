@@ -220,7 +220,7 @@ public:
 			TEXT("make and delete Mesh Terrains: call Create(label, location, sizeMeters, ...) / ImportHeightmap(label, file, location, sizeMeters, heightScale, ...) / Delete(terrain)"),
 			UUnrealAIMeshTerrainCreateApi::StaticClass(), TEXT("MeshTerrainCreateOperations"));
 		Context.AddApiSource(TEXT("meshTerrainBrush"),
-			TEXT("Mesh Terrain brush strokes, stored like Mesh Terrain Mode's Sculpt / Paint tools store them: call Sculpt(terrain, mode, point, radius, height, strength, falloff) / Paint(terrain, channel, point, radius, weight, falloff) / Erase(terrain, channel, point, radius, falloff)"),
+			TEXT("Mesh Terrain brush strokes, stored like Mesh Terrain Mode's Sculpt / Paint tools store them: call Sculpt(terrain, mode, point, radius, height, strength, falloff) / Paint(terrain, channel, point, radius, weight, falloff) / Erase(terrain, channel, point, radius, falloff) / PaintWhere(terrain, channel, minSlope, maxSlope, minHeight, maxHeight, strength, label, within)"),
 			UUnrealAIMeshTerrainSculptApi::StaticClass(), TEXT("MeshTerrainBrushOperations"));
 
 		Context.AddObjectMember(TerrainClass, TEXT("Definition"), TEXT("the terrain's Mesh Partition definition (material, priority layers, paint channels)"),
@@ -360,7 +360,7 @@ editable in the mode. Each call is one undo step and returns when the terrain is
 stroke is still applied: `Ready` false and `State` say so; `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
 modifiers before it, so edit noise / shapes first and sculpt last. A stroke is at most 250 m in radius: shape larger features
 (a hill 1 km across, a basin) with a modifier (`meshTerrainModifier`: AddShape Sphere / Cone Union, AddNoise, AddTexturePatch)
-and paint large areas with AddWeight.
+and paint large areas with AddWeight (a disc) or PaintWhere (by slope and height).
 
 ```
 meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Raise", [1200, -800, 0], 1500, 400)      a 4 m hill, 15 m radius
@@ -368,7 +368,16 @@ meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Flatten", [0, 0, 0], 200
 meshTerrainBrush | call Sculpt(unreal.find("Terrain"), "Smooth", [0, 0, 0], 2500)
 meshTerrainBrush | call Paint(unreal.find("Terrain"), "Red", [0, 0, 0], 2000, 1)                {Brush, NewBrush, Vertices, Before, After, Ready, Seconds}
 meshTerrainBrush | call Erase(unreal.find("Terrain"), "Red", [0, 0, 0], 500)
+meshTerrainBrush | call PaintWhere(unreal.find("Terrain"), "Yellow", 0, 90, -200, 300)                 sand on beaches: every vertex 2 m below .. 3 m above sea level
+meshTerrainBrush | call PaintWhere(unreal.find("Terrain"), "Red", 30)                               rock where the ground is steeper than 30 degrees
+meshTerrainBrush | call PaintWhere(unreal.find("Terrain"), "Green", 0, 15, 300, 10000000, 1, "", [-50000, -50000, 50000, 50000])   grass on flat ground in a box
 ```
+
+`PaintWhere(terrain, channel, minSlope = 0, maxSlope = 90, minHeight, maxHeight, strength = 1, label, within = [])` paints a
+whole terrain (or the `[MinX, MinY, MaxX, MaxY]` box) by the ground's slope (degrees) and height (world Z, cm): in range the
+channel moves to `strength`, with soft edges (2 degrees, 50 cm); elsewhere it keeps its weight. It reads the ground as the
+modifiers left it when it runs: shape first, paint last (a later change does not repaint). The paint is stored in brush
+modifiers ("<terrain>_Paint", one per tile of at most 600 m), which later PaintWhere calls over the same area reuse.
 
 `Before` / `After` are the full-resolution ground height (or channel weight) at the vertex nearest the point; `Surface`
 reads the rendered collision, which on rough ground can differ by some cm. The operations load a terrain's base and modifier
