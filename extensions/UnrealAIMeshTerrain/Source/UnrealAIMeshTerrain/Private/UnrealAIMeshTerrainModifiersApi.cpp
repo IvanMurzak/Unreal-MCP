@@ -239,16 +239,26 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		const double Start = FPlatformTime::Seconds();
 		AMeshPartition* Main = nullptr;
 		TArray<AMeshPartition*> Done;
+		TArray<FString> Pending;
 		for (AMeshPartition* Terrain : Terrains)
 		{
 			if (!IsValid(Terrain) || Done.Contains(Terrain))
 				continue;
 			Main = Main ? Main : Terrain;
 			Done.Add(Terrain);
-			if (!WaitForBuild(Terrain, TimeoutSeconds)) // its first round updates the terrain's modifier list
-				return FModifierOpResult();
+			// Its first round updates the terrain's modifier list. The change is applied: a build that takes longer (a remeshed
+			// shape) is reported, not failed, so the caller does not repeat it; every terrain still gets its round.
+			FString StillBuilding;
+			if (!WaitForBuild(Terrain, TimeoutSeconds, &StillBuilding))
+				Pending.Add(StillBuildingState(Terrain, StillBuilding));
 		}
-		return Describe(Modifier, Main, Start);
+		FModifierOpResult Out = Describe(Modifier, Main, Start);
+		if (!Pending.IsEmpty())
+		{
+			Out.Ready = false;
+			Out.State = FString::Join(Pending, TEXT("; "));
+		}
+		return Out;
 	}
 
 	/**
@@ -709,6 +719,8 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		return FRoadResult();
 
 	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
+	// Flat past each edge by more than a triangle, so no bank vertex tilts the road's edge (the banks start outside it).
+	const double Plateau = Width / 2.0 + FMath::Max(100.0, 1.5 * RoadEdge);
 	// The path every few metres (at most 1000 points: the spline's limit).
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
@@ -807,36 +819,58 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	for (const UModifierComponent* Modifier : Existing)
 		Order = FMath::Max(Order, double(Modifier->GetPriority()));
 
+	// The spline reaches the ground only within MaxZDistance of its points (engine default 20 m): cover the deepest cut or fill.
+	double Deepest = 0.0;
+	for (int32 Index = 0; Index < Z.Num(); ++Index)
+		Deepest = FMath::Max(Deepest, FMath::Abs(Ground[Index] - Z[Index]));
+
 	FTerrainTransaction Transaction(LOCTEXT("AddRoad", "Add Mesh Terrain Road"));
 	FPlacement Remeshed(Terrain);
-	FString RemeshLabel;
+	FPlacement Cored(Terrain);
+	FString RemeshLabel, CorridorLabel;
 	if (Coarse.IsValid)
 	{
-		// A Remesh box (a SplineRemesh along the path leaves a Boolean shape's triangles as they are).
+		// Two steps, because every later change to the terrain rebuilds what is remeshed (a 900 m box at road resolution: 680k
+		// triangles, about 3 minutes): a Remesh box over the shape with medium edges (a SplineRemesh alone leaves a Boolean
+		// shape's 100 m triangles as they are: none of their vertices is near the path), then a SplineRemesh with the road's
+		// fine edges only in a corridor around it (its radius is a 3D distance from the road's profile: the banks, a margin
+		// and the deepest cut). Measured on a 250 m cone with a 3.7 km spiral road: 390k triangles, an edit rebuilds in
+		// about 20 s, the road as flat across as under a fine box.
 		FBox Box = Coarse;
 		const FBox Built = BuiltBounds(Terrain);
 		Box.Min.Z = FMath::Min(Built.Min.Z, Box.Min.Z) - 1000.0;
 		Box.Max.Z = FMath::Max(Built.Max.Z, Box.Max.Z) + 1000.0;
 		const FVector Size = Box.GetSize();
-		// Edges a fifth of the road's width, longer when that would pass AddRemesh's triangle limit.
-		const double Edge = FMath::Max(RoadEdge, FMath::Sqrt(2.0 * Size.X * Size.Y / MaxRemeshTriangles));
+		// Medium edges, longer when that would pass AddRemesh's triangle limit.
+		const double Edge = FMath::Max(FMath::Max(5.0 * RoadEdge, 500.0), FMath::Sqrt(2.0 * Size.X * Size.Y / MaxRemeshTriangles));
 		UModifierComponent* Remesh = Remeshed.Spawn(ModifierClassOf(TEXT("Remesh")), Box.GetCenter(), FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Remesh"));
 		if (!Remesh || !SetRemesh(Remesh, Size, Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
 			return FRoadResult();
 		RemeshLabel = Remesh->GetOwner()->GetActorNameOrLabel();
+		UModifierComponent* Corridor = Cored.Spawn(ModifierClassOf(TEXT("SplineRemesh")), Road[0], FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Corridor"));
+		const double Radius = Plateau + Falloff + 1500.0 + Deepest;
+		// Only the stretch of the road over the box (from its first point in it to its last, plus a point either side):
+		// elsewhere the terrain's own grid is fine enough.
+		const FBox2D Box2D(FVector2D(Box.Min), FVector2D(Box.Max));
+		const int32 First = Road.IndexOfByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		const int32 Last = Road.FindLastByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		TArray<FVector> Stretch;
+		for (int32 Index = FMath::Max(0, First - 1); First != INDEX_NONE && Index <= FMath::Min(Road.Num() - 1, Last + 1); ++Index)
+			Stretch.Add(Road[Index]);
+		if (Stretch.Num() < 2)
+			Stretch = Road;
+		if (!Corridor || !SetNumber(Corridor, TEXT("SplineRadius"), Radius) || !SetNumber(Corridor, TEXT("TargetEdgeLength"), RoadEdge)
+			|| !SetNumber(Corridor, TEXT("Priority"), Order + 1.5) || !ApplySplinePoints(Corridor, Stretch, /*bClosed*/ false))
+			return FRoadResult();
+		CorridorLabel = Corridor->GetOwner()->GetActorNameOrLabel();
 	}
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
-	// Flat 1 m past each edge, so the whole Width is flat (the banks start outside it).
-	// The spline reaches the ground only within MaxZDistance of its points (engine default 20 m): cover the deepest cut or fill.
-	double Deepest = 0.0;
-	for (int32 Index = 0; Index < Z.Num(); ++Index)
-		Deepest = FMath::Max(Deepest, FMath::Abs(Ground[Index] - Z[Index]));
 	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetNumber(Spline, TEXT("MaxZDistance"), FMath::Max(2000.0, Deepest + 1000.0))
-		|| !SetSpline(Terrain, Spline, Road, Width / 2.0 + 100.0, Falloff, FString(), /*bClosed*/ false))
+		|| !SetSpline(Terrain, Spline, Road, Plateau, Falloff, FString(), /*bClosed*/ false))
 		return FRoadResult();
 	Remeshed.bKept = true;
-	// A remeshed shape takes minutes to build (its final mesh has a million triangles): wait as long as the caller allows.
+	Cored.bKept = true;
 	const FModifierOpResult Built = Placed.Keep(TimeoutSeconds);
 	if (!Built.Modifier)
 		return FRoadResult();
@@ -845,6 +879,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	Out.Modifier = Spline;
 	Out.Actor = Built.Actor;
 	Out.Remesh = RemeshLabel;
+	Out.Corridor = CorridorLabel;
 	Out.Terrain = Built.Terrain;
 	Out.Ready = Built.Ready;
 	Out.State = Built.State;
@@ -854,6 +889,20 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	Out.EndGroundZ = Ground.Last();
 	Out.Reached = FMath::Abs(Z.Last() - Ground.Last()) <= 100.0;
 	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / Tan / 100.0; // with the profile's margin: what it needs
+	Out.Seconds = SecondsSince(Start);
+	if (!Out.Reached)
+	{
+		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
+			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
+			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" with its Remesh and Corridor"));
+	}
+	if (!Out.Ready)
+	{
+		Out.MaxSlope = -1.0;
+		Out.Note += FString(Out.Note.IsEmpty() ? TEXT("") : TEXT("; "))
+			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
+		return Out;
+	}
 	// The built road: its grade along the centre line, from the collision.
 	double Previous = 0.0;
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
@@ -864,13 +913,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Previous = Height;
 	}
 	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
-	if (!Out.Reached)
-	{
-		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
-			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
-			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" and its Remesh"));
-	}
-	else if (Out.MaxSlope > MaxSlope + 0.5)
+	if (Out.Reached && Out.MaxSlope > MaxSlope + 0.5)
 	{
 		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, RoadEdge);
 	}

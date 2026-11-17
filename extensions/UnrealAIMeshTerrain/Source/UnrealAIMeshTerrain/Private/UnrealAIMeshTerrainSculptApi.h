@@ -43,6 +43,9 @@ struct FUnrealAIMeshTerrainStroke
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	bool Ready = false;
 
+	/** "built", or (Ready false) that the stroke is applied while the terrain still builds: WaitForBuild before reading it */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString State;
 	/** how long the stroke and its build took (seconds) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double Seconds = 0.0;
@@ -60,7 +63,7 @@ class UUnrealAIMeshTerrainSculptApi : public UObject
 	GENERATED_BODY()
 
 public:
-	/** sculpt a Mesh Terrain around Point (world X, Y) within Radius (cm, at most 25000) with a soft edge (Falloff 0..1: the outer part of the radius that fades, 0 = hard edge); Mode "Raise" / "Lower" moves the ground Height cm (0..100000) up / down at the centre, "Flatten" pulls it to the world Z Height, "Smooth" evens it out (Height ignored); Strength (0 exclusive) ..1 scales the stroke; stored in a brush modifier (one per area, repeated strokes accumulate in it, editable in Mesh Terrain Mode's Sculpt tools); one undo step; returns when the terrain is rebuilt: Brush, NewBrush, Vertices, Before / After (the full-resolution height at the centre), Ready, Seconds; if it fails waiting for the build the stroke is already applied: call meshTerrain | call WaitForBuild, do not repeat it */
+	/** sculpt a Mesh Terrain around Point (world X, Y) within Radius (cm, at most 25000) with a soft edge (Falloff 0..1: the outer part of the radius that fades, 0 = hard edge); Mode "Raise" / "Lower" moves the ground Height cm (0..100000) up / down at the centre, "Flatten" pulls it to the world Z Height, "Smooth" evens it out (Height ignored); Strength (0 exclusive) ..1 scales the stroke; stored in a brush modifier (one per area, repeated strokes accumulate in it, editable in Mesh Terrain Mode's Sculpt tools); one undo step; returns when the terrain is rebuilt: Brush, NewBrush, Vertices, Before / After (the full-resolution height at the centre), Ready, Seconds; when the build takes longer than 240 s the stroke is still applied: Ready false and State say so, call meshTerrain | call WaitForBuild, do not repeat it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainStroke Sculpt(UE::MeshPartition::AMeshPartition* Terrain, const FString& Mode, FVector Point, double Radius, double Height = 100.0, double Strength = 1.0, double Falloff = 0.5);
 

@@ -491,6 +491,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			if (!WaitForBuild(Terrain))
 				return FUnrealAIMeshTerrainStroke();
 			Out.Ready = true;
+			Out.State = TEXT("built");
 			Out.Seconds = SecondsSince(Start);
 			return Out;
 		}
@@ -504,9 +505,10 @@ namespace UnrealAIMeshTerrainSculptLocal
 		const double Digits = Stroke.Kind == EStroke::Paint ? 1000.0 : 100.0;
 		Out.Before = FMath::RoundToDouble(Out.Before * Digits) / Digits;
 		Out.After = FMath::RoundToDouble(Out.After * Digits) / Digits;
-		if (!WaitForBuild(Terrain))
-			return FUnrealAIMeshTerrainStroke();
-		Out.Ready = true;
+		// The stroke is stored: a build that takes longer is reported (Ready false, State), not failed.
+		FString StillBuilding;
+		Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
+		Out.State = Out.Ready ? FString(TEXT("built")) : StillBuildingState(Terrain, StillBuilding);
 		Out.Seconds = SecondsSince(Start);
 		return Out;
 	}

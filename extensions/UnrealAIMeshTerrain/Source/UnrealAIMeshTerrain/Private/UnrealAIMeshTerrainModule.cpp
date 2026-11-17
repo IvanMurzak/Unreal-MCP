@@ -356,8 +356,8 @@ material (`/MeshPartition/Materials/M_MeshPartition_Default`) only tints each ch
 base: there is no grass, sand or rock look to find in it (do not dig through its graph); for real looks the terrain needs a
 definition with its own material. A stroke is stored in a
 brush modifier (`Kind` ProjectMeshLayers, "<terrain>_Brush"): strokes near one go into it, so they accumulate and stay
-editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (a stroke that times out
-waiting for the build is already applied: `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
+editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (when that takes over 240 s the
+stroke is still applied: `Ready` false and `State` say so; `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
 modifiers before it, so edit noise / shapes first and sculpt last. A stroke is at most 250 m in radius: shape larger features
 (a hill 1 km across, a basin) with a modifier (`meshTerrainModifier`: AddShape Sphere / Cone Union, AddNoise, AddTexturePatch)
 and paint large areas with AddWeight.
@@ -412,11 +412,14 @@ own triangles (a 1 km Sphere's are 100+ m across), so a pad or stroke smaller th
 over the shape first gives it finer triangles).
 
 A road with a grade limit: `AddRoad(terrain, points, width, maxSlope)` takes the path's X, Y, follows the ground and cuts or
-fills where it is steeper, and remeshes a Boolean shape's coarse surface under it. Read `Reached`, `MaxSlope` (built) and
-`Note`: a path shorter than `MinLengthMeters` (about rise / tan(maxSlope), with a margin) ends below the target; wind it
-(switchbacks, a spiral around a hill), `Remove` the road (and its `Remesh`) and call again. A remeshed hill takes minutes
-to rebuild after every later change there: an operation's 120 s wait may time out with the change applied, then
-`WaitForBuild(terrain, 600)`.
+fills where it is steeper, and remeshes a Boolean shape's coarse surface under it (`Remesh`: medium triangles over the shape,
+`Corridor`: fine ones around the road). Read `Reached`, `MaxSlope` (built) and `Note`: a path shorter than `MinLengthMeters`
+(about rise / tan(maxSlope), with a margin) ends below the target; wind it (switchbacks, a spiral around a hill), `Remove`
+the road (with its `Remesh` and `Corridor`) and call again.
+
+Waits: every operation waits at most 240 s for the build (the server ends a call after 300 s). A remeshed hill can take
+longer after a change there: the operation then succeeds with `Ready` false and a `State` saying the change is applied and
+still building. Do not repeat the change: call `meshTerrain | call WaitForBuild(terrain)` (again, until `Ready`).
 
 Repairs: a modifier's `Bounds` say where it acts. Leftovers bound to no terrain (`where Terrain == null`): `Bind` a modifier to
 a terrain or `Remove` it; a deleted terrain's base meshes (`Modifier.IsBase`) can only be removed; `meshTerrainCreate | call Delete(terrain)` deletes a whole

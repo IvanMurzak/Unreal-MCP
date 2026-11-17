@@ -36,8 +36,15 @@ namespace UnrealAIMeshTerrain
 	using UMeshPartitionEditorComponent = UE::MeshPartition::UMeshPartitionEditorComponent;
 	using UModifierComponent = UE::MeshPartition::UModifierComponent;
 
-	/** The default time an operation waits for the terrain to build before it fails (seconds). */
-	constexpr double DefaultBuildTimeoutSeconds = 120.0;
+	/**
+	 * The default time an operation waits for the terrain to build (seconds): below the MCP server's tool timeout (300 s by
+	 * default), so a long build (a remeshed shape) comes back as "still building" instead of a dropped call.
+	 */
+	constexpr double DefaultBuildTimeoutSeconds = 240.0;
+	/** How long SurfacePoints and an evaluation of the modifier stack may compute (seconds). */
+	constexpr double SampleBudgetSeconds = 120.0;
+	/** Specs only: when above 0, every build wait gives up after this many seconds (a forced timeout). */
+	inline double BuildTimeoutForTests = 0.0;
 	/** The TimeoutSeconds range the operations accept. */
 	constexpr double MinTimeoutSeconds = 1.0;
 	constexpr double MaxTimeoutSeconds = 600.0;
@@ -156,13 +163,17 @@ namespace UnrealAIMeshTerrain
 
 	/**
 	 * Drive @p Terrain's build on this (game) thread until every section shows its final mesh with its collision, for at
-	 * most @p TimeoutSeconds: true when built; false after Fail naming what is still pending. Pumps the editor component
+	 * most @p TimeoutSeconds: true when built; false after Fail naming what is still pending (with @p OutStillBuilding: no
+	 * Fail, that text in it instead, for an operation whose change is already applied). Pumps the editor component
 	 * (UMeshPartitionEditorComponent::Update: queued modifier changes start, finished builds are applied), the game thread's
 	 * task queue (collision cooking and the transformer pipeline complete there) and the asset compiler (the static
 	 * meshes), so the build advances inside one RQL call without editor frames. Safe because Unreal-MCP runs calls at the end
 	 * of a frame, outside the task graph's game-thread processing (UnrealMcpGameThreadDispatcher).
 	 */
-	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
+	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds, FString* OutStillBuilding = nullptr);
+
+	/** The State of an operation whose change is applied while @p Terrain still builds (@p Pending: what WaitForBuild said). */
+	FString StillBuildingState(const AMeshPartition* Terrain, const FString& Pending);
 
 	/** Invalidate and rebuild every section of @p Terrain (ForceRebuildAllSections), then WaitForBuild. */
 	bool Rebuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
@@ -219,7 +230,7 @@ namespace UnrealAIMeshTerrain
 	 * the full-resolution mesh with its weight channels, independent of the preview sections. Empty on a timeout (after Fail
 	 * with @p bFailOnTimeout).
 	 */
-	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = DefaultBuildTimeoutSeconds, bool bFailOnTimeout = true);
+	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = SampleBudgetSeconds, bool bFailOnTimeout = true);
 
 	// ---- Create (shared with the create operations and the specs) ------------------------------------------------------
 
