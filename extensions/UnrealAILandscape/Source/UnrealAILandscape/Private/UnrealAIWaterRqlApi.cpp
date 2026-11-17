@@ -697,7 +697,7 @@ bool UnrealAILandscapeRqlApiLocal::PlanRoad(ALandscapeProxy* Landscape, const FV
 	const auto On = [&](const FVector2D& At) { return At.X >= Grid.Rect.Min.X && At.Y >= Grid.Rect.Min.Y && At.X <= Grid.Rect.Max.X && At.Y <= Grid.Rect.Max.Y && GroundAt(At.X, At.Y).IsSet(); };
 	if (!On(StartAt) || !On(EndAt) || !GroundAt(VX(From.X), VY(From.Y)).IsSet() || !GroundAt(VX(To.X), VY(To.Y)).IsSet())
 		return UnrealMcpRql::Failed<bool>(TEXT("Start and End must be on the (loaded) landscape"));
-	// Moves in about 190 directions (offsets up to 8 nodes, 2 to 7 degrees apart). On a flank far steeper than MaxSlope only
+	// Moves in 176 directions (offsets up to 8 nodes, 2 to 7 degrees apart). On a flank far steeper than MaxSlope only
 	// headings within a few degrees of the contour climb no more than it allows: with 48 directions (7.5 degrees apart) few of
 	// them did, and roads up a 44 degree hill ran four to six times longer than the climb needs.
 	constexpr int32 Reach = 8;

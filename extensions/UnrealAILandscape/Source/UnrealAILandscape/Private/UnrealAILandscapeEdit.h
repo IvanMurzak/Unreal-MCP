@@ -80,8 +80,9 @@ namespace UnrealAILandscapeRqlApiLocal
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
 
 	/**
-	 * RoadBetween's route: a path from Start to End (world) whose ground climbs no more than MaxSlope (with a margin), found by
-	 * an A* search on a grid of nodes Width / 2 apart (at most 400 x 400), then resampled every few metres with each point's Z the ground
+	 * RoadBetween's route: a path from Start to End (world) whose moves climb no more than MaxSlope end to end (with a margin)
+	 * over ground within 150 cm of each move's straight line (the grading cuts or fills that much), found by an A* search on
+	 * a grid of nodes Width / 2 apart (at most 400 x 400, 176 move directions), then resampled every few metres with each point's Z the ground
 	 * limited to MaxSlope between neighbours (both ends on the ground when that is possible). False after Fail; bReached
 	 * false when the road does not get to End's ground (the search could not reach it: the path then ends nearest to it).
 	 */

@@ -877,7 +877,7 @@ void FUnrealAILandscapeSpec::Define()
 			GEditor->RedoTransaction();
 			TestEqual(TEXT("redo brings it back"), Count(), 2);
 			{
-				// The bound: the oldest records go past MaxEdits (recorded directly, without editing the ground 1000 times).
+				// The bound: the oldest records go past MaxEdits (recorded directly, without editing the ground MaxEdits times).
 				FScopedTransaction Transaction(FText::FromString(TEXT("edit log bound")));
 				for (int32 Index = 0; Index < UnrealAILandscapeRqlApiLocal::MaxEdits + 5; ++Index)
 					UnrealAILandscapeRqlApiLocal::RecordEdit(Landscape, TEXT("Sculpt"), FString::FromInt(Index), { FVector(X0, 0.0, 0.0) }, 100.0, 0.0, 1.0);
