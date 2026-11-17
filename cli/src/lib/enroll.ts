@@ -139,7 +139,8 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
 
     emitProgress(opts.onProgress, { phase: 'start', message: 'Redeeming enrollment code' });
 
-    const resp = await fetchWithTimeout(
+    // The body is read inside the deadline, so a server that stalls after the headers times out too.
+    const { resp, text } = await fetchWithTimeout(
       fetchImpl,
       `${baseUrl}${REDEEM_PATH}`,
       {
@@ -148,6 +149,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
         body: JSON.stringify({ enroll_code: enrollCode }),
       },
       { timeoutMs: PER_REQUEST_TIMEOUT_MS },
+      async (r) => ({ resp: r, text: await r.text() }),
     );
 
     if (!resp.ok) {
@@ -156,7 +158,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
       if (resp.status === 503) {
         return fail('signing_unavailable', 'The server could not sign a plugin credential right now (503). Try again shortly.');
       }
-      const body = (await resp.json().catch(() => ({}))) as { error?: string; error_description?: string };
+      const body = parseJsonObject(text) as { error?: string; error_description?: string };
       const reason = body.error === 'invalid_grant' ? 'invalid_code' : body.error ?? `http-${resp.status}`;
       // A 400 (or an explicit `invalid_grant`) is the AS's uniform spent/invalid/
       // expired-code signal (no oracle). Any OTHER status (e.g. a transient 5xx) is
@@ -172,7 +174,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
       );
     }
 
-    const body = (await resp.json()) as RedeemResponse;
+    const body = JSON.parse(text) as RedeemResponse;
     if (!body.access_token) return fail('token-malformed', 'Redeem response missing access_token.');
     // cli-core's normalizer maps the AS response defensively (snake_case AND
     // camelCase; `expires_in` seconds → absolute ISO `expiresAt`) and carries
@@ -252,6 +254,15 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
     const error = asError(err);
     const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';
     return { kind: 'failure', success: false, reason, error };
+  }
+}
+
+/** An error answer's JSON body, `{}` when it is not JSON. */
+function parseJsonObject(text: string): unknown {
+  try {
+    return JSON.parse(text) ?? {};
+  } catch {
+    return {};
   }
 }
 
