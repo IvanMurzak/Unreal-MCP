@@ -280,6 +280,18 @@ def build_host(_args) -> None:
         raise StepError(f"Host editor target ({target}) build failed for UE_ROOT={env('UE_ROOT')} (exit {code})")
 
 
+def chain_server_released() -> bool:
+    """Whether the chain lock (CHAIN_LOCK_PATH, written by chain_feed.py apply) keeps gamedev-mcp-server released."""
+    lock = os.environ.get("CHAIN_LOCK_PATH", "")
+    if not lock:
+        return False
+    try:
+        node = json.loads(Path(lock).read_text(encoding="utf-8")).get("nodes", {}).get("gamedev-mcp-server") or {}
+    except (OSError, ValueError) as error:
+        raise StepError(f"chain: cannot read the lock {lock}: {error}")
+    return node.get("state") == "released"
+
+
 def smoke(_args) -> None:
     """The live relay smoke: client -> gamedev-mcp-server -> sidecar -> plugin -> editor -> tool.
 
@@ -288,7 +300,11 @@ def smoke(_args) -> None:
     editor inherits UNREAL_MCP_BRIDGE_PATH. It also writes the RAW MCP dump for the T2 chain fixture to
     RUNNER_TEMP, never under the host project.
     """
-    if os.environ.get("CHAIN_ACTIVE") == "1":
+    if os.environ.get("CHAIN_ACTIVE") == "1" and chain_server_released():
+        # The lock keeps gamedev-mcp-server at its published release (nothing builds it): download that
+        # public release like an ordinary run, the way the Godot leg does.
+        print("chain: gamedev-mcp-server is released in this lock; the smoke uses the public server release")
+    elif os.environ.get("CHAIN_ACTIVE") == "1":
         server = os.environ.get("UNREAL_MCP_SERVER_PATH", "")
         if not server or not Path(server).is_file():
             raise StepError(f"chain: UNREAL_MCP_SERVER_PATH '{server}' is not an existing chain-built server")
