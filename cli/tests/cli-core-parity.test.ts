@@ -85,7 +85,7 @@ describe('pinned setup-mcp parity vs the shared Configure policy (T4 DoD)', () =
     if (r.kind !== 'success') return;
     const writtenUrl = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'].url;
 
-    const pin = derivePinV2(dir);
+    const pin = derivePinV2(fs.realpathSync.native(dir));
 
     // (a) The URL uses cli-core's exact routing helper + v2 pin.
     expect(writtenUrl).toBe(pinUrl('https://ai-game.dev/mcp', pin));

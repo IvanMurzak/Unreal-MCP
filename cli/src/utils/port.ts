@@ -1,4 +1,5 @@
-import { derivePortV2 } from '@baizor/gamedev-cli-core';
+import * as fs from 'node:fs';
+import { derivePinV2, derivePortV2 } from '@baizor/gamedev-cli-core';
 
 // The v1 ProjectIdentity port / pin (separators never converted), golden-vector gated in cli-core; the names are this CLI's.
 export {
@@ -135,10 +136,30 @@ export function resolveLocalBindPort(opts: {
 }
 
 /**
- * The deterministic local-server port of an Unreal project. The sidecar hashes `FPaths::ProjectDir()`, which uses `/`
- * on every platform, while `path.resolve` gives `C:\…` on Windows and v1 keeps separators: the v2 derivation (`\` to
- * `/`) gives the sidecar's port for either form. Pure.
+ * The spelling of a project folder its pin and port are derived from: its real path (symlinks, junctions and 8.3 names
+ * resolved, as the sidecar's `CanonicalProjectPath` and the App's realpath pin do), so a project opened through
+ * `/var/tmp/x` and one addressed as `/private/var/tmp/x` are one project. A path that cannot be resolved (absent, or a
+ * UNC path, which can block for the SMB timeout while the share is offline) is kept as given.
+ */
+export function projectHashRoot(projectDir: string): string {
+  if (projectDir.startsWith('\\\\') || projectDir.startsWith('//')) return projectDir;
+  try {
+    return fs.realpathSync.native(projectDir);
+  } catch {
+    return projectDir;
+  }
+}
+
+/** The v2 routing pin (`/p/<pin>`) the sidecar registers this project under: cli-core v2 of {@link projectHashRoot}. */
+export function deriveProjectRoutingPin(projectDir: string): string {
+  return derivePinV2(projectHashRoot(projectDir));
+}
+
+/**
+ * The deterministic local-server port of an Unreal project. The sidecar hashes the real path of `FPaths::ProjectDir()`
+ * with `/` on every platform, while `realpath` gives `C:\…` on Windows and v1 keeps separators: the v2 derivation
+ * (`\` to `/`) of {@link projectHashRoot} gives the sidecar's port for either form.
  */
 export function deriveLocalServerPort(projectDir: string): number {
-  return derivePortV2(projectDir);
+  return derivePortV2(projectHashRoot(projectDir));
 }

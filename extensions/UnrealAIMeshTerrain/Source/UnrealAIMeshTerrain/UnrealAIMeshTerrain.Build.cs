@@ -23,6 +23,7 @@ public class UnrealAIMeshTerrain : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
+			"Chaos",
 			// FJsonValue: the computed members (Definition, Sections, Modifier, ...).
 			"Json",
 			// The RQL module seam: IUnrealMcpRqlModule.h and UnrealMcpRqlTools.h live in the Unreal-MCP plugin's UnrealMcpRql

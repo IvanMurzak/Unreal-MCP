@@ -8,6 +8,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import * as path from 'path';
+import * as fs from 'fs';
 import { enrollPlugin } from '../src/lib/enroll.js';
 import { deriveProjectPin } from '../src/utils/port.js';
 import {
@@ -74,9 +75,9 @@ describe('B5 — Windows backslash enroll pin matches the plugin hash (cli-core 
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
 
-    // Whatever separators `path.resolve` produced on this OS, the plugin's v2
-    // hash of the same resolved root prefix-matches the enroll pin.
-    const resolved = path.resolve(project);
+    // Whatever separators the real path has on this OS (the sidecar hashes the
+    // project's real path), the plugin's v2 hash of it prefix-matches the enroll pin.
+    const resolved = fs.realpathSync.native(project);
     expect(deriveProjectPathHashV2(resolved).startsWith(r.pin)).toBe(true);
     expect(r.pin).toBe(derivePinV2(resolved));
   });

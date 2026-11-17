@@ -1,0 +1,10 @@
+{
+  "description": "another level, so the next open reads the saved file",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call NewLevel(\"/Game/E2E/LsEditLogOther\")"
+  },
+  "assert": {
+    "pattern": "LsEditLogOther"
+  }
+}

@@ -66,6 +66,8 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("the description has the keyword hint"), Tool && Tool->Description.Contains(TEXT("unreal.Rotator(pitch=, yaw=, roll=)"))
 			&& Tool->Description.Contains(TEXT("unreal.Color(r=, g=, b=, a=)"))
 			&& Tool->Description.Contains(TEXT("Rotator: roll, pitch, yaw; Color: b, g, r, a")));
+		TestTrue(TEXT("the description points editor features at the installed RQL extensions first"), Tool
+			&& Tool->Description.Contains(TEXT("check rql-schema for an installed extension with ready operations")));
 
 		// The orders the description names are what UE's Python really does (FRotator is built through MakeRotator).
 		const FUnrealMcpToolResult R = Run(TEXT(

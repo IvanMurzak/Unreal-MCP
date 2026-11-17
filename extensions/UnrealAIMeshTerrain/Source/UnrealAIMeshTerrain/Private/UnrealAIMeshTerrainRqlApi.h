@@ -89,18 +89,18 @@ class UUnrealAIMeshTerrainRqlApi : public UObject
 public:
 	/** rebuild every section of a Mesh Terrain from its modifiers and wait (at most TimeoutSeconds, 1..600) until its mesh, collision and rendering match them: for a terrain edited outside these operations (Mesh Terrain Mode, Python, set) or that looks stale; returns the build state (Ready, Sections, Triangles, Modifiers, Seconds, State) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
-	FUnrealAIMeshTerrainBuild Rebuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds = 120.0);
+	FUnrealAIMeshTerrainBuild Rebuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds = 240.0);
 
 	/** wait (at most TimeoutSeconds, 1..600) until the Mesh Terrain's pending build is done, without invalidating anything: after `set` on a modifier or terrain; returns the build state */
-	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
-	FUnrealAIMeshTerrainBuild WaitForBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds = 120.0);
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	FUnrealAIMeshTerrainBuild WaitForBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds = 240.0);
 
-	/** the built surface of a Mesh Terrain at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point), Normal and Channels (the paint weights there); read-only; waits for a pending build first (at most 120 s); a point off the terrain gives Inside false */
-	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
+	/** the built surface of a Mesh Terrain at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point), Normal and Channels (the paint weights there); read-only; waits for a pending build first (at most 240 s); a point off the terrain gives Inside false */
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAIMeshTerrainSurface Surface(UE::MeshPartition::AMeshPartition* Terrain, FVector Point);
 
 	/** Surface at every point of Points (world X, Y; Z ignored; at most 10000) in one call, in order: a profile along a road, a grid of spawn points; waits for a pending build first */
-	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
+	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	TArray<FUnrealAIMeshTerrainSurface> SurfacePoints(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points);
 
 	/** enable the MeshTerrainMode and MeshPartition plugins in the project file (.uproject), so Mesh Terrains load in a packaged game and the editor keeps the mode; returns what changed; a restart is needed only when they were not loaded */

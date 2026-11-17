@@ -43,6 +43,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 
 	/** Sizes, radii and widths beyond 100 km are typos, not terrain features. */
 	constexpr double MaxLength = 10000000.0;
+	/** A remesh far finer than the ground it covers makes millions of triangles: at most this many. */
+	constexpr double MaxRemeshTriangles = 4000000.0;
 	/** The component tag a shape's mesh component carries ("MeshTerrainShape:Box"), so Edit can resize it. */
 	const TCHAR* ShapeTagPrefix = TEXT("MeshTerrainShape:");
 
@@ -156,9 +158,9 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 * Wait for @p Terrain's pending build, then fail unless the XY box @p Footprint overlaps its ground: a modifier placed off
 	 * the terrain changes nothing, which is always a mistake (a wrong terrain or a wrong unit).
 	 */
-	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint)
+	bool CheckFootprint(AMeshPartition* Terrain, const FBox2D& Footprint, double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 	{
-		if (!WaitForBuild(Terrain))
+		if (!WaitForBuild(Terrain, TimeoutSeconds))
 			return false;
 		const FBox2D Area = TerrainArea(Terrain);
 		if (!Area.bIsValid || Area.Intersect(Footprint))
@@ -172,8 +174,11 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return FBox2D(FVector2D(Center.X - HalfX, Center.Y - HalfY), FVector2D(Center.X + HalfX, Center.Y + HalfY));
 	}
 
-	/** The guards every operation on an existing modifier runs: available, a live modifier of the editor world, not a base mesh. */
-	bool CheckModifier(const UModifierComponent* Modifier, bool bNeedsTerrain = true)
+	/**
+	 * The guards every operation on an existing modifier runs: available, a live modifier of the editor world, not a base mesh
+	 * (with @p bOrphanBase, Remove's: a base mesh left behind by a deleted terrain, which shapes nothing, may go).
+	 */
+	bool CheckModifier(const UModifierComponent* Modifier, bool bNeedsTerrain = true, bool bOrphanBase = false)
 	{
 		if (!CheckAvailable())
 			return false;
@@ -181,7 +186,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			return UnrealMcpRql::Failed<bool>(TEXT("Modifier is null: pass one from meshTerrainModifiers (meshTerrainModifiers | select $ref Modifier)"));
 		if (!IsValid(Modifier) || Modifier->GetWorld() != UnrealMcpRql::EditorWorld())
 			return UnrealMcpRql::Failed<bool>(TEXT("the modifier is not in the open level (deleted, or another world)"));
-		if (Modifier->IsBase())
+		if (Modifier->IsBase() && !(bOrphanBase && !IsValid(TerrainOf(Modifier))))
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is a base mesh (a section of the terrain itself), not a modifier: only the terrain's create / import operations make or replace those"),
 				*Modifier->GetOwner()->GetActorNameOrLabel()));
 		AMeshPartition* Terrain = TerrainOf(Modifier);
@@ -204,6 +209,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (Modifier)
 		{
 			Out.Actor = Modifier->GetOwner() ? Modifier->GetOwner()->GetActorNameOrLabel() : FString();
+			Out.Location = Modifier->GetOwner() ? Modifier->GetOwner()->GetActorLocation() : Modifier->GetComponentLocation();
 			Out.Kind = ModifierKind(Modifier);
 			Out.PriorityLayer = Modifier->GetType().ToString();
 			Out.Priority = Modifier->GetPriority();
@@ -228,21 +234,31 @@ namespace UnrealAIMeshTerrainModifiersLocal
 	 * Let the edited terrains pick the change up (their modifier lists) and wait until each is rebuilt, then describe
 	 * @p Modifier. @p Terrains may hold nulls and duplicates; the first non-null one is the result's terrain.
 	 */
-	FModifierOpResult Finish(UModifierComponent* Modifier, std::initializer_list<AMeshPartition*> Terrains)
+	FModifierOpResult Finish(UModifierComponent* Modifier, std::initializer_list<AMeshPartition*> Terrains, double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 	{
 		const double Start = FPlatformTime::Seconds();
 		AMeshPartition* Main = nullptr;
 		TArray<AMeshPartition*> Done;
+		TArray<FString> Pending;
 		for (AMeshPartition* Terrain : Terrains)
 		{
 			if (!IsValid(Terrain) || Done.Contains(Terrain))
 				continue;
 			Main = Main ? Main : Terrain;
 			Done.Add(Terrain);
-			if (!WaitForBuild(Terrain)) // its first round updates the terrain's modifier list
-				return FModifierOpResult();
+			// Its first round updates the terrain's modifier list. The change is applied: a build that takes longer (a remeshed
+			// shape) is reported, not failed, so the caller does not repeat it; every terrain still gets its round.
+			FString StillBuilding;
+			if (!WaitForBuild(Terrain, TimeoutSeconds, &StillBuilding))
+				Pending.Add(StillBuildingState(Terrain, StillBuilding));
 		}
-		return Describe(Modifier, Main, Start);
+		FModifierOpResult Out = Describe(Modifier, Main, Start);
+		if (!Pending.IsEmpty())
+		{
+			Out.Ready = false;
+			Out.State = FString::Join(Pending, TEXT("; "));
+		}
+		return Out;
 	}
 
 	/**
@@ -274,10 +290,10 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Modifier = SpawnModifier(Terrain, Class, Location, Rotation, Label, Previous);
 			return Modifier;
 		}
-		FModifierOpResult Keep()
+		FModifierOpResult Keep(double TimeoutSeconds = DefaultBuildTimeoutSeconds)
 		{
 			bKept = true;
-			return Finish(Modifier, { Terrain, Previous });
+			return Finish(Modifier, { Terrain, Previous }, TimeoutSeconds);
 		}
 	};
 
@@ -292,6 +308,44 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		Owner->Modify();
 		Owner->SetActorLocation(Owner->GetActorLocation() + FVector(0.0, 0.0, 0.001), /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
 		Owner->PostEditMove(/*bFinished*/ true);
+	}
+
+	/** Room (cm) left above and below the heights a modifier must reach. */
+	constexpr double ReachSpare = 10000.0;
+
+	/** Raise @p Modifier's numeric property @p Name to @p Needed when it is lower (through SetNumber: one undo step with the edit). */
+	bool WidenTo(UModifierComponent* Modifier, const TCHAR* Name, double Needed)
+	{
+		const FNumericProperty* Property = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(Name));
+		return !Property || Needed <= Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Modifier)) || SetNumber(Modifier, Name, Needed);
+	}
+
+	/**
+	 * A Patch / WeightUtility modifier reaches the ground only within MaxZDistance / 2 above and below its location (default
+	 * 200 m in all): a pad or paint on a 300 m hill would miss the ground above. Widen it to every height the terrain's built
+	 * ground has around @p Location, with ReachSpare to spare.
+	 */
+	bool CoverTerrainHeights(UModifierComponent* Modifier, const AMeshPartition* Terrain, const FVector& Location)
+	{
+		const FBox Built = BuiltBounds(Terrain); // valid: the Add operations wait for the build (CheckFootprint) first
+		// MaxZDistance is the whole span, centred on the location.
+		return !Built.IsValid || WidenTo(Modifier, TEXT("MaxZDistance"), 2.0 * (FMath::Max(Built.Max.Z - Location.Z, Location.Z - Built.Min.Z) + ReachSpare));
+	}
+
+	/**
+	 * A TexturePatch moves only the ground within VerticalPatchExtentUp / Down of its location (default 100 m each) and clamps
+	 * what it writes to them: a 300 m stamp would be cut at 100 m. Widen them to the terrain's built heights plus the stamp's
+	 * @p Height (its EncodingScale), with ReachSpare to spare.
+	 */
+	bool CoverTexturePatch(UModifierComponent* Patch, const AMeshPartition* Terrain, const FVector& Location, double Height)
+	{
+		const FBox Built = BuiltBounds(Terrain);
+		const double Above = Built.IsValid ? FMath::Max(Built.Max.Z - Location.Z, 0.0) : 0.0; // ground above the patch
+		const double Below = Built.IsValid ? FMath::Max(Location.Z - Built.Min.Z, 0.0) : 0.0; // and below it
+		const double Reach = FMath::Abs(Height) + ReachSpare;
+		// The extents are in the patch's own space: a patch scaled down on Z needs larger ones for the same world heights.
+		const double ScaleZ = FMath::Max(FMath::Abs(Patch->GetComponentScale().Z), UE_KINDA_SMALL_NUMBER);
+		return WidenTo(Patch, TEXT("VerticalPatchExtentUp"), (Above + Reach) / ScaleZ) && WidenTo(Patch, TEXT("VerticalPatchExtentDown"), (Below + Reach) / ScaleZ);
 	}
 
 	/** The guards every Add operation runs first: available, a terrain of the open level (its actors loaded), a world Location. */
@@ -471,16 +525,23 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return Spline;
 	}
 
-	/** Make @p Modifier's spline pass through @p Points (world), then let the modifier re-read it. */
-	bool ApplySplinePoints(UModifierComponent* Modifier, const TArray<FVector>& Points, bool bClosed)
+	/**
+	 * Make @p Modifier's spline pass through @p Points (world), then let the modifier re-read it. @p bLinear: straight between
+	 * the points (a road: a curve overshoots in Z between points where the profile turns, steeper than its grade).
+	 */
+	bool ApplySplinePoints(UModifierComponent* Modifier, const TArray<FVector>& Points, bool bClosed, bool bLinear = false)
 	{
 		USplineComponent* Spline = SplineOf(Modifier, /*bCreate*/ true);
 		if (!Spline)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no spline: only Spline and SplineRemesh modifiers follow points"), *ModifierKind(Modifier)));
 		Spline->Modify();
+		// A road's spline (AddRoad) stays straight between its points when SetSplinePoints moves it.
+		bLinear |= Spline->GetNumberOfSplinePoints() > 0 && Spline->GetSplinePointType(0) == ESplinePointType::Linear;
 		Spline->ClearSplinePoints(/*bUpdateSpline*/ false);
 		for (const FVector& Point : Points)
 			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::World, /*bUpdateSpline*/ false);
+		for (int32 Index = 0; bLinear && Index < Points.Num(); ++Index)
+			Spline->SetSplinePointType(Index, ESplinePointType::Linear, /*bUpdateSpline*/ false);
 		Spline->SetClosedLoop(bClosed, /*bUpdateSpline*/ false);
 		Spline->UpdateSpline();
 		// A closed spline modifier fills its inside (a plateau outline), an open one is a path.
@@ -494,6 +555,23 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Remesh->UpdateSplineData();
 		Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		return true;
+	}
+
+	/** A Remesh box's coverage (Size, cm) and edge length, as AddRemesh and AddRoad set them. */
+	bool SetRemesh(UModifierComponent* Remesh, const FVector& Size, double EdgeLength)
+	{
+		return SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
+			&& SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength);
+	}
+
+	/** A spline modifier's flat half-width, falloff, paint channel ("" none) and path, as AddSpline and AddRoad (bLinear) set them. */
+	bool SetSpline(AMeshPartition* Terrain, UModifierComponent* Spline, const TArray<FVector>& Points, double Plateau, double Falloff, const FString& Channel, bool bClosed,
+		bool bLinear = false)
+	{
+		return SetNumber(Spline, TEXT("PlateauDistance"), Plateau) && SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
+			&& SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
+				: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
+			&& ApplySplinePoints(Spline, Points, bClosed, bLinear);
 	}
 
 	// ---- Lattices ----------------------------------------------------------------------------------------------------
@@ -590,7 +668,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE
 	FTerrainTransaction Transaction(LOCTEXT("AddPatch", "Add Mesh Terrain Patch"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Patch = Placed.Spawn(ModifierClassOf(TEXT("Patch")), Location, FRotator::ZeroRotator, Label);
-	if (!Patch || !SetNumber(Patch, TEXT("Radius"), Radius) || !SetNumber(Patch, TEXT("Falloff"), Falloff))
+	if (!Patch || !SetNumber(Patch, TEXT("Radius"), Radius) || !SetNumber(Patch, TEXT("Falloff"), Falloff) || !CoverTerrainHeights(Patch, Terrain, Location))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -609,7 +687,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(U
 	FPlacement Placed(Terrain);
 	UModifierComponent* Weight = Placed.Spawn(ModifierClassOf(TEXT("WeightUtility")), Location, FRotator::ZeroRotator, Label);
 	if (!Weight || !SetProperty(Weight, TEXT("WeightChannelName"), ChannelName(Terrain, Channel)) || !SetNumber(Weight, TEXT("Radius"), Radius)
-		|| !SetNumber(Weight, TEXT("Falloff"), Falloff) || !SetNumber(Weight, TEXT("InnerValue"), Value) || !SetNumber(Weight, TEXT("OuterValue"), 0.0))
+		|| !SetNumber(Weight, TEXT("Falloff"), Falloff) || !SetNumber(Weight, TEXT("InnerValue"), Value) || !SetNumber(Weight, TEXT("OuterValue"), 0.0)
+		|| !CoverTerrainHeights(Weight, Terrain, Location))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -625,12 +704,297 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(U
 	FTerrainTransaction Transaction(LOCTEXT("AddSpline", "Add Mesh Terrain Spline"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Points[0], FRotator::ZeroRotator, Label);
-	if (!Spline || !SetNumber(Spline, TEXT("PlateauDistance"), Width / 2.0) || !SetNumber(Spline, TEXT("FalloffDistance"), Falloff)
-		|| !SetProperty(Spline, TEXT("WeightChannels"), Channel.IsEmpty() ? FString(TEXT("()"))
-			: FString::Printf(TEXT("((WeightChannelName=(Name=\"%s\"),Value=1.000000))"), *ChannelName(Terrain, Channel)))
-		|| !ApplySplinePoints(Spline, Points, Closed))
+	if (!Spline || !SetSpline(Terrain, Spline, Points, Width / 2.0, Falloff, Channel, Closed))
 		return FModifierOpResult();
 	return Placed.Keep();
+}
+
+FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double MaxSlope, double Falloff, const FString& Label, double TimeoutSeconds)
+{
+	using FRoadResult = FUnrealAIMeshTerrainRoadResult;
+	const double Start = FPlatformTime::Seconds();
+	if (!CheckTimeout(TimeoutSeconds) || !CheckTerrain(Terrain) || !CheckPoints(Points))
+		return FRoadResult();
+	if (!FMath::IsFinite(Width) || Width < 100.0 || Width > 10000.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Width %g is outside 100 .. 10000 cm"), Width));
+	if (!FMath::IsFinite(MaxSlope) || MaxSlope < 0.5 || MaxSlope > 45.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("MaxSlope %g is outside 0.5 .. 45 degrees"), MaxSlope));
+	if (Falloff < 0.0)
+		Falloff = Width;
+	if (!FMath::IsFinite(Falloff) || Falloff < 10.0 || Falloff > 100000.0)
+		return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("Falloff %g is outside 10 .. 100000 cm (-1: Width)"), Falloff));
+	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff), TimeoutSeconds)) // the terrain may still rebuild a remeshed hill
+		return FRoadResult();
+
+	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
+	// Flat past each edge by more than a triangle, so no bank vertex tilts the road's edge (the banks start outside it).
+	const double Plateau = Width / 2.0 + FMath::Max(100.0, 1.5 * RoadEdge);
+	for (int32 Index = 1; Index < Points.Num(); ++Index)
+	{
+		if (FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index])) < 1.0) // the path is X, Y: points apart only in Z are the same place
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("points %d and %d are the same X, Y: remove the duplicate"), Index - 1, Index));
+	}
+	// Corners rounded: a spline road with a flat width and banks cannot keep its grade through a sharp corner (its two legs'
+	// widths meet at different heights: a 90 degree switchback measured 13 degrees at MaxSlope 8). Every turn over 20 degrees
+	// becomes an arc of radius 2.5 x (Plateau + Falloff) (smaller only where the legs are too short for it): measured on a
+	// 4 m road, Plateau + Falloff alone still left 11.5 degrees at MaxSlope 8 on a hillside corner.
+	const double TurnRadius = 2.5 * (Plateau + Falloff);
+	TArray<FVector2D> Line = { FVector2D(Points[0]) };
+	TArray<FVector2D> TightTurns; // corners that got less than TurnRadius (or none: a reversal)
+	int32 Rounded = 0;
+	const auto TurnAt = [&Points](int32 Index)
+	{
+		const FVector2D U = (FVector2D(Points[Index]) - FVector2D(Points[Index - 1])).GetSafeNormal(), V = (FVector2D(Points[Index + 1]) - FVector2D(Points[Index])).GetSafeNormal();
+		return FMath::Acos(FMath::Clamp(FVector2D::DotProduct(U, V), -1.0, 1.0));
+	};
+	const auto Rounds = [](double Turn) { return Turn >= FMath::DegreesToRadians(20.0) && Turn <= FMath::DegreesToRadians(179.0); };
+	// The arcs share what the spline's 1000 points leave (they are split again into the profile's steps below).
+	int32 Corners = 0;
+	for (int32 Index = 1; Index + 1 < Points.Num(); ++Index)
+		Corners += Rounds(TurnAt(Index)) ? 1 : 0;
+	const int32 ArcBudget = FMath::Max(2, (900 - Points.Num()) / FMath::Max(1, Corners));
+	for (int32 Index = 1; Index + 1 < Points.Num(); ++Index)
+	{
+		const FVector2D A(Points[Index - 1]), P(Points[Index]), B(Points[Index + 1]);
+		const FVector2D U = (P - A).GetSafeNormal(), V = (B - P).GetSafeNormal();
+		const double Turn = TurnAt(Index);
+		if (!Rounds(Turn))
+		{
+			if (Turn > FMath::DegreesToRadians(179.0))
+				TightTurns.Add(P); // a reversal: no curve fits
+			Line.Add(P);
+			continue;
+		}
+		const double HalfTan = FMath::Tan(Turn / 2.0);
+		const double MaxTrim = 0.45 * FMath::Min(FVector2D::Distance(A, P), FVector2D::Distance(P, B));
+		const double Radius = FMath::Min(TurnRadius, MaxTrim / HalfTan);
+		const double Trim = Radius * HalfTan;
+		if (Radius < TurnRadius - 1.0)
+			TightTurns.Add(P);
+		const double Side = FVector2D::CrossProduct(U, V) > 0.0 ? 1.0 : -1.0; // left turn: the centre is on the left
+		const FVector2D From = P - U * Trim;
+		const FVector2D Centre = From + FVector2D(-U.Y, U.X) * Side * Radius;
+		const int32 Pieces = FMath::Clamp(FMath::CeilToInt(Radius * Turn / FMath::Max(Width / 2.0, 100.0)), 2, ArcBudget);
+		for (int32 Piece = 0; Piece <= Pieces; ++Piece)
+			Line.Add(Centre + (From - Centre).GetRotated(FMath::RadiansToDegrees(Side * Turn * Piece / Pieces)));
+		++Rounded;
+	}
+	Line.Add(FVector2D(Points.Last()));
+	// The path every few metres (at most 1000 points: the spline's limit).
+	double Length = 0.0;
+	for (int32 Index = 1; Index < Line.Num(); ++Index)
+		Length += FVector2D::Distance(Line[Index - 1], Line[Index]);
+	auto Samples = [&Line](double Step)
+	{
+		int32 Count = 1;
+		for (int32 Index = 1; Index < Line.Num(); ++Index)
+			Count += FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Line[Index - 1], Line[Index]) / Step));
+		return Count;
+	};
+	double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
+	for (int32 Guard = 0; Samples(Step) > 1000; ++Guard)
+	{
+		if (Guard > 100)
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("the path has too many points and corners for one road (%d after rounding its corners, at most 1000): split it into several roads"), Line.Num()));
+		Step *= 1.1;
+	}
+	TArray<FVector2D> Path = { Line[0] };
+	TArray<double> Along = { 0.0 };
+	for (int32 Index = 1; Index < Line.Num(); ++Index)
+	{
+		const FVector2D From(Line[Index - 1]), To(Line[Index]);
+		const double Segment = FVector2D::Distance(From, To);
+		const int32 Pieces = FMath::Max(1, FMath::CeilToInt(Segment / Step));
+		for (int32 Piece = 1; Piece <= Pieces; ++Piece)
+		{
+			Path.Add(FMath::Lerp(From, To, double(Piece) / Pieces));
+			Along.Add(Along.Last() + Segment / Pieces);
+		}
+	}
+	TArray<double> Ground;
+	for (const FVector2D& Point : Path)
+	{
+		const FSurfaceSample Sample = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false);
+		if (!Sample.bInside)
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("the road leaves %s at X %.0f, Y %.0f: keep its points on the terrain"), *Terrain->GetActorNameOrLabel(), Point.X, Point.Y));
+		Ground.Add(Sample.Height);
+	}
+
+	// The grade-limited profile (MaxSlope with a margin for the spline's curve and the mesh). When the climb fits the path,
+	// both ends sit on the ground: every point stays within what the start and the end can reach (so the road starts
+	// climbing early enough), as close to the ground as that allows. Otherwise it follows the ground from the start as far up
+	// as it can. Then at most the grade per step (one forward pass holds every neighbouring pair to it).
+	const double Tan = FMath::Tan(FMath::DegreesToRadians(MaxSlope * 0.9));
+	const bool bFits = FMath::Abs(Ground.Last() - Ground[0]) <= Length * Tan;
+	TArray<double> Z = Ground;
+	if (bFits)
+	{
+		for (int32 Index = 0; Index < Z.Num(); ++Index)
+		{
+			const double FromStart = Along[Index] * Tan, FromEnd = (Length - Along[Index]) * Tan;
+			Z[Index] = FMath::Clamp(Ground[Index], FMath::Max(Ground[0] - FromStart, Ground.Last() - FromEnd), FMath::Min(Ground[0] + FromStart, Ground.Last() + FromEnd));
+		}
+	}
+	for (int32 Index = 1; Index < Z.Num(); ++Index)
+	{
+		const double Rise = (Along[Index] - Along[Index - 1]) * Tan;
+		Z[Index] = FMath::Clamp(Z[Index], Z[Index - 1] - Rise, Z[Index - 1] + Rise);
+	}
+	TArray<FVector> Road;
+	for (int32 Index = 0; Index < Path.Num(); ++Index)
+	{
+		Road.Add(FVector(Path[Index], Z[Index]));
+	}
+
+	// A Boolean shape's surface keeps its own coarse triangles (100+ m across), which no spline can bend: remesh it finer than
+	// the road first.
+	// The remesh covers each crossed shape whole: a coarse triangle straddling the remesh's edge stays as it is.
+	TArray<UModifierComponent*> Existing = Modifiers(Terrain);
+	FBox Coarse(ForceInit);
+	for (const UModifierComponent* Modifier : Existing)
+	{
+		const FBox Box = Modifier->ComputeCombinedBounds();
+		if (!IsKind(Modifier, TEXT("Boolean")) || Modifier->GetIsDisabledFlag() || !Box.IsValid)
+			continue;
+		const FBox2D Area(FVector2D(Box.Min), FVector2D(Box.Max));
+		bool bCrossed = false;
+		for (int32 Index = 1; Index < Path.Num() && !bCrossed; ++Index)
+		{
+			FBox2D Segment(ForceInit);
+			Segment += Path[Index - 1];
+			Segment += Path[Index];
+			bCrossed = Area.Intersect(Segment);
+		}
+		if (bCrossed)
+			Coarse += Box.ExpandBy(FVector(0.05 * Box.GetSize().X + 1000.0, 0.05 * Box.GetSize().Y + 1000.0, 0.0));
+	}
+	double Order = 0.0;
+	for (const UModifierComponent* Modifier : Existing)
+		Order = FMath::Max(Order, double(Modifier->GetPriority()));
+
+	// The spline reaches the ground only within MaxZDistance of its points (engine default 20 m): cover the deepest cut or fill.
+	double Deepest = 0.0;
+	for (int32 Index = 0; Index < Z.Num(); ++Index)
+		Deepest = FMath::Max(Deepest, FMath::Abs(Ground[Index] - Z[Index]));
+
+	FTerrainTransaction Transaction(LOCTEXT("AddRoad", "Add Mesh Terrain Road"));
+	FPlacement Remeshed(Terrain);
+	FPlacement Cored(Terrain);
+	FString RemeshLabel, CorridorLabel;
+	if (Coarse.IsValid)
+	{
+		// Two steps, because every later change to the terrain rebuilds what is remeshed (a 900 m box at road resolution: 680k
+		// triangles, about 3 minutes): a Remesh box over the shape with medium edges (a SplineRemesh alone leaves a Boolean
+		// shape's 100 m triangles as they are: none of their vertices is near the path), then a SplineRemesh with the road's
+		// fine edges only in a corridor around it (its radius is a 3D distance from the road's profile: the banks, a margin
+		// and the deepest cut). Measured on a 250 m cone with a 3.7 km spiral road: 390k triangles, an edit rebuilds in
+		// about 20 s, the road as flat across as under a fine box.
+		FBox Box = Coarse;
+		const FBox Built = BuiltBounds(Terrain);
+		Box.Min.Z = FMath::Min(Built.Min.Z, Box.Min.Z) - 1000.0;
+		Box.Max.Z = FMath::Max(Built.Max.Z, Box.Max.Z) + 1000.0;
+		const FVector Size = Box.GetSize();
+		// Medium edges, longer when that would pass AddRemesh's triangle limit.
+		const double Edge = FMath::Max(FMath::Max(5.0 * RoadEdge, 500.0), FMath::Sqrt(2.0 * Size.X * Size.Y / MaxRemeshTriangles));
+		UModifierComponent* Remesh = Remeshed.Spawn(ModifierClassOf(TEXT("Remesh")), Box.GetCenter(), FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Remesh"));
+		if (!Remesh || !SetRemesh(Remesh, Size, Edge) || !SetNumber(Remesh, TEXT("Priority"), Order + 1.0))
+			return FRoadResult();
+		RemeshLabel = Remesh->GetOwner()->GetActorNameOrLabel();
+		UModifierComponent* Corridor = Cored.Spawn(ModifierClassOf(TEXT("SplineRemesh")), Road[0], FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Corridor"));
+		const double Radius = Plateau + Falloff + 1500.0 + Deepest;
+		// Only the stretch of the road over the box (from its first point in it to its last, plus a point either side):
+		// elsewhere the terrain's own grid is fine enough.
+		const FBox2D Box2D(FVector2D(Box.Min), FVector2D(Box.Max));
+		const int32 First = Road.IndexOfByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		const int32 Last = Road.FindLastByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		TArray<FVector> Stretch;
+		for (int32 Index = FMath::Max(0, First - 1); First != INDEX_NONE && Index <= FMath::Min(Road.Num() - 1, Last + 1); ++Index)
+			Stretch.Add(Road[Index]);
+		if (Stretch.Num() < 2)
+			Stretch = Road;
+		if (!Corridor || !SetNumber(Corridor, TEXT("SplineRadius"), Radius) || !SetNumber(Corridor, TEXT("TargetEdgeLength"), RoadEdge)
+			|| !SetNumber(Corridor, TEXT("Priority"), Order + 1.5) || !ApplySplinePoints(Corridor, Stretch, /*bClosed*/ false))
+			return FRoadResult();
+		CorridorLabel = Corridor->GetOwner()->GetActorNameOrLabel();
+	}
+	FPlacement Placed(Terrain);
+	UModifierComponent* Spline = Placed.Spawn(ModifierClassOf(TEXT("Spline")), Road[0], FRotator::ZeroRotator, Label);
+	if (!Spline || !SetNumber(Spline, TEXT("Priority"), Order + 2.0) || !SetNumber(Spline, TEXT("MaxZDistance"), FMath::Max(2000.0, Deepest + 1000.0))
+		|| !SetSpline(Terrain, Spline, Road, Plateau, Falloff, FString(), /*bClosed*/ false, /*bLinear*/ true))
+		return FRoadResult();
+	Remeshed.bKept = true;
+	Cored.bKept = true;
+	// One budget for the call: the wait before placing the road took part of it (the MCP server ends a call after 300 s).
+	const FModifierOpResult Built = Placed.Keep(FMath::Max(MinTimeoutSeconds, TimeoutSeconds - SecondsSince(Start)));
+	if (!Built.Modifier)
+		return FRoadResult();
+
+	FRoadResult Out;
+	Out.Modifier = Spline;
+	Out.Actor = Built.Actor;
+	Out.Remesh = RemeshLabel;
+	Out.Corridor = CorridorLabel;
+	Out.Terrain = Built.Terrain;
+	Out.Ready = Built.Ready;
+	Out.State = Built.State;
+	Out.LengthMeters = Length / 100.0;
+	Out.RoundedCorners = Rounded;
+	Out.StartZ = Z[0];
+	Out.EndZ = Z.Last();
+	Out.EndGroundZ = Ground.Last();
+	Out.Reached = FMath::Abs(Z.Last() - Ground.Last()) <= 100.0;
+	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / Tan / 100.0; // with the profile's margin: what it needs
+	Out.Seconds = SecondsSince(Start);
+	if (!Out.Reached)
+	{
+		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
+			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
+			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" with its Remesh and Corridor"));
+	}
+	if (!Out.Ready)
+	{
+		Out.MaxSlope = -1.0;
+		Out.Note += FString(Out.Note.IsEmpty() ? TEXT("") : TEXT("; "))
+			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
+		return Out;
+	}
+	// The built road: its grade along the centre line every metre (longer steps past 3 km: at most 3000 samples), from the collision.
+	const double Measure = FMath::Max(100.0, Length / 3000.0);
+	FVector2D Steepest = Path[0];
+	{
+		double Previous = SampleSurface(Terrain, Path[0].X, Path[0].Y, /*bChannels*/ false).Height;
+		FVector2D Last = Path[0];
+		for (int32 Index = 1; Index < Path.Num(); ++Index)
+		{
+			const int32 Metres = FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Path[Index - 1], Path[Index]) / Measure));
+			for (int32 Piece = 1; Piece <= Metres; ++Piece)
+			{
+				const FVector2D Point = FMath::Lerp(Path[Index - 1], Path[Index], double(Piece) / Metres);
+				const double Height = SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ false).Height;
+				const double Grade = FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - Previous) / FMath::Max(FVector2D::Distance(Point, Last), 1.0)));
+				if (Grade > Out.MaxSlope)
+				{
+					Out.MaxSlope = Grade;
+					Steepest = Point;
+				}
+				Previous = Height;
+				Last = Point;
+			}
+		}
+	}
+	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
+	Out.SteepestAt = Steepest;
+	if (Out.Reached && Out.MaxSlope > MaxSlope + 0.5)
+	{
+		const FVector2D* Tight = TightTurns.FindByPredicate([&Steepest, Width](const FVector2D& Turn) { return FVector2D::Distance(Turn, Steepest) <= 3.0 * Width + 1000.0; });
+		Out.Note = Tight
+			? FString::Printf(TEXT("the built road is %.1f degrees steep at X %.0f, Y %.0f, at a turn too tight for a road this wide (the legs around the point X %.0f, Y %.0f are too short for a %.0f m curve): give that corner more room (longer legs, a wider switchback), Remove the road and call again"),
+				Out.MaxSlope, Steepest.X, Steepest.Y, Tight->X, Tight->Y, TurnRadius / 100.0)
+			: FString::Printf(TEXT("the built road is %.1f degrees steep at X %.0f, Y %.0f: the ground under it is too coarse there; AddRemesh over that spot (EdgeLength %.0f) and Rebuild"),
+				Out.MaxSlope, Steepest.X, Steepest.Y, RoadEdge);
+	}
+	Out.Seconds = SecondsSince(Start);
+	return Out;
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size, const FString& Operation, FRotator Rotation, const FString& Label)
@@ -757,7 +1121,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 		if (!SetProperty(Patch, TEXT("HeightChannel"), Height_->GetPathName()))
 			return FModifierOpResult();
 	}
-	if (!SetProperty(Height_, TEXT("TextureAsset"), Texture->GetPathName()) || !SetNumber(Height_, TEXT("EncodingScale"), Height))
+	if (!SetProperty(Height_, TEXT("TextureAsset"), Texture->GetPathName()) || !SetNumber(Height_, TEXT("EncodingScale"), Height)
+		|| !CoverTexturePatch(Patch, Terrain, Location, Height))
 		return FModifierOpResult();
 	Patch->OnChanged(Patch->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 	return Placed.Keep();
@@ -771,17 +1136,15 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(U
 		return Fail(FString::Printf(TEXT("Size %s must be above 0 and at most 10000000 cm on each axis"), *Text(Size)));
 	if (!FMath::IsFinite(EdgeLength) || EdgeLength < 10.0 || EdgeLength > 100000.0)
 		return Fail(FString::Printf(TEXT("EdgeLength %g is outside 10 .. 100000 cm"), EdgeLength));
-	// A remesh far finer than the ground it covers makes millions of triangles: keep it within ~4M.
 	const double Triangles = 2.0 * (Size.X / EdgeLength) * (Size.Y / EdgeLength);
-	if (Triangles > 4000000.0)
-		return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: use longer edges or a smaller Size (at most 4000000)"), Size.X, Size.Y, EdgeLength, Triangles));
+	if (Triangles > MaxRemeshTriangles)
+		return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: use longer edges or a smaller Size (at most %.0f)"), Size.X, Size.Y, EdgeLength, Triangles, MaxRemeshTriangles));
 	if (!CheckFootprint(Terrain, Around(Location, Size.X / 2.0, Size.Y / 2.0)))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("AddRemesh", "Add Mesh Terrain Remesh"));
 	FPlacement Placed(Terrain);
 	UModifierComponent* Remesh = Placed.Spawn(ModifierClassOf(TEXT("Remesh")), Location, FRotator::ZeroRotator, Label);
-	if (!Remesh || !SetProperty(Remesh, TEXT("UnscaledCoverage"), FString::Printf(TEXT("(X=%.17g,Y=%.17g,Z=%.17g)"), Size.X, Size.Y, Size.Z))
-		|| !SetNumber(Remesh, TEXT("TargetEdgeLength"), EdgeLength))
+	if (!Remesh || !SetRemesh(Remesh, Size, EdgeLength))
 		return FModifierOpResult();
 	return Placed.Keep();
 }
@@ -893,8 +1256,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 			const FNumericProperty* Edge = CastField<FNumericProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength")));
 			const double EdgeLength = Edge ? Edge->GetFloatingPointPropertyValue(Edge->ContainerPtrToValuePtr<void>(Modifier)) : 0.0;
 			const double Triangles = EdgeLength > 0.0 ? 2.0 * (NewSize.X / EdgeLength) * (NewSize.Y / EdgeLength) : 0.0;
-			if (Triangles > 4000000.0)
-				return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: at most 4000000"), NewSize.X, NewSize.Y, EdgeLength, Triangles));
+			if (Triangles > MaxRemeshTriangles)
+				return Fail(FString::Printf(TEXT("a %.0f x %.0f cm remesh with %g cm edges makes about %.0f triangles: at most %.0f"), NewSize.X, NewSize.Y, EdgeLength, Triangles, MaxRemeshTriangles));
 		}
 		else if (Lattice)
 		{
@@ -1010,7 +1373,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 		}
 		if (HeightEntry)
 		{
-			if (!SetNumber(HeightEntry, TEXT("EncodingScale"), Strength))
+			if (!SetNumber(HeightEntry, TEXT("EncodingScale"), Strength) || !CoverTexturePatch(Modifier, TerrainOf(Modifier), Modifier->GetComponentLocation(), Strength))
 				return FModifierOpResult();
 			Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		}
@@ -1034,7 +1397,23 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::Me
 	// carries its world-space points along itself).
 	Owner->SetActorLocation(Location, /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
 	Owner->PostEditMove(/*bFinished*/ true);
-	return Finish(Modifier, { TerrainOf(Modifier) });
+	// The vertical reach the Add operations gave is measured from the location: keep it covering the ground at the new one.
+	AMeshPartition* Terrain = TerrainOf(Modifier);
+	if (IsKind(Modifier, TEXT("Patch")) || IsKind(Modifier, TEXT("WeightUtility")))
+	{
+		if (!CoverTerrainHeights(Modifier, Terrain, Modifier->GetComponentLocation()))
+			return FModifierOpResult();
+	}
+	else if (IsKind(Modifier, TEXT("TexturePatch")))
+	{
+		const FObjectProperty* Entry = CastField<FObjectProperty>(Modifier->GetClass()->FindPropertyByName(TEXT("HeightChannel")));
+		UObject* HeightEntry = Entry ? Entry->GetObjectPropertyValue_InContainer(Modifier) : nullptr;
+		const FNumericProperty* Scale = HeightEntry ? CastField<FNumericProperty>(HeightEntry->GetClass()->FindPropertyByName(TEXT("EncodingScale"))) : nullptr;
+		const double Height = Scale ? Scale->GetFloatingPointPropertyValue(Scale->ContainerPtrToValuePtr<void>(HeightEntry)) : 0.0;
+		if (!CoverTexturePatch(Modifier, Terrain, Modifier->GetComponentLocation(), Height))
+			return FModifierOpResult();
+	}
+	return Finish(Modifier, { Terrain });
 }
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, int32 Closed)
@@ -1131,19 +1510,22 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::MeshPartition::UModifierComponent* Modifier)
 {
-	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false))
+	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false, /*bOrphanBase*/ true))
 		return FModifierOpResult();
+	// A deleted terrain the modifier still points at counts as none (it may not be garbage collected yet).
 	AMeshPartition* Terrain = TerrainOf(Modifier);
+	if (!IsValid(Terrain))
+		Terrain = nullptr;
 	AActor* Owner = Modifier->GetOwner();
 	const FString Label = Owner->GetActorNameOrLabel();
 	const FString Kind = ModifierKind(Modifier);
 	FTerrainTransaction Transaction(LOCTEXT("RemoveModifier", "Remove Mesh Terrain Modifier"));
-	// A modifier actor holding only this modifier (what the palette and these operations place) goes as a whole; a
-	// modifier component on any other actor (the terrain itself, a Blueprint, a second modifier) goes alone, with the
-	// shape mesh AddShape gave it.
+	// A modifier actor holding only this modifier (what the palette and these operations place), or a base mesh's own actor
+	// (the base mesh is its root: what Create made) left behind by a deleted terrain, goes as a whole; a modifier component on
+	// any other actor (the terrain itself, a Blueprint, a second modifier) goes alone, with the shape mesh AddShape gave it.
 	TArray<UModifierComponent*> Siblings;
 	Owner->GetComponents(Siblings);
-	if (Cast<UE::MeshPartition::AModifierActor>(Owner) && Siblings.Num() == 1)
+	if ((Cast<UE::MeshPartition::AModifierActor>(Owner) || (Modifier->IsBase() && Owner->GetRootComponent() == Modifier)) && Siblings.Num() == 1)
 	{
 		if (!Owner->GetWorld()->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true))
 			return Fail(FString::Printf(TEXT("could not delete %s"), *Label));

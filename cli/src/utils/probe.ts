@@ -87,13 +87,21 @@ async function probeEndpoint(
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
 
   try {
-    const response = await fetchWithTimeout(
+    // The body is read inside the deadline: a server that stalls after the headers times out instead of hanging
+    // (the abort is rethrown; any other unreadable body still reads as empty, as before).
+    const { response, text } = await fetchWithTimeout(
       fetchImpl,
       endpoint,
       { method: 'POST', headers, body: '{}' },
       { timeoutMs },
+      async (r) => ({
+        response: r,
+        text: await r.text().catch((err: unknown) => {
+          if (err instanceof Error && err.name === 'AbortError') throw err;
+          return '';
+        }),
+      }),
     );
-    const text = await response.text().catch(() => '');
     if (response.ok) {
       let data: unknown;
       try {

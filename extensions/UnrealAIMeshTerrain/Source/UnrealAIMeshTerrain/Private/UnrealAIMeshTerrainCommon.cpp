@@ -11,6 +11,8 @@
 #include "Algo/AnyOf.h"
 #include "AssetCompilingManager.h"
 #include "Components/StaticMeshComponent.h"
+#include "Chaos/TriangleMeshImplicitObject.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Editor.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -19,7 +21,6 @@
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDesc.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
-#include "WorldPartition/WorldPartitionBlueprintLibrary.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "Async/TaskGraphInterfaces.h"
 
@@ -156,9 +157,22 @@ namespace UnrealAIMeshTerrain
 				return true;
 			});
 		}
+
+		/**
+		 * Whether the actor of @p Instance was deleted in this session: its descriptor stays until the level is saved, its
+		 * package stays in memory, dirty (deleted on save) and without the actor. Unloaded actors' packages are not in memory
+		 * or not dirty (World Partition does not unload dirty actors).
+		 */
+		bool IsDeletedActor(const FWorldPartitionActorDescInstance& Instance)
+		{
+			if (Instance.IsLoaded())
+				return false;
+			const UPackage* Package = FindObject<UPackage>(nullptr, *Instance.GetActorPackage().ToString());
+			return Package && Package->IsDirty();
+		}
 	}
 
-	int32 LoadTerrainActors(const AMeshPartition* Terrain)
+	void LoadTerrainActors(const AMeshPartition* Terrain)
 	{
 		TArray<FGuid> Unloaded;
 		ForEachTerrainActorDesc(Terrain, [&Unloaded](const FWorldPartitionActorDescInstance& Instance)
@@ -166,19 +180,12 @@ namespace UnrealAIMeshTerrain
 			if (!Instance.IsLoaded())
 				Unloaded.Add(Instance.GetGuid());
 		});
-		if (!Unloaded.IsEmpty())
+		// The core loader skips the actors deleted in this session (their descriptors stay until the level is saved).
+		if (!Unloaded.IsEmpty() && UnrealMcpRql::LoadWorldPartitionActors(Unloaded))
 		{
-			// UWorldPartitionBlueprintLibrary::LoadActors (what Python's load_actors calls) keeps them in its per-world actor-list
-			// loader adapter and releases it with the world; the class is MinimalAPI, so it is called through reflection.
-			if (UFunction* LoadActors = UWorldPartitionBlueprintLibrary::StaticClass()->FindFunctionByName(TEXT("LoadActors")))
-			{
-				struct { TArray<FGuid> InActorsToLoad; } Params{ Unloaded };
-				UWorldPartitionBlueprintLibrary::StaticClass()->GetDefaultObject()->ProcessEvent(LoadActors, &Params);
-			}
 			if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
 				Component->UpdateModifierList();
 		}
-		return Unloaded.Num();
 	}
 
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain)
@@ -332,6 +339,89 @@ namespace UnrealAIMeshTerrain
 		return Box;
 	}
 
+	FBox BaseBounds(const AMeshPartition* Terrain)
+	{
+		FBox Box(ForceInit);
+		if (const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
+		{
+			for (const UModifierComponent* Base : Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier) && Modifier->IsBase(); }))
+				Box += Base->ComputeCombinedBounds();
+		}
+		return Box;
+	}
+
+	void GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, TOptional<FVector>& OutHighest, TOptional<FVector>& OutLowest)
+	{
+		OutHighest.Reset();
+		OutLowest.Reset();
+		if (!Base.IsValid)
+			return;
+		// The highest and lowest vertices of the sections' collision, a few candidates each way: a vertex can lie under an
+		// overhang (the underside of a Union shape past the terrain's edge), which no vertical trace reaches, so the first
+		// candidate the trace from above lands on is the ground's extreme. Within the terrain's own area: the collision also
+		// has a skirt a few cm outside and below its edges.
+		constexpr int32 Candidates = 64;
+		auto ByZ = [](bool bHighest) { return [bHighest](const FVector& A, const FVector& B) { return bHighest ? A.Z > B.Z : A.Z < B.Z; }; };
+		TArray<FVector> High, Low;
+		auto Keep = [&ByZ](TArray<FVector>& Best, const FVector& Point, bool bHighest)
+		{
+			Best.Add(Point);
+			if (Best.Num() >= Candidates * 2)
+			{
+				Best.Sort(ByZ(bHighest));
+				Best.SetNum(Candidates);
+			}
+		};
+		const FBox2D Area(FVector2D(Base.Min) - FVector2D(1.0), FVector2D(Base.Max) + FVector2D(1.0));
+		TArray<UPrimitiveComponent*> Components;
+		for (const APreviewSection* Section : PreviewSections(Terrain))
+		{
+			Section->GetComponents(Components);
+			for (UPrimitiveComponent* Component : Components)
+			{
+				const UBodySetup* Body = Component ? Component->GetBodySetup() : nullptr;
+				if (!Body || !Component->IsCollisionEnabled())
+					continue;
+				const FTransform& Transform = Component->GetComponentTransform();
+				for (const Chaos::FTriangleMeshImplicitObjectPtr& Mesh : Body->TriMeshGeometries)
+				{
+					if (!Mesh)
+						continue;
+					const auto& Points = Mesh->Particles();
+					for (int32 Index = 0; Index < static_cast<int32>(Points.Size()); ++Index)
+					{
+						const FVector World = Transform.TransformPosition(FVector(Points.GetX(Index)));
+						if (!Area.IsInside(FVector2D(World)))
+							continue;
+						Keep(High, World, true);
+						Keep(Low, World, false);
+					}
+				}
+			}
+		}
+		// The trace at the vertex itself, then 5 cm beside it (diagonally too): a pit's floor corner sits right under the rim of
+		// one or two vertical walls.
+		auto FirstOnGround = [Terrain, &ByZ](TArray<FVector>& Best, bool bHighest, TOptional<FVector>& Out)
+		{
+			Best.Sort(ByZ(bHighest));
+			for (const FVector& Point : Best)
+			{
+				for (const FVector2D Offset : { FVector2D(0.0), FVector2D(5.0, 0.0), FVector2D(-5.0, 0.0), FVector2D(0.0, 5.0), FVector2D(0.0, -5.0),
+					FVector2D(5.0, 5.0), FVector2D(5.0, -5.0), FVector2D(-5.0, 5.0), FVector2D(-5.0, -5.0) })
+				{
+					const FSurfaceSample Ground = SampleSurface(Terrain, Point.X + Offset.X, Point.Y + Offset.Y, /*bChannels*/ false);
+					if (Ground.bInside && FMath::IsNearlyEqual(Ground.Height, Point.Z, 2.0))
+					{
+						Out = FVector(Point.X + Offset.X, Point.Y + Offset.Y, Ground.Height);
+						return;
+					}
+				}
+			}
+		};
+		FirstOnGround(High, true, OutHighest);
+		FirstOnGround(Low, false, OutLowest);
+	}
+
 	FString FBuildState::Describe() const
 	{
 		TArray<FString> Parts;
@@ -390,6 +480,8 @@ namespace UnrealAIMeshTerrain
 		// A modifier that loaded (World Partition) or was spawned joins the build when the editor component lists it.
 		ForEachTerrainActorDesc(Terrain, [Terrain, &State, &Current](const FWorldPartitionActorDescInstance& Instance)
 		{
+			if (IsDeletedActor(Instance))
+				return;
 			++State.Actors;
 			if (const AActor* Actor = Instance.IsLoaded() ? Instance.GetActor(/*bEvenIfPendingKill*/ false) : nullptr; IsValid(Actor))
 			{
@@ -432,13 +524,13 @@ namespace UnrealAIMeshTerrain
 		return State;
 	}
 
-	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds)
+	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds, FString* OutStillBuilding)
 	{
 		UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component"), *TerrainName(Terrain)));
 		const double Start = FPlatformTime::Seconds();
-		const double Deadline = Start + FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
+		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
 		FBuildState State;
 		int32 Rounds = 0;
 		while (true)
@@ -457,14 +549,25 @@ namespace UnrealAIMeshTerrain
 				break;
 			if (FPlatformTime::Seconds() > Deadline)
 			{
-				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s did not finish building within %.0f s (%s); call meshTerrain | call WaitForBuild(...) again with a longer timeout"),
-					*TerrainName(Terrain), TimeoutSeconds, *State.Describe()));
+				if (OutStillBuilding)
+				{
+					*OutStillBuilding = FString::Printf(TEXT("still building after %.0f s (%s)"), FPlatformTime::Seconds() - Start, *State.Describe());
+					return false;
+				}
+				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s did not finish building within %.0f s (%s); call meshTerrain | call WaitForBuild(...) again (at most %.0f s per call: the server ends a call after 300 s)"),
+					*TerrainName(Terrain), FPlatformTime::Seconds() - Start, *State.Describe(), DefaultBuildTimeoutSeconds));
 			}
 			FPlatformProcess::Sleep(0.01f);
 		}
 		UE_LOG(LogUnrealAIMeshTerrain, Log, TEXT("%s built in %.2f s (%d rounds): %d sections, %d triangles"),
 			*TerrainName(Terrain), FPlatformTime::Seconds() - Start, Rounds, State.Sections, State.Triangles);
 		return true;
+	}
+
+	FString StillBuildingState(const AMeshPartition* Terrain, const FString& Pending)
+	{
+		return FString::Printf(TEXT("applied (one undo step), %s: call meshTerrain | call WaitForBuild(unreal.find(\"%s\")) before reading heights or changing it again"),
+			*Pending, *TerrainName(Terrain));
 	}
 
 	bool Rebuild(AMeshPartition* Terrain, double TimeoutSeconds)
@@ -493,7 +596,7 @@ namespace UnrealAIMeshTerrain
 		}
 	}
 
-	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds)
+	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds, bool bFailOnTimeout)
 	{
 		TArray<FRegionMesh> Out;
 		const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
@@ -518,7 +621,8 @@ namespace UnrealAIMeshTerrain
 			{
 				for (UE::MeshPartition::FBuildTaskHandle& Handle : Handles)
 					Handle.Cancel();
-				UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
+				if (bFailOnTimeout)
+					UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
 				return {};
 			}
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -533,7 +637,7 @@ namespace UnrealAIMeshTerrain
 		return Out;
 	}
 
-	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels, const TArray<FRegionMesh>* Evaluated)
+	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels, TArray<FRegionMesh>* Evaluated)
 	{
 		FSurfaceSample Out;
 		const FBox Bounds = BuiltBounds(Terrain);
@@ -565,7 +669,8 @@ namespace UnrealAIMeshTerrain
 		if (!Out.bInside || !bChannels)
 			return Out;
 		// The paint channels are not in the collision: evaluate the modifier stack around the point (cached per region).
-		// The builder keeps only triangles wholly inside the region: retry wider for a coarse terrain (quads over ~2.5 m).
+		// The builder keeps only triangles wholly inside the region: retry wider for coarse geometry (quads over ~2.5 m, a
+		// Boolean shape's triangles of 100+ m), and keep what was evaluated in Evaluated for the caller's next points.
 		const auto HitIn = [&Out, &Start, &End](const TArray<FRegionMesh>& Parts)
 		{
 			for (const FRegionMesh& Part : Parts)
@@ -573,6 +678,11 @@ namespace UnrealAIMeshTerrain
 				if (!Part.Spatial.IsValid())
 					continue;
 				const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
+				// Parts cached for other points: skip the ones that are not under this one before tracing them (the ray is
+				// vertical in an unrotated terrain's space).
+				const UE::Geometry::FAxisAlignedBox3d Box = Part.Spatial->GetBoundingBox();
+				if (Part.Transform.GetRotation().IsIdentity(1e-6) && (LocalStart.X < Box.Min.X || LocalStart.X > Box.Max.X || LocalStart.Y < Box.Min.Y || LocalStart.Y > Box.Max.Y))
+					continue;
 				const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
 				double Distance = 0.0;
 				int32 Triangle = INDEX_NONE;
@@ -586,16 +696,35 @@ namespace UnrealAIMeshTerrain
 						+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
 				}
 				Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
+				// The evaluated face's normal: a trace that lands on an edge of the collision (a section seam, the terrain's
+				// border) reports the edge's normal (45 degrees or more on flat ground), not the ground's.
+				// (the inverse transpose of the terrain's transform: right under a non-uniform scale too)
+				const FVector Face = Part.Transform.GetRotation().RotateVector(Part.Mesh->GetTriNormal(Triangle) * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D())).GetSafeNormal();
+				if (!Face.IsNearlyZero())
+					Out.Normal = Face;
 				return true;
 			}
 			return false;
 		};
-		const auto Around = [Terrain, X, Y, &Bounds](double Half)
+		TArray<FRegionMesh> Local;
+		TArray<FRegionMesh>& Parts = Evaluated ? *Evaluated : Local;
+		if (HitIn(Parts))
+			return Out;
+		// Each step builds whole sections (the region only filters them): stop once a region covers the whole terrain, and
+		// treat a timeout as a miss (no Channels). Keep only the region that hit (or the widest, on a miss): the smaller ones
+		// lie inside it; at most MaxCachedRegions of them for scattered points.
+		constexpr int32 MaxCachedRegions = 32;
+		TArray<FRegionMesh> Around;
+		for (const double Half : { 250.0, 2500.0, 25000.0, 250000.0 })
 		{
-			return BuildRegion(Terrain, FBox(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0)));
-		};
-		if (!HitIn(Evaluated ? *Evaluated : Around(250.0)))
-			HitIn(Around(2500.0));
+			const FBox Region(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0));
+			Around = BuildRegion(Terrain, Region, SampleBudgetSeconds, /*bFailOnTimeout*/ false);
+			if (HitIn(Around) || (Region.Min.X <= Bounds.Min.X && Region.Min.Y <= Bounds.Min.Y && Region.Max.X >= Bounds.Max.X && Region.Max.Y >= Bounds.Max.Y))
+				break;
+		}
+		if (Parts.Num() >= MaxCachedRegions)
+			Parts.RemoveAt(0, Parts.Num() - MaxCachedRegions + 1);
+		Parts.Append(MoveTemp(Around));
 		return Out;
 	}
 

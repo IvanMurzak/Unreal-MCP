@@ -7,6 +7,7 @@
 #include "Templates/Function.h"
 
 class FUnrealMcpToolRegistry;
+struct FUnrealMcpToolCall;
 class FJsonObject;
 class IUnrealMcpRqlModule;
 
@@ -46,6 +47,24 @@ namespace UnrealMcpRqlTools
 	/** The rql-schema JSON for @p TypeName (empty = overview). Game thread. */
 	UNREALMCPRQL_API FString Schema(const FString& TypeName, bool& bOutOk);
 
+	/**
+	 * The rql-schema JSON with @p Guide: non-empty returns that installed module's guide and sources (module name, extension
+	 * id, one of its sources or their type), else as Schema(TypeName). Game thread.
+	 */
+	UNREALMCPRQL_API FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk);
+
+	/**
+	 * The RQL answers this plugin sends need a sidecar renderer at least this new (the bridge's RqlBridge.RendererVersion,
+	 * sent in its handshake as `rqlRenderer`): 1 = rql-schema's installed extensions and extension guides. Raise both
+	 * together when the plugin sends something an older renderer would drop.
+	 */
+	constexpr int32 RequiredRqlRenderer = 1;
+	/**
+	 * Why the sidecar that sent @p Call cannot render RQL answers (its renderer is older than RequiredRqlRenderer), as the
+	 * plain-text error to answer with; empty when it can or when the call came from no sidecar. Plain text, so an old
+	 * bridge passes it through unchanged instead of rendering an empty success.
+	 */
+	UNREALMCPRQL_API FString OutdatedBridgeError(const FUnrealMcpToolCall& Call);
 	/** The `unreal-rql` skill markdown (core + installed modules). Game thread. */
 	UNREALMCPRQL_API FString SkillMarkdown();
 

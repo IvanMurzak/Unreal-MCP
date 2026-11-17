@@ -17,6 +17,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.McpPlugin.Common;
+using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Microsoft.Extensions.Logging;
 using CustomConfigurator = com.IvanMurzak.McpPlugin.AgentConfig.Impl.CustomConfigurator;
@@ -421,7 +422,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// "AuthRequired ⇒ authOption.required" gating that made the default path token-required.
         /// </para>
         /// </summary>
-        private static AgentConfiguratorSettings MapSettings(AgentSettingsDto dto)
+        internal static AgentConfiguratorSettings MapSettings(AgentSettingsDto dto)
         {
             var connectionMode = string.Equals(dto.ConnectionMode, "Cloud", StringComparison.OrdinalIgnoreCase)
                 ? McpConnectionMode.Cloud
@@ -429,7 +430,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             var useAccessToken = UsesAccessToken(dto);
             var authOption = useAccessToken ? McpAuthOption.required : McpAuthOption.none;
             return AgentConfiguratorSettings.CreateForHost(
-                projectRootPath: dto.ProjectRootPath,
+                // The real path, as the sidecar derives its pin and bind port from (ProjectConnectionResolver), so a
+                // project opened through a symlink / junction / 8.3 name gets a config that reaches its editor.
+                projectRootPath: CanonicalProjectPath.Resolve(dto.ProjectRootPath),
                 executableFullPath: dto.ExecutableFullPath,
                 port: dto.Port,
                 timeoutMs: dto.TimeoutMs,

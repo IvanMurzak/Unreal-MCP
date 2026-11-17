@@ -31,16 +31,35 @@ export interface FetchWithTimeoutOptions {
  * `fetch` with a per-request abort deadline so a hung endpoint cannot stall a
  * flow indefinitely. Honors the injected `fetchImpl` (for tests). On the
  * deadline OR an `externalSignal` abort the underlying request is aborted and
- * `fetchImpl` rejects with an `AbortError`, which propagates to the caller
+ * the call rejects with an `AbortError`, which propagates to the caller
  * unchanged (the helper does not catch it). The timeout timer is always
  * cleared and the external-signal listener always removed.
+ *
+ * Without `read` the deadline covers only the response headers. Pass `read`
+ * (e.g. `(r) => r.text()`) to keep the deadline and the external signal armed
+ * until the body is consumed: a server that sends the headers and then stalls
+ * the body is cut off too.
  */
 export async function fetchWithTimeout(
   fetchImpl: typeof fetch,
   url: string,
   init: RequestInit,
   opts: FetchWithTimeoutOptions,
-): Promise<Response> {
+): Promise<Response>;
+export async function fetchWithTimeout<T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  opts: FetchWithTimeoutOptions,
+  read: (response: Response) => Promise<T>,
+): Promise<T>;
+export async function fetchWithTimeout<T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  opts: FetchWithTimeoutOptions,
+  read?: (response: Response) => Promise<T>,
+): Promise<Response | T> {
   const controller = new AbortController();
   const timer = setTimeout(() => {
     opts.onTimeout?.();
@@ -55,7 +74,8 @@ export async function fetchWithTimeout(
   }
 
   try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    return read ? await read(response) : response;
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', externalAbort);

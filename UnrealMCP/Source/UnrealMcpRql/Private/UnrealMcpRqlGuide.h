@@ -9,6 +9,7 @@
 // RQL's shared language rules (LanguageRules) follow the language section, so the rules every host states alike are not
 // copied here.
 
+#include "CoreMinimal.h"
 #include "UnrealMcpRqlInclude.h"
 
 /** Appended to every rql-* description: names RQL and links its documentation. */
@@ -61,7 +62,7 @@ namespace UnrealMcpRqlGuide
 	inline const char* Language()
 	{
 		return R"RQL(RQL: source | stage | stage ...
-Sources: actors (every actor of the level open in the editor and its loaded sublevels, nothing from other maps: to read another level, open it first with rql-mutate editor | call OpenLevel("/Game/Maps/Other"); unreal.assets("World") lists the project's levels), playActors (the running Play In Editor world's actors), levels, world, selection, console (editor log entries), diagnostics (the editor's current warnings and errors: viewport on-screen messages, Blueprints that fail to compile, Message Log pages, warning / error log lines; Source Severity Message), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
+Sources: actors (every actor of the level open in the editor and its loaded sublevels, nothing from other maps: to read another level, open it first with rql-mutate editor | call OpenLevel("/Game/Maps/Other"); unreal.assets("World") lists the project's levels; in a World Partition level only the loaded actors: unloadedActors lists the others, editor | call LoadActors(["Lake"]) or LoadRegion([minX, minY], [maxX, maxY]) loads them, in rql-query too), playActors (the running Play In Editor world's actors), levels, world, selection, console (editor log entries), diagnostics (the editor's current warnings and errors: viewport on-screen messages, Blueprints that fail to compile, Message Log pages, warning / error log lines; Source Severity Message), editor (editor state and operations), dataTables, gameplayTags, settings (Project Settings / Editor Preferences sections), blueprints, widgetBlueprints, levelSequences, plus the sources of installed extensions (rql-schema lists them, and the extensions you can still install). Assets: unreal.assets("Material") or unreal.assets("StaticMesh", "/Game/Props") (at most 200, loaded lazily), unreal.asset("/Game/Materials/M_Red"). ref("PointLight#1234") resolves a $ref; unreal.find("Lamp") an actor by label, name or path; unreal.classes("ActorComponent", "Light") lists classes; unreal.settings("Maps & Modes") a settings object. A member path may follow a function: unreal.asset("/Game/BP_Door").EventGraph.
 Stages:
   where <predicate>                  filter
   select a b.c alias=(expr)          project columns (wrap computed expressions in parentheses)
@@ -106,8 +107,10 @@ Results come back as compact rows (header line, then col|col). Long results are 
 		return R"RQL(  set path = expr, ...   assign members (paths may go through structs: set Location.Z = Location.Z + 100)
                          values see each target: $ (the target), $index (its position in the stream entering set / call), $count (how many enter)
   call Method(args)      invoke a method the tools expose
-                         installed extensions add sources with operations (e.g. landscapes, Control Rig, Niagara, PCG,
-                         Enhanced Input): check rql-schema before writing C++ or Python for an editor feature
+                         installed extensions add sources with operations (rql-schema lists them): read the extension's
+                         guide, rql-schema {"guide": "<name>"}, before writing C++ or Python for an editor feature
+                         in a World Partition level actors reaches only loaded actors: load the others first with
+                         editor | call LoadActors(["Lake"]) (rql-query unloadedActors lists them)
 )RQL";
 	}
 
@@ -178,7 +181,7 @@ Widgets and sequences:
 	{
 		return "Run a read-only RQL query against the live Unreal Editor world and return compact rows. One precise query beats many "
 			"exploratory calls; several queries separated by ; run in one call, each with its own [i/n] result block. Changes need "
-			"rql-mutate." UNREAL_MCP_RQL_DOCS_LINE;
+			"rql-mutate; call works here only on read-only operations (rql-schema marks them [read-only], e.g. an extension's Surface)." UNREAL_MCP_RQL_DOCS_LINE;
 	}
 
 	inline const char* MutateIntro()
@@ -214,10 +217,30 @@ Widgets and sequences:
 
 	inline const char* SchemaDescription()
 	{
-		return "Without a type: RQL sources, functions, the Unreal-MCP extensions you can still install (with how), and the actor "
-			"and component classes in the editor world (with counts), "
+		return "Without a type: RQL sources, functions, the installed extensions (their sources and guides), the Unreal-MCP "
+			"extensions you can still install (with how), and the actor and component classes in the editor world (with counts), "
 			"plus the Actor members. With a type name (e.g. \"PointLight\", \"StaticMeshComponent\", \"Vector\"): that type's "
-			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class." UNREAL_MCP_RQL_DOCS_LINE;
+			"members (name type; ro = read-only) and methods. Use it before querying an unfamiliar class. With guide (an installed "
+			"extension or one of its sources, e.g. {\"guide\": \"landscape\"}): that extension's guide, how its operations work "
+			"together; read it before using them." UNREAL_MCP_RQL_DOCS_LINE;
+	}
+
+	/** The rql-schema call that returns @p ModuleName's guide: rql-schema {"guide": "MeshTerrain"}. */
+	inline FString GuideCall(const FString& ModuleName)
+	{
+		return FString::Printf(TEXT("rql-schema {\"guide\": \"%s\"}"), *ModuleName);
+	}
+
+	/**
+	 * The installed extension modules, for the rql-query / rql-mutate descriptions (built at registration, which re-runs when
+	 * the module set changes). Empty when none is installed.
+	 */
+	inline FString ExtensionsLine(const TArray<FString>& ModuleNames)
+	{
+		if (ModuleNames.IsEmpty())
+			return FString();
+		return FString::Printf(TEXT("Installed extensions: %s. Each adds sources with operations; read its guide before using them: %s "
+			"(each extension's own name)."), *FString::Join(ModuleNames, TEXT(", ")), *GuideCall(TEXT("<name>")));
 	}
 
 	/** The skill rql-query ships (FUnrealMcpToolBuilder::Skill): the one place its name and description live. */

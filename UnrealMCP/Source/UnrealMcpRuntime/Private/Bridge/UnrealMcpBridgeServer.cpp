@@ -448,6 +448,10 @@ void FUnrealMcpBridgeServer::HandleHandshake(const TSharedPtr<FJsonObject>& Mess
 				SidecarIpcVersion = static_cast<int32>(VersionNumber);
 		}
 		NegotiatedIpcVersion = FUnrealMcpBridgeServer::NegotiateIpcVersion(IpcVersion, SidecarIpcVersion);
+		double Renderer = 0.0;
+		SidecarRqlRenderer = Message->TryGetNumberField(TEXT("rqlRenderer"), Renderer) ? static_cast<int32>(Renderer) : 0;
+		SidecarBridgeVersion.Reset();
+		Message->TryGetStringField(TEXT("bridgeVersion"), SidecarBridgeVersion);
 		bHandshakeOk = true;
 	}
 
@@ -531,6 +535,8 @@ void FUnrealMcpBridgeServer::HandleToolCall(const TSharedPtr<FJsonObject>& Messa
 	Call.CancelRequested = CancelFlag;
 	Call.TimeoutMs = TimeoutMs;
 	Call.ReceivedSeconds = FPlatformTime::Seconds();
+	Call.SidecarRqlRenderer = SidecarRqlRenderer; // the handshake set them on this reader thread
+	Call.SidecarBridgeVersion = SidecarBridgeVersion;
 
 	const FString CapturedTool = ToolName;
 	const FString CapturedRequestId = RequestId;

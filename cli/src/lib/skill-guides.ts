@@ -1,4 +1,4 @@
-// The agent skills `setup-skills` writes, generated offline (no editor, no server):
+// The agent skills `setup-skills` writes offline (no editor, no server; the editor's own skills are a separate step):
 // - `unreal-mcp-cli`: how to use this CLI from a cold start. Short on purpose (an agent keeps every byte it reads in
 //   context for every later turn); depth lives in reference files it opens only when needed. Rendered from
 //   `cli-guide.ts`, the source the root --help and `rql --help` render from too, so the skill cannot drift from them.

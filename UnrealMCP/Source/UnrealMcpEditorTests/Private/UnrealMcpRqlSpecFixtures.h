@@ -99,6 +99,17 @@ struct FUnrealMcpRqlSpecBag
 	UPROPERTY(EditAnywhere, Category = "Spec") TMap<FString, int32> Counts;
 };
 
+/** A struct inside a struct (UnrealMcpRqlStructWritesSpec): `set Nest.Inner.Damage` writes two levels down. */
+USTRUCT()
+struct FUnrealMcpRqlSpecNest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecRow Inner;
+	/** Reset to 0 by the fixture's PostEditChangeProperty (a value the owner derives, as a collision profile does). */
+	UPROPERTY(EditAnywhere, Category = "Spec") int32 Locked = 0;
+};
+
 UCLASS()
 class UUnrealMcpRqlSpecFixture : public UObject
 {
@@ -153,13 +164,24 @@ public:
 	/** Not exposed by reflection (no Edit / Blueprint flags): IUnrealMcpRqlModule::ExposeProperties makes it a member. */
 	UPROPERTY() int32 HiddenValue = 0;
 
+	UPROPERTY(EditAnywhere, Category = "Spec") FUnrealMcpRqlSpecNest Nest;
+	/** Reset to 1 by PostEditChangeProperty: a write of it never stays. */
+	UPROPERTY(EditAnywhere, Category = "Spec") int32 Pinned = 1;
+
 	/** PostEditChangeProperty calls (writes go through the editor's property-change path). */
 	int32 PostEditCount = 0;
+	/** The last edit's changed property and member property, as the Details panel names them ("Damage" in "Nest"). */
+	FName LastEditProperty;
+	FName LastEditMember;
 
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override
 	{
 		Super::PostEditChangeProperty(Event);
 		++PostEditCount;
+		LastEditProperty = Event.Property ? Event.Property->GetFName() : NAME_None;
+		LastEditMember = Event.MemberProperty ? Event.MemberProperty->GetFName() : NAME_None;
+		Nest.Locked = 0;
+		Pinned = 1;
 	}
 };
 
@@ -207,7 +229,51 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
 	void MakeRow(int32 Damage, FUnrealMcpRqlSpecRow& Row);
 
+	/** counts its calls (the duplicate-call guard's specs: arguments that differ only in a vector or a nested list) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	int32 Mark(FVector Point, const TArray<FVector>& Path) { return ++Marks; }
+
+	/** the numbers 0 .. Count - 1 (a list-valued call result) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	TArray<int32> Sequence(int32 Count)
+	{
+		TArray<int32> Out;
+		for (int32 I = 0; I < Count; ++I)
+			Out.Add(I);
+		return Out;
+	}
+
+	/** "0" .. "<Count - 1>" mapped to their numbers (a map-valued call result) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
+	TMap<FString, int32> SequenceMap(int32 Count)
+	{
+		TMap<FString, int32> Out;
+		for (int32 I = 0; I < Count; ++I)
+			Out.Add(FString::FromInt(I), I);
+		return Out;
+	}
+
+	/** returns its point, counting its calls (a read-only operation: rql-query may call it) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	FVector Probe(FVector Point) { ++Probes; return Point; }
+
+	UPROPERTY() int32 Marks = 0;
+	UPROPERTY() int32 Probes = 0;
 	UPROPERTY() FUnrealMcpRqlSpecRow Stored;
+};
+
+/** An actor the editor's Delete refuses (as a World Partition landscape with streaming proxies left): RQL Destroy must too. */
+UCLASS()
+class AUnrealMcpRqlSpecUndeletableActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	virtual bool CanDeleteSelectedActor(FText& OutReason) const override
+	{
+		OutReason = INVTEXT("it still has 3 spec proxies");
+		return false;
+	}
 };
 
 /**

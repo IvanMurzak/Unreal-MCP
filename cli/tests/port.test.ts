@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import { derivePinV2 } from '@baizor/gamedev-cli-core';
 import {
   generatePortFromDirectory,
   normalizeProjectRoot,
@@ -8,7 +11,10 @@ import {
   isAbsoluteLoopbackHost,
   resolveLocalBindPort,
   deriveLocalServerPort,
+  deriveProjectRoutingPin,
+  projectHashRoot,
 } from '../src/utils/port.js';
+import { makeTempDir, rmTempDir } from './helpers.js';
 
 describe('generatePortFromDirectory', () => {
   it('is deterministic and in the 20000-29999 range', () => {
@@ -217,5 +223,42 @@ describe('deriveLocalServerPort — the port the sidecar binds', () => {
     expect(deriveLocalServerPort('C:\\Users\\user\\my-game')).toBe(24298);
     expect(deriveLocalServerPort('C:/Users/user/my-game/')).toBe(24298);
     expect(deriveLocalServerPort('/home/user/my-game')).toBe(23940);
+  });
+});
+
+describe('the real path is the hashed spelling (the sidecar and the App hash the folder\'s real path)', () => {
+  it('a symlinked (junction on Windows) project folder gets the real folder\'s pin and port', () => {
+    const root = makeTempDir();
+    try {
+      const real = path.join(root, 'RealProject');
+      const link = path.join(root, 'LinkedProject');
+      fs.mkdirSync(real);
+      fs.symlinkSync(real, link, 'junction'); // the type is used on Windows only
+
+      expect(derivePinV2(link)).not.toBe(derivePinV2(real)); // the two spellings hash apart
+      const realPin = derivePinV2(fs.realpathSync.native(real)); // the App's own pin of the project
+      expect(deriveProjectRoutingPin(link)).toBe(realPin);
+      expect(deriveProjectRoutingPin(real)).toBe(realPin);
+      expect(deriveProjectRoutingPin(`${link}/`)).toBe(realPin);
+      expect(deriveLocalServerPort(link)).toBe(deriveLocalServerPort(real));
+    } finally {
+      rmTempDir(root);
+    }
+  });
+
+  it('macOS: /var/tmp/x routes as /private/var/tmp/x', () => {
+    if (process.platform !== 'darwin') return;
+    const dir = fs.mkdtempSync('/var/tmp/unreal-mcp-cli-pin-');
+    try {
+      expect(deriveProjectRoutingPin(dir)).toBe(derivePinV2(`/private${dir}`));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a path that cannot be resolved as given (golden vectors, UNC shares)', () => {
+    expect(projectHashRoot('/home/user/my-game')).toBe('/home/user/my-game');
+    expect(projectHashRoot('\\\\server\\share\\game')).toBe('\\\\server\\share\\game');
+    expect(deriveProjectRoutingPin('/home/user/my-game')).toBe(derivePinV2('/home/user/my-game'));
   });
 });

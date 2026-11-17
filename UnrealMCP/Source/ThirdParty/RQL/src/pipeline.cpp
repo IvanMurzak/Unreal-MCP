@@ -465,10 +465,9 @@ public:
             const Value& first = first_[k];
             const std::string text = path_text(*exprs[k]);
             const std::string label = !text.empty() ? "sort key '" + text + "'" : "sort key " + std::to_string(k + 1);
-            const std::string& detail = first.error_detail();
             x.diagnostics.push_back(Diagnostic::warning(first.error_code(), label + " failed for " + std::to_string(failed_[k]) + " of " +
-                                                                                std::to_string(items_) + " item(s) (" + first.error_code() +
-                                                                                (detail.empty() ? std::string() : ": " + detail) + "); they sort last"));
+                                                                                std::to_string(items_) + " item(s) (first: " + describe_value(first) +
+                                                                                "); they sort last"));
         }
     }
 

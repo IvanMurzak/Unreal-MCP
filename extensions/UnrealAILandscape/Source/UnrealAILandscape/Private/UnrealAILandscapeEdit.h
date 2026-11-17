@@ -7,6 +7,8 @@
 #include "LandscapeEditTypes.h"
 
 class ALandscapeProxy;
+class ULandscapeInfo;
+struct FUnrealAILandscapeEdit;
 enum ELandscapeLayerUpdateMode : uint32;
 
 /** Landscape edit helpers the landscape and water operations share (UnrealAILandscapeRqlApi.cpp). */
@@ -23,4 +25,86 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * foliage) for the next tick. Without rendering (-nullrhi, commandlets) nothing merges: the edit stays in its layer.
 	 */
 	void MergeNow(ALandscapeProxy* Landscape, ELandscapeLayerUpdateMode FollowUp);
+
+	/** 1 at @p T = 0, a smooth (cosine) fall to 0 at @p T = 1 and beyond. */
+	double Cosine(double T);
+
+	/**
+	 * The ground's heights over @p R (row by row): with one height edit layer that layer (@p EditLayer, the one edits are
+	 * written to), with several their sum (the merged heights).
+	 */
+	TArray<uint16> ReadGround(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R);
+
+	/** Add Delta(index) (height units, row by row over @p R) to @p EditLayer, clamped to 0..65535, then write and MergeNow. */
+	void AddToHeightLayer(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R, TFunctionRef<int32(int32)> Delta);
+
+	/** The lowest and highest world Z (cm) the landscape's heightmap can hold (its 16-bit range scaled by the actor's Z scale). */
+	FVector2D HeightRange(const ALandscapeProxy* Landscape);
+
+	/**
+	 * Whether ground from @p LowCm to @p HighCm (world Z) fits the landscape's HeightRange; else false after Fail naming the
+	 * range, the request and the fix (Create with a larger MaxHeightMeters). Never clamp silently.
+	 */
+	bool FitsHeightRange(const ALandscapeProxy* Landscape, double LowCm, double HighCm);
+
+	/**
+	 * Load the World Partition streaming proxies of the landscape that overlap @p Area (world X, Y; null: all of them), as
+	 * the editor's region loading does, so an edit or read sees all of the ground and not only the region loaded around the
+	 * camera after a map opens. Nothing to do on a map without World Partition. Loading changes and dirties nothing.
+	 * False after Fail when World Partition cannot load at all; actors the loader skips (a data layer that is not loaded,
+	 * runtime-only) stay unloaded and are not reported (UnrealMcpRql::LoadWorldPartitionActors).
+	 */
+	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area = nullptr);
+
+	/**
+	 * Load every World Partition actor of @p Class (and its subclasses) in the editor world that is not loaded yet, as the
+	 * editor's region loading does: the sources (landscapes, waterBodies, waterZones) then list the whole map, not only the
+	 * region a reopened map loads around the camera. Loading changes and dirties nothing. Nothing to do without World Partition.
+	 */
+	void LoadAll(UClass* Class);
+
+	/**
+	 * How many records a landscape's edit log keeps (the oldest go first). A painting session of small circles makes hundreds
+	 * (wave 3: 1000 records evicted the session's road and river); MaxLogPoints bounds the size, a record is ~100 bytes.
+	 */
+	constexpr int32 MaxEdits = 5000;
+
+	/** A logged path keeps the points that hold it within this distance of the real one (cm) ... */
+	constexpr double LogPathTolerance = 50.0;
+	/** ... and at most this many (a coarser tolerance when it needs more). */
+	constexpr int32 MaxLogPathPoints = 1000;
+	/** The points of all records together (the oldest records go first): a long session must not bloat the level file. */
+	constexpr int32 MaxLogPoints = 100000;
+
+	/** @p Points thinned to the fewest that keep the path within @p Tolerance cm (Douglas-Peucker), its ends included. */
+	TArray<FVector> ThinPath(const TArray<FVector>& Points, double Tolerance);
+
+	/**
+	 * Append a record to the edit log of @p Landscape's landscape actor (creating the editor-only log component the first
+	 * time), inside the current operation's undo step; a path is thinned to LogPathTolerance (at most MaxLogPathPoints); the
+	 * oldest records go beyond MaxEdits records or MaxLogPoints points. @p Rule describes a rule edit (PaintWhere).
+	 */
+	void RecordEdit(ALandscapeProxy* Landscape, const TCHAR* Op, const FString& Label, const TArray<FVector>& Points, double Radius,
+		double Width, double Height, const FString& Layer = FString(), const FString& Rule = FString());
+
+	/** The edit log of @p Landscape's landscape actor, oldest first (empty when it has none). */
+	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape);
+
+	/** Carve: a channel Depth cm below the ground along Points (world), Width cm of bottom then 1:1 banks; changed vertices. */
+	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);
+
+	/**
+	 * RoadBetween's route: a path from Start to End (world) whose moves climb no more than MaxSlope end to end (with a margin)
+	 * over ground within 150 cm of each move's straight line (the grading cuts or fills that much), found by an A* search on
+	 * a grid of nodes Width / 2 apart (at most 400 x 400, 176 move directions), then resampled every few metres with each point's Z the ground
+	 * limited to MaxSlope between neighbours (both ends on the ground when that is possible). False after Fail; bReached
+	 * false when the road does not get to End's ground (the search could not reach it: the path then ends nearest to it).
+	 */
+	bool PlanRoad(ALandscapeProxy* Landscape, const FVector& Start, const FVector& End, double Width, double MaxSlope, TArray<FVector>& OutPoints, bool& bReached);
+
+	/**
+	 * Ramp: the ground along Points (world) set to their Z, straight from point to point, Width cm wide, blended back to the
+	 * ground over Falloff cm (a cosine) on both sides; raises or lowers; changed vertices (0 after Fail).
+	 */
+	int32 RampAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Falloff);
 }

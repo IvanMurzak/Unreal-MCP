@@ -57,8 +57,15 @@ public:
 	 */
 	void SetUndoTitle(const FString& QueryText);
 
-	/** rql-schema data: sources, functions, present classes and type descriptors (JSON the sidecar renders). */
-	FString Schema(const FString& TypeName, bool& bOutOk);
+	/**
+	 * rql-schema data (JSON the sidecar renders). @p Guide non-empty: that installed module's guide and sources (matched by
+	 * module name, extension id, source name or source type). Else @p TypeName: that type, or without one the overview
+	 * (sources, functions, installed modules with their guide call, present classes).
+	 */
+	FString Schema(const FString& TypeName, const FString& Guide, bool& bOutOk);
+
+	/** The installed modules that add sources or guides, by name (the rql-* descriptions name them). */
+	TArray<FString> ModuleNames() const;
 
 	/** The unreal-rql skill: language, operations, live sources / functions, module guides, installed modules. */
 	FString SkillMarkdown() const;
@@ -91,10 +98,38 @@ private:
 	TArray<FEntry> FunctionEntries;
 	TArray<TPair<FString, FString>> Guides;
 	TArray<FString> ModuleReports;
+	/** An extension module and the sources / guides its ConfigureRql added (index ranges into SourceEntries / Guides). */
+	struct FModuleInfo
+	{
+		FString Name;
+		FString ExtensionId;
+		FString Version;
+		int32 SourceBegin = 0;
+		int32 SourceEnd = 0;
+		int32 GuideBegin = 0;
+		int32 GuideEnd = 0;
+		/** Its operations classes (AddApiClass / AddApiSource). */
+		TArray<UClass*> ApiClasses;
+	};
+	TArray<FModuleInfo> ModuleInfos;
 	TArray<FBatchValidator> BatchValidators;
 	TArray<FMutationHook> CommittedHooks;
 	TArray<TFunction<bool(const UObject*)>> WritableTemplates;
 	int32 TransactionIndex = INDEX_NONE;
+	/** rql-query running a `call` of a read-only operation: the engine allows the call, the batch check refuses any other. */
+	bool bReadOnlyCallRequest = false;
+	/** The batch check refused a call in a read-only request: Execute answers with rql-query's permission-denied. */
+	bool bRefusedReadOnlyCall = false;
+	/** The call names a read-only operation and the caller gave no max_targets: the request runs at the ceiling. */
+	bool bReadOnlyLimit = false;
+	/** Every planned call of the request is a read-only operation's: its answer is a read, not a receipt. */
+	bool bReadOnlyCalls = false;
+	/** A call record of an operation that declares itself read-only (meta = (RqlReadOnly)). */
+	bool IsReadOnlyCall(const rql::MutationRecord& Record) const;
+	/** @p Records is a non-empty batch of read-only calls only. */
+	bool AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const;
+	/** @p Records is a non-empty batch of calls of operations that work the undo buffer themselves (Undo / Redo). */
+	bool AllOwnUndoCalls(const std::vector<rql::MutationRecord>& Records) const;
 	/** Subobjects create_for_literal built for the running query: kept alive until it ends. */
 	TArray<TStrongObjectPtr<UObject>> LiteralObjects;
 	FString UndoTitle = TEXT("RQL mutation");
@@ -103,6 +138,19 @@ private:
 	bool FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure);
 	/** {"type": descriptor, "shared": its base, whose members the sidecar summarises once} for rql-schema. */
 	rql::Json Describe(const rql::TypeDescriptor* Type);
+	/**
+	 * The module @p Name names, or null: its module name, extension id, the id's last segment with or without "unreal-ai-",
+	 * one of its sources or its operations type; case, hyphens, underscores and spaces ignored (GuideKey).
+	 */
+	const FModuleInfo* FindModuleInfo(const FString& Name) const;
+	/** @p Name lower-cased without hyphens, underscores and whitespace: how rql-schema's guide argument is matched. */
+	static FString GuideKey(const FString& Name);
+	/** The module with a guide whose operations class @p Type is, or null. */
+	const FModuleInfo* ModuleOfType(const rql::TypeDescriptor* Type) const;
+	bool IsApiType(const FModuleInfo& Info, const rql::TypeDescriptor* Type) const;
+	/** {"name", "extension", "version"} of a module, for the overview and its guide. */
+	static rql::Json ModuleJson(const FModuleInfo& Info);
+	FString GuideSchema(const FString& Key, bool& bOutOk) const;
 	void ConfigureMutations();
 	void ConfigureModules();
 	void CloseTransaction();

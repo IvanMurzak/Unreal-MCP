@@ -65,7 +65,7 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 
 **C++ は第一級のループです。**`source-compile` は Live Coding が有効ならそれを、そうでなければ UnrealBuildTool を使ってビルドし、すべての診断をファイル、行、重大度付きで返すので、エージェントはビルドログを読まずにエラーを直せます。変更にフルビルドとエディター再起動が必要な場合（新しいクラス、`UCLASS` / `UPROPERTY` / `UFUNCTION` 宣言の変更）はそう伝えます。ファイル操作は `<Project>/Source/` の中に限られます。ターミナルからは `unreal-mcp-cli compile` がエディターなしで `file:line:col` 形式の診断を出力します。
 
-**RQL はエディター自身から学べます：**`rql-schema` がすべてのソース、型、メンバーを一覧し、`unreal-rql` スキルがレシピ付きで構文を教えます（`unreal-mcp-cli setup-skills` がエージェント用に書き出します）。
+**RQL はエディター自身から学べます：**`rql-schema` がすべてのソース、型、メンバーを一覧し、`unreal-rql` スキルがレシピ付きで構文を教えます（エディターがエージェント用に書き出します：エディターを開いた状態での `unreal-mcp-cli setup-skills`、**Generate skill files** ボタン、または自動生成）。`guide` 付きの `rql-schema`（例: `{"guide": "landscape"}`）は、インストール済み拡張機能のガイドをどのクライアントにも返します。
 
 ## 必要環境
 

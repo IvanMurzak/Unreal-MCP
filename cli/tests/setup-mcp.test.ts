@@ -162,7 +162,7 @@ describe('setupMcp — http transport', () => {
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
     expect(written.mcpServers.other).toBeDefined();
     // Pinned by default (T4): `<base>/mcp/p/<pin-v2>`.
-    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://localhost:5220/mcp/p/${derivePinV2(dir)}`);
+    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://localhost:5220/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
     expect(written.mcpServers['unreal-mcp'].type).toBe('http');
   });
 
@@ -172,7 +172,7 @@ describe('setupMcp — http transport', () => {
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
-    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://h/mcp/p/${derivePinV2(dir)}`);
+    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://h/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
     expect(written.mcpServers['unreal-mcp'].headers).toEqual({ Authorization: 'Bearer tok' });
   });
 
@@ -183,7 +183,7 @@ describe('setupMcp — http transport', () => {
     if (r.kind !== 'success') return;
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
     // Still no `/mcp/mcp` — the pin segment is appended once after the single `/mcp`.
-    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://h/mcp/p/${derivePinV2(dir)}`);
+    expect(written.mcpServers['unreal-mcp'].url).toBe(`http://h/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
   });
 
   it('--no-pin writes an UNPINNED <base>/mcp URL (T4 escape hatch)', async () => {
@@ -201,7 +201,7 @@ describe('setupMcp — http transport', () => {
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const written = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'));
-    expect(written.servers['unreal-mcp'].url).toBe(`http://localhost:5220/mcp/p/${derivePinV2(dir)}`);
+    expect(written.servers['unreal-mcp'].url).toBe(`http://localhost:5220/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
     expect(written.mcpServers).toBeUndefined();
   });
 
@@ -213,7 +213,7 @@ describe('setupMcp — http transport', () => {
     expect(r.configPath).toMatch(/[\\/]\.codex[\\/]config\.toml$/);
     const content = fs.readFileSync(r.configPath, 'utf-8');
     expect(content).toContain('[mcp_servers.unreal-mcp]');
-    expect(content).toContain(`url = "http://localhost:5220/mcp/p/${derivePinV2(dir)}"`);
+    expect(content).toContain(`url = "http://localhost:5220/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}"`);
     expect(content).toContain('tool_timeout_sec = 300');
   });
 
@@ -243,7 +243,7 @@ describe('setupMcp — D11 credential-free OAuth config (http, no machine login)
       const body = getAgentById(agentId)!.bodyPath;
       const entry = written[body]['unreal-mcp'];
       expect(entry.type).toBe('http');
-      expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
+      expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
       expect(entry.headers).toBeUndefined();
     });
   }
@@ -254,7 +254,7 @@ describe('setupMcp — D11 credential-free OAuth config (http, no machine login)
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const content = fs.readFileSync(r.configPath, 'utf-8');
-    expect(content).toContain(`url = "https://ai-game.dev/mcp/p/${derivePinV2(dir)}"`);
+    expect(content).toContain(`url = "https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}"`);
     expect(content.toLowerCase()).not.toContain('authorization');
   });
 
@@ -271,7 +271,7 @@ describe('setupMcp — D11 credential-free OAuth config (http, no machine login)
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
-    expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
+    expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
     expect(entry.headers).toBeUndefined();
   });
 
@@ -289,7 +289,7 @@ describe('setupMcp — D11 credential-free OAuth config (http, no machine login)
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
     const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8')).mcpServers['unreal-mcp'];
-    expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
+    expect(entry.url).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
     expect(entry.headers).toBeUndefined();
   });
 });
@@ -316,10 +316,10 @@ describe('setupMcp — Cloud project key (contract §7)', () => {
       expect(r.projectKeyId).toBe('key-1');
       const entry = JSON.parse(fs.readFileSync(r.configPath, 'utf-8'))[getAgentById(agentId)!.bodyPath]['unreal-mcp'];
       expect(entry.headers).toEqual({ Authorization: `Bearer ${KEY}` });
-      expect(entry.url ?? entry.serverUrl).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(dir)}`);
+      expect(entry.url ?? entry.serverUrl).toBe(`https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(dir))}`);
       // The key is bound to THIS project's pin, for the Unreal engine, against the AS root.
       expect(calls).toEqual([
-        expect.objectContaining({ issuer: 'https://ai-game.dev', pin: derivePinV2(dir), engine: 'unreal', label: dir, regenerate: false }),
+        expect.objectContaining({ issuer: 'https://ai-game.dev', pin: derivePinV2(fs.realpathSync.native(dir)), engine: 'unreal', label: dir, regenerate: false }),
       ]);
     });
   }

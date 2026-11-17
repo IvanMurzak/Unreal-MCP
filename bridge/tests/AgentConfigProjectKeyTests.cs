@@ -20,6 +20,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using com.IvanMurzak.McpPlugin.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
+using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
 
@@ -100,7 +101,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Equal(1, _server.Mints);
             var content = McpJson;
             Assert.Contains("Bearer " + _server.KeyFor(1), content);
-            var pin = AgentConfiguratorSettings.CreateForHost(_projectRoot, string.Empty, 0, 0, Issuer + "/mcp",
+            var pin = AgentConfiguratorSettings.CreateForHost(CanonicalProjectPath.Resolve(_projectRoot), string.Empty, 0, 0, Issuer + "/mcp",
                 null, ConnectionMode.Cloud).ProjectPin;
             Assert.Contains("/mcp/p/" + pin, content);
             // The minted key is bound to THIS project's pin and recorded as an Unreal key.
@@ -212,7 +213,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             await Configure(service, "claude-code");
             // Cursor holds this project's pinned route with a key the cache never knew (e.g. regenerated and revoked
             // by the CLI); Gemini is configured over stdio for this project.
-            var pin = AgentConfiguratorSettings.CreateForHost(_projectRoot, string.Empty, 0, 0, Issuer + "/mcp",
+            var pin = AgentConfiguratorSettings.CreateForHost(CanonicalProjectPath.Resolve(_projectRoot), string.Empty, 0, 0, Issuer + "/mcp",
                 null, ConnectionMode.Cloud).ProjectPin;
             var cursorPath = Path.Combine(_projectRoot, ".cursor", "mcp.json");
             Directory.CreateDirectory(Path.GetDirectoryName(cursorPath)!);

@@ -1,0 +1,10 @@
+{
+  "description": "the island removed with Delete (on a World Partition map Destroy refuses a landscape that still has streaming proxies)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "landscape | call Delete(unreal.find(\"E2EIsland\"))"
+  },
+  "assert": {
+    "pattern": "Delete\\(LandscapeProxy Landscape\\)\\|[1-9]"
+  }
+}

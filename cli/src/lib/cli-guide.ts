@@ -35,7 +35,7 @@ export const RQL_LANGUAGE = [
 
 /** The editor commands the root help and the skill feature. */
 export const EDITOR_COMMANDS: readonly CommandRow[] = [
-  ['rql', "rql '<query>'", 'read or change levels, actors, components, assets (RQL; recipes below)'],
+  ['rql', "rql '<query>'", 'read or change levels, actors, components, assets (RQL; recipes below); an installed extension\'s guide: run-tool rql-schema --input \'{"guide": "<name>"}\''],
   ['exec', "exec '<python>'", 'Python with the full `unreal` API (the last expression is printed)'],
   ['tools', 'tools [--filter <regex>]', "the editor's AI tools; run-tool <tool> --input '<json>' calls one"],
 ];

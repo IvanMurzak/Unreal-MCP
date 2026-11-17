@@ -1,0 +1,10 @@
+{
+  "description": "the saved level opened again",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call OpenLevel(\"/Game/E2E/LsEditLog\")"
+  },
+  "assert": {
+    "pattern": "World#\\d+\\(LsEditLog\\)"
+  }
+}

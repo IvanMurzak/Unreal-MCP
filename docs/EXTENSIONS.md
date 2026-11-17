@@ -61,7 +61,7 @@ IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyNiagaraAI)
 | `AddApiSource(Name, Description, Class, TypeName)` | `AddApiClass` plus a source holding the class default object (`niagara \| call SpawnSystem(...)`) |
 | `ExposeProperties(Owner, Names, bWritable)` | properties reflection hides (not EditAnywhere / BlueprintVisible) as members |
 | `AddJsonMember` / `AddObjectMember` / `AddObjectListMember` | read-only computed members (JSON values, one object reference, owning object lists) |
-| `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill |
+| `AddGuide(Topic, Markdown)` | a section of the `unreal-rql` skill and of `rql-schema {"guide": "<module or one of its sources>"}` (agents without the skill read it there) |
 
 Operations classes: declare the functions `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))`
 (UHT records C++ default arguments for BlueprintCallable functions only; the meta keeps them out of Blueprint menus),
@@ -76,6 +76,12 @@ Core helpers in `UnrealMcpRql` (they report failures with `Fail` and return null
 (class names, asset paths), `EditorWorld()`, `SpawnActor(Class, Location, Rotation, Label, Parent)`,
 `AddComponent(Actor, Class, Name, Configure)` (the actor `AddComponent` method; `Configure` runs before the component
 registers), `CreateAsset(Class, Path)` (the `editor | call CreateAsset` rules and factory), `PluginVersion(PluginName)`.
+World Partition actors that are not loaded: `LoadWorldPartitionActors(Guids, &Error)` (by descriptor GUID) and
+`LoadWorldPartitionRegion(Box2D, &Loaded, &Error)` (bounds overlapping an XY box) load them as `editor | call LoadActors`
+/ `LoadRegion` do, through the editor's actor-list loader: synchronous, nothing marked unsaved, no undo step, so a
+read-only operation may call them. They skip loaded actors, actors deleted in this session and runtime-only descriptors,
+act on the editor world only (nothing while playing), and an actor in a data layer the editor has not loaded stays
+unloaded. They return `false` with the error (no `Fail`) only when the engine has no loader, or for an invalid box.
 
 The editor's Extensions window lists the module's extension (`GetExtensionId`) and can disable it; the rql-* tools
 (and their skill) are re-registered when a module registers, unregisters or is toggled. Specs use

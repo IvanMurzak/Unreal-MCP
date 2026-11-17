@@ -10,12 +10,14 @@
 #include "Containers/StringConv.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/World.h"
 #include "Engine/LevelScriptActor.h"
 #include "GameFramework/Actor.h"
 #include "HAL/UnrealMemory.h"
 #include "Misc/OutputDeviceNull.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "UObject/Class.h"
 #include "UObject/EnumProperty.h"
 #include "UObject/Object.h"
@@ -670,6 +672,53 @@ void FUnrealMcpRqlTypes::AddApiClass(UClass* Class, const FString& TypeName)
 		ApiClasses.Add(Class, TypeName);
 }
 
+namespace UnrealMcpRqlTypesLocal
+{
+	/** The meta key an operation declares itself read-only with (IUnrealMcpRqlModule::AddApiClass). */
+	const FName ReadOnlyMeta(TEXT("RqlReadOnly"));
+
+	/** The UFUNCTION of @p Class that `call` names @p Method: its name without the K2_ prefix, case-insensitively. */
+	const UFunction* FindOperation(const UClass* Class, const FString& Method)
+	{
+		for (TFieldIterator<UFunction> It(Class); It; ++It)
+		{
+			FString Name = It->GetName();
+			if (Name.StartsWith(TEXT("K2_")))
+				Name.RightChopInline(3);
+			if (Name.Equals(Method, ESearchCase::IgnoreCase))
+				return *It;
+		}
+		return nullptr;
+	}
+}
+
+bool FUnrealMcpRqlTypes::IsReadOnlyOperation(const UClass* Class, const UFunction* Function) const
+{
+	return Function && IsApiClass(Class) && Function->HasMetaData(UnrealMcpRqlTypesLocal::ReadOnlyMeta);
+}
+
+bool FUnrealMcpRqlTypes::IsReadOnlyOperation(const UClass* Class, const FString& Method) const
+{
+	return Class && IsReadOnlyOperation(Class, UnrealMcpRqlTypesLocal::FindOperation(Class, Method));
+}
+
+bool FUnrealMcpRqlTypes::IsOwnUndoOperation(const UClass* Class, const FString& Method) const
+{
+	static const FName OwnUndoMeta(TEXT("RqlOwnUndo"));
+	const UFunction* Function = Class ? UnrealMcpRqlTypesLocal::FindOperation(Class, Method) : nullptr;
+	return Function && IsApiClass(Class) && Function->HasMetaData(OwnUndoMeta);
+}
+
+bool FUnrealMcpRqlTypes::HasReadOnlyOperation(const FString& Method) const
+{
+	for (const TPair<UClass*, FString>& Api : ApiClasses)
+	{
+		if (IsReadOnlyOperation(Api.Key, Method))
+			return true;
+	}
+	return false;
+}
+
 void FUnrealMcpRqlTypes::ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable)
 {
 	if (!Owner)
@@ -797,7 +846,7 @@ void FUnrealMcpRqlTypes::FillClass(rql::TypeDescriptor& Descriptor, UClass* Clas
 	for (TFieldIterator<UFunction> It(Class, EFieldIteratorFlags::ExcludeSuper); It; ++It)
 	{
 		if (IsCallable(Class, *It))
-			AddFunctionMethod(Descriptor, *It);
+			AddFunctionMethod(Descriptor, *It, IsReadOnlyOperation(Class, *It));
 	}
 	TArray<FClassHook*> ClassHooks;
 	Hooks.MultiFindPointer(Class, ClassHooks, /*bMaintainOrder*/ true);
@@ -899,7 +948,7 @@ bool FUnrealMcpRqlTypes::IsCallable(UClass* Class, UFunction* Function) const
 	return Function->HasMetaData(TEXT("CallInEditor")) && Function->NumParms == 0;
 }
 
-void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function)
+void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function, bool bReadOnly)
 {
 	rql::MethodDescriptor Method;
 	FString Name = Function->GetName();
@@ -909,7 +958,8 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 	FString ToolTip = Function->GetMetaData(TEXT("ToolTip"));
 	ToolTip.ReplaceInline(TEXT("\r"), TEXT(" "));
 	ToolTip.ReplaceInline(TEXT("\n"), TEXT(" "));
-	Method.description = UnrealMcpRqlToStd(ToolTip.TrimStartAndEnd());
+	// rql-schema prints the description after the signature: a read-only operation says so first.
+	Method.description = UnrealMcpRqlToStd((bReadOnly ? ReadOnlyMark : TEXT("")) + ToolTip.TrimStartAndEnd());
 
 	TArray<FProperty*> Inputs;
 	TArray<FProperty*> Outputs;
@@ -1352,6 +1402,125 @@ static bool UnrealMcpRqlFollowTemplate(const FProperty* Property, void* Instance
 	return bAny;
 }
 
+/**
+ * The member path, below the struct @p Property, that holds every difference between @p Before and @p After: one member
+ * per level while exactly one member of the level differs, walked as UnrealMcpRqlFollowTemplate walks (a struct whose
+ * value is more than its members is one leaf). Empty when the property is not such a struct, nothing differs, or several
+ * of its members do. `set BodyInstance.CollisionEnabled = ...` so yields [CollisionEnabled].
+ */
+static void UnrealMcpRqlChangedMemberPath(const FProperty* Property, const void* Before, const void* After, TArray<FProperty*>& Path)
+{
+	const FStructProperty* Struct = CastField<FStructProperty>(Property);
+	if (!Struct || Property->ArrayDim != 1 || !Struct->Struct->PropertyLink
+		|| (Struct->Struct->StructFlags & (STRUCT_IdenticalNative | STRUCT_SerializeNative)))
+		return;
+	FProperty* Changed = nullptr;
+	for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+	{
+		bool bSame = true;
+		for (int32 Index = 0; Index < It->ArrayDim && bSame; ++Index)
+			bSame = It->Identical_InContainer(Before, After, Index);
+		if (bSame)
+			continue;
+		if (Changed)
+			return; // two members differ: the struct itself is the deepest property holding the change
+		Changed = *It;
+	}
+	if (!Changed)
+		return;
+	Path.Add(Changed);
+	UnrealMcpRqlChangedMemberPath(Changed, Changed->ContainerPtrToValuePtr<void>(Before), Changed->ContainerPtrToValuePtr<void>(After), Path);
+}
+
+/**
+ * Struct members whose engine setter does more than store the value, applied through that setter after a write of the
+ * struct (@p Live, was @p Before) and before the owner's PostEditChange, so the state the owner rebuilds there (a
+ * component's physics) matches. FBodyInstance, as its setters and the Details panel's collision customization do: a new
+ * CollisionProfileName loads that profile's CollisionEnabled, ObjectType and responses (SetCollisionProfileName); an
+ * edited CollisionEnabled or ObjectType leaves the profile for Custom (SetCollisionEnabled / SetObjectType). Without it
+ * the raw value stays beside a profile that disagrees, and the owner's construction rerun reloads the profile over it.
+ * A static mesh component that takes its collision from the mesh asset (bUseDefaultCollision, a StaticMeshActor's
+ * default) stops doing so first, as the Details panel's MarkAllBodiesDefaultCollision(false): the mesh's profile would
+ * otherwise be loaded over any edit. A write that puts a member back to its value before this call's first collision
+ * write (the runtime's rollback of a failed mutation, or an edit undone in the same query) restores the whole collision
+ * state as it was, default collision included: the setters alone would leave the profile at Custom.
+ * Returns whether it turned the static mesh's default collision off (the template's objects follow that too).
+ */
+bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before)
+{
+	const FStructProperty* Struct = CastField<FStructProperty>(Property);
+	if (!Struct || Struct->Struct != FBodyInstance::StaticStruct() || Property->ArrayDim != 1)
+		return false;
+	// Private members of FBodyInstance: reached through reflection, written through its public setters.
+	static const FName ProfileName(TEXT("CollisionProfileName"));
+	static const FName EnabledName(TEXT("CollisionEnabled"));
+	static const FName ObjectTypeName(TEXT("ObjectType"));
+	static const FName ResponsesName(TEXT("CollisionResponses"));
+	const FNameProperty* Profile = CastField<FNameProperty>(Struct->Struct->FindPropertyByName(ProfileName));
+	const FByteProperty* Enabled = CastField<FByteProperty>(Struct->Struct->FindPropertyByName(EnabledName));
+	const FByteProperty* ObjectType = CastField<FByteProperty>(Struct->Struct->FindPropertyByName(ObjectTypeName));
+	const FProperty* Responses = Struct->Struct->FindPropertyByName(ResponsesName);
+	if (!Profile || !Enabled || !ObjectType || !Responses)
+		return false;
+	FBodyInstance& Body = *static_cast<FBodyInstance*>(Live);
+	const FName NewProfile = Profile->GetPropertyValue_InContainer(Live);
+	const FName OldProfile = Profile->GetPropertyValue_InContainer(Before);
+	const uint8 NewEnabled = Enabled->GetPropertyValue_InContainer(Live);
+	const uint8 OldEnabled = Enabled->GetPropertyValue_InContainer(Before);
+	const uint8 NewObjectType = ObjectType->GetPropertyValue_InContainer(Live);
+	const uint8 OldObjectType = ObjectType->GetPropertyValue_InContainer(Before);
+	if (NewProfile == OldProfile && NewEnabled == OldEnabled && NewObjectType == OldObjectType)
+		return false;
+	UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Owner);
+	if (Mesh && Live != &Mesh->BodyInstance)
+		Mesh = nullptr;
+
+	if (const FBodySnapshot* First = BodySnapshots.Find(Live))
+	{
+		const void* Original = First->Body->GetStructMemory();
+		const bool bRestores = (NewProfile == OldProfile || NewProfile == Profile->GetPropertyValue_InContainer(Original))
+			&& (NewEnabled == OldEnabled || NewEnabled == Enabled->GetPropertyValue_InContainer(Original))
+			&& (NewObjectType == OldObjectType || NewObjectType == ObjectType->GetPropertyValue_InContainer(Original));
+		if (bRestores)
+		{
+			for (const FProperty* Member : { static_cast<const FProperty*>(Profile), static_cast<const FProperty*>(Enabled),
+					static_cast<const FProperty*>(ObjectType), Responses })
+				Member->CopyCompleteValue_InContainer(Live, Original);
+			if (Mesh)
+				Mesh->bUseDefaultCollision = First->bUseDefaultCollision; // re-registering loads the mesh's profile again
+			return false;
+		}
+	}
+	else
+	{
+		FBodySnapshot& Snapshot = BodySnapshots.Add(Live);
+		Snapshot.Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
+		FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot.Body->GetStructMemory(), Before);
+		Snapshot.bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
+	}
+
+	const bool bDefaultCollisionOff = Mesh && Mesh->bUseDefaultCollision;
+	if (bDefaultCollisionOff)
+		Mesh->bUseDefaultCollision = false;
+	if (NewProfile != OldProfile)
+	{
+		Profile->SetPropertyValue_InContainer(Live, OldProfile);
+		Body.SetCollisionProfileName(NewProfile);
+		return bDefaultCollisionOff;
+	}
+	if (NewEnabled != OldEnabled)
+	{
+		Enabled->SetPropertyValue_InContainer(Live, OldEnabled);
+		Body.SetCollisionEnabled(static_cast<ECollisionEnabled::Type>(NewEnabled), /*bUpdatePhysicsFilterData*/ false);
+	}
+	if (NewObjectType != OldObjectType)
+	{
+		ObjectType->SetPropertyValue_InContainer(Live, OldObjectType);
+		Body.SetObjectType(static_cast<ECollisionChannel>(NewObjectType));
+	}
+	return bDefaultCollisionOff;
+}
+
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)
 {
 	// A previous write of this mutation may have rebuilt the component (set A = 1, B = 2 on a Blueprint actor's component):
@@ -1367,33 +1536,64 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 			"default with blueprint-set-default, or make the variable Instance Editable first (blueprint-modify-variable instanceEditable=true)"),
 			*Property->GetAuthoredName(), *Actor->GetClass()->GetName()));
 	// The editor's own property-change path, so components refresh (transforms, render state) and Blueprint actors rerun
-	// their construction script — exactly as an edit in the Details panel.
-	// PreEditChange and PostEditChangeProperty always pair up: an actor unregisters its components in PreEditChange and
-	// re-registers them in PostEditChangeProperty, so a failing write must still send the post notification.
+	// their construction script — exactly as an edit in the Details panel. The value is built in a copy first, so the
+	// notification can name the member that changes: a write through a struct path (set BodyInstance.bSimulatePhysics)
+	// is announced as that member in a chain under the owner's property, as the Details panel announces it, and owners
+	// that react to one struct member (UStaticMeshComponent: bSimulatePhysics makes the component Movable) do so.
+	// PreEditChange and PostEditChangeChainProperty always pair up: an actor unregisters its components in PreEditChange
+	// and re-registers them in PostEditChangeProperty, so a failing write must still send the post notification.
 	// An archetype (a Blueprint's component template) passes the change on to the objects made from it that still hold
 	// its old value, as the Details panel does: placed actors follow a new default unless they override it.
 	// Instanced sub-objects are not copied over (each owner needs its own): the construction rerun rebuilds those.
+	void* Live = Property->ContainerPtrToValuePtr<void>(Object);
+	FTempValue Old(Property);
+	Property->CopyCompleteValue(Old.Ptr, Live);
+	FTempValue Planned(Property);
+	Property->CopyCompleteValue(Planned.Ptr, Live);
+	Write(Property, Planned.Ptr, Value);
+	TArray<FProperty*> Path;
+	UnrealMcpRqlChangedMemberPath(Property, Old.Ptr, Planned.Ptr, Path);
+	FEditPropertyChain Chain;
+	Chain.AddTail(Property);
+	for (FProperty* Member : Path)
+		Chain.AddTail(Member);
+	FProperty* Leaf = Path.Num() > 0 ? Path.Last() : Property;
+	Chain.SetActiveMemberPropertyNode(Property);
+	Chain.SetActivePropertyNode(Leaf);
+
 	TArray<UObject*> Instances;
 	if (Object->HasAnyFlags(RF_ArchetypeObject) && !Object->HasAnyFlags(RF_ClassDefaultObject) && !Property->ContainsInstancedObjectProperty())
 		Object->GetArchetypeInstances(Instances);
-	TOptional<FTempValue> Old;
-	if (Instances.Num() > 0)
+	// On a template (archetype, class default) the chain notifications also propagate to every object made from it, which
+	// rebuilds them before the member-by-member follow below can compare them: there the owner alone is told, by the
+	// same event (the member, under the owner's property).
+	const bool bTemplate = Object->HasAnyFlags(RF_ArchetypeObject | RF_ClassDefaultObject);
+	FPropertyChangedEvent Event(Leaf, EPropertyChangeType::ValueSet);
+	Event.SetActiveMemberProperty(Property);
+	FPropertyChangedChainEvent ChainEvent(Chain, Event);
+	auto Notify = [Object, bTemplate, &Event, &ChainEvent]()
 	{
-		Old.Emplace(Property);
-		Property->CopyCompleteValue(Old->Ptr, Property->ContainerPtrToValuePtr<void>(Object));
-	}
-	Object->PreEditChange(Property);
-	FPropertyChangedEvent Event(Property, EPropertyChangeType::ValueSet);
+		if (bTemplate)
+			Object->PostEditChangeProperty(Event);
+		else
+			Object->PostEditChangeChainProperty(ChainEvent);
+	};
+	if (bTemplate)
+		Object->PreEditChange(Leaf);
+	else
+		Object->PreEditChange(Chain);
+	Property->CopyCompleteValue(Live, Planned.Ptr);
+	bool bDefaultCollisionOff = false;
 	try
 	{
-		Write(Property, Property->ContainerPtrToValuePtr<void>(Object), Value);
+		bDefaultCollisionOff = ApplyStructSetters(Object, Property, Live, Old.Ptr);
 	}
 	catch (...)
 	{
-		Object->PostEditChangeProperty(Event);
+		Notify();
 		throw;
 	}
-	Object->PostEditChangeProperty(Event);
+	Notify();
 	const void* New = Property->ContainerPtrToValuePtr<void>(Object);
 	// A raw write of a relative transform (the Details panel's transform rows call the setters instead) only moves a
 	// component that re-registers in PostEditChangeProperty; some never do (Niagara). Recompute its world transform, as
@@ -1413,7 +1613,7 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 			continue;
 		void* Current = Property->ContainerPtrToValuePtr<void>(Instance);
 		// Member by member: a struct (BodyInstance) the instance overrides in one member still follows a change of another.
-		if (!UnrealMcpRqlFollowTemplate(Property, Current, Old->Ptr, New, /*bApply*/ false))
+		if (!UnrealMcpRqlFollowTemplate(Property, Current, Old.Ptr, New, /*bApply*/ false))
 			continue; // nothing changed that the instance does not override: keep it
 		// As FComponentEditorUtils::ApplyDefaultValueChange: a component the construction script made is rebuilt on undo
 		// through its owner, so the owner is recorded instead of the component.
@@ -1424,10 +1624,47 @@ void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Propert
 		if (!Component || !Component->IsCreatedByConstructionScript())
 			Instance->Modify();
 		Instance->PreEditChange(Property);
-		UnrealMcpRqlFollowTemplate(Property, Current, Old->Ptr, New, /*bApply*/ true);
+		UnrealMcpRqlFollowTemplate(Property, Current, Old.Ptr, New, /*bApply*/ true);
+		// The template stopped taking its collision from the mesh asset (ApplyStructSetters): so do the objects that follow
+		// it, or re-registering them loads the mesh's profile over the members they just took.
+		if (UStaticMeshComponent* InstanceMesh = Cast<UStaticMeshComponent>(Instance); bDefaultCollisionOff && InstanceMesh)
+			InstanceMesh->bUseDefaultCollision = false;
 		FPropertyChangedEvent InstanceEvent(Property, EPropertyChangeType::ValueSet);
 		Instance->PostEditChangeProperty(InstanceEvent);
 		Instance->MarkPackageDirty();
+	}
+	// A write the editor put back (the owner derives the value from other settings, or refuses it) did nothing: say so,
+	// instead of a receipt whose old and new are the same value. The runtime then rolls the mutation's writes back.
+	// The member the write changed is compared (BodyInstance.CollisionEnabled), not the whole struct: a setter may have
+	// changed its neighbours (the profile name) while the owner put the member itself back.
+	const UObject* After = LiveObject(Object);
+	const void* OldLeaf = Old.Ptr;
+	const void* PlannedLeaf = Planned.Ptr;
+	const void* AfterLeaf = IsValid(After) ? Property->ContainerPtrToValuePtr<void>(After) : nullptr;
+	for (const FProperty* Member : Path)
+	{
+		OldLeaf = Member->ContainerPtrToValuePtr<void>(OldLeaf);
+		PlannedLeaf = Member->ContainerPtrToValuePtr<void>(PlannedLeaf);
+		AfterLeaf = AfterLeaf ? Member->ContainerPtrToValuePtr<void>(AfterLeaf) : nullptr;
+	}
+	// Every element of a fixed-size array member (Identical compares one element).
+	const auto Same = [Leaf](const void* A, const void* B)
+	{
+		for (int32 Index = 0; Index < Leaf->ArrayDim; ++Index)
+		{
+			const SIZE_T Offset = SIZE_T(Leaf->GetElementSize()) * Index;
+			if (!Leaf->Identical(static_cast<const uint8*>(A) + Offset, static_cast<const uint8*>(B) + Offset))
+				return false;
+		}
+		return true;
+	};
+	if (AfterLeaf && !Same(OldLeaf, PlannedLeaf) && Same(AfterLeaf, OldLeaf))
+	{
+		FString Label = Property->GetAuthoredName();
+		for (const FProperty* Member : Path)
+			Label += TEXT(".") + Member->GetAuthoredName();
+		Throw(FString::Printf(TEXT("%s reset '%s' to its old value after the write (it derives it from other settings or refuses the "
+			"value), so nothing changed"), *After->GetClass()->GetName(), *Label));
 	}
 }
 

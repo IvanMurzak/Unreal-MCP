@@ -24,6 +24,7 @@
 #include "MeshPartition.h"
 #include "MeshPartitionModifierActor.h"
 #include "MeshPartitionModifierComponent.h"
+#include "MeshPartitionPreviewSection.h"
 #include "Modifiers/MeshPartitionNoiseModifier.h"
 
 // ============================================================================================
@@ -114,7 +115,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 		{
 			const FString Skill = UnrealMcpRqlTools::SkillMarkdown();
 			for (const TCHAR* Text : { TEXT("meshTerrains"), TEXT("meshTerrainModifiers"), TEXT("meshTerrain | call Surface("), TEXT("call WaitForBuild("),
-				TEXT("Mesh Terrain (Experimental, UE 5.8+)") })
+				TEXT("Mesh Terrain (Experimental, UE 5.8+)"), TEXT("generic paint slots"), TEXT("A stroke is at most 250 m in radius") })
 			{
 				TestTrue(*FString::Printf(TEXT("skill mentions %s"), Text), Skill.Contains(Text));
 			}
@@ -130,6 +131,24 @@ void FUnrealAIMeshTerrainSpec::Define()
 			{
 				TestTrue(*FString::Printf(TEXT("schema lists %s (%s)"), Method, *Schema.Left(400)), Schema.Contains(Method));
 			}
+			// The reads are read-only (rql-query can call them); Rebuild invalidates the sections, so it is not.
+			for (const TCHAR* Read : { TEXT("[read-only] the built surface"), TEXT("[read-only] Surface at every point"), TEXT("[read-only] wait (at most") })
+				TestTrue(*FString::Printf(TEXT("schema marks %s"), Read), Schema.Contains(Read));
+			TestFalse(TEXT("Rebuild is not read-only"), Schema.Contains(TEXT("[read-only] rebuild")));
+		});
+
+		It("returns its guide for any spelling of its name or extension id", [this]()
+		{
+			for (const TCHAR* Key : { TEXT("MeshTerrain"), TEXT("mesh-terrain"), TEXT("Mesh Terrain"), TEXT("mesh_terrain"),
+				TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), TEXT("unreal-ai-mesh-terrain"), TEXT("meshTerrains") })
+			{
+				bool bOk = false;
+				const FString Guide = UnrealMcpRqlTools::Schema(FString(), Key, bOk);
+				TestTrue(*FString::Printf(TEXT("guide '%s' (%s)"), Key, *Guide.Left(200)), bOk && Guide.Contains(TEXT("\"name\":\"MeshTerrain\"")));
+			}
+			bool bOk = true;
+			UnrealMcpRqlTools::Schema(FString(), TEXT("mesh-terrainx"), bOk);
+			TestFalse(TEXT("another name is still unknown"), bOk);
 		});
 
 		It("adds the terrain and modifier members", [this]()
@@ -141,7 +160,7 @@ void FUnrealAIMeshTerrainSpec::Define()
 				TestTrue(*FString::Printf(TEXT("MeshPartition has %s"), Member), Terrain.Contains(FString(TEXT("\"")) + Member + TEXT("\"")) || Terrain.Contains(FString(Member) + TEXT(" ")));
 			const FString Modifier = UnrealMcpRqlTools::Schema(TEXT("NoiseModifier"), bOk);
 			TestTrue(TEXT("modifier schema ok"), bOk);
-			for (const TCHAR* Member : { TEXT("Terrain"), TEXT("Kind"), TEXT("Disabled"), TEXT("Modifier") })
+			for (const TCHAR* Member : { TEXT("Terrain"), TEXT("Kind"), TEXT("Label"), TEXT("Bounds"), TEXT("Disabled"), TEXT("Modifier") })
 				TestTrue(*FString::Printf(TEXT("modifiers have %s"), Member), Modifier.Contains(FString(TEXT("\"")) + Member + TEXT("\"")) || Modifier.Contains(FString(Member) + TEXT(" ")));
 		});
 	});
@@ -233,6 +252,48 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Sections member"), Json.Contains(TEXT("PreviewSection")));
 		});
 
+		It("reports in Bounds the built box past the edge, the terrain's own Base box and its highest and lowest ground", [this]()
+		{
+			const FString Label = MeshTerrainSpecLabel(TEXT("SpecBounds"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-900000.0, 0.0, 0.0), 4000.0, 4000.0, 40, 40);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
+				return;
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Sphere", [-898500, 0, 0], [2000, 2000, 1000], "Union"):
+			// a dome whose half reaches 5 m past the terrain's +X edge (-898000).
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(*FString::Printf(TEXT("AddShape (%s)"), *MeshTerrainSpecJson(Result)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Sphere"},{"list":[{"lit":-898500},{"lit":0},{"lit":0}]},{"list":[{"lit":2000},{"lit":2000},{"lit":1000}]},{"lit":"Union"}]}]})RQL"), *Label), true, &Result));
+
+			TOptional<FVector> High, Low;
+			UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), High, Low);
+			if (!TestTrue(TEXT("the built ground has extremes"), High.IsSet() && Low.IsSet()))
+				return;
+			const FVector Highest = *High, Lowest = *Low;
+			TestTrue(*FString::Printf(TEXT("highest ground on the dome's top (%s)"), *Highest.ToString()), FMath::IsNearlyEqual(Highest.Z, 500.0, 5.0)
+				&& FVector2D::Distance(FVector2D(Highest), FVector2D(-898500.0, 0.0)) <= 300.0);
+			const FBox Base = UnrealAIMeshTerrain::BaseBounds(Terrain);
+			const FBox Built = UnrealAIMeshTerrain::BuiltBounds(Terrain);
+			// Past the edge the dome's lower half is built too, under it: the lowest GROUND (a trace from above) is the flat terrain.
+			TestTrue(*FString::Printf(TEXT("lowest ground on the flat terrain, not under the overhang (%s, %s)"), *Lowest.ToString(), *Built.ToString()), FMath::IsNearlyEqual(Lowest.Z, 0.0, 1.0));
+			TestTrue(*FString::Printf(TEXT("Base is the terrain as created (%s)"), *Base.ToString()), Base.IsValid
+				&& FMath::IsNearlyEqual(Base.Min.X, -902000.0, 1.0) && FMath::IsNearlyEqual(Base.Max.X, -898000.0, 1.0)
+				&& FMath::IsNearlyEqual(Base.Min.Y, -2000.0, 1.0) && FMath::IsNearlyEqual(Base.Max.Y, 2000.0, 1.0));
+			TestTrue(*FString::Printf(TEXT("the built box reaches past the edge (%s)"), *Built.ToString()), Built.IsValid && Built.Max.X > -898000.0 + 100.0);
+
+			// meshTerrains | where Label == "<label>" | select Bounds
+			TestTrue(TEXT("Bounds query"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrains"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"%s"}]}},{"op":"select","fields":[{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), *Label), false, &Result));
+			const FString Json = MeshTerrainSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("Bounds.Base in metres (%s)"), *Json), Json.Contains(TEXT("\"Base\":{\"Min\":[-902000,-2000,")) && Json.Contains(TEXT("\"SizeMeters\":[40,40]}")));
+			TestTrue(TEXT("Bounds.Highest and Lowest"), Json.Contains(TEXT("\"Highest\":[")) && Json.Contains(TEXT("\"Lowest\":[")));
+
+			// A box pit with vertical walls: its floor corners sit right under the rim, still the lowest ground.
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Box", [-901000, 0, 0], [1000, 1000, 1000], "Subtract")
+			TestTrue(TEXT("box pit"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifier"]},"stages":[{"op":"call","method":"AddShape","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Box"},{"list":[{"lit":-901000},{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":1000},{"lit":1000}]},{"lit":"Subtract"}]}]})RQL"), *Label), true, &Result));
+			UnrealAIMeshTerrain::GroundExtremes(Terrain, UnrealAIMeshTerrain::BaseBounds(Terrain), High, Low);
+			TestTrue(*FString::Printf(TEXT("lowest ground on the pit's floor (%s)"), Low ? *Low->ToString() : TEXT("unset")), Low.IsSet() && FMath::IsNearlyEqual(Low->Z, -500.0, 2.0)
+				&& FVector2D::Distance(FVector2D(*Low), FVector2D(-901000.0, 0.0)) <= 710.0);
+		});
+
 		It("reads the flat ground with Surface: height, slope, location; off the terrain Inside is false", [this]()
 		{
 			const FString Label = MeshTerrainSpecLabel(TEXT("SpecSurface"));
@@ -253,6 +314,16 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Surface off the terrain"), UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Surface"), Label, TEXT(R"({"list":[{"lit":-900000},{"lit":0},{"lit":0}]})")), true, &Result));
 			const TSharedPtr<FJsonObject> Off = MeshTerrainSpecCallResult(Result);
 			TestTrue(TEXT("off the terrain Inside is false"), Off.IsValid() && !Off->GetBoolField(TEXT("Inside")));
+
+			// Read-only operations: rql-query runs them (no rql-mutate needed to read the ground).
+			TestTrue(*FString::Printf(TEXT("Surface in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Surface"), Label, TEXT(R"({"list":[{"lit":-800500},{"lit":700},{"lit":0}]})")), false, &Result));
+			TestTrue(*FString::Printf(TEXT("SurfacePoints in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("SurfacePoints"), Label, TEXT(R"({"list":[{"list":[{"lit":-800500},{"lit":700},{"lit":0}]},{"list":[{"lit":-800500},{"lit":700},{"lit":0}]}]})")), false, &Result));
+			TestTrue(*FString::Printf(TEXT("WaitForBuild in rql-query (%s)"), *MeshTerrainSpecJson(Result)),
+				UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("WaitForBuild"), Label), false, &Result));
+			TestFalse(TEXT("Rebuild is refused in rql-query"), UnrealMcpRqlTools::RunPlan(MeshTerrainSpecCall(TEXT("Rebuild"), Label), false, &Result));
+			TestTrue(*FString::Printf(TEXT("as permission-denied (%s)"), *MeshTerrainSpecJson(Result)), MeshTerrainSpecJson(Result).Contains(TEXT("permission-denied")));
 		});
 
 		It("returns from WaitForBuild with a modifier applied: Surface, a world trace and the evaluated stack agree; disabling it with set flattens it again", [this]()
@@ -273,6 +344,10 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(TEXT("Ready with the modifier"), Build.IsValid() && Build->GetBoolField(TEXT("Ready")) && Build->GetIntegerField(TEXT("Modifiers")) == 1);
 			const TArray<UnrealAIMeshTerrain::UModifierComponent*> Listed = UnrealAIMeshTerrain::Modifiers(Terrain);
 			TestTrue(TEXT("Modifiers lists the noise"), Listed.Num() == 1 && Listed[0] == Noise && UnrealAIMeshTerrain::ModifierKind(Noise) == TEXT("Noise"));
+			// meshTerrainModifiers | where Owner.Label == "<label>_Noise" | select Label Bounds
+			TestTrue(TEXT("Label / Bounds query"), UnrealMcpRqlTools::RunPlan(Where + TEXT(R"RQL({"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}},{"name":"Bounds","expr":{"path":["Bounds"]}}]}]})RQL"), false, &Result));
+			const FString Members = MeshTerrainSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("a modifier's Label and Bounds (%s)"), *Members.Left(400)), Members.Contains(FString::Printf(TEXT("\"%s_Noise\""), *Label)) && Members.Contains(TEXT("\"SizeMeters\":[60,60]")));
 
 			UWorld* World = Terrain->GetWorld();
 			double Relief = 0.0;
@@ -303,6 +378,37 @@ void FUnrealAIMeshTerrainSpec::Define()
 			{
 				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
 				TestTrue(*FString::Printf(TEXT("flat again at %s (%.2f)"), *Point.ToString(), Sample.Height), Sample.bInside && FMath::IsNearlyZero(Sample.Height, 0.5));
+			}
+		});
+
+		It("reads a flat ground's Slope as 0 on the seams between sections and at its border", [this]()
+		{
+			// 1000 x 300 quads: more than one section (at most 500 x 500 quads each), so there are seams to sample.
+			const FString Label = MeshTerrainSpecLabel(TEXT("SpecSeams"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-2300000.0, -3000000.0, 40.0), 12000.0, 3600.0, 1000, 300);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const TArray<UnrealAIMeshTerrain::APreviewSection*> Sections = UnrealAIMeshTerrain::PreviewSections(Terrain);
+			if (!TestTrue(*FString::Printf(TEXT("several sections (%d)"), Sections.Num()), Sections.Num() > 1))
+				return;
+			TArray<FVector2D> Points;
+			for (const UnrealAIMeshTerrain::APreviewSection* Section : Sections)
+			{
+				// Every section corner and edge midpoint: on a seam or on the terrain's border.
+				const FBox Box = Section->GetPreviewMeshBounds();
+				for (const double X : { Box.Min.X, Box.GetCenter().X, Box.Max.X })
+				{
+					for (const double Y : { Box.Min.Y, Box.GetCenter().Y, Box.Max.Y })
+						Points.Add(FVector2D(X, Y));
+				}
+			}
+			for (const FVector2D& Point : Points)
+			{
+				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
+				const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Sample.Normal.Z), 0.0, 1.0)));
+				TestTrue(*FString::Printf(TEXT("flat at %s: height %.2f, slope %.2f (normal %s)"), *Point.ToString(), Sample.Height, Slope, *Sample.Normal.ToString()),
+					Sample.bInside && FMath::IsNearlyEqual(Sample.Height, 40.0, 0.5) && Slope < 0.5);
 			}
 		});
 

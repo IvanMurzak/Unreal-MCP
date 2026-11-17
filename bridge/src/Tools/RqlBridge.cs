@@ -39,6 +39,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         public const string QueryArgument = "query";
         public const string PlanArgument = "plan";
 
+        /// <summary>
+        /// The RQL answers this renderer understands, sent in the handshake (<c>rqlRenderer</c>). 1: rql-schema's
+        /// installed extensions (<c>modules</c>) and extension guides (<c>guide</c>, <c>unknown-guide</c>). Raise it when the
+        /// plugin starts sending something an older renderer would drop, together with the plugin's
+        /// <c>UnrealMcpRqlTools::RequiredRqlRenderer</c>.
+        /// </summary>
+        public const int RendererVersion = 1;
+
         /// <summary>Whether a tool of this RQL role takes RQL text that the sidecar parses into a plan.</summary>
         public static bool ParsesQuery(string? role) => role == QueryRole || role == MutateRole;
 
@@ -97,6 +105,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             // Each statement's plan, to find the statement of a plan RqlScript runs: its text is the call's query (the undo step's title).
             var plans = statements.Select(st => RqlParser.TryParse(st.Text, out var p, out _) ? PlanCodec.Serialize(p!) : null).ToList();
             int next = 0, calls = 0;
+            var allReadOnly = true;
 
             QueryResult Execute(QueryPlan plan)
             {
@@ -126,12 +135,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                 var json = ParseObject(first?.Text);
                 if (json == null || !json.ContainsKey("ok"))
                     return QueryResult.Fail(new[] { Diagnostic.Error("internal-error", string.IsNullOrEmpty(first?.Text) ? "the editor sent no RQL result" : first!.Text!) });
-                return ToResult(role, json);
+                var statement = ToResult(role, json, out var readOnly);
+                // The row budget only shortens receipts: a statement that is not one (a plain read, a failure) leaves it.
+                if (statement.Receipt && !readOnly)
+                    allReadOnly = false;
+                return statement;
             }
 
             // RqlScript runs the statements synchronously, one after another: off the caller's thread, each IPC call awaited in turn.
             var result = await Task.Run(() => RqlScript.Run(statements, new QueryOptions { AllowMutation = role == MutateRole }, Execute)).ConfigureAwait(false);
-            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result) } };
+            // One receipt row budget for the whole script: every row unless a statement's receipt is a change's.
+            var content = new List<ContentBlock> { new ContentBlock { Type = Consts.ContentType.Text, Text = RenderResult(result, allReadOnly) } };
             content.AddRange(notes);
             return new ResponseCallTool { Status = result.Ok ? ResponseStatus.Success : ResponseStatus.Error, Content = content };
         }
@@ -151,7 +165,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             if (role == SchemaRole)
                 rendered = RenderSchema(json);
             else if (json.ContainsKey("ok"))
-                rendered = RenderResult(ToResult(role, json));
+                rendered = RenderResult(ToResult(role, json, out var readOnly), readOnly);
             else
                 return response;
 
@@ -174,17 +188,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         /// <summary>
         /// A query / mutate answer as RQL's result. rql-mutate answers with a set / call receipt: the table format compacts it
         /// (one method: line, no $ref column for created objects, the first 50 rows and a count). The flag is not part of the JSON.
+        /// A call of read-only operations only (the plugin adds <c>"readOnly": true</c>, in either tool) changed nothing: its
+        /// rows are the answer (sampled heights), so it keeps the compact form (the method once) and lists every row
+        /// (<see cref="ReadOnlyRows"/>).
         /// </summary>
-        private static QueryResult ToResult(string role, JsonObject json)
+        private static QueryResult ToResult(string role, JsonObject json, out bool readOnly)
         {
+            readOnly = json["readOnly"] is JsonValue flag && flag.TryGetValue<bool>(out var b) && b;
             var result = ParseResult(json);
-            result.Receipt = role == MutateRole && result.Ok;
+            result.Receipt = result.Ok && (role == MutateRole || readOnly);
             return result;
         }
 
+        /// <summary>Rows a read-only call's answer lists: the plugin's read ceiling (its 64 KB answer usually ends first).</summary>
+        public const int ReadOnlyRows = 1000;
+
         // The rql tools have no json format, so a receipt's count carries no "(the json format lists every row)" pointer.
-        private static string RenderResult(QueryResult result) =>
-            AgentFormat.Render(result, OutputFormat.Table, AgentFormat.DefaultReceiptRows, moreRowsNote: "");
+        private static string RenderResult(QueryResult result, bool readOnly) =>
+            AgentFormat.Render(result, OutputFormat.Table, readOnly ? ReadOnlyRows : AgentFormat.DefaultReceiptRows, moreRowsNote: "");
 
         private static string JsonKindName(JsonNode node) =>
             node.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? "boolean" : node.GetValueKind().ToString().ToLowerInvariant();
@@ -269,33 +290,47 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
         {
             if (Str(json, "error") == "unknown-type")
             {
-                var candidates = (json["candidates"] as JsonArray)?.Select(c => c?.GetValue<string>() ?? "").Where(c => c.Length > 0).ToList()
-                    ?? new List<string>();
+                var candidates = Strings(json["candidates"]);
                 var error = AgentFormat.UnknownTypeError(Str(json, "name") ?? "", candidates);
                 // The type belongs to an extension this editor does not have: the hint names it and how to get it.
                 var hint = Str(json, "hint");
                 return string.IsNullOrEmpty(hint) ? error : error.TrimEnd() + "\nhint: " + hint;
             }
 
+            if (Str(json, "error") == "unknown-guide")
+            {
+                var names = Strings(json["candidates"]);
+                return $"error unknown-guide: no installed extension '{Str(json, "name")}'"
+                    + (names.Count > 0 ? $"; guides: {string.Join(", ", names)} (or one of their sources)" : "; none is installed (rql-schema lists the extensions you can add)");
+            }
+            if (json["guide"] is JsonObject guide)
+                return RenderGuide(guide);
+
             var sb = new StringBuilder();
             if (json["sources"] is JsonArray sources)
             {
                 sb.Append("sources:\n");
-                foreach (var s in sources.OfType<JsonObject>())
-                {
-                    sb.Append("  ").Append(Str(s, "name"));
-                    var type = Str(s, "type");
-                    if (!string.IsNullOrEmpty(type)) sb.Append(": ").Append(type);
-                    var description = Str(s, "description");
-                    if (!string.IsNullOrEmpty(description)) sb.Append(" — ").Append(description);
-                    sb.Append('\n');
-                }
+                AppendSources(sb, sources);
             }
             if (json["functions"] is JsonArray functions && functions.Count > 0)
             {
                 sb.Append("functions:\n");
                 foreach (var f in functions.OfType<JsonObject>().OrderBy(f => Str(f, "name"), StringComparer.Ordinal))
                     sb.Append("  ").Append(Str(f, "name")).Append("(…) — ").Append(Str(f, "description")).Append('\n');
+            }
+            if (json["modules"] is JsonArray modules && modules.Count > 0)
+            {
+                // The installed extensions: their sources, and the call that returns the guide on how their operations work.
+                sb.Append("installed extensions (sources; read the guide before using them):\n");
+                foreach (var m in modules.OfType<JsonObject>())
+                {
+                    sb.Append("  ").Append(Str(m, "name")).Append(ExtensionLabel(m));
+                    var names = Strings(m["sources"]);
+                    if (names.Count > 0) sb.Append(": ").Append(string.Join(", ", names));
+                    var call = Str(m, "guideCall");
+                    if (!string.IsNullOrEmpty(call)) sb.Append(" — guide: ").Append(call);
+                    sb.Append('\n');
+                }
             }
             if (json["extensions"] is JsonArray extensions && extensions.Count > 0)
             {
@@ -331,6 +366,54 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     }
                 }
             }
+            var guideCall = Str(json, "guideCall");
+            if (!string.IsNullOrEmpty(guideCall))
+                sb.Append("guide (how these operations work together): ").Append(guideCall).Append('\n');
+            return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>The non-empty strings of a JSON string array (none when absent).</summary>
+        private static List<string> Strings(JsonNode? array) =>
+            (array as JsonArray)?.Select(n => n?.GetValue<string>() ?? "").Where(n => n.Length > 0).ToList() ?? new List<string>();
+
+        /// <summary><c> (extension version)</c> of a module; empty without an extension id.</summary>
+        private static string ExtensionLabel(JsonObject module)
+        {
+            var extension = Str(module, "extension");
+            if (string.IsNullOrEmpty(extension)) return "";
+            var version = Str(module, "version");
+            return string.IsNullOrEmpty(version) ? $" ({extension})" : $" ({extension} {version})";
+        }
+
+        /// <summary>`source: type — description` lines.</summary>
+        private static void AppendSources(StringBuilder sb, JsonArray sources)
+        {
+            foreach (var s in sources.OfType<JsonObject>())
+            {
+                sb.Append("  ").Append(Str(s, "name"));
+                var type = Str(s, "type");
+                if (!string.IsNullOrEmpty(type)) sb.Append(": ").Append(type);
+                var description = Str(s, "description");
+                if (!string.IsNullOrEmpty(description)) sb.Append(" — ").Append(description);
+                sb.Append('\n');
+            }
+        }
+
+        /// <summary>
+        /// One installed extension's guide (rql-schema with <c>guide</c>): a header, its sources, then each AddGuide section as
+        /// Markdown, unabridged (the guide is the reason for the call).
+        /// </summary>
+        private static string RenderGuide(JsonObject guide)
+        {
+            var sb = new StringBuilder();
+            sb.Append("# ").Append(Str(guide, "name")).Append(" guide").Append(ExtensionLabel(guide)).Append("\n\n");
+            if (guide["sources"] is JsonArray sources && sources.Count > 0)
+            {
+                sb.Append("sources (rql-schema \"<type>\" lists a type's members and operations):\n");
+                AppendSources(sb, sources);
+            }
+            foreach (var section in (guide["sections"] as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+                sb.Append("\n## ").Append(Str(section, "topic")).Append("\n\n").Append(Str(section, "markdown")).Append('\n');
             return sb.ToString().TrimEnd();
         }
 

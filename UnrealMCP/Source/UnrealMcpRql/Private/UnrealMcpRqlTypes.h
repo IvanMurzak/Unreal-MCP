@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/WeakObjectPtr.h"
 #include "UnrealMcpRqlInclude.h"
 
@@ -109,7 +110,7 @@ public:
 		std::shared_ptr<void> KeepAlive = nullptr);
 	/** Convert and store; throws std::runtime_error with a message for the agent when the value does not fit. */
 	void Write(const FProperty* Property, void* ValuePtr, const rql::Value& Value);
-	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeProperty). */
+	/** Write a property of an object with the editor notifications (PreEditChange / PostEditChangeChainProperty, naming the changed member). */
 	void WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value);
 	/**
 	 * @p Object, or the object that replaced it during this call: an edit of a Blueprint actor's component reruns the
@@ -159,6 +160,19 @@ public:
 	void AddApiClass(UClass* Class, const FString& TypeName);
 	/** Whether @p Class was registered with AddApiClass (its class default object is an operations object). */
 	bool IsApiClass(const UClass* Class) const { return Class && ApiClasses.Contains(const_cast<UClass*>(Class)); }
+	/** What a read-only operation's description starts with (rql-schema shows it after the signature). */
+	static constexpr const TCHAR* ReadOnlyMark = TEXT("[read-only] ");
+	/** An operation of an operations class that declares `meta = (RqlReadOnly)` (IUnrealMcpRqlModule::AddApiClass). */
+	bool IsReadOnlyOperation(const UClass* Class, const UFunction* Function) const;
+	/** The operation @p Method (case-insensitive; K2_ prefix dropped, as `call` names it) of @p Class is read-only. */
+	bool IsReadOnlyOperation(const UClass* Class, const FString& Method) const;
+	/** Some operations class has a read-only operation named @p Method: rql-query may run a `call` of it. */
+	bool HasReadOnlyOperation(const FString& Method) const;
+	/**
+	 * An operation that works the undo buffer itself (meta = (RqlOwnUndo): Undo / Redo): the session opens no undo step
+	 * around it and marks nothing unsaved after it (the undone change does both).
+	 */
+	bool IsOwnUndoOperation(const UClass* Class, const FString& Method) const;
 	void ExposeProperties(UStruct* Owner, const TArray<FName>& Names, bool bWritable);
 
 	/** Add or replace a member of a descriptor (hooks use it). */
@@ -188,6 +202,14 @@ private:
 	TMap<UStruct*, TMap<FName, bool>> Exposed;
 	TMap<FString, bool> KnownMemberNames; // IsKnownMemberName; FString keys compare case-insensitively
 	TMap<const UObject*, TWeakObjectPtr<UObject>> Replaced; // LiveObject: replaced object -> its newest replacement
+	/** A body's collision before this call's first write of it (ApplyStructSetters), and its mesh's bUseDefaultCollision. */
+	struct FBodySnapshot
+	{
+		TSharedPtr<FStructOnScope> Body;
+		bool bUseDefaultCollision = false;
+	};
+	TMap<const void*, FBodySnapshot> BodySnapshots; // by the FBodyInstance's memory
+	bool ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before);
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;
 	std::vector<rql::Diagnostic> RequestWarnings;
@@ -197,6 +219,6 @@ private:
 	void FillClass(rql::TypeDescriptor& Descriptor, UClass* Class);
 	void FillStruct(rql::TypeDescriptor& Descriptor, UScriptStruct* Struct);
 	void AddPropertyMember(rql::TypeDescriptor& Descriptor, FProperty* Property, bool bOnObject, bool bForceWritable);
-	void AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function);
+	void AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFunction* Function, bool bReadOnly);
 	bool IsCallable(UClass* Class, UFunction* Function) const;
 };

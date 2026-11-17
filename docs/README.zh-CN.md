@@ -65,7 +65,7 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 
 **C++ 是一等公民的工作循环。**`source-compile` 在 Live Coding 启用时用它编译，否则用 UnrealBuildTool，并返回每条诊断的文件、行号和严重级别，智能体无需读构建日志就能修复错误。当改动需要完整构建并重启编辑器时（新增类、修改了 `UCLASS` / `UPROPERTY` / `UFUNCTION` 声明），它会明确提示。文件操作限定在 `<Project>/Source/` 内。在终端中，`unreal-mcp-cli compile` 无需编辑器即可输出 `file:line:col` 格式的诊断。
 
-**RQL 从编辑器本身学习：**`rql-schema` 列出每个数据源、类型和成员，`unreal-rql` skill 用示例讲解语法（`unreal-mcp-cli setup-skills` 会为你的智能体写入它）。
+**RQL 从编辑器本身学习：**`rql-schema` 列出每个数据源、类型和成员，`unreal-rql` skill 用示例讲解语法（由编辑器为你的智能体写入：编辑器打开时运行 `unreal-mcp-cli setup-skills`、点击 **Generate skill files** 按钮，或开启自动生成）；带 `guide` 的 `rql-schema`（如 `{"guide": "landscape"}`）可向任何客户端返回已安装扩展的指南。
 
 ## 系统要求
 

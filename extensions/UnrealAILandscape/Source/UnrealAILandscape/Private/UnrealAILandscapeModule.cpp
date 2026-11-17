@@ -7,6 +7,7 @@
 
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealAILandscapeRqlApi.h"
+#include "UnrealAILandscapeEdit.h"
 #include "UnrealAIWaterRqlApi.h"
 #include "UnrealAIWaterSafety.h"
 
@@ -27,10 +28,11 @@
 
 namespace UnrealAILandscapeRqlLocal
 {
-	/** Every actor of class T in the editor world (the persistent level and loaded sublevels). */
+	/** Every actor of class T in the editor world (the persistent level and loaded sublevels), World Partition ones loaded first. */
 	template <typename T>
 	TArray<UObject*> EditorActors()
 	{
+		UnrealAILandscapeRqlApiLocal::LoadAll(T::StaticClass());
 		TArray<UObject*> Out;
 		UWorld* World = UnrealMcpRql::EditorWorld();
 		if (!World)
@@ -74,6 +76,35 @@ namespace UnrealAILandscapeRqlLocal
 		return FString();
 	}
 
+	/**
+	 * The highest (or lowest) ground point of one collision component, vertex by vertex in its own frame (any rotation or
+	 * scale), read like Surface reads the ground (the editor heightfield, else the physics one), so Bounds' Highest / Lowest
+	 * agree with Surface and line traces. Unset when the component has no heightfield yet.
+	 */
+	TOptional<FVector> ExtremeGround(ULandscapeHeightfieldCollisionComponent* Component, bool bHighest)
+	{
+		ALandscapeProxy* Owner = Component->GetLandscapeProxy();
+		if (!Owner)
+			return {};
+		const FTransform ToWorld = Component->GetComponentTransform();
+		const int32 Quads = FMath::RoundToInt(Component->CollisionSizeQuads * Component->CollisionScale); // its landscape quads
+		const EHeightfieldSource Source = Owner->GetHeightAtLocation(ToWorld.GetLocation(), EHeightfieldSource::Editor).IsSet()
+			? EHeightfieldSource::Editor : EHeightfieldSource::Complex;
+		TOptional<FVector> Best;
+		for (int32 Y = 0; Y <= Quads; ++Y)
+		{
+			for (int32 X = 0; X <= Quads; ++X)
+			{
+				// The last row and column are shared with the next component: nudge them inside this one.
+				const FVector At = ToWorld.TransformPosition(FVector(FMath::Min<double>(X, Quads - 0.01), FMath::Min<double>(Y, Quads - 0.01), 0.0));
+				const TOptional<float> Height = Owner->GetHeightAtLocation(At, Source);
+				if (Height.IsSet() && (!Best.IsSet() || (bHighest ? Height.GetValue() > Best->Z : Height.GetValue() < Best->Z)))
+					Best = FVector(At.X, At.Y, Height.GetValue());
+			}
+		}
+		return Best;
+	}
+
 	const TCHAR* WaterBodyTypeName(EWaterBodyType Type)
 	{
 		switch (Type)
@@ -105,15 +136,18 @@ public:
 	virtual void ConfigureRql(FUnrealMcpRqlModuleContext& Context) override
 	{
 		using namespace UnrealAILandscapeRqlLocal;
-		Context.AddObjectListSource(TEXT("landscapes"), TEXT("the Landscape actors and streaming proxies of the editor world"),
+		// A reopened World Partition map loads only the region around the camera: each source loads its actors of the whole
+		// map first (as the World Partition window's region loading does; nothing is changed or dirtied), so a far lake or a
+		// streaming proxy left behind by a deleted landscape is listed too.
+		Context.AddObjectListSource(TEXT("landscapes"), TEXT("the Landscape actors and streaming proxies of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			ALandscapeProxy::StaticClass(), []() { return EditorActors<ALandscapeProxy>(); });
-		Context.AddObjectListSource(TEXT("waterBodies"), TEXT("the Water body actors (river, lake, ocean, custom) of the editor world"),
+		Context.AddObjectListSource(TEXT("waterBodies"), TEXT("the Water body actors (river, lake, ocean, custom) of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			AWaterBody::StaticClass(), []() { return EditorActors<AWaterBody>(); });
-		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world"),
+		Context.AddObjectListSource(TEXT("waterZones"), TEXT("the Water zone actors of the editor world (on a World Partition map all of them: it loads the unloaded ones)"),
 			AWaterZone::StaticClass(), []() { return EditorActors<AWaterZone>(); });
 
 		Context.AddApiSource(TEXT("landscape"),
-			TEXT("Landscape operations: call Create(label, location, sizeMeters, material) / Sculpt(landscape, center, radius, height) / Paint(landscape, layer, center, radius, strength) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Rebuild(landscape)"),
+			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength, label, within) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
 			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
@@ -144,13 +178,18 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Bounds"),
-			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y]"),
+			TEXT("the whole landscape's world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest and highest ground), SizeMeters [X, Y], Highest and Lowest [X, Y, Z] (where the highest and lowest ground is, to a vertex), HeightRange [MinZ, MaxZ] (the lowest and highest ground it can hold: Sculpt, Flatten and Carve stay within it; set by Create's MaxHeightMeters)"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
+				// A World Partition map loads only the region around the camera: load the rest so the box is the whole landscape.
+				UnrealAILandscapeRqlApiLocal::LoadLandscape(Cast<ALandscapeProxy>(Object));
 				// The loaded collision heightfields' local boxes span the ground (ULandscapeInfo::GetCompleteBounds was empty for a
 				// landscape created in the session; on a World Partition map the primary actor has no components of its own). The
 				// engine pads a flat component's box by one unit up and down: undo it, so Z is the real lowest and highest ground.
 				FBox Box(ForceInit);
+				ULandscapeHeightfieldCollisionComponent* Top = nullptr;
+				ULandscapeHeightfieldCollisionComponent* Bottom = nullptr;
+				double TopZ = TNumericLimits<double>::Lowest(), BottomZ = TNumericLimits<double>::Max();
 				const ALandscapeProxy* Proxy = Cast<ALandscapeProxy>(Object);
 				if (const ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
@@ -161,7 +200,18 @@ public:
 						FBox Local = Pair.Value->CachedLocalBox;
 						if (FMath::IsNearlyEqual(Local.GetExtent().Z, 1.0))
 							Local.Min.Z = Local.Max.Z = Local.GetCenter().Z;
-						Box += Local.TransformBy(Pair.Value->GetComponentTransform());
+						const FBox World = Local.TransformBy(Pair.Value->GetComponentTransform());
+						Box += World;
+						if (World.Max.Z > TopZ)
+						{
+							TopZ = World.Max.Z;
+							Top = Pair.Value;
+						}
+						if (World.Min.Z < BottomZ)
+						{
+							BottomZ = World.Min.Z;
+							Bottom = Pair.Value;
+						}
 					}
 				}
 				TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
@@ -177,7 +227,48 @@ public:
 				Out->SetArrayField(TEXT("Min"), Vector({ Box.Min.X, Box.Min.Y, Box.Min.Z }));
 				Out->SetArrayField(TEXT("Max"), Vector({ Box.Max.X, Box.Max.Y, Box.Max.Z }));
 				Out->SetArrayField(TEXT("SizeMeters"), Vector({ (Box.Max.X - Box.Min.X) / 100.0, (Box.Max.Y - Box.Min.Y) / 100.0 }));
+				// Only the components holding the extremes are read vertex by vertex (a 2 km landscape: 2 of 64).
+				if (const TOptional<FVector> High = ExtremeGround(Top, true))
+					Out->SetArrayField(TEXT("Highest"), Vector({ High->X, High->Y, High->Z }));
+				if (const TOptional<FVector> Low = ExtremeGround(Bottom, false))
+					Out->SetArrayField(TEXT("Lowest"), Vector({ Low->X, Low->Y, Low->Z }));
+				const FVector2D Range = UnrealAILandscapeRqlApiLocal::HeightRange(Proxy);
+				Out->SetArrayField(TEXT("HeightRange"), Vector({ Range.X, Range.Y }));
 				return MakeShared<FJsonValueObject>(Out);
+			});
+		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Edits"),
+			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it, and the undo history is no record of them (no locations, empty after a restart): to find them (\"I edited the terrain myself, check it\") use landscape | call Bumps(unreal.find(\"<label>\")): a place with no Edit was most likely made outside these operations"),
+			[](UObject* Object) -> TSharedPtr<FJsonValue>
+			{
+				TArray<TSharedPtr<FJsonValue>> Out;
+				const auto Number = [](double Value) { return MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Value * 100.0) / 100.0); };
+				// Newest first (a long list is shown cut after its first items), each with its Index in the log (oldest 0), the
+				// number Bumps' Edit names.
+				const TArray<FUnrealAILandscapeEdit>& Log = UnrealAILandscapeRqlApiLocal::EditLog(Cast<ALandscapeProxy>(Object));
+				for (int32 Index = Log.Num() - 1; Index >= 0; --Index)
+				{
+					const FUnrealAILandscapeEdit& Edit = Log[Index];
+					TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
+					Record->SetNumberField(TEXT("Index"), Index);
+					Record->SetStringField(TEXT("Op"), Edit.Op);
+					Record->SetStringField(TEXT("Label"), Edit.Label);
+					TArray<TSharedPtr<FJsonValue>> Points;
+					for (const FVector& Point : Edit.Points)
+						Points.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{ Number(Point.X), Number(Point.Y), Number(Point.Z) }));
+					Record->SetArrayField(TEXT("Points"), Points);
+					if (Edit.Radius != 0.0)
+						Record->SetField(TEXT("Radius"), Number(Edit.Radius));
+					if (Edit.Width != 0.0)
+						Record->SetField(TEXT("Width"), Number(Edit.Width));
+					Record->SetField(TEXT("Height"), Number(Edit.Height));
+					if (!Edit.Layer.IsEmpty())
+						Record->SetStringField(TEXT("Layer"), Edit.Layer);
+					if (!Edit.Rule.IsEmpty())
+						Record->SetStringField(TEXT("Rule"), Edit.Rule);
+					Record->SetStringField(TEXT("Time"), Edit.Time);
+					Out.Add(MakeShared<FJsonValueObject>(Record));
+				}
+				return MakeShared<FJsonValueArray>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("PaintLayers"), TEXT("the names of the landscape's paint layers"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
@@ -187,7 +278,10 @@ public:
 				if (ULandscapeInfo* Info = Proxy ? Proxy->GetLandscapeInfo() : nullptr)
 				{
 					for (const FLandscapeInfoLayerSettings& Layer : Info->Layers)
-						Layers.Add(MakeShared<FJsonValueString>(Layer.GetLayerName().ToString()));
+					{
+						if (Layer.LayerInfoObj != ALandscapeProxy::VisibilityLayer) // the engine's hole layer, not a paint layer
+							Layers.Add(MakeShared<FJsonValueString>(Layer.GetLayerName().ToString()));
+					}
 				}
 				return MakeShared<FJsonValueArray>(Layers);
 			});
@@ -264,31 +358,112 @@ waterZones | select Label Location ZoneExtent
 landscapes | where IsPrimary | set LandscapeMaterial = "/Game/Materials/M_Terrain"
 ```
 
-Create, sculpt and paint with the `landscape` operations (each call is one undo step):
+Create, sculpt and paint with the `landscape` operations (each call is one undo step). A landscape holds ground within
+`HeightRange` (in `Bounds`): +-256 m around its Z by default. For taller ground pass `MaxHeightMeters` to `Create` (a 300 m
+hill: `Create("Island", [0, 0, 0], 2000, null, 400)`); a Sculpt, Flatten or Carve that would leave the range fails and
+changes nothing.
 
 ```
 landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")    a material blending two paint layers
 landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")                      100 x 100 m, flat, centred on the location
 [[2000, 1500, 1200, 600], [-1800, -900, 1500, 900]] | call landscape.Sculpt(unreal.find("Terrain"), [$[0], $[1], 0], $[2], $[3])    hills: center X Y, radius, height (cm)
+landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)                   a level pad: radius 15 m at Z 400 cm, 8 m blend
+landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)              a channel 1.5 m deep, 6 m wide along the points
+landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)                                 blend a spike, pit or bump within 8 m away into the ground around it
+landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)   a road bed 8 m wide at the points' Z, at most 8 degrees steep
+landscape | call RoadBetween(unreal.find("Terrain"), [-80000, -80000, 0], [40000, 20000, 0], 800, 8, 500, "road to the top")   a road 8 m wide that finds its own way (switchbacks) at most 8 degrees steep
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)                                 a whole-landscape base layer (radius 0)
 [[2000, 1500], [-1800, -900]] | call landscape.Paint(unreal.find("Terrain"), "Rock", [$[0], $[1], 0], 1000)   rock on the hilltops
 landscapes | select Label PaintLayers Sections
 ```
 
-Heights are in cm (negative Height digs a hollow); a paint layer shows when the material blends a layer of that name.
+Paint by the ground instead of circles with `PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength,
+label, within)`: every vertex whose slope (degrees) and world height (cm) fall in the ranges, with soft edges (2 degrees past
+the slope bounds, 50 cm past the height bounds); `within` ([minX, minY, maxX, maxY] world cm, optional) limits it to a
+box. Each call takes its weight from the layers painted before it, so paint the base layer first, then one rule per layer,
+the one that must win last; a Paint circle afterwards paints over a rule (and a rule over a circle) the same way.
+
+```
+landscape | call Paint(unreal.find("Island"), "Grass", [0, 0, 0], 0)                                   grass everywhere
+landscape | call PaintWhere(unreal.find("Island"), "Sand", 0, 15, -100000, 300)                         beaches: flat-ish ground up to 3 m above the sea (Z 0)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90)                                      every slope steeper than 30 degrees
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 0, 90, 22000)                                everything above 220 m (a mountain top)
+landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 100000, 1, "mountain rock", [-20000, 20000, 20000, 70000])   slopes on the mountain only
+```
+
+History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
+Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 5000, newest first:
+Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
+switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional argument `Label` (the last one; PaintWhere: before Within; CreateRiverBetween's edit takes the river's label) ("river", "road to the
+top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
+made each place (`Edit`: "Carve 'river' #3", #3 its `Index`; once the log is full each new record shifts the indexes). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
+place with no `Edit` was most likely made outside these operations (or before the log, or past its last 5000 records / 100,000 path points).
+To check a landscape someone edited by hand ("I played with the terrain, check nothing is broken"), call `Bumps`: the log
+does not show such an edit, the undo history is no record of it (no locations, empty after a restart, not every Python
+edit adds a step), and spot heights miss a hill between them. Report each place without an `Edit` with its Location and
+Height before changing it; a place whose `Edit` does not fit (a Pit on a road) may be a hand edit too, and a smaller
+`minHeight` (100) shows smaller changes.
+
+```
+landscapes | where IsPrimary and Label == "Terrain" | select Edits                              what was done here, newest first
+landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150, "river bed")   a named edit
+```
+
+Repairs: `Bumps` (read-only) lists the places where the ground stands out of its surroundings (a spike, pit, mound or
+hole: Kind, Location, Height above (+) or below (-) the ground around it, Radius, Length, Edit), largest first; a long narrow
+one (4 x longer than wide) is a `Channel` (a riverbed, ditch or road cut: a long Carve leaves one) or a `Ridge`, not a
+place to Smooth away; `Smooth` replaces the
+ground within a radius by the smoothest surface that meets the ground around it, so such a place disappears while a slope
+stays a slope (unlike Flatten, which makes it level); a curved surface comes back a little flatter, so use the smallest
+radius that covers the place (about 1.5 x the Radius Bumps gives). `Ramp` grades a road, ramp or path: a strip Width wide set to the
+points' Z (straight between points, cutting and filling), its sides blended back over Falloff; with MaxSlope it refuses a
+stretch that climbs more steeply and says how long it needs to be. `RoadBetween` builds a road between two places by
+itself: it searches the ground for a route no steeper than MaxSlope (switchbacks or a spiral up a hill, around steep ground;
+it cuts or fills up to 1.5 m where the ground is uneven under the route),
+grades it like Ramp and returns {Reached, LengthMeters, MaxSlope (built), Points, Changed}; Reached false means it found no
+route that climbs there within MaxSlope (the road goes as far as it found one: allow a larger MaxSlope or pick another end). Use
+RoadBetween for a road up a hill or across rough ground; use Ramp when you choose the route yourself (a ramp to a pad,
+a road along given points): read the ground along it with Surface and choose each point's Z; on a tight bend give a point
+every few metres (each corner of the line tilts the road a little across).
+)MD") TEXT(R"MD(
+```
+landscape | call Bumps(unreal.find("Terrain"))                                          [{Kind, Location, Height, Radius, Length}, ...]
+landscape | call Smooth(unreal.find("Terrain"), [-3000, 3000, 0], 2500)                    a 15 m spike at [-3000, 3000] gone (radius 1.5 x its Radius)
+```
+
+Heights are in cm (negative Height digs a hollow; Flatten's Height is a world Z). How far each edit reaches:
+- `Sculpt(landscape, center, radius, height)`: the full Height at the centre, falling smoothly (a cosine) to 0 at Radius; nothing
+  changes beyond Radius. A hill 300 m high and 800 m across: radius 40000, height 30000.
+- `Flatten(landscape, center, radius, height, falloff)`: every vertex within Radius is set to Height (a flat disc); from Radius to
+  Radius + Falloff the ground blends (a cosine) from Height back to its own height; beyond Radius + Falloff nothing changes.
+  Falloff is optional, default 0: a sharp step at Radius (a cliff where the ground differs from Height). For a pad that
+  blends in, give Falloff about 1.6 x the height difference (its steepest part is then 45 degrees), more for a gentle one.
+- `Carve(landscape, points, width, depth)`: a bed Width wide along the points (Z ignored) Depth below the ground under the
+  path, then banks rising 1:1 back to the ground for at most 2 x Width (on steeper ground the bank ends in a step); it
+  only lowers ground, so it follows hills (a ditch, not a level road).
+A paint layer shows when the material
+blends a layer of that name. Paint layers are weight-blended: painting Rock takes its weight from Grass. Where a layer is painted:
+`landscape | call Coverage(unreal.find("Terrain"), "Rock")` (read-only) lists its areas, largest first, with their middle,
+box (Min / Max) and Area; repaint one with Paint of another layer over it (that layer takes the weight). Delete a whole
+landscape with `landscape | call Delete(unreal.find("Terrain"))`: `Destroy` on its actor leaves the World Partition
+streaming proxies behind.
 Created materials and layer infos are unsaved: `editor | call SaveAll()`.
 
-Read the ground back with `Surface` (rql-mutate, read-only) and `Bounds` instead of line traces: Create, Sculpt and
+Read the ground back with `Surface` (read-only: works in rql-query, changes nothing) and `Bounds` instead of line traces: Create, Sculpt and
 Paint return with the landscape merged, so its collision, `Surface` and the rendered surface agree at once.
 
 ```
-landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters
+landscapes | where IsPrimary | select Label Bounds                                                 world box: Min/Max [X, Y, Z] cm, SizeMeters, Highest/Lowest [X, Y, Z]
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])                                   {Inside, Height, Slope, Location, Normal}
 range(0, 100) | call landscape.Surface(unreal.find("Terrain"), [($ % 10) * 1000 - 4500, floor($ / 10) * 1000 - 4500, 0])   a 10 x 10 grid
 ```
 
 `Height` is the world Z (cm) that traces and collision hit, `Slope` degrees (0 flat), `Location` a spawn point on the
-ground; off the landscape `Inside` is false. Traces from above also hit your own actors (probes, roads, trees);
+ground, `Layers` each paint layer's weight there (`{Grass: 0.1, Rock: 0.9}`: where a layer is painted); off the landscape
+`Inside` is false. On a World Partition map these operations and `Bounds` load the regions of
+the landscape they touch, and `landscapes`, `waterBodies` and `waterZones` load and list every one of the map (a reopened
+map loads only the region around the camera; `actors` lists only what is loaded). A streaming proxy whose landscape was
+deleted is a leftover: `landscapes | where !IsPrimary and LandscapeActorRef == null | select Label Location`. Traces from above also hit your own actors (probes, roads, trees);
 `Surface` reads only the ground. Far views draw the landscape at a lower LOD, so a thin mesh laid on the ground (a road)
 can look buried from afar: sample `Surface` every metre along it and lift it 5-10 cm, or paint the road as a layer.
 `call Rebuild(unreal.find("Terrain"))` re-merges a landscape edited elsewhere (Landscape mode, Python) and rebuilds its
@@ -304,6 +479,7 @@ tick, and its "Water" edit layer is made without the engine's modal dialog.)
 water | call CreateOcean("Ocean", 0)                                                    sea level Z 0 around the island (fills the water zone)
 water | call CreateLake("Lake", [12000, -8000, 2400], 3000)                             Z of the center is the water surface
 water | call CreateRiverBetween("River", unreal.find("Terrain"), [-20000, 30000, 0], [60000, -90000, 0], 1500, 300)
+landscape | call Carve(unreal.find("Terrain"), [[-9000, 0, 0], [9000, 0, 0]], 2000, 300)   a bed along YOUR line (CreateRiverBetween picks the lowest route)
 water | call CreateRiver("Creek", [[0, 0, 900], [4000, 1000, 700], [9000, 0, 400]], 800)  your own points, upstream first
 waterBodies | select Label Water Path                                                  Water.Ready / Water.Problem: renders or why not
 water | call SetMaterial(unreal.find("Lake"), "/Water/Materials/WaterSurface/Water_Material")
@@ -313,7 +489,10 @@ water | call EnableWater()                                                      
 
 Land above the ocean's height hides it, so one ocean surrounds an island. `CreateRiverBetween` follows the lowest
 ground from source to mouth, keeps the water flowing downhill and (Depth > 0, cm) carves its bed into the landscape, so
-it shows even across a rise; keep the mouth a little inside the landscape. A water body's surface is its spline's Z: a
+it shows even across a rise; keep the mouth a little inside the landscape. Its bed (and a Carve) cuts through whatever
+lies on its route, a road or path included: where the route crosses one (compare the river's or Carve's logged Points with the road's logged
+Points; read them all with `get Edits[n].Points`; a road not in the log: read Surface along it), lower the road to a ford no
+steeper than its slope with Ramp or place a bridge over the bed, and say so. A water body's surface is its spline's Z: a
 lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render.
 The first water material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
 	}

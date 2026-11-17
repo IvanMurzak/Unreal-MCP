@@ -8,6 +8,7 @@
 
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAttributeSet.h"
+#include "DynamicMesh/MeshNormals.h"
 #include "Engine/World.h"
 #include "ScopedTransaction.h"
 
@@ -53,6 +54,12 @@ namespace UnrealAIMeshTerrainSculptLocal
 		FName Channel;
 	};
 
+	/** 1 at @p T = 0, a smoothstep fall to 0 at @p T = 1. */
+	double SmoothFall(double T)
+	{
+		return 1.0 - T * T * (3.0 - 2.0 * T);
+	}
+
 	/** 1 inside the brush's core, fading smoothly to 0 at its Radius over the outer Falloff part. */
 	double BrushWeight(double Distance, double Radius, double Falloff)
 	{
@@ -61,8 +68,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 		const double Inner = Radius * (1.0 - Falloff);
 		if (Distance <= Inner)
 			return 1.0;
-		const double T = (Distance - Inner) / (Radius - Inner);
-		return 1.0 - T * T * (3.0 - 2.0 * T);
+		return SmoothFall((Distance - Inner) / (Radius - Inner));
 	}
 
 	template <typename T>
@@ -154,16 +160,19 @@ namespace UnrealAIMeshTerrainSculptLocal
 	constexpr int32 NoVertex = -1;
 	constexpr int32 NoWeightLayer = -2;
 
-	int32 ApplyStroke(FDynamicMesh3& Mesh, const FTransform& Transform, const FStroke& Stroke, double& OutBefore, double& OutAfter)
+	int32 ApplyStroke(FDynamicMesh3& Mesh, const FTransform& Transform, const FStroke& Stroke, double& OutBefore, double& OutAfter, double& OutNearest)
 	{
 		const FVector Local = Transform.InverseTransformPosition(FVector(Stroke.Point, 0.0));
 		const FVector2D Center(Local.X, Local.Y);
 		TMap<int32, double> Weights;
 		int32 Nearest = INDEX_NONE;
 		double NearestDistance = TNumericLimits<double>::Max();
+		// How far the nearest vertex is, under the brush or not (for the error when none is under it).
+		OutNearest = TNumericLimits<double>::Max();
 		for (const int32 Vertex : Mesh.VertexIndicesItr())
 		{
 			const double Distance = FVector2D::Distance(FVector2D(Mesh.GetVertex(Vertex)), Center);
+			OutNearest = FMath::Min(OutNearest, Distance);
 			const double Weight = BrushWeight(Distance, Stroke.Radius, Stroke.Falloff) * Stroke.Strength;
 			if (Weight <= 0.0)
 				continue;
@@ -461,14 +470,24 @@ namespace UnrealAIMeshTerrainSculptLocal
 			return Abandon(FString::Printf(TEXT("the brush modifier %s has no sculpt layer to edit"), Owner ? *Owner->GetActorLabel() : TEXT("?")));
 
 		FUnrealAIMeshTerrainStroke Out;
-		Out.Vertices = ApplyStroke(Mesh, Target->GetWorldTransform(), Stroke, Out.Before, Out.After);
+		double Nearest = 0.0;
+		Out.Vertices = ApplyStroke(Mesh, Target->GetWorldTransform(), Stroke, Out.Before, Out.After, Nearest);
 		if (Out.Vertices == NoWeightLayer)
 			return Abandon(FString::Printf(TEXT("the brush modifier %s has no weight attribute for the channel %s"), Owner ? *Owner->GetActorLabel() : TEXT("?"), *Stroke.Channel.ToString()));
 		if (Out.Vertices == NoVertex)
 		{
-			return Abandon(FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
-				Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
+			// The base meshes' spacing alone would have put a vertex under the brush: the ground there is a modifier's own
+			// triangles (a Boolean shape keeps its mesh's, 100+ m across for a large sphere). (No vertex at all: Nearest is Max.)
+			const bool bCoarseGround = Nearest < TNumericLimits<double>::Max() && Nearest > Stroke.Radius && Spacing < Stroke.Radius;
+			return Abandon(bCoarseGround
+				? FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f: the nearest is %.0f cm away (Radius %.0f cm). The ground there is made of large triangles, such as a Boolean shape's: %s"),
+					Stroke.Point.X, Stroke.Point.Y, Nearest, Stroke.Radius, *(Nearest < MaxRadius
+						? FString::Printf(TEXT("use a Radius above %.0f cm, or shape that ground with modifiers"), Nearest)
+						: FString(TEXT("a stroke cannot reach them (Radius at most 25000 cm): shape that ground with modifiers"))))
+				: FString::Printf(TEXT("no terrain vertex is under the brush at X %.0f, Y %.0f (Radius %.0f cm; the terrain has a vertex about every %.0f cm)"),
+					Stroke.Point.X, Stroke.Point.Y, Stroke.Radius, Spacing));
 		}
+
 		if (Out.Vertices == 0)
 		{
 			// Already that shape / weight there (an Erase where nothing is painted): nothing to store, and no new channel
@@ -478,6 +497,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			if (!WaitForBuild(Terrain))
 				return FUnrealAIMeshTerrainStroke();
 			Out.Ready = true;
+			Out.State = TEXT("built");
 			Out.Seconds = SecondsSince(Start);
 			return Out;
 		}
@@ -491,12 +511,345 @@ namespace UnrealAIMeshTerrainSculptLocal
 		const double Digits = Stroke.Kind == EStroke::Paint ? 1000.0 : 100.0;
 		Out.Before = FMath::RoundToDouble(Out.Before * Digits) / Digits;
 		Out.After = FMath::RoundToDouble(Out.After * Digits) / Digits;
-		if (!WaitForBuild(Terrain))
-			return FUnrealAIMeshTerrainStroke();
-		Out.Ready = true;
+		// The stroke is stored: a build that takes longer is reported (Ready false, State), not failed.
+		FString StillBuilding;
+		Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
+		Out.State = Out.Ready ? FString(TEXT("built")) : StillBuildingState(Terrain, StillBuilding);
 		Out.Seconds = SecondsSince(Start);
 		return Out;
 	}
+}
+
+namespace UnrealAIMeshTerrainSculptLocal
+{
+	constexpr int32 MaxPaintTiles = 64;
+	constexpr double SlopeEdgeDegrees = 2.0;
+	constexpr double HeightEdge = 50.0; // cm
+
+	/** 1 inside [Lo, Hi], fading smoothly to 0 over Edge past each bound. */
+	double RangeWeight(double Value, double Lo, double Hi, double Edge)
+	{
+		const double Outside = Value < Lo ? Lo - Value : Value > Hi ? Value - Hi : 0.0;
+		if (Outside <= 0.0)
+			return 1.0;
+		if (Outside >= Edge)
+			return 0.0;
+		return SmoothFall(Outside / Edge);
+	}
+
+	FUnrealAIMeshTerrainPaintWhere PaintWhereFailed(const FString& Message)
+	{
+		return UnrealMcpRql::Failed<FUnrealAIMeshTerrainPaintWhere>(Message);
+	}
+
+	/**
+	 * PaintWhere: the area split into tiles a brush modifier can hold (at most 600 x 600 m and MaxVertices); in each tile a
+	 * brush (the one an earlier PaintWhere left for exactly that tile, when nothing is applied after it there; else a new
+	 * one after every modifier) whose weight attribute for the channel moves to Strength at every vertex in the ranges.
+	 */
+	FUnrealAIMeshTerrainPaintWhere RunPaintWhere(AMeshPartition* Terrain, const FString& ChannelText, double MinSlope, double MaxSlope, double MinHeight, double MaxHeight,
+		double Strength, const FString& Label, const TArray<double>& Within)
+	{
+		const double Start = FPlatformTime::Seconds();
+		for (const double Value : { MinSlope, MaxSlope, MinHeight, MaxHeight, Strength })
+		{
+			if (!FMath::IsFinite(Value))
+				return PaintWhereFailed(TEXT("the slopes, heights and Strength must be finite numbers"));
+		}
+		if (!(MinSlope >= 0.0 && MinSlope <= MaxSlope && MaxSlope <= 90.0))
+			return PaintWhereFailed(FString::Printf(TEXT("MinSlope %g / MaxSlope %g: need 0 <= MinSlope <= MaxSlope <= 90 degrees"), MinSlope, MaxSlope));
+		if (MinHeight > MaxHeight)
+			return PaintWhereFailed(FString::Printf(TEXT("MinHeight %g is above MaxHeight %g (world Z, cm)"), MinHeight, MaxHeight));
+		if (!(Strength >= 0.0 && Strength <= 1.0))
+			return PaintWhereFailed(FString::Printf(TEXT("Strength %g is outside 0 .. 1 (the weight to paint)"), Strength));
+		if (Within.Num() != 0 && Within.Num() != 4)
+			return PaintWhereFailed(FString::Printf(TEXT("Within has %d numbers: pass [MinX, MinY, MaxX, MaxY] (world cm) or [] for the whole terrain"), Within.Num()));
+		if (Within.Num() == 4 && !(Within[0] < Within[2] && Within[1] < Within[3]))
+			return PaintWhereFailed(TEXT("Within must be [MinX, MinY, MaxX, MaxY] with MinX < MaxX and MinY < MaxY (world cm)"));
+		const FName Channel(*ChannelText.TrimStartAndEnd());
+		if (Channel.IsNone())
+			return PaintWhereFailed(TEXT("Channel is empty: name one of the terrain's Channels (meshTerrains | select Label Channels)"));
+		if (!CheckTerrain(Terrain))
+			return FUnrealAIMeshTerrainPaintWhere();
+		const UMeshPartitionDefinition* Definition = Terrain->GetMeshPartitionDefinition();
+		if (!Definition || !Definition->GetChannelNames().Contains(Channel))
+			return PaintWhereFailed(FString::Printf(TEXT("'%s' is not a paint channel of %s: its definition has %s"), *ChannelText, *Terrain->GetActorNameOrLabel(), *ChannelList(Terrain)));
+		if (!WaitForBuild(Terrain))
+			return FUnrealAIMeshTerrainPaintWhere();
+		const FBox Built = BuiltBounds(Terrain);
+		if (!Built.IsValid)
+			return PaintWhereFailed(FString::Printf(TEXT("%s has no built ground to paint"), *Terrain->GetActorNameOrLabel()));
+		const FBox2D Ground(FVector2D(Built.Min), FVector2D(Built.Max));
+		FBox2D Area = Within.Num() == 4 ? FBox2D(FVector2D(Within[0], Within[1]), FVector2D(Within[2], Within[3])) : Ground;
+		if (!Area.Intersect(Ground))
+		{
+			return PaintWhereFailed(FString::Printf(TEXT("Within is off the terrain %s (it spans X %.0f .. %.0f, Y %.0f .. %.0f)"), *Terrain->GetActorNameOrLabel(),
+				Ground.Min.X, Ground.Max.X, Ground.Min.Y, Ground.Max.Y));
+		}
+		Area = Area.Overlap(Ground);
+
+		// Tiles: at most 600 m and MaxVertices of the terrain's base grid each.
+		const double Density = VertexDensity(Terrain, Area);
+		const double Tile = FMath::Min(2.0 * MaxBrushHalfExtent, Density > 0.0 ? FMath::Sqrt(MaxVertices / 2.0 / Density) : 2.0 * MaxBrushHalfExtent);
+		const FVector2D Size = Area.GetSize();
+		const int32 TilesX = FMath::Max(1, FMath::CeilToInt(Size.X / Tile)), TilesY = FMath::Max(1, FMath::CeilToInt(Size.Y / Tile));
+		if (TilesX * TilesY > MaxPaintTiles)
+			return PaintWhereFailed(FString::Printf(TEXT("the area needs %d brush tiles (at most %d): pass a smaller Within"), TilesX * TilesY, MaxPaintTiles));
+		const FVector2D Half(Size.X / TilesX / 2.0, Size.Y / TilesY / 2.0);
+		// A brush fades out at the edge of its edit box: each one reaches a few vertices past its tile, so the vertices along a
+		// tile's edge lie well inside a brush (the overlapping brushes write the same weights there).
+		const double Margin = 2.0 * (Density > 0.0 ? FMath::Sqrt(1.0 / Density) : 100.0) + 100.0;
+
+		FScopedTransaction Transaction(FText::Format(NSLOCTEXT("UnrealAIMeshTerrain", "PaintWhere", "Paint Mesh Terrain where ({0})"), FText::FromName(Channel)));
+		UWorld* World = Terrain->GetWorld();
+		const TArray<UModifierComponent*> Stack = Modifiers(Terrain);
+		// New brushes go after every modifier of their priority layer there is (as Run places a stroke's brush): set from the first.
+		TOptional<double> Last;
+		FStroke Paint;
+		Paint.Kind = EStroke::Paint;
+		Paint.Channel = Channel;
+		FUnrealAIMeshTerrainPaintWhere Out;
+		const float Depth = static_cast<float>(Built.Max.Z - Built.Min.Z + 20000.0);
+		struct FTile { FVector2D Center; FVector2D Half; int32 Splits = 0; };
+		TArray<FTile> Tiles;
+		for (int32 TileY = 0; TileY < TilesY; ++TileY)
+		{
+			for (int32 TileX = 0; TileX < TilesX; ++TileX)
+				Tiles.Add({ Area.Min + FVector2D((2 * TileX + 1) * Half.X, (2 * TileY + 1) * Half.Y), Half });
+		}
+		TArray<FString> Skipped;
+		// A prepared tile: its brush (new or reused), what to restore when it stores nothing, and its edit mesh.
+		struct FPrepared
+		{
+			UProjectMeshLayersModifier* Brush = nullptr;
+			bool bNew = false;
+			AActor* Owner = nullptr;
+			AMeshPartition* Previous = nullptr;
+			TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries;
+			float OldUp = 0.0f, OldDown = 0.0f;
+			FBox2D Box;
+			UE::MeshPartition::UEditableModifierToolTarget* Target = nullptr;
+			FDynamicMesh3 Mesh;
+			int32 Layer = INDEX_NONE;
+		};
+		TArray<FPrepared> Prepared;
+		TMap<FIntPoint, double> TargetWeights; // by world X, Y (cm): the weight each vertex moves by
+		const auto Key = [](const FVector& Point) { return FIntPoint(FMath::RoundToInt32(Point.X), FMath::RoundToInt32(Point.Y)); };
+		// A tile that stores nothing leaves no new brush behind and a reused one as it was.
+		const auto DropTile = [World, Terrain](FPrepared& Prep)
+		{
+			if (Prep.bNew)
+			{
+				if (Prep.Owner)
+					World->EditorDestroyActor(Prep.Owner, /*bShouldModifyLevel*/ true);
+				for (const AMeshPartition* Bound : { static_cast<const AMeshPartition*>(Terrain), static_cast<const AMeshPartition*>(Prep.Previous) })
+				{
+					if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
+						Component->UpdateModifierList();
+				}
+				return;
+			}
+			Prep.Brush->SetChannelEntries(Prep.OldEntries);
+			const auto Restore = [&Prep](const TCHAR* Name, float Old)
+			{
+				const float* Value = PropertyValue<float>(Prep.Brush, Name);
+				if (Value && *Value != Old)
+					SetProperty(Prep.Brush, Name, Old);
+			};
+			Restore(TEXT("VerticalExtentUp"), Prep.OldUp);
+			Restore(TEXT("VerticalExtentDown"), Prep.OldDown);
+		};
+		// A vertex belongs to exactly one tile (half-open boxes; the area's own far edges included), so seams are painted once.
+		const auto Owns = [&Area](const FBox2D& Box, const FVector2D& Point)
+		{
+			// (Tile edges are sums of halves: within 1 cm of the area's far edge counts as on it.)
+			return Point.X >= Box.Min.X && (Point.X < Box.Max.X || Box.Max.X >= Area.Max.X - 1.0) && Point.Y >= Box.Min.Y && (Point.Y < Box.Max.Y || Box.Max.Y >= Area.Max.Y - 1.0);
+		};
+		for (int32 TileIndex = 0; TileIndex < Tiles.Num(); ++TileIndex)
+		{
+			const FTile Piece = Tiles[TileIndex];
+			const FVector2D Center = Piece.Center;
+			const FBox2D Box(Center - Piece.Half, Center + Piece.Half);
+			// An earlier PaintWhere's brush for exactly this tile, with nothing applied after it there (the brushes of the
+			// neighbouring tiles overlap it only by their margins, with the same weights: they do not count).
+			const FBox2D Inner = Box.ExpandBy(-10.0);
+			const FVector2D Extents = Piece.Half + FVector2D(Margin);
+			const auto IsTileBrush = [&Extents, &Center](const UModifierComponent* Modifier)
+			{
+				return Cast<UProjectMeshLayersModifier>(Modifier) && EditExtents(const_cast<UProjectMeshLayersModifier*>(Cast<UProjectMeshLayersModifier>(Modifier))).Equals(Extents, 1.0)
+					&& !FVector2D(Modifier->GetComponentLocation()).Equals(Center, 1.0);
+			};
+			UProjectMeshLayersModifier* Brush = nullptr;
+			for (int32 Index = 0; Index < Stack.Num() && !Brush; ++Index)
+			{
+				UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Stack[Index]);
+				if (!Candidate || !CanTakeStroke(Candidate, Paint) || !FVector2D(Candidate->GetComponentLocation()).Equals(Center, 1.0) || !EditExtents(Candidate).Equals(Extents, 1.0))
+					continue;
+				bool bCovered = false;
+				for (int32 Later = Index + 1; Later < Stack.Num() && !bCovered; ++Later)
+				{
+					const FBox Bounds = Stack[Later]->ComputeCombinedBounds();
+					bCovered = !Stack[Later]->GetIsDisabledFlag() && Bounds.IsValid && !IsTileBrush(Stack[Later]) && Inner.Intersect(FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)));
+				}
+				Brush = bCovered ? nullptr : Candidate;
+			}
+			const bool bNew = Brush == nullptr;
+			AMeshPartition* Previous = nullptr;
+			if (bNew)
+			{
+				const FVector Location(Center, (Built.Min.Z + Built.Max.Z) / 2.0);
+				Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
+					UniqueLabel(World, Label.IsEmpty() ? Terrain->GetActorLabel() + TEXT("_Paint") : Label), Previous));
+				if (!Brush)
+				{
+					if (Out.Brushes.IsEmpty())
+					{
+						Transaction.Cancel();
+						return FUnrealAIMeshTerrainPaintWhere(); // SpawnModifier failed with the reason; nothing was painted
+					}
+					Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (no brush could be placed)"), Center.X, Center.Y));
+					continue;
+				}
+				if (!Last)
+				{
+					Last = 0.0;
+					for (const UModifierComponent* Modifier : Stack)
+					{
+						if (Modifier->GetType() == Brush->GetType())
+							Last = FMath::Max(*Last, Modifier->GetPriority() + 1.0);
+					}
+				}
+				Brush->SetPriority(*Last);
+				SetProperty(Brush, TEXT("EditExtents"), Extents);
+			}
+			AActor* Owner = Brush->GetOwner();
+			Brush->Modify();
+			if (Owner)
+				Owner->Modify();
+			const FObjectProperty* MeshProperty = CastField<FObjectProperty>(Brush->GetClass()->FindPropertyByName(TEXT("MeshObject")));
+			if (UObject* MeshObject = MeshProperty ? MeshProperty->GetObjectPropertyValue_InContainer(Brush) : nullptr)
+				MeshObject->Modify();
+			const auto FloatProperty = [Brush](const TCHAR* Name) { const float* Value = PropertyValue<float>(Brush, Name); return Value ? *Value : 0.0f; };
+			const float OldUp = FloatProperty(TEXT("VerticalExtentUp")), OldDown = FloatProperty(TEXT("VerticalExtentDown"));
+			for (const TCHAR* Name : { TEXT("VerticalExtentUp"), TEXT("VerticalExtentDown") })
+			{
+				if (FloatProperty(Name) < Depth)
+					SetProperty(Brush, Name, Depth);
+			}
+			const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
+			if (!ChannelEntry(OldEntries, Channel))
+			{
+				TArray<FSculptLayerModifierWeightAttributeEntry> Entries = OldEntries;
+				Entries.AddDefaulted_GetRef().ChannelName = Channel;
+				Brush->SetChannelEntries(Entries);
+			}
+			FPrepared& Prep = Prepared.AddDefaulted_GetRef();
+			Prep.Brush = Brush;
+			Prep.bNew = bNew;
+			Prep.Owner = Owner;
+			Prep.Previous = Previous;
+			Prep.OldEntries = OldEntries;
+			Prep.OldUp = OldUp;
+			Prep.OldDown = OldDown;
+			Prep.Box = Box;
+			Prep.Target = NewObject<UE::MeshPartition::UEditableModifierToolTarget>();
+			Prep.Target->Initialize(Brush);
+			Prep.Mesh = Prep.Target->GetDynamicMesh();
+			FDynamicMesh3& Mesh = Prep.Mesh;
+			if (Mesh.VertexCount() > MaxVertices * 1.5)
+			{
+				// Denser ground than the base grid (a remeshed shape): split the tile in four (twice at most).
+				DropTile(Prep);
+				if (bNew && Piece.Splits < 2)
+				{
+					const FVector2D Quarter = Piece.Half / 2.0;
+					for (const FVector2D Sign : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
+						Tiles.Add({ Center + Sign * Quarter, Quarter, Piece.Splits + 1 });
+				}
+				else
+				{
+					Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (%d vertices in its %.0f m tile)"), Center.X, Center.Y, Mesh.VertexCount(), Piece.Half.X / 50.0));
+				}
+				Prepared.Pop();
+				continue;
+			}
+			UE::Geometry::FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+			for (int32 Index = 0; Attributes && Index < Attributes->NumWeightLayers(); ++Index)
+			{
+				if (Attributes->GetWeightLayer(Index)->GetName() == Channel)
+					Prep.Layer = Index;
+			}
+			if (Prep.Layer == INDEX_NONE)
+			{
+				DropTile(Prep);
+				Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (its brush %s has no weight attribute for %s)"), Center.X, Center.Y, Owner ? *Owner->GetActorLabel() : TEXT("?"), *Channel.ToString()));
+				Prepared.Pop();
+				continue;
+			}
+			// The weights of the vertices this tile owns, from its full neighbourhood (an edge vertex of a tile's mesh has
+			// triangles on one side only; its owner sees both).
+			const FTransform Transform = Prep.Target->GetWorldTransform();
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+			{
+				const FVector World3 = Transform.TransformPosition(Mesh.GetVertex(Vertex));
+				if (!Area.IsInsideOrOn(FVector2D(World3)) || !Owns(Box, FVector2D(World3)))
+					continue;
+				const FVector Normal = Transform.TransformVectorNoScale(UE::Geometry::FMeshNormals::ComputeVertexNormal(Mesh, Vertex));
+				const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Normal.Z), 0.0, 1.0)));
+				const double Weight = RangeWeight(Slope, MinSlope, MaxSlope, SlopeEdgeDegrees) * RangeWeight(World3.Z, MinHeight, MaxHeight, HeightEdge);
+				TargetWeights.Add(Key(World3), Weight);
+				Out.Matched += Weight >= 1.0 ? 1 : 0;
+			}
+		}
+		// Then every tile writes all of its mesh's vertices, those past its edge too: a brush Sets the channel at every vertex
+		// it holds, so overlapping brushes must agree (a neighbour's vertex left at its old value would undo the paint there).
+		TSet<FIntPoint> Painted;
+		for (FPrepared& Prep : Prepared)
+		{
+			FDynamicMesh3& Mesh = Prep.Mesh;
+			UE::Geometry::FDynamicMeshWeightAttribute* Weights = Mesh.Attributes()->GetWeightLayer(Prep.Layer);
+			const FTransform Transform = Prep.Target->GetWorldTransform();
+			int32 Changed = 0;
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+			{
+				const FIntPoint Where = Key(Transform.TransformPosition(Mesh.GetVertex(Vertex)));
+				const double* Weight = TargetWeights.Find(Where);
+				if (!Weight || *Weight <= 0.0)
+					continue;
+				float Old = 0.0f;
+				Weights->GetValue(Vertex, &Old);
+				const float New = static_cast<float>(FMath::Lerp(static_cast<double>(Old), Strength, *Weight));
+				if (New != Old)
+				{
+					Weights->SetValue(Vertex, &New);
+					++Changed;
+					Painted.Add(Where);
+				}
+			}
+			if (Changed == 0)
+			{
+				DropTile(Prep); // nothing to store: no new brush and no new channel entry (it would pin the channel there)
+				continue;
+			}
+			Prep.Target->CommitDynamicMesh(Mesh, IDynamicMeshCommitter::FDynamicMeshCommitInfo());
+			Out.NewBrushes += Prep.bNew ? 1 : 0;
+			Out.Brushes.Add(Prep.Owner ? Prep.Owner->GetActorLabel() : FString());
+		}
+		Out.Vertices = Painted.Num();
+		if (!Skipped.IsEmpty())
+			Out.Note = FString::Printf(TEXT("not painted: %s; pass a smaller Within there"), *FString::Join(Skipped, TEXT("; ")));
+		FString StillBuilding;
+		Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
+		Out.State = Out.Ready ? FString(TEXT("built")) : StillBuildingState(Terrain, StillBuilding);
+		Out.Seconds = SecondsSince(Start);
+		return Out;
+	}
+}
+
+FUnrealAIMeshTerrainPaintWhere UUnrealAIMeshTerrainSculptApi::PaintWhere(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, double MinSlope, double MaxSlope,
+	double MinHeight, double MaxHeight, double Strength, const FString& Label, const TArray<double>& Within)
+{
+	return UnrealAIMeshTerrainSculptLocal::RunPaintWhere(Terrain, Channel, MinSlope, MaxSlope, MinHeight, MaxHeight, Strength, Label, Within);
 }
 
 FUnrealAIMeshTerrainStroke UUnrealAIMeshTerrainSculptApi::Sculpt(UE::MeshPartition::AMeshPartition* Terrain, const FString& Mode, FVector Point, double Radius, double Height, double Strength, double Falloff)

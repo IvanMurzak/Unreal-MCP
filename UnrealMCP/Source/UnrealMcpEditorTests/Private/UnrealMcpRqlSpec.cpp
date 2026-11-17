@@ -22,6 +22,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "ScopedTransaction.h"
 #include "Engine/LevelStreamingVolume.h"
 #include "Engine/PointLight.h"
@@ -37,6 +38,7 @@
 #include "Misc/PackageName.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "UnrealMcpRqlSpecHelpers.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -249,6 +251,34 @@ void FUnrealMcpRqlSpec::Define()
 				Collector.Shutdown();
 		});
 
+		It("refuses rql-schema through a bridge whose RQL renderer is older than the plugin's answers, with a plain-text error", [this]()
+		{
+			FUnrealMcpToolRegistry Registry;
+			UnrealMcpRqlTools::Register(Registry);
+			auto Call = [&Registry](int32 Renderer, const FString& BridgeVersion)
+			{
+				TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+				Args->SetStringField(TEXT("guide"), TEXT("no-such-guide"));
+				FUnrealMcpToolCall ToolCall(Args);
+				ToolCall.SidecarRqlRenderer = Renderer;
+				ToolCall.SidecarBridgeVersion = BridgeVersion;
+				return Registry.Execute(TEXT("rql-schema"), ToolCall);
+			};
+			// The released 0.32.0 bridge sends no rqlRenderer (0): it would render the guide as an empty success.
+			const FUnrealMcpToolResult Old = Call(0, TEXT("0.32.0"));
+			TestFalse(TEXT("an old bridge gets an error"), Old.bSuccess);
+			TestTrue(*FString::Printf(TEXT("naming both versions and the fix (%s)"), *Old.Message), Old.Message.StartsWith(TEXT("error bridge-outdated: the Unreal MCP bridge 0.32.0 is older than the plugin: it renders RQL answers at level 0"))
+				&& Old.Message.Contains(TEXT("UNREAL_MCP_BRIDGE_PATH")));
+			TestFalse(TEXT("as plain text, which an old bridge passes through unchanged"), Old.Message.StartsWith(TEXT("{")));
+			TestTrue(TEXT("a bridge that did not report its version"), Call(0, FString()).Message.StartsWith(TEXT("error bridge-outdated: the Unreal MCP bridge is older than the plugin")));
+			// The current renderer, and a call from no sidecar (INDEX_NONE), get the schema answer (here: unknown-guide JSON).
+			for (const int32 Renderer : { UnrealMcpRqlTools::RequiredRqlRenderer, static_cast<int32>(INDEX_NONE) })
+			{
+				const FUnrealMcpToolResult Current = Call(Renderer, TEXT("0.33.0"));
+				TestTrue(*FString::Printf(TEXT("renderer %d gets the schema answer (%s)"), Renderer, *Current.Message), Current.Message.Contains(TEXT("unknown-guide")));
+			}
+		});
+
 		It("answers a call without a parsed plan with an unsupported diagnostic", [this]()
 		{
 			FUnrealMcpToolRegistry Registry;
@@ -363,6 +393,59 @@ void FUnrealMcpRqlSpec::Define()
 			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("destroy ok (%s)"), *Codes(Destroyed)), IsOk(Destroyed));
 			TestEqual(TEXT("the original is gone"), CountLamps(), 0);
+		});
+
+		It("refuses Destroy of an actor the editor's Delete refuses (CanDeleteSelectedActor), with its reason, destroying nothing", [this]()
+		{
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!TestNotNull(TEXT("editor world"), World))
+				return;
+			SpawnLamp();
+			AActor* Undeletable = World->SpawnActor<AUnrealMcpRqlSpecUndeletableActor>();
+			if (!TestNotNull(TEXT("spawned"), Undeletable))
+				return;
+			Undeletable->SetActorLabel(TEXT("RqlSpecLampUndeletable"));
+			ON_SCOPE_EXIT { if (IsValid(Undeletable)) World->EditorDestroyActor(Undeletable, true); };
+			// actors | where Label starts-with "RqlSpecLamp" | call Destroy()
+			const TSharedPtr<FJsonObject> Refused = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"starts-with","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
+			TestFalse(TEXT("refused"), IsOk(Refused));
+			TestTrue(*FString::Printf(TEXT("with the actor's reason (%s)"), *Codes(Refused)),
+				Codes(Refused).Contains(TEXT("RqlSpecLampUndeletable cannot be deleted: it still has 3 spec proxies")) && Codes(Refused).Contains(TEXT("nothing was changed")));
+			TestTrue(TEXT("nothing destroyed, the deletable lamp included (all or nothing)"), IsValid(Undeletable) && CountLamps() == 1);
+			// actors | where Label == "RqlSpecLamp" | call Destroy(): others still go
+			const TSharedPtr<FJsonObject> Destroyed = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLamp"}]}},{"op":"call","method":"Destroy","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a deletable actor is destroyed (%s)"), *Codes(Destroyed)), IsOk(Destroyed) && CountLamps() == 0);
+		});
+
+		It("undoes and redoes the last change with editor | call Undo / Redo, returning its title, adding no undo step", [this]()
+		{
+			SpawnLamp();
+			if (!TestEqual(TEXT("one lamp"), CountLamps(), 1) || !GEditor || !GEditor->Trans)
+				return;
+			const int32 Queue = GEditor->Trans->GetQueueLength();
+			const FString Title = GEditor->Trans->GetTransaction(Queue - 1)->GetTitle().ToString();
+			auto Text = [](const TSharedPtr<FJsonObject>& Result)
+			{
+				FString Json;
+				if (Result.IsValid())
+					FJsonSerializer::Serialize(Result.ToSharedRef(), TJsonWriterFactory<>::Create(&Json));
+				return Json;
+			};
+			// editor | call Undo(1000): more than there is, nothing undone
+			const TSharedPtr<FJsonObject> TooMany = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[{"lit":1000}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("too many steps are refused (%s)"), *Codes(TooMany)), !IsOk(TooMany) && Codes(TooMany).Contains(TEXT("can be undone now")));
+			TestEqual(TEXT("and nothing was undone"), CountLamps(), 1);
+			const TSharedPtr<FJsonObject> DryRun = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[{"lit":1000}]}]})RQL"), true, true);
+			TestTrue(*FString::Printf(TEXT("a dry run refuses it too (%s)"), *Codes(DryRun)), !IsOk(DryRun) && Codes(DryRun).Contains(TEXT("can be undone now")));
+			// editor | call Undo()
+			const TSharedPtr<FJsonObject> Undone = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Undo","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("undo returns the undone step's title '%s' (%s)"), *Title, *Text(Undone)), IsOk(Undone) && Text(Undone).Contains(Title));
+			TestEqual(TEXT("the spawn is undone"), CountLamps(), 0);
+			TestEqual(TEXT("Undo adds no undo step of its own"), GEditor->Trans->GetQueueLength(), Queue);
+			// editor | call Redo()
+			const TSharedPtr<FJsonObject> Redone = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"Redo","args":[]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("redo returns the title (%s)"), *Text(Redone)), IsOk(Redone) && Text(Redone).Contains(Title));
+			TestEqual(TEXT("the spawn is back"), CountLamps(), 1);
 		});
 
 		It("duplicates an actor at its own world transform plus the offset", [this]()
@@ -800,7 +883,9 @@ void FUnrealMcpRqlSpec::Define()
 			TestEqual(TEXT("no streaming entry added"), W->GetStreamingLevels().Num(), StreamingBefore);
 			// editor | call AddSublevel("@PKG@")
 			const TSharedPtr<FJsonObject> Self = Exec(With(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddSublevel","args":[{"lit":"@PKG@"}]}]})RQL")), true);
-			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(TEXT("its own sublevel"))));
+			// An untitled world the full suite left open (NewLevel("")) has no saved map to name: it is refused as such.
+			const TCHAR* OwnLevel = FPackageName::IsTempPackage(Package) ? TEXT("no saved level") : TEXT("its own sublevel");
+			TestTrue(*FString::Printf(TEXT("the world's own level is refused (%s)"), *Codes(Self)), !IsOk(Self) && Codes(Self).Contains(Says(OwnLevel)));
 			// levels | where IsPersistent | set IsVisible = false
 			const TSharedPtr<FJsonObject> Hide = Exec(TEXT(R"RQL({"rql":"0.1","source":{"path":["levels"]},"stages":[{"op":"where","pred":{"path":["IsPersistent"]}},{"op":"set","assign":[{"target":{"path":["IsVisible"]},"value":{"lit":false}}]}]})RQL"), true);
 			TestTrue(*FString::Printf(TEXT("hidden (%s)"), *Codes(Hide)), IsOk(Hide) && !W->PersistentLevel->bIsVisible);

@@ -67,14 +67,16 @@ async function invokeTool(routePrefix: string, opts: RunToolOptions): Promise<Ru
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const response = await fetchWithTimeout(
+    // The body is read inside the deadline: a server that sends the headers and then stalls is still cut off
+    // (timeout or caller abort). A connection dropped mid-body throws and is classified as such, never read as an
+    // empty answer.
+    const { response, text } = await fetchWithTimeout(
       fetchImpl,
       endpoint,
       { method: 'POST', headers, body: body.json },
       { timeoutMs, externalSignal: opts.signal, onTimeout: () => { timedOut = true; } },
+      async (r) => ({ response: r, text: await r.text() }),
     );
-    // A connection dropped mid-body throws here and is classified as such, never read as an empty answer.
-    const text = await response.text();
     const data = parseJsonOrText(text);
     if (!response.ok) {
       return makeFailure({

@@ -22,8 +22,9 @@
 
 import { upsertServerTarget } from '../utils/project-marker.js';
 // B5 FIX (auth-fixes design 02 T3): the routing pin is derived with cli-core's
-// v2 ProjectIdentity (`derivePinV2`), which normalizes `\`→`/` before hashing.
-// `path.resolve` (below) yields a Windows backslash root; the legacy v1
+// v2 ProjectIdentity (`derivePinV2`, through `deriveProjectRoutingPin`, which hashes
+// the real path the sidecar hashes), which normalizes `\`→`/` before hashing.
+// A Windows path (resolved or real) has backslashes; the legacy v1
 // `deriveProjectPin` hashed those backslashes verbatim, so the enroll pin never
 // prefix-matched the plugin's forward-slash `projectPathHash` and pinned routing
 // silently failed on Windows. v2 collapses `C:\a\b` and `C:/a/b` to one hash.
@@ -35,13 +36,13 @@ import { upsertServerTarget } from '../utils/project-marker.js';
 // deleted (it dropped unknown fields and wrote non-atomically).
 import {
   commitToolsOnlyLogin,
-  derivePinV2,
   MachineCredentialStore,
   normalizeRedeemResponse,
   unrealAdapter,
   type CredentialCodec,
 } from '@baizor/gamedev-cli-core';
 import { upsertProjectPin } from '../utils/pin-upsert.js';
+import { deriveProjectRoutingPin } from '../utils/port.js';
 import { asError } from '../utils/error.js';
 import { fetchWithTimeout } from '../utils/http.js';
 import { emitProgress } from './progress.js';
@@ -138,7 +139,8 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
 
     emitProgress(opts.onProgress, { phase: 'start', message: 'Redeeming enrollment code' });
 
-    const resp = await fetchWithTimeout(
+    // The body is read inside the deadline, so a server that stalls after the headers times out too.
+    const { resp, text } = await fetchWithTimeout(
       fetchImpl,
       `${baseUrl}${REDEEM_PATH}`,
       {
@@ -147,6 +149,14 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
         body: JSON.stringify({ enroll_code: enrollCode }),
       },
       { timeoutMs: PER_REQUEST_TIMEOUT_MS },
+      // A body that breaks mid-read reads as empty (the status still classifies the failure); a timeout still aborts.
+      async (r) => ({
+        resp: r,
+        text: await r.text().catch((e: unknown) => {
+          if ((e as { name?: string } | null)?.name === 'AbortError') throw e;
+          return '';
+        }),
+      }),
     );
 
     if (!resp.ok) {
@@ -155,7 +165,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
       if (resp.status === 503) {
         return fail('signing_unavailable', 'The server could not sign a plugin credential right now (503). Try again shortly.');
       }
-      const body = (await resp.json().catch(() => ({}))) as { error?: string; error_description?: string };
+      const body = parseJsonObject(text) as { error?: string; error_description?: string };
       const reason = body.error === 'invalid_grant' ? 'invalid_code' : body.error ?? `http-${resp.status}`;
       // A 400 (or an explicit `invalid_grant`) is the AS's uniform spent/invalid/
       // expired-code signal (no oracle). Any OTHER status (e.g. a transient 5xx) is
@@ -171,7 +181,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
       );
     }
 
-    const body = (await resp.json()) as RedeemResponse;
+    const body = JSON.parse(text) as RedeemResponse;
     if (!body.access_token) return fail('token-malformed', 'Redeem response missing access_token.');
     // cli-core's normalizer maps the AS response defensively (snake_case AND
     // camelCase; `expires_in` seconds → absolute ISO `expiresAt`) and carries
@@ -226,7 +236,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
 
     // 3. Upsert the D14 routing pin (cli-core v2 identity — B5 fix) into any
     //    existing project-local agent config.
-    const pin = derivePinV2(projectDir);
+    const pin = deriveProjectRoutingPin(projectDir);
     const { updatedFiles } = upsertProjectPin(projectDir, pin, { serverTarget });
     if (updatedFiles.length > 0) {
       emitProgress(opts.onProgress, {
@@ -251,6 +261,15 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
     const error = asError(err);
     const reason = error.name === 'AbortError' ? 'timeout' : 'network-error';
     return { kind: 'failure', success: false, reason, error };
+  }
+}
+
+/** An error answer's JSON body, `{}` when it is not JSON. */
+function parseJsonObject(text: string): unknown {
+  try {
+    return JSON.parse(text) ?? {};
+  } catch {
+    return {};
   }
 }
 

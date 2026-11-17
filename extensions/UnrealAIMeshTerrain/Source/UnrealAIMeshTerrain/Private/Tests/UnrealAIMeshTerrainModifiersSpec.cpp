@@ -182,6 +182,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TEXT("AddPatch(MeshPartition Terrain, Vector Location, double Radius, double Falloff, string Label)"),
 				TEXT("AddWeight(MeshPartition Terrain, string Channel, Vector Location, double Radius, double Falloff, double Value, string Label)"),
 				TEXT("AddSpline(MeshPartition Terrain, List<Vector> Points, double Width, double Falloff, bool Closed, string Channel, string Label)"),
+				TEXT("AddRoad(MeshPartition Terrain, List<Vector> Points, double Width, double MaxSlope, double Falloff, string Label, double TimeoutSeconds)"),
 				TEXT("AddShape(MeshPartition Terrain, string Shape, Vector Location, Vector Size, string Operation, Rotator Rotation, string Label)"),
 				TEXT("AddLattice(MeshPartition Terrain, Vector Location, Vector Size, int Resolution, string Label)"),
 				TEXT("AddTexturePatch(MeshPartition Terrain, Texture2D Texture, Vector Location, Vector2D Size, double Height, string Label)"),
@@ -393,15 +394,29 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				TestTrue(TEXT("Green 0.3 after Edit"), Sample.Channels.Contains(TEXT("Green")) && FMath::IsNearlyEqual(Sample.Channels[TEXT("Green")], 0.3f, 0.02f));
 			}
 
-			// meshTerrainModifier | call AddTexturePatch(unreal.find("<label>"), "/Engine/EngineResources/WhiteSquareTexture", [X0, 0, 0], [1000, 1000], 1000)
-			if (ModSpecRun(TEXT("texture patch"), TEXT("AddTexturePatch"), { T, ModSpecStr(TEXT("/Engine/EngineResources/WhiteSquareTexture")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(1000.0, 1000.0), ModSpecNum(1000.0),
+			// A 300 m stamp: white raises half the Height. The engine's default vertical extents (100 m up and down) would clamp it.
+			// meshTerrainModifier | call AddTexturePatch(unreal.find("<label>"), "/Engine/EngineResources/WhiteSquareTexture", [X0, 0, 0], [1000, 1000], 60000)
+			if (ModSpecRun(TEXT("texture patch"), TEXT("AddTexturePatch"), { T, ModSpecStr(TEXT("/Engine/EngineResources/WhiteSquareTexture")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(1000.0, 1000.0), ModSpecNum(60000.0),
 				ModSpecStr(Label + TEXT("_Tex")) }))
 			{
+				const auto Extent = [this, Terrain, &Label](const TCHAR* Name)
+				{
+					UModifierComponent* Patch = ModSpecFindModifier(Terrain, Label + TEXT("_Tex"));
+					const FNumericProperty* Property = Patch ? CastField<FNumericProperty>(Patch->GetClass()->FindPropertyByName(Name)) : nullptr;
+					return Property ? Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Patch)) : -1.0;
+				};
+				TestTrue(*FString::Printf(TEXT("the patch reaches its Height up and down (%.0f / %.0f)"), Extent(TEXT("VerticalPatchExtentUp")), Extent(TEXT("VerticalPatchExtentDown"))),
+					Extent(TEXT("VerticalPatchExtentUp")) >= 60000.0 && Extent(TEXT("VerticalPatchExtentDown")) >= 60000.0);
 				// Mesh Partition reads a texture patch's texture through the renderer: under -nullrhi (the suite) it applies nothing.
 				if (FApp::CanEverRender())
-					ModSpecExpectHeight(TEXT("white raises half the Height"), Terrain, X0, 0.0, 500.0, 2.0);
+					ModSpecExpectHeight(TEXT("white raises half the Height, 300 m"), Terrain, X0, 0.0, 30000.0, 20.0);
 				else
 					AddInfo(TEXT("-nullrhi: a texture patch changes no height without a renderer (engine); its height is checked in a rendering editor"));
+				// meshTerrainModifier | call Edit(unreal.find("<label>_Tex").Modifier, [-1, -1, -1], -1, -1, 80000): a higher stamp widens them again.
+				ModSpecRun(TEXT("higher stamp"), TEXT("Edit"), { ModSpecModifier(Label + TEXT("_Tex")), ModSpecVec(-1.0, -1.0, -1.0), ModSpecNum(-1.0), ModSpecNum(-1.0), ModSpecNum(80000.0) });
+				TestTrue(*FString::Printf(TEXT("Edit widens the extents (%.0f)"), Extent(TEXT("VerticalPatchExtentUp"))), Extent(TEXT("VerticalPatchExtentUp")) >= 80000.0);
+				// Back to a low stamp: the shapes placed later around it are checked at ground level.
+				ModSpecRun(TEXT("low stamp"), TEXT("Edit"), { ModSpecModifier(Label + TEXT("_Tex")), ModSpecVec(-1.0, -1.0, -1.0), ModSpecNum(-1.0), ModSpecNum(-1.0), ModSpecNum(1000.0) });
 			}
 
 			// meshTerrainModifier | call AddRemesh(unreal.find("<label>"), [X0 + 4000, -1500, 0], [2000, 2000, 50000], 100)
@@ -419,7 +434,11 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 
 			// meshTerrainModifier | call Move(unreal.find("<label>_Rectangle").Modifier, [X0 - 4000, 3000, 100])
 			const FString Rectangle = Label + TEXT("_Rectangle");
-			ModSpecRun(TEXT("move the rectangle"), TEXT("Move"), { ModSpecModifier(Rectangle), ModSpecVec(X0 - 4000.0, 3000.0, 100.0) });
+			TSharedPtr<FJsonObject> Moved;
+			ModSpecRun(TEXT("move the rectangle"), TEXT("Move"), { ModSpecModifier(Rectangle), ModSpecVec(X0 - 4000.0, 3000.0, 100.0) }, &Moved);
+			// The result says where the modifier is now (Move takes a world position: an agent passing an offset sees it).
+			TestTrue(*FString::Printf(TEXT("Move returns the new world Location (%s)"), *ModSpecJson(Moved).Left(400)), Moved.IsValid()
+				&& Moved->GetStringField(TEXT("Location")) == FString::Printf(TEXT("(%.0f, 3000, 100)"), X0 - 4000.0));
 			ModSpecExpectHeight(TEXT("the pad moved"), Terrain, X0 - 4000.0, 3000.0, 100.0);
 			ModSpecExpectHeight(TEXT("the old pad is gone"), Terrain, X0 - 4000.0, 1500.0, 0.0, 2.0);
 		});
@@ -458,6 +477,193 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			// meshTerrainModifier | call Move(<lattice>, [X0 - 1000, 0, 0])
 			ModSpecRun(TEXT("moved lattice"), TEXT("Move"), { ModSpecModifier(Lattice), ModSpecVec(X0 - 1000.0, 0.0, 0.0) });
 			ModSpecExpectHeight(TEXT("the bump moved with it"), Terrain, X0 - 1000.0, 0.0, 600.0, 5.0);
+		});
+
+		It("list the base meshes and modifiers a deleted terrain left behind as bound to no terrain, and Remove them", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModOrphan"));
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(-1400000.0, 0.0, 0.0), 4000.0, 4000.0, 40, 40);
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
+			{
+				UnrealAIMeshTerrain::DestroyTerrain(Terrain);
+				return;
+			}
+			const TArray<UModifierComponent*> Bases = UnrealAIMeshTerrain::Modifiers(Terrain, /*bBases*/ true);
+			if (!TestEqual(TEXT("one base mesh"), Bases.Num(), 1))
+			{
+				UnrealAIMeshTerrain::DestroyTerrain(Terrain);
+				return;
+			}
+			TWeakObjectPtr<AActor> BaseActor = Bases[0]->GetOwner();
+			const FString BaseLabel = BaseActor->GetActorLabel();
+			ON_SCOPE_EXIT { if (BaseActor.IsValid()) BaseActor->GetWorld()->EditorDestroyActor(BaseActor.Get(), true); };
+			// The terrain actor deleted alone (the Outliner's Delete): its base mesh stays, bound to nothing.
+			Terrain->GetWorld()->EditorDestroyActor(Terrain, /*bShouldModifyLevel*/ true);
+
+			// meshTerrainModifiers | where Terrain == null | select Modifier
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("orphans query"), UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifiers"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Terrain"]},{"lit":null}]}},{"op":"select","fields":[{"name":"Modifier","expr":{"path":["Modifier"]}}]}]})RQL"), false, &Result));
+			const FString Json = ModSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("the left-behind base mesh is listed (%s)"), *Json.Left(800)), Json.Contains(FString::Printf(TEXT("\"Actor\":\"%s\""), *BaseLabel)) && Json.Contains(TEXT("\"IsBase\":true")));
+
+			// meshTerrainModifiers | where Terrain == null and Modifier.Actor == "<base label>" | call meshTerrainModifier.Remove($)
+			TestTrue(*FString::Printf(TEXT("Remove takes the left-behind base mesh (%s)"), *ModSpecJson(Result).Left(600)), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainModifiers"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Terrain"]},{"lit":null}]},{"op":"==","args":[{"path":["Modifier","Actor"]},{"lit":"%s"}]}]}},{"op":"call","method":"Remove","on":{"path":["meshTerrainModifier"]},"args":[{"path":[]}]}]})RQL"), *BaseLabel), true, &Result));
+			TestTrue(TEXT("its actor is gone, not left empty"), !BaseActor.IsValid() || BaseActor->IsActorBeingDestroyed() || !IsValid(BaseActor.Get()));
+		});
+
+		It("build a road no steeper than MaxSlope up a Boolean dome, remeshed under it, and say how long a too-short path must be", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModRoad"));
+			const double X0 = -1500000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 20000.0, 20000.0, 200, 200);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 60.0)))
+				return;
+			const FString T = ModSpecFind(Label);
+			// A 10 m dome, 80 m across: meshTerrainModifier | call AddShape(<terrain>, "Sphere", [X0, 0, 0], [8000, 8000, 2000], "Union")
+			ModSpecRun(TEXT("a dome"), TEXT("AddShape"), { T, ModSpecStr(TEXT("Sphere")), ModSpecVec(X0, 0.0, 0.0), ModSpecVec(8000.0, 8000.0, 2000.0), ModSpecStr(TEXT("Union")) });
+			const FString Path = FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0 - 9000.0, -9000.0, 0.0), *ModSpecVec(X0, 0.0, 0.0));
+
+			// meshTerrainModifier | call AddRoad(<terrain>, [[X0 - 9000, -9000, 0], [X0, 0, 0]], 600, 8, -1, "<label>_Road")
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(*FString::Printf(TEXT("AddRoad (%s)"), *ModSpecJson(Result).Left(600)), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(Label + TEXT("_Road")) }), true, &Result));
+			TSharedPtr<FJsonObject> Road = ModSpecResult(Result);
+			if (!TestTrue(*FString::Printf(TEXT("a road result (%s)"), *ModSpecJson(Result).Left(600)), Road.IsValid()))
+				return;
+			const FString Json = ModSpecJson(Result);
+			TestTrue(*FString::Printf(TEXT("it reaches the top (%s)"), *Json.Left(800)), Road->GetBoolField(TEXT("Reached")) && Road->GetBoolField(TEXT("Ready")));
+			TestFalse(TEXT("a remesh under the road over the dome"), Road->GetStringField(TEXT("Remesh")).IsEmpty());
+			// Fine triangles only in a corridor along the road (a SplineRemesh), medium ones over the rest of the dome.
+			UModifierComponent* Corridor = ModSpecFindModifier(Terrain, Road->GetStringField(TEXT("Corridor")));
+			UModifierComponent* Box = ModSpecFindModifier(Terrain, Road->GetStringField(TEXT("Remesh")));
+			TestTrue(*FString::Printf(TEXT("a SplineRemesh corridor along the road (%s)"), *Json.Left(800)), Corridor && UnrealAIMeshTerrain::ModifierKind(Corridor) == TEXT("SplineRemesh"));
+			const FFloatProperty* BoxEdge = Box ? CastField<FFloatProperty>(Box->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength"))) : nullptr;
+			const FFloatProperty* CorridorEdge = Corridor ? CastField<FFloatProperty>(Corridor->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength"))) : nullptr;
+			TestTrue(TEXT("the box has medium edges (at least 5 m), the corridor the road's fine ones (a fifth of its width)"), BoxEdge && CorridorEdge
+				&& BoxEdge->GetPropertyValue_InContainer(Box) >= 500.0f && FMath::IsNearlyEqual(CorridorEdge->GetPropertyValue_InContainer(Corridor), 120.0f, 0.5f));
+			TestTrue(*FString::Printf(TEXT("built no steeper than 8.5 degrees (%s)"), *Json.Left(800)), Road->GetNumberField(TEXT("MaxSlope")) <= 8.5);
+			ModSpecExpectHeight(TEXT("the road's end on the dome's top"), Terrain, X0, 0.0, 1000.0, 100.0);
+			ModSpecExpectHeight(TEXT("the road's start on the plain"), Terrain, X0 - 9000.0, -9000.0, 0.0, 20.0);
+			// Flat across: 3 m either side of the centre line halfway up.
+			const double Mid = ModSpecHeight(Terrain, X0 - 4500.0, -4500.0);
+			const double Left = ModSpecHeight(Terrain, X0 - 4500.0 - 212.0, -4500.0 + 212.0), Right = ModSpecHeight(Terrain, X0 - 4500.0 + 212.0, -4500.0 - 212.0);
+			TestTrue(*FString::Printf(TEXT("flat across (%.1f / %.1f / %.1f)"), Left, Mid, Right), FMath::Abs(Left - Mid) <= 15.0 && FMath::Abs(Right - Mid) <= 15.0);
+
+			// The same path at 2 degrees needs about 1000 / tan(1.8) = 318 m (AddRoad keeps a 10% margin): it falls short and says so.
+			ModSpecRun(TEXT("remove the road"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road")) });
+			ModSpecRun(TEXT("remove its remesh"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Remesh")) });
+			ModSpecRun(TEXT("remove its corridor"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Corridor")) });
+			TestTrue(TEXT("AddRoad 2 degrees"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(2.0) }), true, &Result));
+			Road = ModSpecResult(Result);
+			TestTrue(*FString::Printf(TEXT("too short: not reached, the minimum length and what to do (%s)"), *ModSpecJson(Result).Left(900)), Road.IsValid()
+				&& !Road->GetBoolField(TEXT("Reached")) && FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), 318.2, 5.0)
+				&& FMath::IsNearlyEqual(Road->GetNumberField(TEXT("MinLengthMeters")), (Road->GetNumberField(TEXT("EndGroundZ")) - Road->GetNumberField(TEXT("StartZ"))) / FMath::Tan(FMath::DegreesToRadians(1.8)) / 100.0, 0.5)
+				&& Road->GetStringField(TEXT("Note")).Contains(TEXT("switchbacks")));
+
+			ModSpecRefuses(TEXT("two points at the same X, Y"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0, 0.0, 500.0)) }, TEXT("same X, Y"));
+			ModSpecRefuses(TEXT("a timeout of 0"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(TEXT("")), ModSpecNum(0.0) }, TEXT("1 .. 600"));
+			ModSpecRefuses(TEXT("a road steeper than 45 degrees"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(60.0) }, TEXT("MaxSlope 60"));
+			ModSpecRefuses(TEXT("a road off the terrain"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 30000.0, 0.0, 0.0)) }, TEXT("leaves"));
+		});
+
+		It("report a change applied while the terrain still builds as Ready false, not as a failure, and build it on WaitForBuild", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModSlow"));
+			const double X0 = -1700000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 40000.0, 40000.0, 400, 400);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0; UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const FString T = ModSpecFind(Label);
+			// Every build wait gives up at once, as a remeshed hill's 3-minute rebuild would after 240 s.
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			// meshTerrainModifier | call AddPatch(<terrain>, [X0, 0, 500], 3000, 1000, "<label>_Pad")
+			TSharedPtr<FJsonObject> Result;
+			const bool bOk = UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddPatch"), { T, ModSpecVec(X0, 0.0, 500.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Pad")) }), true, &Result);
+			const TSharedPtr<FJsonObject> Patch = ModSpecResult(Result);
+			TestTrue(*FString::Printf(TEXT("AddPatch succeeds with Ready false and a State saying it is applied and still building (%s)"), *ModSpecJson(Result).Left(800)),
+				bOk && Patch.IsValid() && !Patch->GetBoolField(TEXT("Ready")) && Patch->GetStringField(TEXT("State")).Contains(TEXT("applied"))
+				&& Patch->GetStringField(TEXT("State")).Contains(TEXT("WaitForBuild")));
+			TestNotNull(TEXT("the pad is placed"), ModSpecFindModifier(Terrain, Label + TEXT("_Pad")));
+			// (A wait before a change that times out fails and changes nothing: let the pad build before the stroke.)
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			TestTrue(TEXT("the pad builds"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			// meshTerrainBrush | call Sculpt(<terrain>, "Raise", [X0 + 10000, 0, 0], 1500, 300)
+			const bool bStroke = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"Sculpt","args":[%s,{"lit":"Raise"},%s,{"lit":1500},{"lit":300}]}]})RQL"),
+				*T, *ModSpecVec(X0 + 10000.0, 0.0, 0.0)), true, &Result);
+			const TSharedPtr<FJsonObject> Stroke = ModSpecResult(Result);
+			TestTrue(*FString::Printf(TEXT("a stroke succeeds with Ready false and that State too (%s)"), *ModSpecJson(Result).Left(800)),
+				bStroke && Stroke.IsValid() && !Stroke->GetBoolField(TEXT("Ready")) && Stroke->GetStringField(TEXT("State")).Contains(TEXT("applied")));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			TestTrue(TEXT("WaitForBuild then builds it"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0));
+			ModSpecExpectHeight(TEXT("the pad"), Terrain, X0, 0.0, 500.0);
+			ModSpecExpectHeight(TEXT("the stroke"), Terrain, X0 + 10000.0, 0.0, 300.0, 5.0);
+		});
+
+		It("round a switchback road's sharp corners so the built road keeps MaxSlope through them, and say where it is steepest", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModZig"));
+			const double X0 = -1900000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 60000.0, 60000.0, 600, 600);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const FString T = ModSpecFind(Label);
+			// Rolling ground and a 40 m rise to the north: meshTerrainModifier | call AddNoise(<terrain>, [X0, 0, 0], [60000, 60000], 4000, 0.00015, 0.3)
+			// and AddPatch(<terrain>, [X0, 15000, 4000], 6000, 12000)
+			ModSpecRun(TEXT("rolling ground"), TEXT("AddNoise"), { T, ModSpecVec(X0, 0.0, 0.0), ModSpecVec2(60000.0, 60000.0), ModSpecNum(4000.0), ModSpecNum(0.00015), ModSpecNum(0.3) });
+			ModSpecRun(TEXT("a rise"), TEXT("AddPatch"), { T, ModSpecVec(X0, 15000.0, 4000.0), ModSpecNum(6000.0), ModSpecNum(12000.0) });
+			// Six 400 m legs joined by 90 degree corners, then up to the top.
+			TArray<FString> Points;
+			for (int32 Leg = 0; Leg < 6; ++Leg)
+			{
+				const double Y = -25000.0 + Leg * 7000.0;
+				Points.Add(ModSpecVec(X0 + (Leg % 2 == 0 ? -20000.0 : 20000.0), Y, 0.0));
+				Points.Add(ModSpecVec(X0 + (Leg % 2 == 0 ? 20000.0 : -20000.0), Y, 0.0));
+			}
+			Points.Add(ModSpecVec(X0, 15000.0, 0.0));
+			// meshTerrainModifier | call AddRoad(<terrain>, <points>, 400, 8, -1, "<label>_Road")
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("AddRoad"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s]})"), *FString::Join(Points, TEXT(","))),
+				ModSpecNum(400.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(Label + TEXT("_Road")) }), true, &Result));
+			const TSharedPtr<FJsonObject> Road = ModSpecResult(Result);
+			if (!TestTrue(*FString::Printf(TEXT("a road result (%s)"), *ModSpecJson(Result).Left(600)), Road.IsValid()))
+				return;
+			TestTrue(*FString::Printf(TEXT("it reaches the top with its 11 corners rounded (%s)"), *ModSpecJson(Result).Left(900)),
+				Road->GetBoolField(TEXT("Reached")) && Road->GetIntegerField(TEXT("RoundedCorners")) == 11);
+			// Ground truth along the road's own spline (what a walker follows), every metre.
+			UModifierComponent* Spline = ModSpecFindModifier(Terrain, Label + TEXT("_Road"));
+			const USplineComponent* Curve = Spline && Spline->GetOwner() ? Spline->GetOwner()->FindComponentByClass<USplineComponent>() : nullptr;
+			if (!TestNotNull(TEXT("the road's spline"), Curve))
+				return;
+			// The corners (where an unrounded road measured 28.7 degrees): within 25 m of each, under 11 degrees. (The road cuts
+			// into a steep, noisy hillside here; a deep cut still exceeds MaxSlope 8 by about 2 degrees, an open item: macOS
+			// measured just under 10, Windows 10.27, so the bound keeps a margin and still fails an unrounded corner.)
+			TArray<FVector2D> Corners;
+			for (int32 Leg = 0; Leg < 6; ++Leg)
+			{
+				Corners.Add(FVector2D(X0 - 20000.0, -25000.0 + Leg * 7000.0));
+				Corners.Add(FVector2D(X0 + 20000.0, -25000.0 + Leg * 7000.0));
+			}
+			double Steepest = 0.0, SteepestCorner = 0.0;
+			FVector Previous = Curve->GetLocationAtDistanceAlongSpline(0.0, ESplineCoordinateSpace::World);
+			double PreviousHeight = ModSpecHeight(Terrain, Previous.X, Previous.Y);
+			for (double Distance = 100.0; Distance <= Curve->GetSplineLength(); Distance += 100.0)
+			{
+				const FVector Point = Curve->GetLocationAtDistanceAlongSpline(Distance, ESplineCoordinateSpace::World);
+				const double Height = ModSpecHeight(Terrain, Point.X, Point.Y);
+				const double Grade = FMath::RadiansToDegrees(FMath::Atan(FMath::Abs(Height - PreviousHeight) / FMath::Max(FVector2D::Distance(FVector2D(Point), FVector2D(Previous)), 1.0)));
+				Steepest = FMath::Max(Steepest, Grade);
+				if (Corners.ContainsByPredicate([&Point](const FVector2D& Corner) { return FVector2D::Distance(Corner, FVector2D(Point)) <= 2500.0; }))
+					SteepestCorner = FMath::Max(SteepestCorner, Grade);
+				Previous = Point;
+				PreviousHeight = Height;
+			}
+			TestTrue(*FString::Printf(TEXT("through its corners the road is under 11 degrees (%.2f)"), SteepestCorner), SteepestCorner < 11.0);
+			// The result says how steep it really is and where (what the agent acts on).
+			TestTrue(*FString::Printf(TEXT("the reported MaxSlope %.2f is the built road's (%.2f along its spline)"), Road->GetNumberField(TEXT("MaxSlope")), Steepest),
+				FMath::Abs(Road->GetNumberField(TEXT("MaxSlope")) - Steepest) <= 1.0 && Road->HasField(TEXT("SteepestAt")));
 		});
 
 		It("bind to the terrain they name, not the nearest one, and move between two terrains with Bind", [this]()
@@ -563,6 +769,56 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 				ModSpecExpectHeight(TEXT("on the default torus ring"), Terrain, X0 + 2000.0 + 333.0, -2000.0, 500.0, 60.0);
 				ModSpecExpectHeight(TEXT("in its hole"), Terrain, X0 + 2000.0, -2000.0, 0.0);
 			}
+		});
+
+		It("paint a 300 m dome and raise a plateau as high: Weight and Patch reach 300 m, Surface reads the channel on the dome's large triangles", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModDome"));
+			const double X0 = -2600000.0;
+			const double Y0 = -3000000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, Y0, 0.0), 160000.0, 160000.0, 80, 80);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain))
+				return;
+			const FString T = ModSpecFind(Label);
+			// A 1200 m wide, 300 m high dome: a lat-long sphere's triangles there are 100+ m across.
+			// meshTerrainModifier | call AddShape(unreal.find("<label>"), "Sphere", [X0, Y0, 0], [120000, 120000, 60000], "Union", [0, 0, 0], "<label>_Dome")
+			if (!ModSpecRun(TEXT("dome"), TEXT("AddShape"), { T, ModSpecStr(TEXT("Sphere")), ModSpecVec(X0, Y0, 0.0), ModSpecVec(120000.0, 120000.0, 60000.0), ModSpecStr(TEXT("Union")),
+				ModSpecVec(0.0, 0.0, 0.0), ModSpecStr(Label + TEXT("_Dome")) }))
+				return;
+			ModSpecExpectHeight(TEXT("the dome's top"), Terrain, X0, Y0, 30000.0, 300.0);
+			// A 30 m stroke on the dome's flank, between its lat-long vertices (rings 230 and 333 m out, every 15 degrees; the base mesh
+			// has one every 20 m), finds none of them: the error says why, not only "a vertex every 20 m".
+			// meshTerrainBrush | call Sculpt(unreal.find("<label>"), "Raise", [X0 + 27760, Y0 + 3655, 0], 3000, 100)
+			{
+				TSharedPtr<FJsonObject> Refused;
+				TestFalse(TEXT("a 30 m stroke on the dome's flank is refused"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"Sculpt","args":[%s,{"lit":"Raise"},%s,{"lit":3000},{"lit":100}]}]})RQL"),
+					*T, *ModSpecVec(X0 + 27760.0, Y0 + 3655.0, 0.0)), true, &Refused));
+				TestTrue(*FString::Printf(TEXT("the error names the large triangles (%s)"), *ModSpecJson(Refused).Left(600)), ModSpecJson(Refused).Contains(TEXT("made of large triangles")));
+			}
+			// meshTerrains | where Label == "<label>" | get Modifiers | select Modifier: a Boolean is in none of the default definition's layers.
+			TSharedPtr<FJsonObject> Listed;
+			TestTrue(TEXT("list the modifiers"), UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrains"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"%s"}]}},{"op":"get","expr":{"path":["Modifiers"]}},{"op":"select","fields":[{"name":"Modifier","expr":{"path":["Modifier"]}}]}]})RQL"), *Label), false, &Listed));
+			const FString ListedJson = ModSpecJson(Listed);
+			TestTrue(*FString::Printf(TEXT("LayerIndex -1 outside the definition's layers (%s)"), *ListedJson.Left(600)), ListedJson.Contains(TEXT("\"LayerIndex\":-1")) && !ListedJson.Contains(TEXT("4294967295")));
+			// meshTerrainModifier | call AddWeight(unreal.find("<label>"), "Red", [X0, Y0, 0], 70000, 1000, 1, "<label>_Rock"): placed on the ground, 300 m below the top.
+			if (!ModSpecRun(TEXT("paint the dome"), TEXT("AddWeight"), { T, ModSpecStr(TEXT("Red")), ModSpecVec(X0, Y0, 0.0), ModSpecNum(70000.0), ModSpecNum(1000.0), ModSpecNum(1.0),
+				ModSpecStr(Label + TEXT("_Rock")) }))
+				return;
+			for (const FVector2D Point : { FVector2D(X0, Y0), FVector2D(X0 + 30000.0, Y0 - 20000.0), FVector2D(X0 - 50000.0, Y0) })
+			{
+				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
+				const float* Red = Sample.Channels.Find(TEXT("Red"));
+				TestTrue(*FString::Printf(TEXT("Red painted at %s, %.0f cm up (%s)"), *Point.ToString(), Sample.Height, Red ? *FString::SanitizeFloat(*Red) : TEXT("no channels")),
+					Sample.bInside && Red && *Red >= 0.9f);
+			}
+			const UnrealAIMeshTerrain::FSurfaceSample Outside = UnrealAIMeshTerrain::SampleSurface(Terrain, X0 + 75000.0, Y0 + 75000.0);
+			TestTrue(TEXT("not painted outside"), Outside.bInside && Outside.Channels.Contains(TEXT("Red")) && Outside.Channels.FindRef(TEXT("Red")) <= 0.1f);
+			// A plateau as high as the dome on the flat ground beside it: 300 m above the ground there. (A Patch moves the
+			// vertices within its radius: on the dome's 100+ m triangles a small pad has none to move.)
+			// meshTerrainModifier | call AddPatch(unreal.find("<label>"), [X0 + 70000, Y0 + 70000, 30000], 3000, 1000, "<label>_Plateau")
+			if (ModSpecRun(TEXT("plateau"), TEXT("AddPatch"), { T, ModSpecVec(X0 + 70000.0, Y0 + 70000.0, 30000.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Plateau")) }))
+				ModSpecExpectHeight(TEXT("the plateau is level at its Z, 300 m above the ground"), Terrain, X0 + 70000.0, Y0 + 70000.0, 30000.0, 5.0);
 		});
 
 		It("rebuild after RQL set on a modifier and WaitForBuild", [this]()

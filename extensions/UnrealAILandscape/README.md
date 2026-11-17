@@ -1,6 +1,6 @@
 # Landscape RQL module
 
-RQL module for Unreal's Landscape and Water systems: create, sculpt and paint landscapes; create oceans, lakes and rivers (a river routed downhill between two points, its bed carved); query landscapes (sections, paint layers), water bodies (with a render status) and water zones.
+RQL module for Unreal's Landscape and Water systems: create, sculpt, flatten, carve, paint and delete landscapes; create oceans, lakes and rivers (a river routed downhill between two points, its bed carved); query landscapes (sections, paint layers), water bodies (with a render status) and water zones.
 
 An optional editor plugin in the [Unreal MCP monorepository](../../README.md), with its own module, version and release archive.
 
@@ -32,8 +32,8 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | Kind | Names |
 | --- | --- |
 | Sources | `landscapes`, `waterBodies`, `waterZones`, `landscape`, `water` |
-| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Paint`, `CreateLayerMaterial`, `Surface`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
-| Members | `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
+| Operations (`call`) | `landscape`: `Create`, `Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Bumps`, `Coverage`, `Paint`, `PaintWhere`, `CreateLayerMaterial`, `Surface`, `Delete`, `Rebuild`; `water`: `CreateOcean`, `CreateLake`, `CreateRiver`, `CreateRiverBetween`, `SetMaterial`, `SetZone`, `EnableWater` |
+| Members | `LandscapeProxy.Edits`, `LandscapeProxy.IsPrimary`, `LandscapeProxy.ComponentCount`, `LandscapeProxy.Sections`, `LandscapeProxy.PaintLayers`, `LandscapeProxy.Bounds`, `WaterBody.WaterType`, `WaterBody.WaterMaterial`, `WaterBody.WaterZone`, `WaterBody.Water`, `WaterBody.Path` |
 
 ```
 landscapes | select Label Sections PaintLayers LandscapeMaterial
@@ -42,9 +42,18 @@ waterZones | select Label ZoneExtent
 landscape | call CreateLayerMaterial("/Game/Landscape/M_Terrain", "Grass #3a7d2c, Rock #7a7a7a")
 landscape | call Create("Terrain", [0, 0, 0], 100, "/Game/Landscape/M_Terrain")
 landscape | call Sculpt(unreal.find("Terrain"), [2000, 1500, 0], 1200, 600)
+landscape | call Flatten(unreal.find("Terrain"), [-3000, 2500, 0], 1500, 400, 800)
+landscape | call Carve(unreal.find("Terrain"), [[-5000, 0, 0], [5000, 0, 0]], 600, 150)
+landscape | call Bumps(unreal.find("Terrain"))
+landscape | call Coverage(unreal.find("Terrain"), "Rock")
+landscape | call Smooth(unreal.find("Terrain"), [2000, 1500, 0], 800)
+landscape | call Ramp(unreal.find("Terrain"), [[-4000, 0, 100], [0, 2000, 250], [4000, 2000, 400]], 800, 500, 8)
+landscape | call RoadBetween(unreal.find("Terrain"), [-80000, -80000, 0], [40000, 20000, 0], 800, 8, 500, "road to the top")
 landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)
+landscape | call PaintWhere(unreal.find("Terrain"), "Rock", 30, 90)
 landscape | call Surface(unreal.find("Terrain"), [2000, 1500, 0])
 landscapes | where IsPrimary | select Label Bounds
+landscape | call Delete(unreal.find("Terrain"))
 water | call CreateOcean("Ocean", 0)
 water | call CreateRiverBetween("River", unreal.find("Terrain"), [-20000, 30000, 0], [60000, -90000, 0], 1500, 300)
 waterBodies | select Label Water Path
@@ -52,16 +61,57 @@ waterBodies | select Label Water Path
 
 `Create` makes a flat landscape of about one vertex per metre in at most 8 x 8 components (63-quad sections, 2 x 2
 per component above 504 m, 127-quad sections above 1008 m, so a 2 km landscape takes seconds), scaled to the requested
-size; `Sculpt` raises or lowers a smooth circular area (cm); `Paint` adds a paint layer by name (creating its layer info
-asset) and paints it with a soft edge; `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
-coloured layer per name.
+size; `Sculpt` raises or lowers a smooth circular area (cm: the full height at the centre, a cosine down to nothing at
+`Radius`); `Flatten` levels everything within `Radius` to a world height (a building pad), then blends back to the old
+ground between `Radius` and `Radius + Falloff` (`Falloff` defaults to 0: a sharp step at the edge); `Carve` digs a channel a given depth below the ground along your
+points (a riverbed or ditch: a level bottom `Width` wide, then 1:1 banks at most 2 x `Width` long); `Smooth` replaces the ground within a radius by
+the smoothest surface meeting the ground around it (a spike, pit or bump blends away, a slope stays a slope); `Ramp` sets a
+strip along points to their Z (a road bed or ramp, cut and fill, sides blended over `Falloff`; `MaxSlope` refuses a stretch
+steeper than that); `RoadBetween` finds a route from a start to an end no steeper than `MaxSlope` (an A* search on a grid of nodes
+half the road's width apart: switchbacks or a spiral up a hill), grades it like `Ramp` and returns `Reached`, `LengthMeters`, the built
+`MaxSlope`, the `Points` and `Changed` (`Reached` false: it found no route that climbs there within `MaxSlope`, the road goes as
+far as it found one); use it for a road up a hill, `Ramp` for a route you choose; `Bumps` (read-only) lists where the ground stands out of its surroundings (`Kind`: Bump, Pit, or a long
+Channel / Ridge; `Location`, `Height`, `Radius`, `Length`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
+`Weight`); `Paint` adds a paint layer by name (creating
+a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `PaintWhere`
+paints a layer wherever the ground matches a rule (slope `MinSlope` .. `MaxSlope` degrees, world height `MinHeight` ..
+`MaxHeight` cm, optionally only inside a `Within` box `[MinX, MinY, MaxX, MaxY]`; soft edges 2 degrees and 50 cm past the bounds): sand on the beaches,
+rock on every slope steeper than 30 degrees, after a base layer painted with `Paint` (radius 0); `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
+coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the
+landscape actor alone leaves the proxies behind).
+
+A landscape holds ground within a fixed height range around its Z, `Bounds.HeightRange`: +-256 m by default, in 0.78 cm
+steps. `Create`'s optional last argument `MaxHeightMeters` (1 to 10000) makes more room by raising the actor's Z scale to
+`max(100, ceil(MaxHeightMeters / 2.56))`, so the height steps grow to Z scale / 128 cm (1024 m: Z scale 400, 3.1 cm).
+`Sculpt`, `Flatten` and `Carve` refuse an edit that would leave the range and change nothing (the error names the range and
+the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the limit silently.
+
+### Edit log
+
+Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Paint`, `PaintWhere`, and
+`CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | where IsPrimary | select Edits`
+(the last 5000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Rule`, `Time`).
+A path keeps the points that hold it within 50 cm of the real one (at most 1000 per record; the whole log keeps at most
+100,000 points, dropping its oldest records first), so a road's switchbacks and a river's bends read back as built. Each of these
+operations takes an optional argument `Label` that names the edit (the last one; `PaintWhere`: before `Within`; `CreateRiverBetween`'s edit takes the river's label). The log is an editor-only component of the landscape
+actor (`AIEditLog`): saved with the level, changed in the operation's own undo step (undo / redo take the record with the
+edit), stripped from cooked games. `Bumps` names the logged edit that made each place (`Edit`). Edits made any other way
+(Landscape mode, Python, heightmap imports) are not recorded. A level saved with a log and opened without this extension
+loses the log (its component class is missing) and nothing else.
+
+On a World Partition map, an editor that opens the map loads only the region around the camera. The operations and
+`Bounds` load the landscape's streaming proxies they need first (as the World Partition window's region loading does), so
+they see the whole landscape and not only the loaded part; `landscapes`, `waterBodies` and `waterZones` load every actor of
+their kind on the map, so a far lake or the streaming proxies a deleted landscape left behind are listed too. Loading
+changes and dirties nothing.
 
 `Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
 traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without
 that the engine merges on the GPU over the next editor frames, and a caller that sculpts and then traces or places actors
 in the same step reads the old ground. `Surface` reads the ground back at a world X, Y (`Inside`, `Height` in cm,
-`Slope` in degrees, `Location` on the ground, `Normal`; read-only, run it through `rql-mutate` like every `call`) and
-`Bounds` gives the landscape's world box with its lowest and highest ground. `Rebuild` merges every edit layer of a
+`Slope` in degrees, `Location` on the ground, `Normal`, `Layers`: each paint layer's weight; read-only, so `rql-query` runs it) and
+`Bounds` gives the landscape's world box with its lowest and highest ground, and where they are (`Highest`,
+`Lowest`: [X, Y, Z], to a vertex). `Rebuild` merges every edit layer of a
 landscape edited elsewhere (Landscape mode, Python) again and rebuilds its collision and, when enabled, its Nanite mesh.
 An editor without rendering (`-nullrhi`, commandlets) cannot merge: the edits stay in their edit layer until a rendering
 editor opens the landscape, and `Rebuild` fails there.

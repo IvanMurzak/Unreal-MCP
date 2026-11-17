@@ -114,7 +114,7 @@ describe('enrollPlugin', () => {
     expect(readProjectMarker(project)).toEqual({ serverTarget: 'https://ai-game.dev' });
 
     // Pin upserted into the existing project-local config (cli-core v2 identity — B5 fix).
-    const pin = derivePinV2(project);
+    const pin = derivePinV2(fs.realpathSync.native(project));
     expect(r.pin).toBe(pin);
     expect(r.pinnedConfigFiles).toContain(path.join(project, '.mcp.json'));
     const parsed = JSON.parse(fs.readFileSync(path.join(project, '.mcp.json'), 'utf-8'));

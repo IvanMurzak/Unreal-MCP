@@ -1,0 +1,10 @@
+{
+  "description": "the mesh terrain guide says to read structure through RQL members, not Python, and how to find leftovers",
+  "tool": "rql-schema",
+  "input": {
+    "guide": "mesh-terrain"
+  },
+  "assert": {
+    "pattern": "not with Python[\\s\\S]*where Terrain == null"
+  }
+}

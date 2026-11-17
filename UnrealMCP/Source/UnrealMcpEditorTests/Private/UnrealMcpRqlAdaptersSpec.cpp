@@ -14,6 +14,7 @@
 
 #include "Components/PointLightComponent.h"
 #include "Editor.h"
+#include "Editor/Transactor.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -438,6 +439,40 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 
 	Describe("containers", [this]()
 	{
+		It("says when a selected list member shows only its first 20 items, and how to read every item", [this]()
+		{
+			Fixture->Numbers.Reset();
+			for (int32 I = 0; I < 30; ++I)
+				Fixture->Numbers.Add(I);
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select Numbers
+			const TSharedPtr<FJsonObject> Cut = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			const FString Said = UnrealMcpRqlSpecHelpers::Codes(Cut) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Cut);
+			TestTrue(*FString::Printf(TEXT("a list-truncated warning names the column and the items left out (%s)"), *Said),
+				UnrealMcpRqlSpecHelpers::IsOk(Cut) && Said.Contains(TEXT("list-truncated: list members show their first 20 items in a query: Numbers (10 item(s) not shown)"))
+				&& Said.Contains(TEXT("... | get Numbers | select ...")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | get Numbers | count: every item streams
+			const TSharedPtr<FJsonObject> All = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"get","expr":{"path":["Numbers"]}},{"op":"count"}]})RQL"));
+			TestEqual(TEXT("get streams all 30"), UnrealMcpRqlSpecHelpers::Number(All), 30.0);
+			// [{Values: [0, 1, ..., 29]}]: items (no select) name their cut member too
+			TArray<FString> Thirty;
+			for (int32 I = 0; I < 30; ++I)
+				Thirty.Add(FString::Printf(TEXT("{\"lit\":%d}"), I));
+			const TSharedPtr<FJsonObject> Items = Run(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"list":[{"object":[{"key":"Values","value":{"list":[%s]}}]}]},"stages":[]})RQL"),
+				*FString::Join(Thirty, TEXT(","))));
+			TestTrue(*FString::Printf(TEXT("an item's cut list member is named (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Items)),
+				UnrealMcpRqlSpecHelpers::Codes(Items).Contains(TEXT("list-truncated")) && UnrealMcpRqlSpecHelpers::Codes(Items).Contains(TEXT("Values (10 item(s) not shown)")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | select n = (Numbers): an alias is no member to get
+			const TSharedPtr<FJsonObject> Alias = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"n","expr":{"op":"+","args":[{"path":["Numbers"]},{"list":[]}]}}]}]})RQL"));
+			TestFalse(*FString::Printf(TEXT("a computed column gets no 'get n' hint (%s)"), *UnrealMcpRqlSpecHelpers::Hints(Alias)), UnrealMcpRqlSpecHelpers::Hints(Alias).Contains(TEXT("get n ")));
+			// ref("UnrealMcpRqlSpecFixture#@F@") | set Numbers = append(Numbers, 30): a set receipt's old / new columns get no note
+			const TSharedPtr<FJsonObject> Receipt = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Numbers"]},"value":{"call":"append","args":[{"path":["Numbers"]},{"lit":30}]}}]}]})RQL"), true);
+			TestFalse(*FString::Printf(TEXT("no list-truncated on a set receipt (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Receipt)), UnrealMcpRqlSpecHelpers::Codes(Receipt).Contains(TEXT("list-truncated")));
+			Fixture->Numbers.SetNum(20);
+			const TSharedPtr<FJsonObject> Whole = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			TestFalse(TEXT("no warning for a list shown whole"), UnrealMcpRqlSpecHelpers::Codes(Whole).Contains(TEXT("list-truncated")));
+			Fixture->Numbers.Reset();
+		});
+
 		It("writes arrays whole and by element, and refuses bad elements and indexes", [this]()
 		{
 			SetsTo(TEXT("whole array"), /* ref("UnrealMcpRqlSpecFixture#@F@") | set Numbers = [1, 2, 3] */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Numbers"]},"value":{"list":[{"lit":1},{"lit":2},{"lit":3}]}}]}]})RQL"),
@@ -793,6 +828,98 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 
 	Describe("extension seam", [this]()
 	{
+		It("lets rql-query call read-only operations (meta RqlReadOnly) with no undo step and no duplicate guard; others stay refused", [this]()
+		{
+			FUnrealMcpRqlAdaptersSpecModule Module;
+			UUnrealMcpRqlSpecFixture* Current = Fixture;
+			Module.Fixture = [Current]() -> UObject* { return Current; };
+			IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module);
+			ON_SCOPE_EXIT { IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module); };
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Probes = 0;
+			Api->Marks = 0;
+			const UTransactor* Trans = GEditor ? GEditor->Trans.Get() : nullptr;
+			const int32 UndoSteps = Trans ? Trans->GetQueueLength() : 0;
+			UPackage* Level = UnrealMcpRql::EditorWorld() ? UnrealMcpRql::EditorWorld()->GetOutermost() : nullptr;
+			if (Level)
+				Level->SetDirtyFlag(false);
+
+			const FString Probe = /* rqlSpecApi | call Probe([1, 2, 3]) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Probe","args":[{"list":[{"lit":1},{"lit":2},{"lit":3}]}]}]})RQL");
+			const TSharedPtr<FJsonObject> Query = UnrealMcpRqlSpecHelpers::Exec(*this, Probe);
+			TestTrue(*FString::Printf(TEXT("rql-query calls a read-only operation (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Query)),
+				UnrealMcpRqlSpecHelpers::IsOk(Query) && Api->Probes == 1 && UnrealMcpRqlSpecHelpers::CellText(Query, 0, 2).Contains(TEXT("1")));
+			const TSharedPtr<FJsonObject> Mutate = UnrealMcpRqlSpecHelpers::Exec(*this, Probe, true);
+			TestTrue(*FString::Printf(TEXT("and rql-mutate still does (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Mutate)), UnrealMcpRqlSpecHelpers::IsOk(Mutate) && Api->Probes == 2);
+
+			// [[0, 0, 0], [0, 0, 0]] | call rqlSpecApi.Probe($): repeating a read is harmless, both run
+			const TSharedPtr<FJsonObject> Same = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"path":[]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("identical rows of a read-only operation both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Same)),
+				UnrealMcpRqlSpecHelpers::IsOk(Same) && Api->Probes == 4 && UnrealMcpRqlSpecHelpers::RowCount(Same) == 2);
+			// range(0, 30) | call rqlSpecApi.Probe([$ * 100, 0, 0]): one read per row
+			const TSharedPtr<FJsonObject> Thirty = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":30}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"*","args":[{"path":[]},{"lit":100}]},{"lit":0},{"lit":0}]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("30 per-row reads all run in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Thirty)),
+				UnrealMcpRqlSpecHelpers::IsOk(Thirty) && Api->Probes == 34 && UnrealMcpRqlSpecHelpers::RowCount(Thirty) == 30);
+			// range(0, 300) | call rqlSpecApi.Probe([$, 0, 0]): rql-query has no max_targets, reads go to the 1000 ceiling
+			const TSharedPtr<FJsonObject> Many = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":300}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("300 reads pass the 200-target default of mutations (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Many)),
+				UnrealMcpRqlSpecHelpers::IsOk(Many) && Api->Probes == 334);
+			TestEqual(*FString::Printf(TEXT("a read's rows are its answer: all 300 (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Many)),
+				UnrealMcpRqlSpecHelpers::RowCount(Many), 300);
+			// rql-mutate takes the read ceiling too (no max_targets needed for a read): range(0, 300) | call rqlSpecApi.Probe([$, 0, 0])
+			const TSharedPtr<FJsonObject> ManyMutate = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":300}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("300 reads in rql-mutate pass the 200-target limit of changes (%s)"), *UnrealMcpRqlSpecHelpers::Codes(ManyMutate)),
+				UnrealMcpRqlSpecHelpers::IsOk(ManyMutate) && Api->Probes == 634 && UnrealMcpRqlSpecHelpers::RowCount(ManyMutate) == 300);
+			// The sidecar renders an rql-mutate answer as a receipt cut at 50 rows unless the plugin marks it a read.
+			TestTrue(TEXT("a call of read-only operations is marked readOnly (the sidecar then shows every row)"),
+				ManyMutate.IsValid() && ManyMutate->HasTypedField<EJson::Boolean>(TEXT("readOnly")) && ManyMutate->GetBoolField(TEXT("readOnly")));
+			// range(0, 1001) | call rqlSpecApi.Probe([$, 0, 0]): over the read ceiling, a read-limit, not a refused change
+			const FString TooMany = TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1001}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]}]})RQL");
+			for (const bool bMutate : { false, true })
+			{
+				const TSharedPtr<FJsonObject> Over = UnrealMcpRqlSpecHelpers::Exec(*this, TooMany, bMutate);
+				const FString Said = UnrealMcpRqlSpecHelpers::Codes(Over) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Over);
+				TestTrue(*FString::Printf(TEXT("%s: 1001 reads are a read-limit (%s)"), bMutate ? TEXT("rql-mutate") : TEXT("rql-query"), *Said),
+					!UnrealMcpRqlSpecHelpers::IsOk(Over) && Said.Contains(TEXT("read-limit: more than 1000 items reach the read-only 'Probe' call: at most 1000 per call"))
+					&& Said.Contains(TEXT("| skip 1000 | first 1000 | call Probe(")));
+				TestFalse(*FString::Printf(TEXT("worded as a read, not a refused change (%s)"), *Said),
+					Said.Contains(TEXT("mutation-limit")) || Said.Contains(TEXT("nothing was changed")) || Said.Contains(TEXT("max_targets")));
+			}
+			TestEqual(TEXT("and nothing ran"), Api->Probes, 634);
+			// range(0, 1000) | call rqlSpecApi.Probe([$ + 0.123456789, $ + 0.987654321, 123456.789012]): 1000 long rows overflow the
+			// 64 KB answer; a read is told to read the rest
+			const TSharedPtr<FJsonObject> Full = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1000}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"+","args":[{"path":[]},{"lit":0.123456789}]},{"op":"+","args":[{"path":[]},{"lit":0.987654321}]},{"lit":123456.789012}]}]}]})RQL"));
+			const FString FullSaid = UnrealMcpRqlSpecHelpers::Codes(Full) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Full);
+			const FString Shown = FString::FromInt(UnrealMcpRqlSpecHelpers::RowCount(Full));
+			TestTrue(*FString::Printf(TEXT("a cut read says to read the rest in batches of what fitted, not 'do not repeat it' (%s)"), *FullSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(Full) && UnrealMcpRqlSpecHelpers::RowCount(Full) < 1000 && FullSaid.Contains(TEXT("output-truncated"))
+				&& FullSaid.Contains(TEXT("a read, not a change")) && FullSaid.Contains(TEXT("| skip ") + Shown + TEXT(" | first ") + Shown + TEXT(" | call Probe("))
+				&& !FullSaid.Contains(TEXT("do not repeat")));
+			Api->Probes = 634;
+			TestEqual(TEXT("read-only calls open no undo step (rql-query and rql-mutate)"), Trans ? Trans->GetQueueLength() : 0, UndoSteps);
+			TestFalse(TEXT("and mark nothing unsaved"), Level && Level->IsDirty());
+
+			// rqlSpecApi | call Add(1): not read-only, refused in rql-query with the mutation hint, before it runs
+			const TSharedPtr<FJsonObject> Add = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Add","args":[{"lit":1}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a call of another operation in rql-query is permission-denied, naming rql-mutate (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Add)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Add) && UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("permission-denied"))
+				&& UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("'call' requires a mutation request: run it with rql-mutate")));
+			// [1, 2] | call rqlSpecApi.Mark([5, 0, 0], [[0, 0, 0]]): a mutating operation with identical rows is still refused
+			const TSharedPtr<FJsonObject> Twice = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("identical rows of a mutating operation are refused, naming the calls (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Twice)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Twice) && UnrealMcpRqlSpecHelpers::Codes(Twice).Contains(TEXT("would run twice with the same arguments (calls 1 and 2"))
+				&& Api->Marks == 0);
+			// rqlSpecApi | call Mark([5, 0, 0], [[0, 0, 0]]): a change keeps its receipt (no readOnly mark)
+			const TSharedPtr<FJsonObject> Marked = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Mark","args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a mutating call is not marked readOnly (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Marked)),
+				UnrealMcpRqlSpecHelpers::IsOk(Marked) && !Marked->HasField(TEXT("readOnly")));
+
+			// rql-schema marks it
+			bool bOk = false;
+			const FString Schema = UnrealMcpRqlTools::Schema(TEXT("RqlSpecApi"), bOk);
+			TestTrue(*FString::Printf(TEXT("rql-schema marks the read-only operation (%s)"), *Schema.Left(600)), bOk && Schema.Contains(TEXT("[read-only] returns its point")));
+			TestFalse(TEXT("and only it"), Schema.Contains(TEXT("[read-only] add two numbers")));
+		});
+
 		It("registers sources, members, operations and guides of an IUnrealMcpRqlModule", [this]()
 		{
 			FUnrealMcpRqlAdaptersSpecModule Module;
@@ -843,6 +970,59 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestTrue(*FString::Printf(TEXT("in-out parameter, reported after the call (%s): %s"), *UnrealMcpRqlSpecHelpers::Codes(Doubled), *UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2)),
 				UnrealMcpRqlSpecHelpers::CellText(Doubled, 0, 2) == TEXT("6"));
 
+			// The duplicate-call guard keys an operation by its full arguments: a point or a nested list is not just its type name.
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Marks = 0;
+			const TSharedPtr<FJsonObject> Points = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[0, 0, 0], [1000, 0, 0]] | call rqlSpecApi.Mark($, [[0, 0, 0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":0},{"lit":0}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"path":[]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls differing only in a vector argument both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Points)), UnrealMcpRqlSpecHelpers::IsOk(Points) && Api->Marks == 2);
+			const TSharedPtr<FJsonObject> Paths = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[[0, 0, 0]], [[0, 0, 0.5]]] | call rqlSpecApi.Mark([0, 0, 0], $) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0.5}]}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"path":[]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls differing only in a nested list both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paths)), UnrealMcpRqlSpecHelpers::IsOk(Paths) && Api->Marks == 4);
+			// Per-row points built from the row ($[0], $[1] inside a list), as an agent reads a surface along a line.
+			const TSharedPtr<FJsonObject> Rows = UnrealMcpRqlSpecHelpers::Exec(*this, /* [[0,0],[1000,0]] | call rqlSpecApi.Mark([$[0],$[1],0], [[0,0,0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"list":[{"lit":0},{"lit":0}]},{"list":[{"lit":1000},{"lit":0}]}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[{"index":0}]},{"path":[{"index":1}]},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("calls whose vector is built from the row ($[0], $[1]) both run (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Rows)), UnrealMcpRqlSpecHelpers::IsOk(Rows) && Api->Marks == 6);
+			const TSharedPtr<FJsonObject> Same = UnrealMcpRqlSpecHelpers::Exec(*this, /* [1, 2] | call rqlSpecApi.Mark([5, 0, 0], [[0, 0, 0]]) */ TEXT(R"RQL({"rql":"0.1","source":{"list":[{"lit":1},{"lit":2}]},"stages":[{"op":"call","method":"Mark","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("identical vector arguments are still refused before anything runs (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Same)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Same) && UnrealMcpRqlSpecHelpers::Codes(Same).Contains(TEXT("would run twice")) && Api->Marks == 6);
+
+			// A list-valued call result lists every item up to 1000 (RQL lists 20 per list in plain queries, then "…+N").
+			const auto CallResultList = [](const TSharedPtr<FJsonObject>& Result) -> TArray<TSharedPtr<FJsonValue>>
+			{
+				const TSharedPtr<FJsonValue> Value = UnrealMcpRqlSpecHelpers::Cell(Result, 0, 2);
+				return Value.IsValid() && Value->Type == EJson::Array ? Value->AsArray() : TArray<TSharedPtr<FJsonValue>>();
+			};
+			const TSharedPtr<FJsonObject> Thirty = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Sequence(30) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Sequence","args":[{"lit":30}]}]})RQL"), true);
+			const TArray<TSharedPtr<FJsonValue>> ThirtyItems = CallResultList(Thirty);
+			TestEqual(*FString::Printf(TEXT("a call result of 30 items lists all 30 (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Thirty)), ThirtyItems.Num(), 30);
+			TestTrue(TEXT("the last item is the 30th number"), ThirtyItems.Num() == 30 && ThirtyItems.Last()->Type == EJson::Number && ThirtyItems.Last()->AsNumber() == 29.0);
+			TestFalse(TEXT("no truncation warning under the cap"), UnrealMcpRqlSpecHelpers::Codes(Thirty).Contains(TEXT("call-result-truncated")));
+			const TSharedPtr<FJsonObject> Many = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call Sequence(1500) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Sequence","args":[{"lit":1500}]}]})RQL"), true);
+			const TArray<TSharedPtr<FJsonValue>> ManyItems = CallResultList(Many);
+			TestEqual(TEXT("a call result of 1500 items lists 1000 and the count left out"), ManyItems.Num(), 1001);
+			TestTrue(TEXT("the 1000th item is the number 999"), ManyItems.Num() == 1001 && ManyItems[999]->AsNumber() == 999.0);
+			const FString ManyCodes = UnrealMcpRqlSpecHelpers::Codes(Many);
+			TestTrue(*FString::Printf(TEXT("says how many were left out (%s)"), *ManyCodes),
+				ManyCodes.Contains(TEXT("call-result-truncated: the call result lists 1500 items: the first 1000 are shown, 500 left out")));
+			TestTrue(*FString::Printf(TEXT("and what to do (%s)"), *UnrealMcpRqlSpecHelpers::Hints(Many)),
+				UnrealMcpRqlSpecHelpers::Hints(Many).Contains(TEXT("call again with fewer inputs")));
+			const TSharedPtr<FJsonObject> ManyMap = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecApi | call SequenceMap(1500) */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"SequenceMap","args":[{"lit":1500}]}]})RQL"), true);
+			const TSharedPtr<FJsonValue> ManyMapValue = UnrealMcpRqlSpecHelpers::Cell(ManyMap, 0, 2);
+			TestEqual(TEXT("a map-valued call result of 1500 entries lists 1000 and the count left out"),
+				ManyMapValue.IsValid() && ManyMapValue->Type == EJson::Object ? ManyMapValue->AsObject()->Values.Num() : -1, 1001);
+			TestTrue(*FString::Printf(TEXT("a cut map is reported too (%s)"), *UnrealMcpRqlSpecHelpers::Codes(ManyMap)),
+				UnrealMcpRqlSpecHelpers::Codes(ManyMap).Contains(TEXT("call-result-truncated: 1 list(s) in the call results hold more than 1000 items: the first 1000 of each are shown, 500 item(s) left out")));
+			// Plain queries keep RQL's list cap (20 items, then "…+N").
+			Fixture->Numbers.Reset();
+			for (int32 I = 0; I < 30; ++I)
+				Fixture->Numbers.Add(I);
+			const TSharedPtr<FJsonObject> Plain = UnrealMcpRqlSpecHelpers::Exec(*this, /* rqlSpecFixture | select Numbers */ TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecFixture"]},"stages":[{"op":"select","fields":[{"name":"Numbers","expr":{"path":["Numbers"]}}]}]})RQL"));
+			const TSharedPtr<FJsonValue> PlainList = UnrealMcpRqlSpecHelpers::Cell(Plain, 0, 0);
+			TestEqual(*FString::Printf(TEXT("a plain query lists 20 items and the count left out (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Plain)),
+				PlainList.IsValid() && PlainList->Type == EJson::Array ? PlainList->AsArray().Num() : -1, 21);
+			FString PlainMarker;
+			TestTrue(TEXT("ending in RQL's count left out"), PlainList.IsValid() && PlainList->Type == EJson::Array && PlainList->AsArray().Num() == 21
+				&& PlainList->AsArray().Last()->TryGetString(PlainMarker) && PlainMarker == FString(TEXT("\u2026+10")));
+			TestFalse(TEXT("and no call warning"), UnrealMcpRqlSpecHelpers::Codes(Plain).Contains(TEXT("call-result-truncated")));
+
 			FUnrealMcpToolRegistry Registry;
 			UnrealMcpRqlTools::Register(Registry);
 			const FUnrealMcpRegisteredTool* Query = Registry.Find(TEXT("rql-query"));
@@ -853,6 +1033,62 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			bool bOk = false;
 			const TSharedPtr<FJsonObject> Schema = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(TEXT("RqlSpecApi"), bOk));
 			TestTrue(TEXT("the api type is in the schema under its name"), bOk && Schema.IsValid());
+			TestEqual(TEXT("the api type points at its module's guide"), Schema.IsValid() ? Schema->GetStringField(TEXT("guideCall")) : FString(),
+				FString(TEXT("rql-schema {\"guide\": \"RqlAdaptersSpec\"}")));
+
+			// The guide in-band (any MCP client, no skill installed): by module name and by one of its sources, whatever the
+			// case, hyphens, underscores and spaces.
+			for (const TCHAR* Key : { TEXT("RqlAdaptersSpec"), TEXT("rqlspecapi"), TEXT("rql-adapters-spec"), TEXT("Rql Adapters Spec"), TEXT("RQL_SPEC_API") })
+			{
+				bool bGuideOk = false;
+				const TSharedPtr<FJsonObject> Guide = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), Key, bGuideOk));
+				const TSharedPtr<FJsonObject>* Body = nullptr;
+				if (!TestTrue(*FString::Printf(TEXT("guide '%s' found"), Key), bGuideOk && Guide.IsValid() && Guide->TryGetObjectField(TEXT("guide"), Body)))
+					continue;
+				TestEqual(TEXT("its module"), (*Body)->GetStringField(TEXT("name")), FString(TEXT("RqlAdaptersSpec")));
+				const TArray<TSharedPtr<FJsonValue>>& Sections = (*Body)->GetArrayField(TEXT("sections"));
+				TestTrue(TEXT("its AddGuide markdown"), Sections.Num() == 1
+					&& Sections[0]->AsObject()->GetStringField(TEXT("topic")) == TEXT("RqlAdaptersSpec guide")
+					&& Sections[0]->AsObject()->GetStringField(TEXT("markdown")) == TEXT("the rqlSpec guide body"));
+				TArray<FString> GuideSources;
+				for (const TSharedPtr<FJsonValue>& Source : (*Body)->GetArrayField(TEXT("sources")))
+					GuideSources.Add(Source->AsObject()->GetStringField(TEXT("name")));
+				TestTrue(TEXT("its sources, and only its"), GuideSources.Contains(TEXT("rqlSpecApi")) && GuideSources.Contains(TEXT("rqlSpecLights"))
+					&& !GuideSources.Contains(TEXT("actors")));
+			}
+			bool bLightOk = false;
+			const TSharedPtr<FJsonObject> Light = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(TEXT("Light"), bLightOk));
+			TestFalse(TEXT("a shared engine class a module source lists (Light) names no module's guide"),
+				Light.IsValid() && Light->HasField(TEXT("guideCall")));
+			bool bLightGuideOk = true;
+			UnrealMcpRqlTools::Schema(FString(), TEXT("Light"), bLightGuideOk);
+			TestFalse(TEXT("nor is it a guide key"), bLightGuideOk);
+			bool bMissingOk = true;
+			const TSharedPtr<FJsonObject> Missing = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), TEXT("NoSuchRqlSpecGuide"), bMissingOk));
+			TestFalse(TEXT("an unknown guide fails"), bMissingOk);
+			TestTrue(TEXT("unknown-guide"), Missing.IsValid() && Missing->GetStringField(TEXT("error")) == TEXT("unknown-guide"));
+
+			// The overview lists the module, its sources and the call that returns its guide.
+			bool bOverviewOk = false;
+			const TSharedPtr<FJsonObject> Overview = UnrealMcpRqlSpecHelpers::Parse(UnrealMcpRqlTools::Schema(FString(), bOverviewOk));
+			const TArray<TSharedPtr<FJsonValue>>* ModuleList = nullptr;
+			bool bListed = false;
+			if (TestTrue(TEXT("overview lists modules"), bOverviewOk && Overview.IsValid() && Overview->TryGetArrayField(TEXT("modules"), ModuleList)))
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *ModuleList)
+				{
+					const TSharedPtr<FJsonObject> Entry = Value->AsObject();
+					if (Entry->GetStringField(TEXT("name")) != TEXT("RqlAdaptersSpec"))
+						continue;
+					bListed = Entry->GetStringField(TEXT("guideCall")) == TEXT("rql-schema {\"guide\": \"RqlAdaptersSpec\"}")
+						&& Entry->GetArrayField(TEXT("sources")).Num() == 5;
+				}
+			}
+			TestTrue(TEXT("the spec module with its 5 sources and guide call"), bListed);
+			TestTrue(TEXT("rql-query names the installed extension and the guide call"), Query && Query->Description.Contains(TEXT("RqlAdaptersSpec"))
+				&& Query->Description.Contains(TEXT("rql-schema {\"guide\": \"")));
+			const FUnrealMcpRegisteredTool* SchemaTool = Registry.Find(TEXT("rql-schema"));
+			TestTrue(TEXT("rql-schema takes a guide argument"), SchemaTool && SchemaTool->Description.Contains(TEXT("With guide")));
 		});
 	});
 }

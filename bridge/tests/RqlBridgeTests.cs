@@ -221,6 +221,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Render_ReadOnlyCallsInRqlMutateShowEveryRow()
+        {
+            // range(0, 120) | call landscape.Surface(...) through rql-mutate: the plugin marks a call of read-only operations
+            // "readOnly", whose rows are the answer (a grid of heights), not a receipt cut at 50 rows.
+            var rows = string.Join(",", Enumerable.Range(0, 120).Select(i =>
+                $"[\"Api#1\",\"Probe(Vector Point)\",\"({i}, 0, 0)\"]"));
+            string Json(bool readOnly) => "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"method\",\"result\"],\"rows\":[" + rows + "]"
+                + (readOnly ? ",\"readOnly\":true" : "") + "}";
+            var read = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(Json(true))));
+            Assert.StartsWith("120 results\nmethod: Probe(Vector Point)\n", read); // compact: the method once
+            Assert.Contains("(119, 0, 0)", read);
+            Assert.DoesNotContain("more row(s) not shown", read);
+            Assert.Equal(Rendered(RqlBridge.Render(RqlBridge.QueryRole, Text(Json(true)))), read); // rql-query renders it alike
+            var receipt = Rendered(RqlBridge.Render(RqlBridge.MutateRole, Text(Json(false))));
+            Assert.Contains("… 70 more row(s) not shown", receipt); // a change keeps its 50-row receipt
+        }
+
+        [Fact]
         public void Render_Scalars()
         {
             var json = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"scalar\",\"value\":3}";
@@ -272,6 +290,50 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             var text = RqlBridge.RenderSchema(json);
             Assert.EndsWith("SceneComponent : ActorComponent {RelativeLocation, Mobility} (+ the ActorComponent members) methods: Destroy() | Attach(Actor Parent)", text);
             Assert.DoesNotContain("Vector", text);
+        }
+
+        [Fact]
+        public void RenderSchema_OverviewListsInstalledExtensionsWithTheirGuideCall()
+        {
+            var json = JsonNode.Parse(@"{
+                ""sources"": [{""name"": ""actors"", ""type"": ""list of Actor""}],
+                ""functions"": [],
+                ""modules"": [{""name"": ""MeshTerrain"", ""extension"": ""com.ivanmurzak.unreal-ai-mesh-terrain"", ""version"": ""0.1.0"",
+                    ""sources"": [""meshTerrain"", ""meshTerrainModifier""], ""guideCall"": ""rql-schema {\""guide\"": \""MeshTerrain\""}""},
+                    {""name"": ""NoGuide"", ""sources"": [""plain""]}]
+            }")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.Contains("installed extensions (sources; read the guide before using them):\n"
+                + "  MeshTerrain (com.ivanmurzak.unreal-ai-mesh-terrain 0.1.0): meshTerrain, meshTerrainModifier — guide: rql-schema {\"guide\": \"MeshTerrain\"}\n"
+                + "  NoGuide: plain\n", text);
+        }
+
+        [Fact]
+        public void RenderSchema_GuideRendersTheSourcesAndEverySection()
+        {
+            var json = JsonNode.Parse(@"{""guide"": {""name"": ""Landscape"", ""extension"": ""com.ivanmurzak.unreal-ai-landscape"", ""version"": ""0.3.0"",
+                ""sources"": [{""name"": ""landscape"", ""type"": ""LandscapeApi"", ""description"": ""landscape operations""}],
+                ""sections"": [{""topic"": ""Landscape and Water"", ""markdown"": ""Sculpt with `landscape | call Sculpt(...)`.""}, {""topic"": ""More"", ""markdown"": ""second""}]}}")!.AsObject();
+            var text = RqlBridge.RenderSchema(json);
+            Assert.StartsWith("# Landscape guide (com.ivanmurzak.unreal-ai-landscape 0.3.0)\n\n", text);
+            Assert.Contains("  landscape: LandscapeApi — landscape operations\n", text);
+            Assert.Contains("\n## Landscape and Water\n\nSculpt with `landscape | call Sculpt(...)`.\n", text);
+            Assert.EndsWith("\n## More\n\nsecond", text);
+        }
+
+        [Fact]
+        public void RenderSchema_UnknownGuideNamesTheInstalledOnes()
+        {
+            var json = JsonNode.Parse(@"{""error"": ""unknown-guide"", ""name"": ""terrain"", ""candidates"": [""Landscape"", ""MeshTerrain""]}")!.AsObject();
+            Assert.Equal("error unknown-guide: no installed extension 'terrain'; guides: Landscape, MeshTerrain (or one of their sources)", RqlBridge.RenderSchema(json));
+        }
+
+        [Fact]
+        public void RenderSchema_OneExtensionTypePointsAtItsGuide()
+        {
+            var json = JsonNode.Parse(@"{""types"": [{""type"": {""name"": ""MeshTerrainApi"", ""kind"": ""object"", ""members"": [], ""methods"": [""Create()""]}}],
+                ""guideCall"": ""rql-schema {\""guide\"": \""MeshTerrain\""}""}")!.AsObject();
+            Assert.EndsWith("\nguide (how these operations work together): rql-schema {\"guide\": \"MeshTerrain\"}", RqlBridge.RenderSchema(json));
         }
 
         [Fact]
@@ -543,6 +605,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 "[1/2] actors | where Label == \"A\" | set Label = \"A2\"\nDRY RUN — nothing changed; 1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|A|A2\n\n" +
                 "[2/2] actors | where Label == \"B\" | set Label = \"B2\"\nDRY RUN — nothing changed; 1 result\n$ref|member|old|new\nStaticMeshActor#1|Label|B|B2",
                 response.Content!.Single().Text);
+        }
+
+        [Fact]
+        public async Task Proxy_AScriptWithAPlainReadKeepsEveryRowOfItsReadOnlyCall()
+        {
+            // rql-query "actors | count; range(0, 120) | call api.Probe(...)": the plain read is no receipt, so it does not cut
+            // the read-only call's 120 rows to a change receipt's 50.
+            var rows = string.Join(",", Enumerable.Range(0, 120).Select(i => $"[\"Api#1\",\"Probe(Vector Point)\",\"({i}, 0, 0)\"]"));
+            var probe = "{\"rql\":\"0.1\",\"ok\":true,\"kind\":\"rows\",\"columns\":[\"$ref\",\"method\",\"result\"],\"rows\":[" + rows + "],\"readOnly\":true}";
+            var calls = new List<JsonObject>();
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "rql-query", Rql = RqlBridge.QueryRole },
+                Plugin(calls, query => query.Contains("Probe") ? probe : Count1));
+            var response = await proxy.Run("req", Args(JsonSerializer.Serialize(new { query = "actors | count; range(0, 120) | call api.Probe([$, 0, 0])" })));
+            var text = response.Content!.First().Text!;
+            Assert.Contains("(119, 0, 0)", text);
+            Assert.DoesNotContain("more row(s) not shown", text);
         }
 
         [Fact]

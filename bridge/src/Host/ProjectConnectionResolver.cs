@@ -43,7 +43,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
     /// <see cref="ProjectConnectionResolver.Resolve"/>), the enrolled <see cref="ServerTarget"/> and the full
     /// <see cref="ProjectPathHash"/> read/derived from the committable project marker + project root, plus the
     /// ready-to-attach <see cref="Metadata"/> handshake payload. Every field is derived deterministically —
-    /// no live socket, no shared state.
+    /// no live socket, no shared state. <c>HashInput</c>: the spelling the pin and hash were derived from, the
+    /// project folder's real path (<see cref="CanonicalProjectPath"/>).
     /// </summary>
     internal sealed record ProjectConnection(
         string Pin,
@@ -53,7 +54,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         string? ServerTarget,
         string ProjectPathHash,
         string ProjectName,
-        ConnectionInstanceMetadata Metadata)
+        ConnectionInstanceMetadata Metadata,
+        string HashInput)
     {
         /// <summary>
         /// Whether <see cref="Port"/> is a USER-chosen port — the marker's <c>portOverride</c> (level 1) or a
@@ -134,7 +136,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 throw new ArgumentException("InstanceId must be non-empty.", nameof(instanceId));
 
             var marker = SafeReadMarker(projectRoot);
-            var identity = ProjectIdentity.Derive(projectRoot, marker);
+            // The pin and the project-path hash come from the folder's REAL path, so every spelling of it (a symlink,
+            // a junction, an 8.3 name) registers under the one pin the CLI and the App derive (cli-core canonicalPath).
+            var hashInput = CanonicalProjectPath.Resolve(projectRoot);
+            var identity = ProjectIdentity.Derive(hashInput, marker);
             var typedPort = TryGetExplicitLoopbackPort(localHost);
             var (port, portSource) = identity.PortIsOverridden
                 ? (identity.Port, LocalServerPortSource.MarkerOverride)   // 1. marker portOverride
@@ -148,7 +153,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var metadata = ConnectionInstanceMetadata.Create(
                 engine: Engine,
                 projectName: projectName,
-                projectRootPath: projectRoot,
+                projectRootPath: hashInput,
                 instanceId: instanceId,
                 machineName: machineName);
 
@@ -160,7 +165,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 ServerTarget: marker?.ServerTarget,
                 ProjectPathHash: metadata.ProjectPathHash,
                 ProjectName: projectName,
-                Metadata: metadata);
+                Metadata: metadata,
+                HashInput: hashInput);
         }
 
         /// <summary>

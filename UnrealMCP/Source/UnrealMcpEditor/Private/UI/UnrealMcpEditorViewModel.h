@@ -379,6 +379,8 @@ public:
 	 * caller (the panel) regenerates after enabling. Game-thread only.
 	 */
 	UNREALMCPEDITOR_API void SetAutoGenerateSkills(const FString& AgentId, bool bEnabled);
+	/** The agent ids with "auto-generate skills" on (FUnrealMcpSkillAutoGenerator regenerates their skills). */
+	const TArray<FString>& GetAutoGenerateSkillsAgents() const { return Config.SkillAutoGenerateAgents; }
 
 	/** The user-overridable Custom-agent skills folder (project-relative; only the Custom configurator reads it). */
 	const FString& GetSkillsPath() const { return Config.SkillsPath; }

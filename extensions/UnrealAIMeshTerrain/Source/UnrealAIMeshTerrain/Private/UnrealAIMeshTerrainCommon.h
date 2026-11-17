@@ -36,8 +36,15 @@ namespace UnrealAIMeshTerrain
 	using UMeshPartitionEditorComponent = UE::MeshPartition::UMeshPartitionEditorComponent;
 	using UModifierComponent = UE::MeshPartition::UModifierComponent;
 
-	/** The default time an operation waits for the terrain to build before it fails (seconds). */
-	constexpr double DefaultBuildTimeoutSeconds = 120.0;
+	/**
+	 * The default time an operation waits for the terrain to build (seconds): below the MCP server's tool timeout (300 s by
+	 * default), so a long build (a remeshed shape) comes back as "still building" instead of a dropped call.
+	 */
+	constexpr double DefaultBuildTimeoutSeconds = 240.0;
+	/** How long SurfacePoints and an evaluation of the modifier stack may compute (seconds). */
+	constexpr double SampleBudgetSeconds = 120.0;
+	/** Specs only: when above 0, every build wait gives up after this many seconds (a forced timeout). */
+	inline double BuildTimeoutForTests = 0.0;
 	/** The TimeoutSeconds range the operations accept. */
 	constexpr double MinTimeoutSeconds = 1.0;
 	constexpr double MaxTimeoutSeconds = 600.0;
@@ -73,10 +80,10 @@ namespace UnrealAIMeshTerrain
 	/**
 	 * Load (in the editor) every actor that carries a base mesh or a modifier of @p Terrain: on a World Partition map they are
 	 * spatially loaded actors, unloaded until a region over them is loaded, and a terrain builds only from loaded ones. They
-	 * stay loaded like actors of a loaded region (WorldPartitionBlueprintLibrary::LoadActors). Returns how many were loaded
-	 * now (0 when all already were, or on a map without World Partition).
+	 * stay loaded like actors of a loaded region (UnrealMcpRql::LoadWorldPartitionActors: no unsaved change, no undo step;
+	 * actors deleted in this session stay deleted). Nothing to do on a map without World Partition.
 	 */
-	int32 LoadTerrainActors(const AMeshPartition* Terrain);
+	void LoadTerrainActors(const AMeshPartition* Terrain);
 
 	/** The editor component that builds @p Terrain (null outside the editor or before the actor registered). */
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain);
@@ -111,8 +118,21 @@ namespace UnrealAIMeshTerrain
 	/** The triangles @p Section renders now: its intermediate preview mesh, or its final static mesh(es) once compiled. */
 	int32 RenderedTriangles(const APreviewSection* Section);
 
-	/** The world box of @p Terrain's built mesh (the preview sections), invalid when nothing is built. */
+	/**
+	 * The world box of @p Terrain's built mesh (the preview sections), invalid when nothing is built. Larger than BaseBounds
+	 * where a Boolean Union shape reaches past the terrain's edge.
+	 */
 	FBox BuiltBounds(const AMeshPartition* Terrain);
+
+	/** The world box of @p Terrain's base meshes (the terrain as Create / ImportHeightmap made it), invalid without one. */
+	FBox BaseBounds(const AMeshPartition* Terrain);
+
+	/**
+	 * Where @p Terrain's built ground is highest and lowest within its own area @p Base (BaseBounds): a vertex of the rendered sections'
+	 * collision that a vertical trace from above lands on (what traces and physics hit; not the underside of an overhang).
+	 * Each is unset when nothing is built (or no section has cooked collision yet) or no candidate vertex is reached.
+	 */
+	void GroundExtremes(const AMeshPartition* Terrain, const FBox& Base, TOptional<FVector>& OutHighest, TOptional<FVector>& OutLowest);
 
 	// ---- Build -------------------------------------------------------------------------------------------------------
 
@@ -143,13 +163,17 @@ namespace UnrealAIMeshTerrain
 
 	/**
 	 * Drive @p Terrain's build on this (game) thread until every section shows its final mesh with its collision, for at
-	 * most @p TimeoutSeconds: true when built; false after Fail naming what is still pending. Pumps the editor component
+	 * most @p TimeoutSeconds: true when built; false after Fail naming what is still pending (with @p OutStillBuilding: no
+	 * Fail, that text in it instead, for an operation whose change is already applied). Pumps the editor component
 	 * (UMeshPartitionEditorComponent::Update: queued modifier changes start, finished builds are applied), the game thread's
 	 * task queue (collision cooking and the transformer pipeline complete there) and the asset compiler (the static
 	 * meshes), so the build advances inside one RQL call without editor frames. Safe because Unreal-MCP runs calls at the end
 	 * of a frame, outside the task graph's game-thread processing (UnrealMcpGameThreadDispatcher).
 	 */
-	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
+	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds, FString* OutStillBuilding = nullptr);
+
+	/** The State of an operation whose change is applied while @p Terrain still builds (@p Pending: what WaitForBuild said). */
+	FString StillBuildingState(const AMeshPartition* Terrain, const FString& Pending);
 
 	/** Invalidate and rebuild every section of @p Terrain (ForceRebuildAllSections), then WaitForBuild. */
 	bool Rebuild(AMeshPartition* Terrain, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
@@ -193,17 +217,20 @@ namespace UnrealAIMeshTerrain
 	/**
 	 * The highest point of @p Terrain's built surface under @p X, @p Y: a trace against the rendered sections' collision.
 	 * With @p bChannels it also evaluates the modifier stack there for the paint channels and ModelHeight: from
-	 * @p Evaluated (a BuildRegion covering the point, for many points) or a small region around the point. Read-only; call
-	 * WaitForBuild first after an edit.
+	 * @p Evaluated (BuildRegions evaluated for earlier points, for many points) or regions around the point, widened until
+	 * one holds a whole triangle under it (Boolean shapes have triangles of 100+ m); the regions it evaluates are added to
+	 * @p Evaluated. With bChannels, Normal is the evaluated face's (a trace on a collision edge, such as a section seam,
+	 * reports the edge's normal). Read-only; call WaitForBuild first after an edit.
 	 */
-	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels = true, const TArray<FRegionMesh>* Evaluated = nullptr);
+	FSurfaceSample SampleSurface(const AMeshPartition* Terrain, double X, double Y, bool bChannels = true, TArray<FRegionMesh>* Evaluated = nullptr);
 
 	/**
 	 * Evaluate @p Terrain's modifier stack (its bases and every modifier, in build order) for the base-mesh groups that
 	 * intersect the world box @p Region, synchronously (UE::MeshPartition::Build::LaunchBuilds, BuildType Request, cached):
-	 * the full-resolution mesh with its weight channels, independent of the preview sections. Empty after Fail (timeout).
+	 * the full-resolution mesh with its weight channels, independent of the preview sections. Empty on a timeout (after Fail
+	 * with @p bFailOnTimeout).
 	 */
-	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = DefaultBuildTimeoutSeconds);
+	TArray<FRegionMesh> BuildRegion(const AMeshPartition* Terrain, const FBox& Region, double TimeoutSeconds = SampleBudgetSeconds, bool bFailOnTimeout = true);
 
 	// ---- Create (shared with the create operations and the specs) ------------------------------------------------------
 

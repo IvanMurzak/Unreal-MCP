@@ -3,10 +3,13 @@
 
 #include "UnrealMcpRqlSession.h"
 
+#include <algorithm>
+
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpAvailableExtensions.h"
 #include "UnrealMcpRqlGuide.h"
 #include "UnrealMcpRqlSources.h"
+#include "UnrealMcpRqlWorldPartition.h"
 
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -20,9 +23,11 @@
 #include "GameFramework/Actor.h"
 #include "Tools/UnrealMcpObjectRef.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
+#include <cstdio>
 #include <stdexcept>
 #include <string_view>
 
@@ -44,6 +49,99 @@ namespace UnrealMcpRqlSessionLocal
 		if (Last == rql::StageKind::Count)
 			return Result.value.is_number() && Result.value.as_number() == 0;
 		return (Last == rql::StageKind::Min || Last == rql::StageKind::Max || Last == rql::StageKind::Avg) && Result.value.is_null();
+	}
+
+	/**
+	 * The full text of a call argument for the duplicate-call guard: lists, maps and structs element by element, numbers at
+	 * full precision, strings quoted, objects by identity (their text is only a type name). rql::to_text reads every vector,
+	 * list or struct as its type name, so two calls differing only in a point would look identical.
+	 */
+	void AppendCallKey(std::string& Out, const rql::Value& Value, int32 Depth = 0)
+	{
+		if (Depth > 32)
+		{
+			Out += "...";
+			return;
+		}
+		switch (Value.kind())
+		{
+		case rql::Value::Kind::Number:
+			Out += Value.is_single() ? rql::format_float(static_cast<float>(Value.as_number())) : rql::format_double(Value.as_number());
+			return;
+		case rql::Value::Kind::String:
+			Out += rql::Json(Value.as_string()).dump();
+			return;
+		case rql::Value::Kind::Object:
+		{
+			char Buffer[32];
+			std::snprintf(Buffer, sizeof(Buffer), "@%p", Value.ptr());
+			Out += Buffer;
+			return;
+		}
+		case rql::Value::Kind::Struct:
+			Out += Value.type()->name + "{";
+			for (const rql::MemberDescriptor& Member : Value.type()->members)
+			{
+				if (Member.explicit_only || !Member.getter)
+					continue;
+				Out += Member.name + "=";
+				try
+				{
+					AppendCallKey(Out, Member.getter(Value.ptr()), Depth + 1);
+				}
+				catch (const std::exception&)
+				{
+					Out += "?";
+				}
+				Out += ",";
+			}
+			Out += "}";
+			return;
+		case rql::Value::Kind::List:
+			Out += "[";
+			for (size_t Index = 0, Count = Value.list().size(); Index < Count; ++Index)
+			{
+				AppendCallKey(Out, Value.list().at(Index), Depth + 1);
+				Out += ",";
+			}
+			Out += "]";
+			return;
+		case rql::Value::Kind::Map:
+			Out += "{";
+			Value.map().for_each([&Out, Depth](const rql::Value& Key, const rql::Value& Item)
+			{
+				AppendCallKey(Out, Key, Depth + 1);
+				Out += ":";
+				AppendCallKey(Out, Item, Depth + 1);
+				Out += ",";
+				return true;
+			});
+			Out += "}";
+			return;
+		case rql::Value::Kind::Entry:
+			AppendCallKey(Out, Value.entry().key, Depth + 1);
+			Out += ":";
+			AppendCallKey(Out, Value.entry().value, Depth + 1);
+			return;
+		case rql::Value::Kind::Row:
+			Out += "(";
+			for (const rql::Value& Cell : Value.row().values)
+			{
+				AppendCallKey(Out, Cell, Depth + 1);
+				Out += ",";
+			}
+			Out += ")";
+			return;
+		case rql::Value::Kind::Null:
+			Out += "null";
+			return;
+		case rql::Value::Kind::Missing:
+			Out += "missing";
+			return;
+		default: // bool, enum, error, unknown
+			Out += rql::describe_value(Value) + ":" + rql::to_text(Value);
+			return;
+		}
 	}
 
 	/**
@@ -98,6 +196,210 @@ namespace UnrealMcpRqlSessionLocal
 		const FString Message = FString::Printf(TEXT("nothing found in the level open in the editor, \"%s\": actors covers only that level%s"),
 			*UnrealMcpRqlUtil::OpenLevelPath(), Partitioned);
 		Result.diagnostics.push_back(rql::Diagnostic::warning("open-level-only", UnrealMcpRqlToStd(Message), UnrealMcpRqlGuide::OpenLevelHint()));
+	}
+
+	/**
+	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
+	 * while some are not loaded, the answer says how many, names a few and how to list and load them.
+	 */
+	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	{
+		const rql::ExprPtr& Source = Plan.source;
+		if (!Result.ok || !Source || Source->kind != rql::ExprKind::Path || Source->on || Source->segments.empty()
+			|| Source->segments[0].kind != rql::SegmentKind::Member)
+			return;
+		const std::string& Name = Source->segments[0].name;
+		if (Name != "actors" && Name != "levels" && Name != "world")
+			return;
+		FString Message;
+		FString Hint;
+		if (UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint))
+			Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
+	}
+
+	/**
+	 * A read-only call over more input than one call takes failed with RQL's mutation-limit ("... nothing was changed, pass
+	 * max_targets"), which reads as a refused change. It is a read: say so, and how to split it. Reads keep the 1000 ceiling
+	 * on purpose: every item is one result row, and 1000 rows already fill the 64 KB answer.
+	 */
+	void RewordReadLimit(rql::QueryResult& Result, const std::string& Method, int32 Limit)
+	{
+		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.code != "mutation-limit")
+				continue;
+			const std::string& Old = Diagnostic.message;
+			const size_t Digits = Old.find_first_not_of("0123456789");
+			const std::string Count = Digits > 0 && Digits != std::string::npos ? Old.substr(0, Digits) : "more than " + std::to_string(Limit);
+			const std::string N = std::to_string(Limit);
+			Diagnostic.code = "read-limit";
+			Diagnostic.message = Count + " items reach the read-only '" + Method + "' call: at most " + N + " per call (one result row each)";
+			Diagnostic.hint = "split the input: ... | first " + N + " | call " + Method + "(...), then ... | skip " + N + " | first " + N
+				+ " | call " + Method + "(...); or sample fewer points";
+		}
+	}
+
+	/**
+	 * A read's answer cut by the 64 KB output limit gets RQL's receipt hint ("the receipt is shortened, not the change: all N
+	 * calls were made; do not repeat it"), the opposite of what a read needs: the rest is read in batches of what fitted.
+	 */
+	void RewordReadTruncation(rql::QueryResult& Result, const std::string& Method)
+	{
+		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.code != "output-truncated")
+				continue;
+			// "output limited to 65536 bytes; <shown> of <total> rows returned"
+			const size_t Of = Diagnostic.message.find(" of ");
+			const size_t Start = Diagnostic.message.rfind("; ", Of);
+			if (Of == std::string::npos || Start == std::string::npos)
+				continue;
+			const std::string Shown = Diagnostic.message.substr(Start + 2, Of - Start - 2);
+			Diagnostic.hint = "a read, not a change: the answer holds only the first " + Shown + " rows; read the rest in batches of " + Shown
+				+ ": ... | skip " + Shown + " | first " + Shown + " | call " + Method + "(...), and so on (fewer outputs per call fit more rows)";
+		}
+	}
+
+	/**
+	 * Items a list-valued call result shows. RQL encodes at most maxListItems (20) items of a list and appends "…+N", which
+	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and call is terminal, so
+	 * nothing can page them. A plan ending in call encodes up to this many instead; plain queries keep RQL's default.
+	 */
+	constexpr int32 MaxCallResultItems = 1000;
+
+	bool EndsWithCall(const rql::QueryPlan& Plan)
+	{
+		return !Plan.stages.empty() && Plan.stages.back().kind == rql::StageKind::Call;
+	}
+
+	/**
+	 * The lists and maps of one encoded call result that RQL cut at MaxCallResultItems, at any depth: a list ends in
+	 * "…+<left out>", a map has the key "…" with the value "+<left out>" (U+2026 in UTF-8).
+	 */
+	void CountCutLists(const rql::Json& Value, int32& OutLists, int64& OutLeftOut, int32 Limit = MaxCallResultItems)
+	{
+		static const std::string Ellipsis = "\xE2\x80\xA6";
+		const size_t Cut = static_cast<size_t>(Limit) + 1;
+		if (Value.is_array() && Value.size() == Cut && Value.at(Limit).is_string()
+			&& Value.at(Limit).as_string().rfind(Ellipsis + "+", 0) == 0)
+		{
+			++OutLists;
+			OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(Value.at(Limit).as_string().c_str() + Ellipsis.size() + 1));
+		}
+		else if (Value.is_object() && Value.size() == Cut)
+		{
+			const rql::Json* LeftOut = Value.find(Ellipsis);
+			if (LeftOut && LeftOut->is_string() && LeftOut->as_string().rfind("+", 0) == 0)
+			{
+				++OutLists;
+				OutLeftOut += FCString::Atoi64(UTF8_TO_TCHAR(LeftOut->as_string().c_str() + 1));
+			}
+		}
+		for (const rql::Json& Item : Value.items())
+			CountCutLists(Item, OutLists, OutLeftOut, Limit);
+	}
+
+	/** Call results with a list or map cut at MaxCallResultItems get a warning: how many items were left out, and what to do. */
+	void AddCallResultListNote(rql::QueryResult& Result)
+	{
+		if (!Result.ok || !Result.rows || !Result.columns)
+			return;
+		const std::vector<std::string>& Columns = *Result.columns;
+		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
+		if (Column == Columns.end())
+			return;
+		const size_t Index = static_cast<size_t>(Column - Columns.begin());
+		int64 LeftOut = 0;
+		int32 Lists = 0;
+		bool bWholeResult = false; // the one cut list is the result itself (not a member or an output of it)
+		for (const std::vector<rql::Json>& Row : *Result.rows)
+		{
+			if (Index >= Row.size())
+				continue;
+			const int32 Before = Lists;
+			CountCutLists(Row[Index], Lists, LeftOut);
+			if (Before == 0 && Lists == 1)
+				bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
+		}
+		if (Lists == 0)
+			return;
+		const FString Message = Lists == 1 && bWholeResult
+			? FString::Printf(TEXT("the call result lists %lld items: the first %d are shown, %lld left out"),
+				LeftOut + MaxCallResultItems, MaxCallResultItems, LeftOut)
+			: FString::Printf(TEXT("%d list(s) in the call results hold more than %d items: the first %d of each are shown, %lld item(s) left out"),
+				Lists, MaxCallResultItems, MaxCallResultItems, LeftOut);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("call-result-truncated", UnrealMcpRqlToStd(Message),
+			UnrealMcpRqlToStd(FString::Printf(TEXT("the call ran: only its result is shortened. To see every item, call again with fewer inputs "
+				"(at most %d items per list); do not repeat a call that creates or changes things just to read its result"), MaxCallResultItems))));
+	}
+
+	/**
+	 * A list member in a plain query shows RQL's first 20 items, then "…+N" (browsing: `select Components` over many
+	 * actors stays short). Reads must not lose items silently: the warning names the cut columns and how to read every
+	 * item, `get <member>` streaming them as rows (paged with first / skip). Call results show 1000 (AddCallResultListNote).
+	 */
+	void AddListMemberNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	{
+		constexpr int32 PlainListItems = 20; // RQL's EngineDefaults::max_list_items, which plain queries keep
+		if (!Result.ok)
+			return;
+		TArray<FString> Cut; // the cut columns (rows) or members (items)
+		int64 LeftOut = 0;
+		auto Count = [&](const std::string& Name, const rql::Json& Value)
+		{
+			int32 Lists = 0;
+			CountCutLists(Value, Lists, LeftOut, PlainListItems);
+			if (Lists > 0)
+				Cut.AddUnique(UnrealMcpRqlFromStd(Name));
+		};
+		if (Result.rows && Result.columns)
+		{
+			for (const std::vector<rql::Json>& Row : *Result.rows)
+			{
+				for (size_t Column = 0; Column < Row.size() && Column < Result.columns->size(); ++Column)
+					Count((*Result.columns)[Column], Row[Column]);
+			}
+		}
+		if (Result.items)
+		{
+			for (const rql::Json& Item : *Result.items)
+			{
+				for (size_t Index = 0; Item.is_object() && Index < Item.size(); ++Index)
+					Count(Item.key(Index), Item.at(Index));
+			}
+		}
+		if (Cut.IsEmpty())
+			return;
+		// The member a cut column reads: a select field's plain path (an alias or a computed column names none), or the
+		// column itself when the query selects nothing.
+		FString Member = Cut[0];
+		for (const rql::Stage& Stage : Plan.stages)
+		{
+			for (const rql::SelectField& Field : Stage.fields)
+			{
+				if (UnrealMcpRqlFromStd(Field.name) != Cut[0])
+					continue;
+				Member.Reset();
+				if (Field.expr && Field.expr->kind == rql::ExprKind::Path && !Field.expr->on)
+				{
+					for (const rql::Segment& Segment : Field.expr->segments)
+					{
+						if (Segment.kind != rql::SegmentKind::Member)
+						{
+							Member.Reset();
+							break;
+						}
+						Member += (Member.IsEmpty() ? TEXT("") : TEXT(".")) + UnrealMcpRqlFromStd(Segment.name);
+					}
+				}
+			}
+		}
+		const FString Message = FString::Printf(TEXT("list members show their first %d items in a query: %s (%lld item(s) not shown)"),
+			PlainListItems, *FString::Join(Cut, TEXT(", ")), LeftOut);
+		const FString Hint = Member.IsEmpty()
+			? FString(TEXT("every item: get <the list member> streams them as rows (page with first / skip)"))
+			: FString::Printf(TEXT("every item: ... | get %s | select ... streams them as rows (page with first / skip); count them with %s.count()"), *Member, *Member);
+		Result.diagnostics.push_back(rql::Diagnostic::warning("list-truncated", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
 	}
 
 	/** Objects whose changes belong to the project (not class defaults of compiled-in classes, not transient helpers). */
@@ -172,6 +474,17 @@ namespace UnrealMcpRqlSessionLocal
 		return Entry.bList ? FString(TEXT("list of ")) + Name : Name;
 	}
 
+	/** A source as rql-schema lists it: name, type, description. */
+	rql::Json SourceJson(const FUnrealMcpRqlSession::FEntry& Entry)
+	{
+		rql::Json Item = rql::Json::object();
+		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
+		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
+		if (!Entry.Description.IsEmpty())
+			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
+		return Item;
+	}
+
 	/** A Markdown table cell. Not `Cell`: macOS MacTypes.h (pulled in by UE 5.7 on Mac) declares a global `Cell`. */
 	FString TableCell(const FString& Text)
 	{
@@ -183,6 +496,9 @@ namespace UnrealMcpRqlSessionLocal
 	{
 	public:
 		explicit FModuleContext(FUnrealMcpRqlSession& InSession) : Session(InSession) {}
+
+		/** The operations classes the module being configured adds (its guide covers them); set per module. */
+		TArray<UClass*>* ApiClasses = nullptr;
 
 		virtual void AddObjectSource(const FString& Name, const FString& Description, UClass* Class, TFunction<UObject*()> Getter) override
 		{
@@ -209,6 +525,8 @@ namespace UnrealMcpRqlSessionLocal
 		virtual void AddApiClass(UClass* Class, const FString& TypeName) override
 		{
 			Session.Types().AddApiClass(Class, TypeName);
+			if (ApiClasses && Class)
+				ApiClasses->Add(Class);
 		}
 
 		virtual void ExposeProperties(UStruct* Owner, const TArray<FName>& PropertyNames, bool bWritable) override
@@ -395,6 +713,20 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// The checks that need the planned changes (dry runs report them too): the core one, then the modules' validators.
 	Policy.validate_batch = [this, TypeProvider, IsWritableTemplate](const std::vector<rql::MutationRecord>& Records) -> std::string
 	{
+		// rql-query runs a call only when every planned call is of a read-only operation (Execute's name check let it
+		// through); anything else is refused like any call in rql-query, before it runs (first: the
+		// refusal is rql-query's permission-denied, whatever else the batch would fail on).
+		bReadOnlyCalls = AllReadOnlyCalls(Records);
+		if (bReadOnlyCallRequest && !bReadOnlyCalls)
+		{
+			bRefusedReadOnlyCall = true;
+			return std::string("not a read-only operation");
+		}
+		// rql-mutate raised the limit for a read-only operation's name: a same-named call that changes something keeps the
+		// editor's limit.
+		if (bReadOnlyLimit && Records.size() > static_cast<size_t>(DefaultMaxTargets) && !bReadOnlyCalls)
+			return UnrealMcpRqlToStd(FString::Printf(TEXT("%d calls, more than the limit of %d for a change (pass max_targets = %d)"),
+				static_cast<int32>(Records.size()), DefaultMaxTargets, static_cast<int32>(Records.size())));
 		// Class defaults and archetypes (the class-default sources' rows, a Blueprint's defaults) are read-only: an
 		// in-memory change to a CDO is not a saved edit and leaks into every new instance. API objects (`editor`, the
 		// extensions' operations) are class defaults by design and stay callable.
@@ -409,34 +741,47 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		}
 		// A call cannot be undone generically: one object reached twice (actors | get Parent | call Destroy() over two
 		// siblings) would run the call twice, and a second call failing after the first changed the editor breaks the
-		// all-or-nothing promise. Refuse the duplicate before anything runs.
-		TSet<TPair<const void*, FString>> Called;
-		for (const rql::MutationRecord& Record : Records)
+		// all-or-nothing promise. Refuse the duplicate before anything runs. A read-only operation changes nothing, so
+		// running it twice is harmless: it is never a duplicate.
+		TMap<TPair<const void*, FString>, int32> Called;
+		for (int32 Index = 0; Index < static_cast<int32>(Records.size()); ++Index)
 		{
-			if (!Record.method || !Record.item.is_object() || !Record.item.ptr())
+			const rql::MutationRecord& Record = Records[Index];
+			if (!Record.method || !Record.item.is_object() || !Record.item.ptr() || IsReadOnlyCall(Record))
 				continue;
 			// An operations object (`editor`, an extension's) is called once per stream item by design (range(0, 300) | call
 			// editor.SpawnActor(...) creates 300 actors): the same operation twice with the same arguments is the duplicate
 			// (DeleteAsset("/Game/X") twice), except a spawn, where identical arguments still mean another actor.
 			FString Key = UnrealMcpRqlFromStd(Record.method->name).ToLower();
-			if (const UObject* Receiver = TypeProvider->AsObject(Record.item); Receiver && TypeProvider->IsApiClass(Receiver->GetClass()))
+			const UObject* Receiver = TypeProvider->AsObject(Record.item);
+			const bool bOperation = Receiver && TypeProvider->IsApiClass(Receiver->GetClass());
+			if (bOperation)
 			{
 				if (Key.StartsWith(TEXT("spawn")))
 					continue;
-				// An object argument by identity: its text is only its type name (two Blueprints both read "Blueprint").
+				std::string Arguments;
 				for (const rql::Value& Argument : Record.args)
-					Key += TEXT("|") + (Argument.is_object() ? FString::Printf(TEXT("%p"), Argument.ptr()) : UnrealMcpRqlFromStd(rql::to_text(Argument)));
+				{
+					Arguments += "|";
+					AppendCallKey(Arguments, Argument);
+				}
+				// Hashed: an argument can be a whole heightmap or vertex list, and every key stays alive for the batch.
+				Key += FSHA1::HashBuffer(Arguments.data(), Arguments.size()).ToString();
 			}
-			bool bTwice = false;
-			Called.Add({ Record.item.ptr(), Key }, &bTwice);
-			if (bTwice)
+			const TPair<const void*, FString> CallKey(Record.item.ptr(), Key);
+			if (const int32* First = Called.Find(CallKey))
 			{
-				const UObject* Object = TypeProvider->AsObject(Record.item);
-				const AActor* Actor = Cast<AActor>(Object);
-				const FString Name = Actor ? Actor->GetActorLabel() : Object ? Object->GetName() : FString(TEXT("one object"));
+				const FString Method = UnrealMcpRqlFromStd(Record.method->name);
+				// An operation: two stream items gave it the same arguments.
+				if (bOperation)
+					return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice with the same arguments (calls %d and %d of this "
+						"stage, counting from 1): give each item its own arguments ($, $[0]), or drop repeated items with | distinct before call"), *Method, *First + 1, Index + 1));
+				const AActor* Actor = Cast<AActor>(Receiver);
+				const FString Name = Actor ? Actor->GetActorLabel() : Receiver ? Receiver->GetName() : FString(TEXT("one object"));
 				return UnrealMcpRqlToStd(FString::Printf(TEXT("%s would run twice on %s (it is in the stream more than once: "
-					"add | distinct before call)"), *UnrealMcpRqlFromStd(Record.method->name), *Name));
+					"add | distinct before call)"), *Method, *Name));
 			}
+			Called.Add(CallKey, Index);
 		}
 		for (const FBatchValidator& Validator : BatchValidators)
 		{
@@ -566,6 +911,10 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// calls create with RF_Transactional (SpawnActor, AddComponent, ...) are recorded into the same transaction.
 	Policy.before_write = [this, OwnerOf, ViewStateActor](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Calls of read-only operations change nothing: no undo step, nothing to snapshot. Undo / Redo work the undo buffer
+		// themselves, which an open transaction would block.
+		if (AllReadOnlyCalls(Records) || AllOwnUndoCalls(Records))
+			return;
 		// Also when a call ended it (StartPlay / StopPlay close it before PIE starts or ends): later writes of the same
 		// query still get an undo step.
 		if (GEditor && (TransactionIndex == INDEX_NONE || !GEditor->IsTransactionActive()))
@@ -582,6 +931,10 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// Property writes already ran the editor's PreEditChange / PostEditChangeProperty; mark what changed as unsaved.
 	Policy.committed = [this, OwnerOf](const std::vector<rql::MutationRecord>& Records)
 	{
+		// Calls of read-only operations changed nothing: nothing to mark unsaved, no change for the modules' hooks. An undone
+		// or redone change marks its own packages.
+		if (AllReadOnlyCalls(Records) || AllOwnUndoCalls(Records))
+			return;
 		for (const rql::MutationRecord& Record : Records)
 		{
 			UObject* Owner = OwnerOf(Record);
@@ -591,6 +944,32 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 		for (const FMutationHook& Hook : CommittedHooks)
 			Hook(Records);
 	};
+}
+
+bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) const
+{
+	if (!Record.method)
+		return false;
+	// The chosen method must be the flagged UFUNCTION's own descriptor (marked by AddFunctionMethod), not a hand-written
+	// method or overload of the same name on that class.
+	static const std::string Mark = UnrealMcpRqlToStd(FUnrealMcpRqlTypes::ReadOnlyMark);
+	const UObject* Receiver = TypesPtr->AsObject(Record.item);
+	return Receiver && Record.method->description.rfind(Mark, 0) == 0
+		&& TypesPtr->IsReadOnlyOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
+}
+
+bool FUnrealMcpRqlSession::AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const
+{
+	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record) { return IsReadOnlyCall(Record); });
+}
+
+bool FUnrealMcpRqlSession::AllOwnUndoCalls(const std::vector<rql::MutationRecord>& Records) const
+{
+	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record)
+	{
+		const UObject* Receiver = Record.method ? TypesPtr->AsObject(Record.item) : nullptr;
+		return Receiver && TypesPtr->IsOwnUndoOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
+	});
 }
 
 void FUnrealMcpRqlSession::ConfigureModules()
@@ -611,8 +990,20 @@ void FUnrealMcpRqlSession::ConfigureModules()
 			if (bAlreadyConfigured)
 				continue;
 		}
+		FModuleInfo Info;
+		Info.Name = Module->GetRqlModuleName();
+		Info.ExtensionId = Extension;
+		Info.SourceBegin = SourceEntries.Num();
+		Info.GuideBegin = Guides.Num();
+		Context.ApiClasses = &Info.ApiClasses;
 		Module->ConfigureRql(Context);
+		Context.ApiClasses = nullptr;
 		const FString Version = Module->GetExtensionVersion();
+		Info.Version = Version;
+		Info.SourceEnd = SourceEntries.Num();
+		Info.GuideEnd = Guides.Num();
+		if (Info.SourceEnd > Info.SourceBegin || Info.GuideEnd > Info.GuideBegin)
+			ModuleInfos.Add(MoveTemp(Info));
 		FString Report = FString::Printf(TEXT("`%s`"), *Module->GetRqlModuleName());
 		if (!Extension.IsEmpty())
 			Report += FString::Printf(TEXT(" - %s %s"), *Extension, *Version);
@@ -680,6 +1071,11 @@ void FUnrealMcpRqlSession::AddAdapter(rql::TypeAdapter Adapter)
 FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutation, bool bDryRun, bool& bOutOk, TOptional<int32> MaxTargets)
 {
 	Types().SetMutationRequest(bAllowMutation);
+	UnrealMcpRqlForgetSimilarActors();
+	bReadOnlyCallRequest = false;
+	bRefusedReadOnlyCall = false;
+	bReadOnlyLimit = false;
+	bReadOnlyCalls = false;
 	const std::string Text = UnrealMcpRqlToStd(PlanJson);
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;
@@ -690,22 +1086,52 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	}
 	else if (!FunctionSource(Plan, Result))
 	{
+		const bool bCall = EndsWithCall(Plan);
+		// rql-query may call read-only operations (meta = (RqlReadOnly)): the engine allows the call stage, and the batch
+		// check refuses every planned call that is not one (a same-named operation of another type) before any runs. Any
+		// other call keeps the engine's own permission-denied, before its target is evaluated.
+		const bool bReadOnlyName = bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(Plan.stages.back().method));
+		bReadOnlyCallRequest = !bAllowMutation && bReadOnlyName;
 		rql::QueryOptions Options;
-		Options.allow_mutation = bAllowMutation;
+		Options.allow_mutation = bAllowMutation || bReadOnlyCallRequest;
 		Options.dry_run = bDryRun;
 		rql::Budgets Budgets;
+		// A read-only call changes nothing, so the editor's mutation limit does not apply: it takes the ceiling in both tools
+		// (rql-query has no max_targets). In rql-mutate a same-named operation that is not read-only is held to the
+		// default limit by the batch check (bReadOnlyLimit).
+		bReadOnlyLimit = bReadOnlyName && !MaxTargets.IsSet();
 		if (MaxTargets.IsSet())
 			Budgets.max_mutation_targets = MaxTargets.GetValue(); // outside 1 .. hard_max_targets the engine refuses the request
+		else if (bReadOnlyLimit)
+			Budgets.max_mutation_targets = HardMaxTargets;
+		if (bCall)
+			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
+		if (bRefusedReadOnlyCall)
+			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
+		else if (bCall)
+			AddCallResultListNote(Result);
+		else if (!bAllowMutation) // a set receipt's old / new columns are no members to get
+			UnrealMcpRqlSessionLocal::AddListMemberNote(Result, Plan);
+		if (bReadOnlyLimit)
+			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, Plan, bAllowMutation);
 	UnrealMcpRqlSessionLocal::AddOpenLevelHint(Result, Plan, bAllowMutation);
+	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
+	if (bReadOnlyCalls && !Plan.stages.empty())
+		UnrealMcpRqlSessionLocal::RewordReadTruncation(Result, Plan.stages.back().method);
 	bOutOk = Result.ok;
-	return UnrealMcpRqlFromStd(Result.to_json(/*include_stats*/ false).dump());
+	rql::Json Answer = Result.to_json(/*include_stats*/ false);
+	// The sidecar renders an rql-mutate answer as a receipt (its first 50 rows and a count): a read's rows are its answer
+	// (a grid of sampled heights), so "readOnly" asks for every row, as rql-query shows them (within the 64 KB answer).
+	if (Result.ok && bReadOnlyCalls)
+		Answer.set("readOnly", true);
+	return UnrealMcpRqlFromStd(Answer.dump());
 }
 
 bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult& OutFailure)
@@ -813,8 +1239,127 @@ bool FUnrealMcpRqlSession::FunctionSource(rql::QueryPlan& Plan, rql::QueryResult
 	return false;
 }
 
-FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
+TArray<FString> FUnrealMcpRqlSession::ModuleNames() const
 {
+	TArray<FString> Names;
+	for (const FModuleInfo& Info : ModuleInfos)
+		Names.Add(Info.Name);
+	return Names;
+}
+
+rql::Json FUnrealMcpRqlSession::ModuleJson(const FModuleInfo& Info)
+{
+	rql::Json Item = rql::Json::object();
+	Item.set("name", UnrealMcpRqlToStd(Info.Name));
+	if (!Info.ExtensionId.IsEmpty())
+		Item.set("extension", UnrealMcpRqlToStd(Info.ExtensionId));
+	if (!Info.Version.IsEmpty())
+		Item.set("version", UnrealMcpRqlToStd(Info.Version));
+	return Item;
+}
+
+FString FUnrealMcpRqlSession::GuideKey(const FString& Name)
+{
+	FString Key;
+	Key.Reserve(Name.Len());
+	for (const TCHAR Char : Name)
+	{
+		if (Char != TEXT('-') && Char != TEXT('_') && !FChar::IsWhitespace(Char))
+			Key.AppendChar(FChar::ToLower(Char));
+	}
+	return Key;
+}
+
+const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::FindModuleInfo(const FString& Name) const
+{
+	// Case, hyphens, underscores and spaces do not matter: "mesh-terrain", "Mesh Terrain" and "meshTerrain" name one module.
+	const FString Key = GuideKey(Name);
+	if (Key.IsEmpty())
+		return nullptr;
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		// The module name, its extension id (com.ivanmurzak.unreal-ai-mesh-terrain), the id's last segment
+		// (unreal-ai-mesh-terrain) and that segment without the first-party "unreal-ai-" prefix (mesh-terrain).
+		FString LastSegment;
+		if (!Info.ExtensionId.Split(TEXT("."), nullptr, &LastSegment, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+			LastSegment = Info.ExtensionId;
+		FString Short = GuideKey(LastSegment);
+		Short.RemoveFromStart(TEXT("unrealai"));
+		for (const FString& Candidate : { GuideKey(Info.Name), GuideKey(Info.ExtensionId), GuideKey(LastSegment), Short })
+		{
+			if (!Candidate.IsEmpty() && Candidate == Key)
+				return &Info;
+		}
+	}
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
+		{
+			// A source by name, or an operations source by its type (MeshTerrainOperations); a source typed by a shared
+			// engine class (Light, StaticMesh) does not make that class this module's.
+			const FEntry& Source = SourceEntries[Index];
+			if (GuideKey(Source.Name) == Key || (IsApiType(Info, Source.Type) && GuideKey(UnrealMcpRqlFromStd(Source.Type->name)) == Key))
+				return &Info;
+		}
+	}
+	return nullptr;
+}
+
+const FUnrealMcpRqlSession::FModuleInfo* FUnrealMcpRqlSession::ModuleOfType(const rql::TypeDescriptor* Type) const
+{
+	for (const FModuleInfo& Info : ModuleInfos)
+	{
+		if (Info.GuideEnd > Info.GuideBegin && IsApiType(Info, Type))
+			return &Info;
+	}
+	return nullptr;
+}
+
+bool FUnrealMcpRqlSession::IsApiType(const FModuleInfo& Info, const rql::TypeDescriptor* Type) const
+{
+	return Type && Info.ApiClasses.Contains(TypesPtr->ClassOf(Type));
+}
+
+FString FUnrealMcpRqlSession::GuideSchema(const FString& Key, bool& bOutOk) const
+{
+	rql::Json Root = rql::Json::object();
+	const FModuleInfo* Info = FindModuleInfo(Key);
+	if (!Info)
+	{
+		bOutOk = false;
+		Root.set("error", "unknown-guide");
+		Root.set("name", UnrealMcpRqlToStd(Key));
+		rql::Json Candidates = rql::Json::array();
+		for (const FModuleInfo& Each : ModuleInfos)
+			Candidates.push(rql::Json(UnrealMcpRqlToStd(Each.Name)));
+		Root.set("candidates", std::move(Candidates));
+		return UnrealMcpRqlFromStd(Root.dump());
+	}
+	bOutOk = true;
+	rql::Json Guide = ModuleJson(*Info);
+	rql::Json SourceList = rql::Json::array();
+	for (int32 Index = Info->SourceBegin; Index < Info->SourceEnd; ++Index)
+		SourceList.push(SourceJson(SourceEntries[Index]));
+	Guide.set("sources", std::move(SourceList));
+	rql::Json Sections = rql::Json::array();
+	for (int32 Index = Info->GuideBegin; Index < Info->GuideEnd; ++Index)
+	{
+		rql::Json Item = rql::Json::object();
+		Item.set("topic", UnrealMcpRqlToStd(Guides[Index].Key));
+		Item.set("markdown", UnrealMcpRqlToStd(Guides[Index].Value.TrimStartAndEnd()));
+		Sections.push(std::move(Item));
+	}
+	Guide.set("sections", std::move(Sections));
+	Root.set("guide", std::move(Guide));
+	return UnrealMcpRqlFromStd(Root.dump());
+}
+
+FString FUnrealMcpRqlSession::Schema(const FString& TypeName, const FString& Guide, bool& bOutOk)
+{
+	const FString WantedGuide = Guide.TrimStartAndEnd();
+	if (!WantedGuide.IsEmpty())
+		return GuideSchema(WantedGuide, bOutOk);
+
 	rql::Json Root = rql::Json::object();
 	bOutOk = true;
 
@@ -876,19 +1421,15 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		rql::Json TypeList = rql::Json::array();
 		TypeList.push(Describe(Found));
 		Root.set("types", std::move(TypeList));
+		// An extension's source type: its guide says how the operations work together.
+		if (const FModuleInfo* Owner = ModuleOfType(Found))
+			Root.set("guideCall", UnrealMcpRqlToStd(UnrealMcpRqlGuide::GuideCall(Owner->Name)));
 		return UnrealMcpRqlFromStd(Root.dump());
 	}
 
 	rql::Json SourceList = rql::Json::array();
 	for (const FEntry& Entry : SourceEntries)
-	{
-		rql::Json Item = rql::Json::object();
-		Item.set("name", UnrealMcpRqlToStd(Entry.Name));
-		Item.set("type", UnrealMcpRqlToStd(TypeLabel(Entry)));
-		if (!Entry.Description.IsEmpty())
-			Item.set("description", UnrealMcpRqlToStd(Entry.Description));
-		SourceList.push(std::move(Item));
-	}
+		SourceList.push(SourceJson(Entry));
 	Root.set("sources", std::move(SourceList));
 
 	rql::Json FunctionList = rql::Json::array();
@@ -900,6 +1441,24 @@ FString FUnrealMcpRqlSession::Schema(const FString& TypeName, bool& bOutOk)
 		FunctionList.push(std::move(Item));
 	}
 	Root.set("functions", std::move(FunctionList));
+
+	// The installed extension modules: their sources and the call that returns their guide (AddGuide).
+	if (!ModuleInfos.IsEmpty())
+	{
+		rql::Json ModuleList = rql::Json::array();
+		for (const FModuleInfo& Info : ModuleInfos)
+		{
+			rql::Json Item = ModuleJson(Info);
+			rql::Json Names = rql::Json::array();
+			for (int32 Index = Info.SourceBegin; Index < Info.SourceEnd; ++Index)
+				Names.push(rql::Json(UnrealMcpRqlToStd(SourceEntries[Index].Name)));
+			Item.set("sources", std::move(Names));
+			if (Info.GuideEnd > Info.GuideBegin)
+				Item.set("guideCall", UnrealMcpRqlToStd(UnrealMcpRqlGuide::GuideCall(Info.Name)));
+			ModuleList.push(std::move(Item));
+		}
+		Root.set("modules", std::move(ModuleList));
+	}
 
 	// The extensions agents could add (each brings sources and operations), with how to get them.
 	const TArray<FUnrealMcpMissingExtension> Missing = UnrealMcpAvailableExtensions::Missing();
@@ -966,7 +1525,7 @@ FString FUnrealMcpRqlSession::SkillMarkdown() const
 	Out += TEXT("# RQL - query and change the Unreal Editor\n\n");
 	Out += TEXT("RQL is one pipeline language for the whole editor: find actors and assets, read members, filter, aggregate, and change "
 		"them in one call. Prefer one precise query over many exploratory calls.\n\n");
-	Out += TEXT("- `rql-query` - read-only queries, compact table results.\n");
+	Out += TEXT("- `rql-query` - read-only queries, compact table results; `call` of read-only operations (rql-schema marks them [read-only]).\n");
 	Out += TEXT("- `rql-mutate` - queries ending with `set` / `call`; all-or-nothing, one undo step (Ctrl+Z), `dry_run: true` previews. "
 		"Several queries separated by `;` run in order, each its own change and undo step; the first that fails stops the rest. "
 		"Changes are not saved to disk until `editor | call SaveAll()` (or SaveLevel / SaveAsset).\n");

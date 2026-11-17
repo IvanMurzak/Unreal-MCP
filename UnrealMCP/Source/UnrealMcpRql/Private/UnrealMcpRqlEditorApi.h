@@ -17,6 +17,53 @@ class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UWorld;
 
+/** One World Partition actor of the editor world that is not loaded (the `unloadedActors` source): its actor descriptor. */
+USTRUCT()
+struct FUnrealMcpUnloadedActor
+{
+	GENERATED_BODY()
+
+	/** the actor's label (its name when it has none) */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Label;
+
+	/** the actor's object name */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Name;
+
+	/** its class as the outliner shows it ("WaterBodyLake", "BP_Door_C") */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Class;
+
+	/** the actor GUID (editor | call LoadActors accepts it) */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Guid;
+
+	/** the external actor package it is saved in */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Package;
+
+	/** its outliner folder */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FString Folder;
+
+	/** its location (cm) */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FVector Location = FVector::ZeroVector;
+
+	/** its editor bounds (cm): Bounds.Min, Bounds.Max */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	FBox Bounds = FBox(ForceInit);
+
+	/** false: it loads with the level, not by region (a data layer may keep it unloaded) */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	bool SpatiallyLoaded = true;
+
+	/** the data layers it belongs to */
+	UPROPERTY(VisibleAnywhere, Category = "World Partition")
+	TArray<FString> DataLayers;
+};
+
 /**
  * The `editor` RQL source (type "Editor"): editor operations that have no owner object, e.g.
  * `editor | call SpawnActor("PointLight", "Lamp", "(0, 0, 300)")`. Every UFUNCTION here is callable from rql-mutate
@@ -121,6 +168,22 @@ public:
 	/** create a DataTable at Path whose rows are RowStruct (a struct name such as "GameplayTagTableRow", or a user-defined struct asset path); returns it, unsaved */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UDataTable* CreateDataTable(const FString& Path, const FString& RowStruct);
+
+	/** World Partition: load actors of the open level that are not loaded (unloadedActors lists them; actors lists only loaded ones) by label, name, GUID or package, as the World Partition window's load does; returns them. Changes nothing saved and adds no undo step (rql-query may call it); they stay loaded until the level closes */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	TArray<AActor*> LoadActors(const TArray<FString>& Actors);
+
+	/** World Partition: load every actor of the open level whose bounds overlap the XY rectangle Min .. Max (cm; Z ignored), as loading a region in the World Partition window does; returns the actors it loaded. Changes nothing saved and adds no undo step (rql-query may call it) */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	TArray<AActor*> LoadRegion(FVector2D Min, FVector2D Max);
+
+	/** undo the editor's last Steps undoable changes (RQL mutations, Details panel edits, ...), as Ctrl+Z does; returns their titles, newest first. Refused, with nothing undone, when fewer steps can be undone (editor | select UndoHistory lists them) */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlOwnUndo))
+	TArray<FString> Undo(int32 Steps = 1);
+
+	/** redo the last Steps undone changes, as Ctrl+Y does; returns their titles, in redo order. Refused, with nothing redone, when fewer can be redone (editor | select RedoHistory) */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true", RqlOwnUndo))
+	TArray<FString> Redo(int32 Steps = 1);
 
 	/** play test: start Play In Editor NOW (inside this call) and return the play state (player pawn, location, movement); bPaused (default true) keeps the game still between calls, so it moves only inside AdvancePlay / InjectInput (deterministic); a running session is kept. Then: editor | call AdvancePlay(1.0, 0, "W") */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))

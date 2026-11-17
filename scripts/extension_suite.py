@@ -300,6 +300,10 @@ def main() -> int:
     parser.add_argument("--server", type=Path)
     parser.add_argument("--bridge", type=Path)
     args = parser.parse_args()
+    args.server = args.server.resolve() if args.server else None
+    args.bridge = args.bridge.resolve() if args.bridge else None
+    if args.mode in ("automation", "verification") and bool(args.server) != bool(args.bridge):
+        parser.error("the live E2E needs both --server and --bridge (or --mode full, which fetches the missing one)")
     with machine_lock(args.ue_lock_held):
         engine = args.engine.resolve()
         if args.extensions and any(n not in extensions() for n in args.extensions):
@@ -310,8 +314,9 @@ def main() -> int:
         if args.result_file:
             write_json(args.result_file, {"status": "running"})
         if args.mode == "full" and (not args.server or not args.bridge):
+            # Keep what the caller passed (a bridge built from this commit) and fetch only the missing binary.
             from suite_dependencies import resolve
-            args.server, args.bridge = resolve(output)
+            args.server, args.bridge = resolve(output, args.server, args.bridge)
         if args.mode in ("full", "verification", "isolated"):
             # No siblings are present in these copies, including their headers and DLLs.
             for name in [None, *selected]:

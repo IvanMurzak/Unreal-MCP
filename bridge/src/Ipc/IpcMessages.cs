@@ -29,6 +29,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         [JsonPropertyName("ipcVersion")] public int IpcVersion { get; set; } = IpcProtocol.IpcVersion;
         [JsonPropertyName("sidecarVersion")] public string? SidecarVersion { get; set; }
         [JsonPropertyName("token")] public string? Token { get; set; }
+        /// <summary>This bridge's release version (the csproj Version), so the plugin can name it in a skew error.</summary>
+        [JsonPropertyName("bridgeVersion")] public string? BridgeVersion { get; set; } = IpcProtocol.BridgeVersion;
+        /// <summary>
+        /// What this bridge's RQL renderer understands (<see cref="Tools.RqlBridge.RendererVersion"/>); a bridge that predates
+        /// the field sends none, and the plugin refuses answers it would render empty.
+        /// </summary>
+        [JsonPropertyName("rqlRenderer")] public int RqlRenderer { get; set; } = Tools.RqlBridge.RendererVersion;
     }
 
     /// <summary>plugin → sidecar: handshake acknowledgement + effective environment/config (§1.3).</summary>

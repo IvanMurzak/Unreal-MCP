@@ -275,6 +275,8 @@ void FUnrealAIMeshTerrainCreateSpec::Define()
 				{ CreateSpecArgs(Existing, At, TEXT("")), TEXT("already exists") },
 				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":5})")), TEXT("SizeMeters 5 is outside 10 .. 20000") },
 				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":30000})")), TEXT("SizeMeters 30000 is outside") },
+				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":20000.01})")), TEXT("SizeMeters 20000.01 is outside") },
+				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":100},{"lit":9.999})")), TEXT("SizeYMeters 9.999 is outside") },
 				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":100},{"lit":50000})")), TEXT("SizeYMeters 50000 is outside") },
 				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":100},{"lit":0},{"lit":5000})")), TEXT("Resolution 5000 is outside 1 .. 2000") },
 				{ CreateSpecArgs(TEXT("SpecBad"), At, TEXT(R"({"lit":100},{"lit":1000},{"lit":300})")), TEXT("at most 2000 per side") },
