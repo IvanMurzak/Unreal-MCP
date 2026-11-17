@@ -248,8 +248,10 @@ def build_bridge(_args) -> None:
     if run(["dotnet", "build", ROOT / "bridge/Unreal-MCP-Bridge.sln", "--configuration", "Debug"]) != 0:
         raise StepError("bridge build failed")
     # The flat framework-dependent output folder is named after the csproj's TFM; read it there.
-    tfm = re.search(r"<TargetFramework>([^<]+)</TargetFramework>", BRIDGE_CSPROJ.read_text(encoding="utf-8")).group(1)
-    bridge = BRIDGE_CSPROJ.parent / "bin/Debug" / tfm / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
+    tfm = re.search(r"<TargetFramework>([^<]+)</TargetFramework>", BRIDGE_CSPROJ.read_text(encoding="utf-8"))
+    if tfm is None:
+        raise StepError(f"no single <TargetFramework> in {BRIDGE_CSPROJ}")
+    bridge = BRIDGE_CSPROJ.parent / "bin/Debug" / tfm.group(1) / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
     if not bridge.is_file():
         raise StepError(f"bridge binary not found at {bridge}")
     add_job_env("UNREAL_MCP_BRIDGE_PATH", str(bridge))
