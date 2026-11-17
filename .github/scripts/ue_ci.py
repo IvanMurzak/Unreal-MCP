@@ -246,7 +246,7 @@ def build_bridge(_args) -> None:
     """Build the bridge sidecar and export it as UNREAL_MCP_BRIDGE_PATH (PR builds bundle no sidecar)."""
     if run(["dotnet", "build", ROOT / "bridge/Unreal-MCP-Bridge.sln", "--configuration", "Debug"]) != 0:
         raise StepError("bridge build failed")
-    bridge = ROOT / "bridge/src/bin/Debug/net9.0" / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
+    bridge = ROOT / "bridge/src/bin/Debug/net10.0" / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
     if not bridge.is_file():
         raise StepError(f"bridge binary not found at {bridge}")
     add_job_env("UNREAL_MCP_BRIDGE_PATH", str(bridge))

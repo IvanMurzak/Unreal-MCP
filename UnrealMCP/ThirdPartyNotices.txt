@@ -8,7 +8,7 @@ The UnrealMCP plugin is licensed under the Apache License, Version 2.0
     Copyright 2026 Ivan Murzak
 
 This plugin runs a prebuilt ".NET" sidecar (`unreal-mcp-bridge`), a
-self-contained, single-file .NET 9 application built per platform RID
+self-contained, single-file .NET 10 application built per platform RID
 (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`). The source and packaged
 GitHub Release assets bundle it under
 `Source/ThirdParty/UnrealMcpBridge/<rid>/` and stage it into
@@ -17,7 +17,7 @@ asset carries no executable and never downloads one: the user downloads
 the sidecar for the plugin version from the GitHub Release by hand, and can
 check it against the shipped `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`.
 Because it is
-self-contained, each binary carries the Microsoft .NET 9 runtime and the
+self-contained, each binary carries the Microsoft .NET 10 runtime and the
 managed dependencies listed below inside it.
 
 The third-party components redistributed via that sidecar or as source
@@ -25,7 +25,7 @@ in this plugin, and their licenses, are enumerated below. Each component remains
 of its respective copyright holder(s) and is governed by its own license.
 
 --------------------------------------------------------------------------
-1. Microsoft .NET 9 Runtime and Libraries (self-contained)
+1. Microsoft .NET 10 Runtime and Libraries (self-contained)
 --------------------------------------------------------------------------
 Publisher : Microsoft Corporation and the .NET Foundation
 License   : MIT License

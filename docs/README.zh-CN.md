@@ -71,7 +71,7 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 
 - **Unreal Engine 5.5 – 5.8**（发布流水线会逐一验证）。
 - **C++ 项目**，因为插件以源码形式发布，Unreal 会用你平台的 C++ 工具链为你的项目编译它的模块。纯 Blueprint 项目一步即可变成 C++ 项目：在编辑器中选择 **Tools → New C++ Class…** 并创建任意类。新项目可用 `unreal-mcp-cli create-project ./MyGame` 生成一个最小的 C++ 项目。Fab 版本无需 C++ 项目：Epic Games Launcher 会安装预编译好的版本。
-- **无需安装 .NET。**MCP 主机是一个自包含的 .NET 程序（`unreal-mcp-bridge`），按你的平台打包在插件内；插件负责启动和重启它。（Fab 版本不含可执行文件：它的 **Get bridge** 按钮会打开发布页面，你只需把 bridge 解压到插件的 bridge 文件夹一次。）只有从源码构建 bridge 才需要 .NET 9 SDK。
+- **无需安装 .NET。**MCP 主机是一个自包含的 .NET 程序（`unreal-mcp-bridge`），按你的平台打包在插件内；插件负责启动和重启它。（Fab 版本不含可执行文件：它的 **Get bridge** 按钮会打开发布页面，你只需把 bridge 解压到插件的 bridge 文件夹一次。）只有从源码构建 bridge 才需要 .NET 10 SDK。
 - **Node.js 22.14+**，仅 `unreal-mcp-cli` 需要（它是 npm 包，22.14 是其最低 Node 版本）。
 - **Windows 或 macOS**（每个版本都在两者上测试）。**Linux x64：**sidecar 会构建并发布，但没有任何发布测试在 Linux 上运行。
 
@@ -288,7 +288,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | 路径 | 内容 |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal 插件（C++）：`UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`，.NET 9 边车进程 |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`，.NET 10 边车进程 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`，npm 包 |
 | [`extensions/`](../extensions/) | 七个可选引擎扩展，各自独立发布 |
 | [`samples/`](../samples/) | 一个编辑器扩展模板和一个运行时（游戏内）工具示例 |

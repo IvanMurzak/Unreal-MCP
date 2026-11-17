@@ -29,7 +29,7 @@ body = [K.eyebrow(X0, 72, "How it works")]
 cards = [
     ("Your AI agent", "Claude Code, Cursor,", "Copilot, Codex, …", "blue"),
     ("MCP server", "ai-game.dev cloud or", "gamedev-mcp-server", "blue"),
-    ("Sidecar", "unreal-mcp-bridge", ".NET 9, auto-started", "yellow"),
+    ("Sidecar", "unreal-mcp-bridge", ".NET 10, auto-started", "yellow"),
     ("UnrealMCP plugin", "C++, inside the editor", "tools on game thread", "red"),
 ]
 for x, (title, sub, sub2, accent) in zip(xs, cards):

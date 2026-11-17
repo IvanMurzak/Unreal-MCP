@@ -247,10 +247,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
       - name: Restore
         run: dotnet restore bridge/Unreal-MCP-Bridge.sln
       - name: Build
@@ -383,10 +383,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
       # --no-zip: sign the raw apphost BEFORE zipping. Cross-build linux-x64
       # here too (no native linux toolchain needed for a portable self-contained
       # apphost); it ships unsigned (no Linux code-signing standard — matches
@@ -519,10 +519,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
       # -NoZip: sign the raw .exe BEFORE zipping.
       - name: Build self-contained bridge (win-x64, no zip)
         run: python bridge/publish.py --configuration Release --platforms win-x64 --no-zip
