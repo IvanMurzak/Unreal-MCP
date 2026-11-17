@@ -301,6 +301,27 @@ namespace UnrealAILandscapeRqlApiLocal
 	}
 
 	/**
+	 * The ground's heights over @p R (row by row): with one height edit layer that layer (@p EditLayer, the one edits are
+	 * written to), with several their sum (the merged heights).
+	 */
+	TArray<uint16> ReadGround(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R)
+	{
+		int32 HeightLayers = 0;
+		if (const ALandscape* Primary = Landscape->GetLandscapeActor())
+		{
+			for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
+				HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
+		}
+		TArray<uint16> Ground;
+		Ground.SetNumZeroed((R.Width() + 1) * (R.Height() + 1));
+		FHeightmapAccessor<false> Reader(Info);
+		if (HeightLayers <= 1)
+			Reader.SetEditLayer(EditLayer);
+		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
+		return Ground;
+	}
+
+	/**
 	 * Read the vertices of @p R through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
 	 * change each one given its vertex X, Y (true when it changed), let @p BeforeWrite check the new values of the rectangle
 	 * (false after Fail: nothing is written) or adjust what goes with them, write them back and refresh; how many changed.
@@ -837,32 +858,16 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	if (!LayerInfo)
 		return 0;
 
-	// The ground over the rectangle and one vertex around it (the slopes at its edge): with one height layer that layer, with
-	// several their sum (the merged heights), as Smooth reads it.
+	// The ground over the rectangle and one vertex around it (the slopes at its edge).
+	const FGuid HeightLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
+	if (!HeightLayer.IsValid())
+		return 0;
 	FIntRect Whole;
 	Area.Info->GetLandscapeExtent(Whole);
 	const FIntRect G(FIntPoint(FMath::Max(Whole.Min.X, R.Min.X - 1), FMath::Max(Whole.Min.Y, R.Min.Y - 1)),
 		FIntPoint(FMath::Min(Whole.Max.X, R.Max.X + 1), FMath::Min(Whole.Max.Y, R.Max.Y + 1)));
 	const int32 GW = G.Width() + 1;
-	TArray<uint16> Ground;
-	Ground.SetNumZeroed(GW * (G.Height() + 1));
-	{
-		int32 HeightLayers = 0;
-		if (const ALandscape* Primary = Landscape->GetLandscapeActor())
-		{
-			for (const ULandscapeEditLayerBase* Each : Primary->GetEditLayersConst())
-				HeightLayers += Each && Each->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
-		}
-		FHeightmapAccessor<false> Reader(Area.Info);
-		if (HeightLayers <= 1)
-		{
-			const FGuid HeightLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
-			if (!HeightLayer.IsValid())
-				return 0;
-			Reader.SetEditLayer(HeightLayer);
-		}
-		Reader.GetDataFast(G.Min.X, G.Min.Y, G.Max.X, G.Max.Y, Ground.GetData());
-	}
+	const TArray<uint16> Ground = ReadGround(Landscape, Area.Info, HeightLayer, G);
 	const FVector Scale = ToWorld.GetScale3D();
 	const auto LocalZ = [&](int32 X, int32 Y) { return LandscapeDataAccess::GetLocalHeight(Ground[(Y - G.Min.Y) * GW + (X - G.Min.X)]); };
 	// 1 inside [Low, High], a cosine to 0 over Edge past either bound.
@@ -922,22 +927,8 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return 0;
 	const FIntRect& R = Area.Rect;
 	const int32 W = R.Width() + 1, H = R.Height() + 1;
-	// The ground: with one height layer that layer, with several their sum (the merged heights); the change is then added to
-	// the layer edits are written to, as Carve and Ramp do.
-	int32 HeightLayers = 0;
-	if (const ALandscape* Primary = Landscape->GetLandscapeActor())
-	{
-		for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
-			HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
-	}
-	TArray<uint16> Ground;
-	Ground.SetNumZeroed(W * H);
-	{
-		FHeightmapAccessor<false> Reader(Area.Info);
-		if (HeightLayers <= 1)
-			Reader.SetEditLayer(EditLayer);
-		Reader.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Ground.GetData());
-	}
+	// The ground (ReadGround); the change is then added to the layer edits are written to, as Carve and Ramp do.
+	TArray<uint16> Ground = ReadGround(Landscape, Area.Info, EditLayer, R);
 	// Vertices with a loaded component under them (the rest of the rectangle reads as 0, not ground).
 	TBitArray<> Valid(false, W * H);
 	const int32 ComponentQuads = Area.Info->ComponentSizeQuads;
