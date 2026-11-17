@@ -237,7 +237,7 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Edits"),
-			TEXT("the landscape's edit log, newest first (the last 1000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it"),
+			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TArray<TSharedPtr<FJsonValue>> Out;
@@ -390,12 +390,12 @@ landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 1000
 ```
 
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
-Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 1000, newest first:
+Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 5000, newest first:
 Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
 switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional last argument `Label` ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
 made each place (`Edit`: "Carve 'river' #3"). Edits made another way (Landscape mode, Python, an import) are NOT in it: a
-place with no `Edit` was most likely made outside these operations (or before the log, or past its last 1000 records / 100,000 path points).
+place with no `Edit` was most likely made outside these operations (or before the log, or past its last 5000 records / 100,000 path points).
 
 ```
 landscapes | where IsPrimary and Label == "Terrain" | select Edits                              what was done here, newest first

@@ -90,7 +90,7 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 
 Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Paint`, `PaintWhere`, and
 `CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | select Edits`
-(the last 1000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Rule`, `Time`).
+(the last 5000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Rule`, `Time`).
 A path keeps the points that hold it within 50 cm of the real one (at most 1000 per record; the whole log keeps at most
 100,000 points, dropping its oldest records first), so a road's switchbacks and a river's bends read back as built. Each of these
 operations takes an optional last argument `Label` that names the edit. The log is an editor-only component of the landscape

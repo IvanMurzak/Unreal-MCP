@@ -827,6 +827,31 @@ void FUnrealAILandscapeSpec::Define()
 			TestTrue(*FString::Printf(TEXT("reaches it (%s)"), *LandscapeSpecJson(Short2).Left(300)), LandscapeSpecJson(Short2).Contains(TEXT("\"Reached\":true")));
 		});
 
+		It("RoadBetween climbs a hill far steeper than MaxSlope without a detour: at most twice the shortest road the slope allows", [this]()
+		{
+			const FString Label = TEXT("RqlSpecRoadCone_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 1300000.0;
+			ALandscape* Landscape = Create(Label, X0, 400);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// A cone 50 m high and 80 m in radius: its flanks reach about 44 degrees, like the wave-3 island's mountain.
+			TestTrue(TEXT("a steep hill"), Call(Label, TEXT("Sculpt"), P3(X0, 0, 0) + TEXT(",") + Lit(8000) + TEXT(",") + Lit(5000)));
+			const FVector Start(X0, -15000.0, 0.0), Top(X0, 0.0, 0.0);
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(TEXT("road built"), Call(Label, TEXT("RoadBetween"), P3(Start.X, Start.Y, 0) + TEXT(",") + P3(Top.X, Top.Y, 0) + TEXT(",") + Lit(400) + TEXT(",") + Lit(9), &Result));
+			const FString Text = LandscapeSpecJson(Result);
+			double Length = 0.0, Built = 0.0;
+			FParse::Value(*Text, TEXT("\"LengthMeters\":"), Length);
+			FParse::Value(*Text, TEXT("\"MaxSlope\":"), Built);
+			// The shortest road: the 50 m climb at 9 degrees (316 m), longer than the 150 m straight line.
+			const double Least = 50.0 / FMath::Tan(FMath::DegreesToRadians(9.0));
+			TestTrue(*FString::Printf(TEXT("it reaches the top (%s)"), *Text.Left(200)), Text.Contains(TEXT("\"Reached\":true")));
+			TestTrue(*FString::Printf(TEXT("no detour: %.0f m for a road of at least %.0f m (48 directions and a stretch-by-stretch check made 4 to 6 times)"), Length, Least),
+				Length >= Least * 0.95 && Length <= Least * 2.0);
+			TestTrue(*FString::Printf(TEXT("no stretch steeper than MaxSlope 9 (%.2f)"), Built), Built > 0.0 && Built <= 9.05);
+		});
+
 		It("keeps an edit log: one record per shaping call with its Label, undone and redone with it, the last MaxEdits only", [this]()
 		{
 			const FString Label = TEXT("RqlSpecEditLog_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);

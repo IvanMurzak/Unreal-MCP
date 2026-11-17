@@ -49,8 +49,11 @@ namespace UnrealAILandscapeRqlApiLocal
 	 */
 	void LoadAll(UClass* Class);
 
-	/** How many records a landscape's edit log keeps (the oldest go first). */
-	constexpr int32 MaxEdits = 1000;
+	/**
+	 * How many records a landscape's edit log keeps (the oldest go first). A painting session of small circles makes hundreds
+	 * (wave 3: 1000 records evicted the session's road and river); MaxLogPoints bounds the size, a record is ~100 bytes.
+	 */
+	constexpr int32 MaxEdits = 5000;
 
 	/** A logged path keeps the points that hold it within this distance of the real one (cm) ... */
 	constexpr double LogPathTolerance = 50.0;
