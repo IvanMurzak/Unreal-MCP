@@ -1,0 +1,10 @@
+{
+  "description": "a new level from the Open World template (the host map the editor starts on), so the next extension's checks run on its landscape, not on the saved edit-log level",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "editor | call NewLevel(\"\", \"/Engine/Maps/Templates/OpenWorld\")"
+  },
+  "assert": {
+    "pattern": "World#\\d+\\(Untitled"
+  }
+}

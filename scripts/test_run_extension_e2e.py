@@ -509,6 +509,8 @@ AUTHORING.update({
     'landscape-editlog-6-reopen.e2e.json': (
         pcg_receipt(f'{OPEN_LEVEL}|World#9400(LsEditLog)'), pcg_receipt(f'{OPEN_LEVEL}|World#9300(LsEditLogOther)')),
     'landscape-editlog-7-read.e2e.json': (text_result(EDIT_LOG), text_result('1 result\nEdits\n[]')),
+    'landscape-editlog-8-leave.e2e.json': (
+        pcg_receipt(f'{NEW_LEVEL}|World#9500(Untitled_2)'), pcg_receipt(f'{NEW_LEVEL}|World#9400(LsEditLog)')),
 })
 # The Mesh Terrain schema and guide texts: per check, the text the extension registers and an older or wrong one.
 BOUNDS = ('MeshPartition : Actor {{Bounds object? ro (the built ground\'s world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest '
@@ -535,7 +537,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 169)
+        self.assertEqual(len(all_checks()), 170)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
