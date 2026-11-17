@@ -3,7 +3,7 @@
 Unmodified copy of the C++ runtime of RQL (Reflection Query Language): `cpp/include/rql/` → `include/rql/`,
 `cpp/src/` → `src/`, plus the repository `LICENSE.md`.
 
-- Source: https://github.com/IvanMurzak/RQL, commit `2eba85023b214df74244477af1a2fd8b2350e486` (`com.IvanMurzak.Rql` 0.4.0).
+- Source: https://github.com/IvanMurzak/RQL, commit `2a85826202ca64b6f0fe73e32858e7de2f0352fa` (`com.IvanMurzak.Rql` 0.4.1).
   That commit is 0.4.0 plus error details in messages (RQL PR #32); the release train rewrites this record to the
   published RQL commit and version.
 - License: **PolyForm Shield 1.0.0** (`LICENSE.md`), not the Apache-2.0 of the rest of this plugin. Same owner;
