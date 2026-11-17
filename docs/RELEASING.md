@@ -24,7 +24,7 @@ file's contract — it only wraps `commands/bump_version.py` and `release.yml`.
 The following actions are **deliberately operator-gated** and are **not** performed by a normal
 merge, by CI on a feature/docs PR, or by any automated task. GitHub Releases and npm publishes are
 CI-backed, but only a manual `workflow_dispatch` of `release.yml` on `main` publishes — merging a
-version bump publishes nothing. Fab submission remains fully manual:
+version bump publishes nothing. The Fab portal step (File Links, submit for review) remains manual:
 
 - [ ] **GitHub Release + `v<version>` tag.** Land a deliberate `VersionName` bump on `main` (run
       `commands/bump_version.py`, commit, merge), then dispatch `release.yml` on `main` with
@@ -33,14 +33,14 @@ version bump publishes nothing. Fab submission remains fully manual:
       CI-owned through `release.yml`'s OIDC `publish-npm` job. Do **not** hand-publish from a feature
       branch or a normal docs/code PR. The historical one-time bootstrap runbook remains below for
       reference.
-- [ ] **Fab (Epic marketplace) submission.** Entirely manual and **out of scope of every CI
-      workflow** — the release pipeline produces the executable-free Fab asset
-      (`unreal-mcp-plugin-fab-<version>.zip`, **the input of the per-engine zips to submit**, C5 below), the dedicated source-plugin zip
+- [ ] **Fab (Epic marketplace) submission.** The portal step is manual — the release pipeline produces the
+      executable-free Fab asset (`unreal-mcp-plugin-fab-<version>.zip`) and **the per-engine zips to submit**
+      (`unreal-mcp-plugin-fab-<version>-ue<engine>.zip`, C5 below), the dedicated source-plugin zip
       (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset) and the packaged
       BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
       its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
-      is ready. The `-fab-` zip ships no executable (Epic rejected the bundled sidecar; the editor
-      downloads and verifies it instead, `docs/ARCHITECTURE.md` §6.8), the distributed `.uplugin` ships no
+      is ready. The `-fab-` zips ship no executable (Epic rejected the bundled sidecar; Fab users
+      download it by hand, `docs/ARCHITECTURE.md` §6.8), the distributed `.uplugin` ships no
       test module, and `FilterPlugin.ini` is complete — see [Fab source-submission readiness](#fab-epic-marketplace-source-submission-readiness-139187) below.
 
 A merge to `main` publishes nothing: `release.yml` has no `push` trigger. The safe rehearsal is a
@@ -80,14 +80,16 @@ artifact jobs in `release.yml`:
   resolver reads — declared on the runtime module in R2 so the bridge bundles into
   packaged GAMES, not just editor packages; see
   [Packaged-game sidecar bundling](#packaged-game-sidecar-bundling-r2) below), then emits
-  **three plugin zips**: the dedicated source install asset
+  **the plugin zips**: the dedicated source install asset
   `unreal-mcp-plugin-source-<version>.zip` (CLI source form, no `EngineVersion` pin, no test module),
   the Fab asset `unreal-mcp-plugin-fab-<version>.zip` (the same source with **no executable**: the bridge
   payloads are removed and `ue_ci.py fab-zip` fails on any file it flags by extension, PE/ELF/Mach-O magic
-  bytes or shebang; the editor downloads the bridge instead, `docs/ARCHITECTURE.md` §6.8) and the packaged
+  bytes or shebang; Fab users download the bridge by hand, `docs/ARCHITECTURE.md` §6.8), its per-engine copies
+  `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` (C5) and the packaged
   BuildPlugin asset `unreal-mcp-plugin-<version>.zip`. It also downloads the four per-RID release zips and
   `stage-bridge` writes their SHA-256 into `Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`, which ships in all
-  three: the trust anchor the editor verifies a downloaded bridge against (§6.8).
+  of them: the trust anchor the editor verifies a downloaded bridge against (§6.8). Every source and Fab zip gets a
+  `.minisig` (`sign-plugin-source`).
   A post-BuildPlugin guard copies the binaries from `Source/ThirdParty/UnrealMcpBridge/<rid>/` into the
   package's `Binaries/ThirdParty/...` output if `RuntimeDependencies` did not stage
   them, and asserts the surviving `Source/ThirdParty/UnrealMcpBridge/<rid>/` payload shipped (the form Epic's
@@ -231,10 +233,10 @@ so `ResolveBridgeBinaryPath` returns empty and devs use `UNREAL_MCP_BRIDGE_PATH`
 Fab accepts a **source** plugin and recompiles it per engine version, **stripping
 `Binaries/`, `Intermediate/`, `Saved/`** from the submitted zip. In-repo fixes
 keep the plugin submittable (`docs/ARCHITECTURE.md` §6.7); submission itself is still
-an entirely manual operator step (no CI job submits — see the checklist at the top):
+a manual operator step in the Fab portal (no CI job submits — see the checklist at the top):
 
 - **C1 — no executable in the Fab asset.** Epic's review rejected the bundled sidecar, so the `-fab-` zip
-  carries none (the editor downloads it, `docs/ARCHITECTURE.md` §6.8). For the CLI and packaged assets the
+  carries none (Fab users download it by hand, C1b). For the CLI and packaged assets the
   prebuilt sidecar lives in the engine-canonical `Source/ThirdParty/UnrealMcpBridge/<rid>/` folder (declared in
   `Config/FilterPlugin.ini`), staged into `Binaries/ThirdParty/UnrealMcpBridge/<rid>/` by
   `RuntimeDependencies`, and resolved from both paths (`ComposeBundledBridgeCandidates`). So an
@@ -255,23 +257,25 @@ an entirely manual operator step (no CI job submits — see the checklist at the
 - **C1c — copyright comment in every code file.** `fab-zip` stamps the vendored RQL and Code-Exec sources (the repo
   keeps them verbatim) and fails on any other code file without one.
 - **C5 — one project file per engine, `EngineVersion` set.** Epic's review requires the key in what it compiles,
-  while every other asset must stay unpinned (UE treats it as an exact match). Download the release's `-fab-` zip
-  into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>` at the release's commit
-  or later, and submit the `unreal-mcp-plugin-fab-<version>-ue<engine>.zip` it writes as that engine's project
-  version. They also take the checkout's `ThirdPartyNotices.txt` and descriptor `Description`. Outside CI, set `RUNNER_TEMP` to a scratch folder. Keep the listing's third-party box ticked and
+  while every other asset must stay unpinned (UE treats it as an exact match). The release builds them
+  (`ue_ci.py fab-engine-zips` in `build-plugin-zip`) and attaches `unreal-mcp-plugin-fab-<version>-ue<engine>.zip`
+  for every engine in `FAB_ENGINES`; `verify-release` checks each one. They also take the checkout's
+  `ThirdPartyNotices.txt` and descriptor `Description`. To correct that text for an already released version, download
+  the release's `-fab-` zip into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>`
+  (outside CI, set `RUNNER_TEMP` to a scratch folder) and replace the release assets. Keep the listing's third-party box ticked and
   file Epic's Third Party Software form whenever `Source/ThirdParty` or the sidecar's components change.
 - **C4 — module `PlatformAllowList` (#187).** Both modules in `UnrealMCP.uplugin` declare
   `"PlatformAllowList": ["Win64","Mac","Linux"]` (desktop-only — console/mobile cannot spawn the .NET
   sidecar), which Fab review expects.
 
-**Manual Fab submission (operator):** submit the per-engine zips built from the release-produced
-`unreal-mcp-plugin-fab-<version>.zip` (C5) — never the `-source-` zip. Epic's Fab technical review rejects any
-executable ("only source files are accepted"), and the `-source-` zip bundles the four bridge binaries for the
-CLI path. The `-fab-` zip is the same test-free source with no executable, plus
-`Source/ThirdParty/UnrealMcpBridge/SHA256SUMS`; on first launch the editor downloads `unreal-mcp-bridge-<rid>.zip`
-for its own version from the GitHub Release and verifies it against that file (`docs/ARCHITECTURE.md` §6.8), so
-the release must stay published with its bridge zips. Verify the downloaded `-fab-` zip before building from it:
-`minisign -Vm unreal-mcp-plugin-fab-<version>.zip -P <MINISIGN_PUBLIC_KEY>`. `fab-engine-zips` then refuses any executable. **Do not bump `VersionName` for a Fab submission** unless
+**Fab update (operator):** in the Fab portal, point each engine's File Link at the release's
+`unreal-mcp-plugin-fab-<version>-ue<engine>.zip` asset (C5) and submit the listing for review — never the
+`-source-` zip. Epic's Fab technical review rejects any executable ("only source files are accepted"), and the
+`-source-` zip bundles the four bridge binaries for the CLI path. The Fab zips are the same test-free source with no
+executable; Fab users download `unreal-mcp-bridge-<rid>.zip` by hand from the plugin version's GitHub Release
+(C1b, `docs/ARCHITECTURE.md` §6.8), so the release must stay published with its bridge zips. Keep the listing text
+version-free (it points users at the plugin's "Get bridge" button), so an update changes only the File Links.
+**Do not bump `VersionName` for a Fab submission** unless
 it is also a coordinated release (the version is release-pipeline-owned).
 
 **Self-hosted runner Live Coding gotcha (UE 5.8+):** the unattended host-project rebuilds inside

@@ -217,7 +217,14 @@ class CiStepTests(unittest.TestCase):
             self.assertEqual(ci.main(["fab-zip", "--version", "1.2.3"]), 0)
             (plugin / "ThirdPartyNotices.txt").write_text("corrected")
             (plugin / "UnrealMCP.uplugin").write_text(json.dumps({"Description": "corrected"}))
-            self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
+            stale = plugin.parent / "dist" / "unreal-mcp-plugin-fab-1.2.3-ue5.4.zip"  # an engine no longer built
+            stale.write_bytes(b"old")
+            github_output = self.runner_temp / "github_output"
+            with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+                self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
+        names = [f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip" for engine in ci.FAB_ENGINES]
+        self.assertEqual(github_output.read_text(encoding="utf-8"), "fab_engine_zips=" + " ".join(names) + "\n")
+        self.assertFalse(stale.exists())
         dist = plugin.parent / "dist"
         for engine in ci.FAB_ENGINES:
             with zipfile.ZipFile(dist / f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip") as archive:
@@ -325,6 +332,25 @@ class CiStepTests(unittest.TestCase):
 
 
 class UeEnvTests(unittest.TestCase):
+    def test_chmod_shim_skips_only_an_already_executable_u_plus_x(self):
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            github_path = temp / "github_path"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": folder, "GITHUB_PATH": str(github_path)}):
+                ue_env.append_job_file("GITHUB_PATH", str(ue_env.install_chmod_shim()))
+            shims = temp / "ue-shims"
+            self.assertEqual(github_path.read_text(encoding="utf-8"), f"{shims}\n")
+            shim = (shims / "chmod").read_bytes()
+            self.assertTrue(shim.startswith(b"#!/bin/sh\n") and b"\r" not in shim)
+            if os.name == "nt":
+                return  # the shim runs where Build.sh does (POSIX)
+            tool = temp / "dotnet"
+            tool.write_text("")
+            tool.chmod(0o555)
+            subprocess.run([str(shims / "chmod"), "u+x", str(tool)], check=True)  # skipped: already executable
+            subprocess.run([str(shims / "chmod"), "644", str(tool)], check=True)  # passed on to the real chmod
+            self.assertEqual(tool.stat().st_mode & 0o777, 0o644)
+
     def test_xcode_versions_compare_as_three_parts(self):
         self.assertEqual(ue_env.xcode3("15.2"), (15, 2, 0))
         self.assertLess(ue_env.xcode3("16.4"), ue_env.xcode3("16.9.0"))
