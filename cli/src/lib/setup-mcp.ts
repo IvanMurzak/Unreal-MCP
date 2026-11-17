@@ -17,7 +17,6 @@ import { platform } from 'os';
 // Configure and the sibling CLIs write for a given project.
 import {
   pinUrl,
-  derivePinV2,
   isCloudUrl,
   toAuthServerRoot,
   createProjectKeyResolver,
@@ -28,7 +27,7 @@ import {
 } from '@baizor/gamedev-cli-core';
 import { resolveConnection, appendMcp } from '../utils/config.js';
 import { asError } from '../utils/error.js';
-import { resolveLocalBindPort } from '../utils/port.js';
+import { deriveProjectRoutingPin, resolveLocalBindPort } from '../utils/port.js';
 import { readProjectMarker } from '../utils/project-marker.js';
 import {
   getAgentById,
@@ -172,7 +171,7 @@ export async function setupMcp(opts: SetupMcpOptions): Promise<SetupMcpResult> {
       // M8: the pin is a routing path segment, not part of the OAuth resource;
       // the canonical resource stays `<base>/mcp`.
       const canonicalUrl = appendMcp(conn.url);
-      const pin = derivePinV2(projectDir);
+      const pin = deriveProjectRoutingPin(projectDir);
       const httpUrl = opts.noPin ? canonicalUrl : pinUrl(canonicalUrl, pin);
       const token = conn.token ?? '';
 

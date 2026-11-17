@@ -53,7 +53,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         string? ServerTarget,
         string ProjectPathHash,
         string ProjectName,
-        ConnectionInstanceMetadata Metadata)
+        ConnectionInstanceMetadata Metadata,
+        string HashInput)
     {
         /// <summary>
         /// Whether <see cref="Port"/> is a USER-chosen port — the marker's <c>portOverride</c> (level 1) or a
@@ -134,7 +135,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 throw new ArgumentException("InstanceId must be non-empty.", nameof(instanceId));
 
             var marker = SafeReadMarker(projectRoot);
-            var identity = ProjectIdentity.Derive(projectRoot, marker);
+            // The pin and the project-path hash come from the folder's REAL path, so every spelling of it (a symlink,
+            // a junction, an 8.3 name) registers under the one pin the CLI and the App derive (cli-core canonicalPath).
+            var hashInput = CanonicalProjectPath.Resolve(projectRoot);
+            var identity = ProjectIdentity.Derive(hashInput, marker);
             var typedPort = TryGetExplicitLoopbackPort(localHost);
             var (port, portSource) = identity.PortIsOverridden
                 ? (identity.Port, LocalServerPortSource.MarkerOverride)   // 1. marker portOverride
@@ -148,7 +152,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             var metadata = ConnectionInstanceMetadata.Create(
                 engine: Engine,
                 projectName: projectName,
-                projectRootPath: projectRoot,
+                projectRootPath: hashInput,
                 instanceId: instanceId,
                 machineName: machineName);
 
@@ -160,7 +164,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 ServerTarget: marker?.ServerTarget,
                 ProjectPathHash: metadata.ProjectPathHash,
                 ProjectName: projectName,
-                Metadata: metadata);
+                Metadata: metadata,
+                HashInput: hashInput);
         }
 
         /// <summary>

@@ -37,7 +37,7 @@ const cloud = { transport: 'http' as const, url: 'https://ai-game.dev' };
 
 const agA = () => path.join(home, '.gemini', 'config', 'mcp_config.json');
 const agB = () => path.join(home, '.gemini', 'antigravity', 'mcp_config.json');
-const pinned = () => `https://ai-game.dev/mcp/p/${derivePinV2(path.resolve(project))}`;
+const pinned = () => `https://ai-game.dev/mcp/p/${derivePinV2(fs.realpathSync.native(project))}`;
 const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8'));
 const writeJson = (p: string, v: unknown) => {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -174,7 +174,7 @@ describe('--regenerate-key carries the new key into the project\'s other agent c
     });
     expect(r.kind).toBe('success');
     if (r.kind !== 'success') return;
-    expect(lookups).toEqual([['https://ai-game.dev', derivePinV2(path.resolve(project))]]);
+    expect(lookups).toEqual([['https://ai-game.dev', derivePinV2(fs.realpathSync.native(project))]]);
     expect(revoked).toBe(true); // the revoke RAN — so the check below is not satisfied by a skipped revoke
     expect(atRevoke).toEqual([]); // nothing still held the old key when it was revoked
     expect([...r.rewrittenConfigPaths].sort()).toEqual([cursor, agA(), agB(), codex, vscode].map((p) => path.resolve(p)).sort());
@@ -278,7 +278,7 @@ describe('--regenerate-key carries the new key into the project\'s other agent c
 
   it('by default reads the key being replaced from the machine project-key cache', async () => {
     const { cursor } = seedOtherConfigs();
-    const pin = derivePinV2(path.resolve(project));
+    const pin = derivePinV2(fs.realpathSync.native(project));
     // HOME/USERPROFILE point at the temp home, so this is the cache the default lookup reads.
     new ProjectKeyStore(path.join(home, '.ai-game-dev')).put({
       key: OLD, keyId: 'kid-old', pin, issuer: 'https://ai-game.dev', sub: 'u1', engine: 'unreal', createdAt: '2026-09-23T00:00:00Z',

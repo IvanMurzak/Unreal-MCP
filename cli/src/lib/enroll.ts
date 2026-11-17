@@ -35,13 +35,13 @@ import { upsertServerTarget } from '../utils/project-marker.js';
 // deleted (it dropped unknown fields and wrote non-atomically).
 import {
   commitToolsOnlyLogin,
-  derivePinV2,
   MachineCredentialStore,
   normalizeRedeemResponse,
   unrealAdapter,
   type CredentialCodec,
 } from '@baizor/gamedev-cli-core';
 import { upsertProjectPin } from '../utils/pin-upsert.js';
+import { deriveProjectRoutingPin } from '../utils/port.js';
 import { asError } from '../utils/error.js';
 import { fetchWithTimeout } from '../utils/http.js';
 import { emitProgress } from './progress.js';
@@ -226,7 +226,7 @@ export async function enrollPlugin(opts: EnrollOptions): Promise<EnrollResult> {
 
     // 3. Upsert the D14 routing pin (cli-core v2 identity — B5 fix) into any
     //    existing project-local agent config.
-    const pin = derivePinV2(projectDir);
+    const pin = deriveProjectRoutingPin(projectDir);
     const { updatedFiles } = upsertProjectPin(projectDir, pin, { serverTarget });
     if (updatedFiles.length > 0) {
       emitProgress(opts.onProgress, {

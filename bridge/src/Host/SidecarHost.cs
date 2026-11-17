@@ -753,7 +753,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // handshake routing key). Non-secret — the credential travels separately in the Authorization header.
                 _logger?.LogInformation(
                     "Resolved project identity for '{ProjectName}' (pin {Pin}, port {Port} [{PortSource}], instance {InstanceId}); hash input '{HashInput}' -> projectPathHash {ProjectPathHash}; attaching instance metadata to the hub handshake.",
-                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortSource, _instanceId, projectPath, resolved.ProjectPathHash);
+                    resolved.ProjectName, resolved.Pin, resolved.Port, resolved.PortSource, _instanceId, resolved.HashInput, resolved.ProjectPathHash);
 #if USE_LOCAL_MCP_PLUGIN
                 // Dual-hash transition (auth-fixes T3 / defect B5, MCP-Plugin-dotnet #165): built against the
                 // source LIB, ConnectionInstanceMetadata carries the v1 legacy hash alongside the v2 primary so a
