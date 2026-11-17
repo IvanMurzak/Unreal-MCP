@@ -73,10 +73,10 @@ namespace UnrealAIMeshTerrain
 	/**
 	 * Load (in the editor) every actor that carries a base mesh or a modifier of @p Terrain: on a World Partition map they are
 	 * spatially loaded actors, unloaded until a region over them is loaded, and a terrain builds only from loaded ones. They
-	 * stay loaded like actors of a loaded region (WorldPartitionBlueprintLibrary::LoadActors). Returns how many were loaded
-	 * now (0 when all already were, or on a map without World Partition).
+	 * stay loaded like actors of a loaded region (UnrealMcpRql::LoadWorldPartitionActors: no unsaved change, no undo step;
+	 * actors deleted in this session stay deleted). Nothing to do on a map without World Partition.
 	 */
-	int32 LoadTerrainActors(const AMeshPartition* Terrain);
+	void LoadTerrainActors(const AMeshPartition* Terrain);
 
 	/** The editor component that builds @p Terrain (null outside the editor or before the actor registered). */
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain);
