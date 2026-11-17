@@ -460,6 +460,7 @@ AUTHORING.update(CONTROL_RIG)
 
 
 SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height, string Label)'
+CREATE_LANDSCAPE = 'LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material, double MaxHeightMeters)'
 WATER = 'WaterOperations#9170'
 # The suite editor runs -nullrhi: water bodies report Ready false there (no water mesh without rendering).
 WATER_STATUS = ('2 results\nLabel|Water|WaterZone.ZoneExtent\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,'
@@ -469,8 +470,7 @@ WATER_STATUS = ('2 results\nLabel|Water|WaterZone.ZoneExtent\nE2EOcean|{{Type:Oc
 # The Landscape island + water sequence: per check, an answer the live UE 5.7 editor gives and one that must not pass.
 AUTHORING.update({
     'water-1-island-landscape.e2e.json': (
-        pcg_receipt('LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material)'
-                    '|Landscape#9191(E2EIsland)'), NO_COUNT),
+        pcg_receipt(f'{CREATE_LANDSCAPE}|Landscape#9191(E2EIsland)'), NO_COUNT),
     'water-2-island-sea-floor.e2e.json': (pcg_receipt(f'{SCULPT}|3196021'), pcg_receipt(f'{SCULPT}|0')),
     'water-3-island-land.e2e.json': (pcg_receipt(f'{SCULPT}|1803641'), pcg_receipt(f'{SCULPT}|0')),
     'water-4-island-mountain.e2e.json': (pcg_receipt(f'{SCULPT}|290393'), pcg_receipt(f'{SCULPT}|0')),
@@ -494,9 +494,7 @@ AUTHORING.update({
 # live editor's shape and one that must not pass.
 NEW_LEVEL = 'Editor@1|NewLevel(string Path, string Template)'
 OPEN_LEVEL = 'Editor@1|OpenLevel(string Path)'
-CREATE_LANDSCAPE = 'LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material, double MaxHeightMeters)'
-EDIT_LOG = ('1 result\nEdits\n[{{Op:Sculpt,Label:{0},Points:["(0, 0, 0)"],Radius:500,Width:0,Height:200,Layer:"",'
-            'Time:"2026-11-16T10:00:00Z"}}]')
+EDIT_LOG = '1 result\nEdits\n[{Index:0,Op:Sculpt,Label:e2e-hill,Points:[[0,0,0]],Radius:500,Height:200,Time:"2026-11-16T10:00:00Z"}]'
 AUTHORING.update({
     'landscape-editlog-1-new-level.e2e.json': (
         pcg_receipt(f'{NEW_LEVEL}|World#9100(LsEditLog)'), pcg_receipt(f'{NEW_LEVEL}|World#9100(Untitled_1)')),
@@ -510,7 +508,7 @@ AUTHORING.update({
         pcg_receipt(f'{NEW_LEVEL}|World#9300(LsEditLogOther)'), pcg_receipt(f'{NEW_LEVEL}|World#9100(LsEditLog)')),
     'landscape-editlog-6-reopen.e2e.json': (
         pcg_receipt(f'{OPEN_LEVEL}|World#9400(LsEditLog)'), pcg_receipt(f'{OPEN_LEVEL}|World#9300(Untitled_2)')),
-    'landscape-editlog-7-read.e2e.json': (text_result(EDIT_LOG.format('e2e-hill')), text_result(EDIT_LOG.format('""'))),
+    'landscape-editlog-7-read.e2e.json': (text_result(EDIT_LOG), text_result('1 result\nEdits\n[]')),
 })
 # The Mesh Terrain schema and guide texts: per check, the text the extension registers and an older or wrong one.
 BOUNDS = ('MeshPartition : Actor {{Bounds object? ro (the built ground\'s world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest '
