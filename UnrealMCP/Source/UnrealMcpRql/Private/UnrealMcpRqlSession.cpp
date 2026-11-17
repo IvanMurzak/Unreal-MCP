@@ -220,9 +220,7 @@ namespace UnrealMcpRqlSessionLocal
 				bCodeOnly |= Existing.message.find(ByCode) != std::string::npos;
 				bShown |= Existing.message.find(Error.message) != std::string::npos;
 			}
-			const bool bAdded = std::any_of(Result.diagnostics.begin() + Reported, Result.diagnostics.end(),
-				[&Error](const rql::Diagnostic& Added) { return Added.message == Error.message; });
-			if (bCodeOnly && !bShown && !bAdded)
+			if (bCodeOnly && !bShown)
 				Result.diagnostics.push_back(Error);
 		}
 	}

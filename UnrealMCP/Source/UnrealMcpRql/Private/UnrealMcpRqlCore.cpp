@@ -1170,7 +1170,7 @@ FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
 	if (Class && Class->IsChildOf(AActor::StaticClass()))
 	{
 		const FString Actors = UnrealMcpRqlSimilarActors(Text, Class);
-		return Actors.IsEmpty() ? Actors : TEXT("; ") + Actors;
+		return Actors.IsEmpty() ? Actors : TEXT(" (") + Actors + TEXT(")");
 	}
 	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(UClass::StaticClass()))
 		return FString();

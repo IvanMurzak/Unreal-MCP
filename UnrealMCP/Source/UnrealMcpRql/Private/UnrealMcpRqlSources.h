@@ -27,7 +27,7 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
 /**
  * " (did you mean /Engine/BasicShapes/Cube?)": up to three asset paths of @p Class whose name matches the last part of
  * @p Text ("Cube", "/Game/Mehses/Cube"), for a reference that resolved to nothing; "" when there is none (or for class
- * references, which do not name assets). For an actor class, "; did you mean 'Island' (Landscape)?" (UnrealMcpRqlSimilarActors).
+ * references, which do not name assets). For an actor class, " (did you mean 'Island' (Landscape)?)" (UnrealMcpRqlSimilarActors).
  */
 FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
 

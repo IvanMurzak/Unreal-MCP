@@ -7,7 +7,6 @@
 #include "UObject/WeakObjectPtr.h"
 #include "UnrealMcpRqlInclude.h"
 
-#include <algorithm>
 #include <utility>
 #include <memory>
 #include <optional>
@@ -138,9 +137,14 @@ public:
 	 */
 	void AddErrorValue(rql::Diagnostic Error)
 	{
-		if (RequestErrors.size() < 8 && std::none_of(RequestErrors.begin(), RequestErrors.end(),
-			[&Error](const rql::Diagnostic& Existing) { return Existing.message == Error.message; }))
-			RequestErrors.push_back(std::move(Error));
+		if (RequestErrors.size() >= 8)
+			return;
+		for (const rql::Diagnostic& Existing : RequestErrors)
+		{
+			if (Existing.message == Error.message)
+				return;
+		}
+		RequestErrors.push_back(std::move(Error));
 	}
 	std::vector<rql::Diagnostic> TakeErrorValues() { return std::exchange(RequestErrors, {}); }
 	/**
