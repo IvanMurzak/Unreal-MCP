@@ -71,7 +71,7 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 
 - **Unreal Engine 5.5 – 5.8**（リリースパイプラインが各バージョンを検証）。
 - **C++ プロジェクト**。プラグインはソースで配布され、Unreal があなたのプラットフォームの C++ ツールチェーンでプロジェクト向けにモジュールをコンパイルするためです。Blueprint のみのプロジェクトは 1 ステップで C++ プロジェクトになります：エディターで **Tools → New C++ Class…** から任意のクラスを作成します。新規プロジェクトは `unreal-mcp-cli create-project ./MyGame` で最小の C++ プロジェクトを生成できます。Fab 版は Epic Games Launcher がコンパイル済みの状態でインストールするため、C++ プロジェクトは不要です。
-- **.NET のインストールは不要。**MCP ホストは自己完結型の .NET プログラム（`unreal-mcp-bridge`）で、プラットフォームごとにプラグインに同梱され、プラグインが起動・再起動します。（Fab 版には実行ファイルが含まれません。**Get bridge** ボタンでリリースページを開き、bridge をプラグインの bridge フォルダーに一度だけ展開します。）.NET 9 SDK が必要なのは bridge をソースからビルドする場合だけです。
+- **.NET のインストールは不要。**MCP ホストは自己完結型の .NET プログラム（`unreal-mcp-bridge`）で、プラットフォームごとにプラグインに同梱され、プラグインが起動・再起動します。（Fab 版には実行ファイルが含まれません。**Get bridge** ボタンでリリースページを開き、bridge をプラグインの bridge フォルダーに一度だけ展開します。）.NET 10 SDK が必要なのは bridge をソースからビルドする場合だけです。
 - **Node.js 22.14+**。`unreal-mcp-cli` にのみ必要です（npm パッケージで、22.14 が最低 Node バージョン）。
 - **Windows または macOS**（各リリースを両方でテスト）。**Linux x64：**sidecar はビルド・配布されますが、Linux ではリリーステストを実行していません。
 
@@ -288,7 +288,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | パス | 内容 |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal プラグイン（C++）: `UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`、.NET 9 のサイドカー |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`、.NET 10 のサイドカー |
 | [`cli/`](../cli/) | `unreal-mcp-cli`、npm パッケージ |
 | [`extensions/`](../extensions/) | 個別にリリースされる 7 つのオプションのエンジン拡張機能 |
 | [`samples/`](../samples/) | エディター拡張機能のテンプレートと、ランタイム（ゲーム内）ツールのサンプル |

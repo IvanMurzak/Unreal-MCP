@@ -151,7 +151,7 @@ Unreal sidecar from a Unity editor.
 │  └─ Slate UI: single main window (settings inline) + aux tabs            │
 └───────────────▲──────────────────────────────────────────────────────────┘
                 │ IPC: 127.0.0.1 TCP, newline-delimited JSON, token-authed
-┌───────────────▼──────────  unreal-mcp-bridge (.NET 9, self-contained) ───┐
+┌───────────────▼──────────  unreal-mcp-bridge (.NET 10, self-contained) ──┐
 │  McpPlugin host (NuGet com.IvanMurzak.McpPlugin + ReflectorNet)           │
 │  ┌─ IpcClient ── dials the plugin, reconnect w/ backoff                  │
 │  ├─ ProxyToolFactory ── manifest → IRunTool proxies → IToolManager       │

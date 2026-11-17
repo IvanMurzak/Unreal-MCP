@@ -39,7 +39,7 @@ connect/disconnect/orphan-safety — in `UnrealMcpEditorTests/`).
   [GameDev-MCP-Server](https://github.com/IvanMurzak/GameDev-MCP-Server) repo and point
   `UNREAL_MCP_SERVER_PATH` at the result.
 - A published / built `unreal-mcp-bridge` for the host RID. For PIE you can point
-  `UNREAL_MCP_BRIDGE_PATH` at the flat `bridge/src/bin/Debug/net9.0/unreal-mcp-bridge.exe`;
+  `UNREAL_MCP_BRIDGE_PATH` at the flat `bridge/src/bin/Debug/net10.0/unreal-mcp-bridge.exe`;
   for a packaged build the bridge is **bundled** under
   `<Staged>/<Project>/Plugins/UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/<rid>/` (§12.5),
   resolved automatically — no env var needed in the packaged game.

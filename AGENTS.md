@@ -16,7 +16,7 @@ authors), [`docs/RUNTIME-E2E.md`](docs/RUNTIME-E2E.md) (in-game walkthrough).
 ## Architecture
 
 Unreal is C++ and cannot host the .NET McpPlugin/ReflectorNet/SignalR stack in-process, so it runs in an
-auto-managed **.NET 9 sidecar** (`unreal-mcp-bridge`, `bridge/`), a local child of whatever loads the
+auto-managed **.NET 10 sidecar** (`unreal-mcp-bridge`, `bridge/`), a local child of whatever loads the
 plugin (Editor, or the game in an opt-in packaged build). The C++ plugin **listens** on loopback TCP; the
 sidecar **dials** it with a one-shot token sent over **stdin** (never argv, never logged — §1.4) and
 relays IPC ⇄ SignalR to the MCP server (cloud `ai-game.dev` by default, or a local `gamedev-mcp-server`).
@@ -47,7 +47,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 | --- | --- |
 | `UnrealMCP/` | The UE plugin (modules, conventions, UE build/test: [`UnrealMCP/AGENTS.md`](UnrealMCP/AGENTS.md)) |
 | `extensions/` | Optional first-party plugins (seven), independent versions/releases ([guide](docs/EXTENSION-MONOREPO.md)) |
-| `bridge/` | .NET 9 sidecar + xUnit tests ([`bridge/AGENTS.md`](bridge/AGENTS.md)) |
+| `bridge/` | .NET 10 sidecar + xUnit tests ([`bridge/AGENTS.md`](bridge/AGENTS.md)) |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest): commands in `cli/src/commands/`, logic in `cli/src/lib/`, tests in `cli/tests/`. Published on npm; CI owns releases |
 | `samples/` | Example extension plugins: `UnrealAITemplate/` (editor RQL module, docs/rql.md) and `UnrealAIRuntimeSample/` (runtime tools, §12.9) |
 | `commands/` | Repo Python tooling (stdlib, Python 3.9+; tests in `scripts/test_commands.py`): `bump_version.py`, `release_github.py`, `test_module_uplugin.py` |

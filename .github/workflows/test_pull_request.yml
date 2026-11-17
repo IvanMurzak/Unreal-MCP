@@ -136,7 +136,7 @@ jobs:
         timeout-minutes: 1
         run: node .github/scripts/docs-only.mjs
 
-  # (a) bridge — .NET 9 sidecar build + xUnit on BOTH hosted OSes (the sidecar
+  # (a) bridge — .NET 10 sidecar build + xUnit on BOTH hosted OSes (the sidecar
   # ships per-RID binaries, so cross-OS test coverage matters). 0 errors / 0
   # failures required.
   bridge:
@@ -154,10 +154,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
 
       # Chain leg: resolve the interpreter once, then — under a lock — self-build
       # ReflectorNet + McpPlugin into a local feed and force the bridge csproj's pins to
@@ -413,15 +413,16 @@ jobs:
       - name: Clean staged bridge binaries (gitignored)
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py clean-staged-bridge
 
-      # The bridge targets net9.0, and the chain feed builds the lower layers with this SDK. On the
-      # runner-manager runners DOTNET_INSTALL_DIR is a persistent per-slot cache, so after the first
-      # job this is a version check, not a download. setup-dotnet also exports DOTNET_ROOT, which the
-      # bridge's apphost (started later by the editor) uses to find this runtime. The steps run in the
-      # runner's default shell, never `pwsh`: Homebrew's pwsh launcher overwrites DOTNET_ROOT.
-      - name: Setup .NET 9
+      # The bridge targets net10.0, and the chain feed builds the lower layers (older TFMs, which
+      # SDK 10 still builds) with this SDK. On the runner-manager runners DOTNET_INSTALL_DIR is a
+      # persistent per-slot cache, so after the first job this is a version check, not a download.
+      # setup-dotnet also exports DOTNET_ROOT, which the bridge's apphost (started later by the editor)
+      # uses to find this runtime. The steps run in the runner's default shell, never `pwsh`:
+      # Homebrew's pwsh launcher overwrites DOTNET_ROOT.
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
 
       # `clean: false` keeps untracked files between runs on this persistent workspace, so a
       # chain run whose cleanup never ran (a killed job) would leave its generated nuget.config /
@@ -432,7 +433,7 @@ jobs:
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py chain-sweep
 
       # Under a lock: clone ReflectorNet / MCP-Plugin-dotnet / GameDev-MCP-Server at the lock
-      # shas, build them with the .NET 9 SDK set up above, force the
+      # shas, build them with the .NET 10 SDK set up above, force the
       # bridge csproj's pins to the lock's ws versions, publish the host-RID server with its
       # chain-identity.json marker and export UNREAL_MCP_SERVER_PATH — BEFORE the bridge build.
       - name: chain feed
