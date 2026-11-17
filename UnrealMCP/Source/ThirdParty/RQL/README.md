@@ -3,9 +3,9 @@
 Unmodified copy of the C++ runtime of RQL (Reflection Query Language): `cpp/include/rql/` → `include/rql/`,
 `cpp/src/` → `src/`, plus the repository `LICENSE.md`.
 
-- Source: https://github.com/IvanMurzak/RQL, commit `2eba85023b214df74244477af1a2fd8b2350e486` (branch `integration/waves-terrain`,
-  unreleased and not yet pushed: `com.IvanMurzak.Rql` 0.4.0 plus error details in messages). The sidecar keeps the
-  0.4.0 package (it only parses; the change is in the C++ runtime's messages) until the cascade release.
+- Source: https://github.com/IvanMurzak/RQL, commit `2eba85023b214df74244477af1a2fd8b2350e486` (`com.IvanMurzak.Rql` 0.4.0).
+  That commit is 0.4.0 plus error details in messages (RQL PR #32); the release train rewrites this record to the
+  published RQL commit and version.
 - License: **PolyForm Shield 1.0.0** (`LICENSE.md`), not the Apache-2.0 of the rest of this plugin. Same owner;
   see `../../../ThirdPartyNotices.txt`.
 - Compiled by the `UnrealMcpRql` module: `Source/UnrealMcpRql/Private/Vendor/UnrealMcpRqlVendor_*.cpp` include each
