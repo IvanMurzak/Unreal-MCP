@@ -133,7 +133,9 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
 - Waits: an operation waits at most 240 s for the build (the MCP server ends a tool call after 300 s by default). When the
   build after a change takes longer (a remeshed shape), the operation still succeeds with `Ready` false and a `State` saying
   the change is applied and still building: call `WaitForBuild`, do not repeat the change. A wait before a change that times
-  out fails and changes nothing.
+  out fails and changes nothing. `Create` / `ImportHeightmap` whose build takes longer fail saying the terrain is created:
+  wait for it, do not create it again. TimeoutSeconds accepts 1..600, but above about 290 s the server drops the call (its
+  tool timeout, 300 s by default).
 - Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a size / resolution / section count
   over the limits, a missing or malformed heightmap, a brush off the terrain, an unknown sculpt mode or paint channel
   (with the ones there are), out-of-range radius / height / strength / weight / falloff, a build that does not finish in time

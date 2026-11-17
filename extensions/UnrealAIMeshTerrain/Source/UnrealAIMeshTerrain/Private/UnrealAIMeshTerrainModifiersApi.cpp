@@ -239,6 +239,7 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		const double Start = FPlatformTime::Seconds();
 		AMeshPartition* Main = nullptr;
 		TArray<AMeshPartition*> Done;
+		TArray<FString> Pending;
 		for (AMeshPartition* Terrain : Terrains)
 		{
 			if (!IsValid(Terrain) || Done.Contains(Terrain))
@@ -246,17 +247,18 @@ namespace UnrealAIMeshTerrainModifiersLocal
 			Main = Main ? Main : Terrain;
 			Done.Add(Terrain);
 			// Its first round updates the terrain's modifier list. The change is applied: a build that takes longer (a remeshed
-			// shape) is reported, not failed, so the caller does not repeat it.
+			// shape) is reported, not failed, so the caller does not repeat it; every terrain still gets its round.
 			FString StillBuilding;
 			if (!WaitForBuild(Terrain, TimeoutSeconds, &StillBuilding))
-			{
-				FModifierOpResult Out = Describe(Modifier, Main, Start);
-				Out.Ready = false;
-				Out.State = StillBuildingState(Terrain, StillBuilding);
-				return Out;
-			}
+				Pending.Add(StillBuildingState(Terrain, StillBuilding));
 		}
-		return Describe(Modifier, Main, Start);
+		FModifierOpResult Out = Describe(Modifier, Main, Start);
+		if (!Pending.IsEmpty())
+		{
+			Out.Ready = false;
+			Out.State = FString::Join(Pending, TEXT("; "));
+		}
+		return Out;
 	}
 
 	/**
@@ -847,8 +849,18 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		RemeshLabel = Remesh->GetOwner()->GetActorNameOrLabel();
 		UModifierComponent* Corridor = Cored.Spawn(ModifierClassOf(TEXT("SplineRemesh")), Road[0], FRotator::ZeroRotator, Label.IsEmpty() ? FString() : Label + TEXT("_Corridor"));
 		const double Radius = Plateau + Falloff + 1500.0 + Deepest;
+		// Only the stretch of the road over the box (from its first point in it to its last, plus a point either side):
+		// elsewhere the terrain's own grid is fine enough.
+		const FBox2D Box2D(FVector2D(Box.Min), FVector2D(Box.Max));
+		const int32 First = Road.IndexOfByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		const int32 Last = Road.FindLastByPredicate([&Box2D](const FVector& Point) { return Box2D.IsInside(FVector2D(Point)); });
+		TArray<FVector> Stretch;
+		for (int32 Index = FMath::Max(0, First - 1); First != INDEX_NONE && Index <= FMath::Min(Road.Num() - 1, Last + 1); ++Index)
+			Stretch.Add(Road[Index]);
+		if (Stretch.Num() < 2)
+			Stretch = Road;
 		if (!Corridor || !SetNumber(Corridor, TEXT("SplineRadius"), Radius) || !SetNumber(Corridor, TEXT("TargetEdgeLength"), RoadEdge)
-			|| !SetNumber(Corridor, TEXT("Priority"), Order + 1.5) || !ApplySplinePoints(Corridor, Road, /*bClosed*/ false))
+			|| !SetNumber(Corridor, TEXT("Priority"), Order + 1.5) || !ApplySplinePoints(Corridor, Stretch, /*bClosed*/ false))
 			return FRoadResult();
 		CorridorLabel = Corridor->GetOwner()->GetActorNameOrLabel();
 	}
@@ -886,8 +898,9 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	}
 	if (!Out.Ready)
 	{
+		Out.MaxSlope = -1.0;
 		Out.Note += FString(Out.Note.IsEmpty() ? TEXT("") : TEXT("; "))
-			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (WaitForBuild, then sample the road with SurfacePoints)");
+			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
 		return Out;
 	}
 	// The built road: its grade along the centre line, from the collision.

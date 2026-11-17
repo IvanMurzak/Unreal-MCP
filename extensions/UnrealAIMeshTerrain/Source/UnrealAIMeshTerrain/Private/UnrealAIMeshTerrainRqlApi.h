@@ -95,7 +95,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAIMeshTerrainBuild WaitForBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds = 240.0);
 
-	/** the built surface of a Mesh Terrain at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point), Normal and Channels (the paint weights there); read-only; waits for a pending build first (at most 120 s); a point off the terrain gives Inside false */
+	/** the built surface of a Mesh Terrain at Point (world X and Y; Z is ignored): Inside, Height (world Z, cm, what traces and collision hit), Slope (degrees), Location ([X, Y, Height], a spawn point), Normal and Channels (the paint weights there); read-only; waits for a pending build first (at most 240 s); a point off the terrain gives Inside false */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
 	FUnrealAIMeshTerrainSurface Surface(UE::MeshPartition::AMeshPartition* Terrain, FVector Point);
 

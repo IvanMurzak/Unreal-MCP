@@ -356,8 +356,8 @@ material (`/MeshPartition/Materials/M_MeshPartition_Default`) only tints each ch
 base: there is no grass, sand or rock look to find in it (do not dig through its graph); for real looks the terrain needs a
 definition with its own material. A stroke is stored in a
 brush modifier (`Kind` ProjectMeshLayers, "<terrain>_Brush"): strokes near one go into it, so they accumulate and stay
-editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (a stroke that times out
-waiting for the build is already applied: `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
+editable in the mode. Each call is one undo step and returns when the terrain is rebuilt (when that takes over 240 s the
+stroke is still applied: `Ready` false and `State` say so; `WaitForBuild`, do not repeat it). The brush stores offsets on top of the
 modifiers before it, so edit noise / shapes first and sculpt last. A stroke is at most 250 m in radius: shape larger features
 (a hill 1 km across, a basin) with a modifier (`meshTerrainModifier`: AddShape Sphere / Cone Union, AddNoise, AddTexturePatch)
 and paint large areas with AddWeight.

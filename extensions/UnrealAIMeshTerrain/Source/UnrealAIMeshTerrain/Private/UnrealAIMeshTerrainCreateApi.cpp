@@ -49,6 +49,16 @@ namespace UnrealAIMeshTerrainCreateApiLocal
 		return true;
 	}
 
+	/** @p Terrain once built; a timeout fails, saying the terrain exists (so the caller waits instead of creating it again). */
+	AMeshPartition* WaitCreated(AMeshPartition* Terrain, double TimeoutSeconds)
+	{
+		FString StillBuilding;
+		if (WaitForBuild(Terrain, TimeoutSeconds, &StillBuilding))
+			return Terrain;
+		return UnrealMcpRql::Failed<AMeshPartition*>(FString::Printf(TEXT("%s is created (one undo step) and %s: do not create it again, call meshTerrain | call WaitForBuild(unreal.find(\"%s\"))"),
+			*Terrain->GetActorLabel(), *StillBuilding, *Terrain->GetActorLabel()));
+	}
+
 	bool CheckCommon(const FString& Label, const FVector& Location, double SizeMeters, double TimeoutSeconds)
 	{
 		if (!CheckTimeout(TimeoutSeconds))
@@ -242,8 +252,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::Create(const F
 			return nullptr; // SpawnFlatTerrain failed with the reason
 		Finish(Transaction, Terrain, Label, Definition);
 	}
-	// The terrain stays when the wait times out: WaitForBuild's error names it.
-	return WaitForBuild(Terrain, TimeoutSeconds) ? Terrain : nullptr;
+	return WaitCreated(Terrain, TimeoutSeconds);
 }
 
 UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightmap(const FString& Label, const FString& File, FVector Location, double SizeMeters,
@@ -311,7 +320,7 @@ UE::MeshPartition::AMeshPartition* UUnrealAIMeshTerrainCreateApi::ImportHeightma
 		// The importer centres the terrain on the origin with value 0 at Z 0: move it onto Location, value 32768 at its Z.
 		Terrain->SetActorLocation(Location - FVector(0.0, 0.0, LandscapeMidValue * LandscapeZScale * HeightScale));
 	}
-	return WaitForBuild(Terrain, TimeoutSeconds) ? Terrain : nullptr;
+	return WaitCreated(Terrain, TimeoutSeconds);
 }
 
 FString UUnrealAIMeshTerrainCreateApi::Delete(UE::MeshPartition::AMeshPartition* Terrain)
