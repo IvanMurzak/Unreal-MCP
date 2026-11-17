@@ -54,6 +54,12 @@ namespace UnrealAIMeshTerrainSculptLocal
 		FName Channel;
 	};
 
+	/** 1 at @p T = 0, a smoothstep fall to 0 at @p T = 1. */
+	double SmoothFall(double T)
+	{
+		return 1.0 - T * T * (3.0 - 2.0 * T);
+	}
+
 	/** 1 inside the brush's core, fading smoothly to 0 at its Radius over the outer Falloff part. */
 	double BrushWeight(double Distance, double Radius, double Falloff)
 	{
@@ -62,8 +68,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 		const double Inner = Radius * (1.0 - Falloff);
 		if (Distance <= Inner)
 			return 1.0;
-		const double T = (Distance - Inner) / (Radius - Inner);
-		return 1.0 - T * T * (3.0 - 2.0 * T);
+		return SmoothFall((Distance - Inner) / (Radius - Inner));
 	}
 
 	template <typename T>
@@ -529,8 +534,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 			return 1.0;
 		if (Outside >= Edge)
 			return 0.0;
-		const double T = Outside / Edge;
-		return 1.0 - T * T * (3.0 - 2.0 * T);
+		return SmoothFall(Outside / Edge);
 	}
 
 	FUnrealAIMeshTerrainPaintWhere PaintWhereFailed(const FString& Message)

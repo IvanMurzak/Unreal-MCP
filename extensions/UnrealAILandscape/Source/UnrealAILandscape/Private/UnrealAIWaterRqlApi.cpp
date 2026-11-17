@@ -283,7 +283,6 @@ namespace UnrealAIWaterRqlLocal
 		Out.ZScale = Out.ToWorld.GetScale3D().Z * LANDSCAPE_ZSCALE;
 		Out.ZOrigin = Out.ToWorld.GetLocation().Z;
 		Out.QuadCm = Scale.X;
-		Out.Raw.SetNumZeroed(Out.Width() * Out.Height());
 		Out.Loaded.Init(false, Out.Width() * Out.Height());
 		const int32 ComponentQuads = Out.Info->ComponentSizeQuads;
 		for (const TPair<FIntPoint, ULandscapeComponent*>& Pair : Out.Info->XYtoComponentMap)
@@ -300,16 +299,7 @@ namespace UnrealAIWaterRqlLocal
 			}
 		}
 		// Edit layers add up: with one height layer it is the ground, with several read the merged ground.
-		int32 HeightLayers = 0;
-		if (const ALandscape* Primary = Landscape->GetLandscapeActor())
-		{
-			for (const ULandscapeEditLayerBase* Layer : Primary->GetEditLayersConst())
-				HeightLayers += Layer && Layer->SupportsTargetType(ELandscapeToolTargetType::Heightmap) ? 1 : 0;
-		}
-		FHeightmapAccessor<false> Accessor(Out.Info);
-		if (HeightLayers <= 1)
-			Accessor.SetEditLayer(Out.EditLayer);
-		Accessor.GetDataFast(Out.Rect.Min.X, Out.Rect.Min.Y, Out.Rect.Max.X, Out.Rect.Max.Y, Out.Raw.GetData());
+		Out.Raw = UnrealAILandscapeRqlApiLocal::ReadGround(Landscape, Out.Info, Out.EditLayer, Out.Rect);
 		return true;
 	}
 
@@ -494,17 +484,8 @@ namespace UnrealAIWaterRqlLocal
 		const int32 Changed = Algo::CountIf(Lower, [](uint16 Amount) { return Amount > 0; });
 		if (Changed == 0)
 			return 0;
-		FHeightmapAccessor<false> Accessor(Grid.Info);
-		Accessor.SetEditLayer(Grid.EditLayer);
-		TArray<uint16> Block;
-		Block.SetNumZeroed(Lower.Num());
-		Accessor.GetDataFast(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
-		for (int32 Index = 0; Index < Block.Num(); ++Index)
-			Block[Index] = static_cast<uint16>(FMath::Max(0, static_cast<int32>(Block[Index]) - Lower[Index]));
-		Landscape->Modify();
-		Accessor.SetData(Band.Min.X, Band.Min.Y, Band.Max.X, Band.Max.Y, Block.GetData());
-		Accessor.Flush();
-		UnrealAILandscapeRqlApiLocal::MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+		UnrealAILandscapeRqlApiLocal::AddToHeightLayer(Landscape, Grid.Info, Grid.EditLayer, Band,
+			[&Lower](int32 Index) { return -static_cast<int32>(Lower[Index]); });
 		return Changed;
 	}
 }
@@ -644,7 +625,7 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 			if (Nearest[Cell] == TNumericLimits<double>::Max())
 				continue;
 			const double Distance = Nearest[Cell];
-			const double Weight = Distance <= Half ? 1.0 : Band > 0.0 ? 0.5 * (1.0 + FMath::Cos(PI * FMath::Min(1.0, (Distance - Half) / Band))) : 0.0;
+			const double Weight = Distance <= Half ? 1.0 : Band > 0.0 ? Cosine((Distance - Half) / Band) : 0.0;
 			const double Ground = Grid.At(X, Y);
 			Delta[Cell] = static_cast<int32>(Grid.Units(FMath::Lerp(Ground, Road[Cell], Weight))) - static_cast<int32>(Grid.Raw[Grid.Index(X, Y)]);
 			Changed += Delta[Cell] != 0 ? 1 : 0;
@@ -652,17 +633,7 @@ int32 UnrealAILandscapeRqlApiLocal::RampAlong(ALandscapeProxy* Landscape, const 
 	}
 	if (Changed == 0)
 		return UnrealMcpRql::Failed<int32>(TEXT("nothing to change: the ground along the points is already at their Z (or off the loaded landscape)"));
-	FHeightmapAccessor<false> Accessor(Grid.Info);
-	Accessor.SetEditLayer(Grid.EditLayer);
-	TArray<uint16> Block;
-	Block.SetNumZeroed(Delta.Num());
-	Accessor.GetDataFast(Area.Min.X, Area.Min.Y, Area.Max.X, Area.Max.Y, Block.GetData());
-	for (int32 Index = 0; Index < Block.Num(); ++Index)
-		Block[Index] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Block[Index]) + Delta[Index], 0, 65535));
-	Landscape->Modify();
-	Accessor.SetData(Area.Min.X, Area.Min.Y, Area.Max.X, Area.Max.Y, Block.GetData());
-	Accessor.Flush();
-	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	AddToHeightLayer(Landscape, Grid.Info, Grid.EditLayer, Area, [&Delta](int32 Index) { return Delta[Index]; });
 	return Changed;
 }
 

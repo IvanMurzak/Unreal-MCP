@@ -82,6 +82,11 @@ export const DEFAULT_SKILLS_AGENT = 'claude-code';
 const GENERATED_MARKER = `generated-by: ${SKILL_METADATA['generated-by']}`;
 
 /** A file this CLI generated (its frontmatter carries our metadata); reference files are judged by their SKILL.md. */
+/** The skill folders this CLI writes offline (`unreal-mcp-cli`, `ai-game-dev-app`). */
+function ownSkillNames(): Set<string> {
+  return new Set(buildGuideFiles().map((f) => f.relativePath.split('/')[0]));
+}
+
 function isGenerated(skillMd: string): boolean {
   try {
     return fs.readFileSync(skillMd, 'utf-8').includes(GENERATED_MARKER);
@@ -109,7 +114,7 @@ export async function setupSkills(opts: SetupSkillsOptions = {}): Promise<SetupS
     if (opts.editor !== false) {
       const foreign = opts.force ? [] : foreignSkills(skillsDir);
       editorSkills = await generateEditorSkills(projectDir, agent.skillsPath, opts);
-      const ownNames = new Set(buildGuideFiles().map((f) => f.relativePath.split('/')[0]));
+      const ownNames = ownSkillNames();
       for (const skill of foreign) {
         if (fs.readFileSync(skill.file, 'utf-8') === skill.content) continue;
         fs.writeFileSync(skill.file, skill.content, 'utf-8');
@@ -183,8 +188,11 @@ function foreignSkills(skillsDir: string): { file: string; content: string }[] {
   return dirs
     .filter((d) => d.isDirectory())
     .map((d) => path.join(skillsDir, d.name, 'SKILL.md'))
-    .filter((file) => fs.existsSync(file) && !isGenerated(file))
-    .map((file) => ({ file, content: fs.readFileSync(file, 'utf-8') }));
+    .flatMap((file) => {
+      if (!fs.existsSync(file)) return [];
+      const content = fs.readFileSync(file, 'utf-8');
+      return content.includes(GENERATED_MARKER) ? [] : [{ file, content }];
+    });
 }
 
 /**
@@ -256,7 +264,7 @@ async function generateEditorSkills(projectDir: string, skillsPath: string, opts
  */
 function moveEditorSkills(staging: string, target: string): { files: number; pruned: number } {
   const current = new Set(fs.readdirSync(staging, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name));
-  const own = new Set(buildGuideFiles().map((f) => f.relativePath.split('/')[0]));
+  const own = ownSkillNames();
   let pruned = 0;
   if (fs.existsSync(target)) {
     for (const entry of fs.readdirSync(target, { withFileTypes: true })) {

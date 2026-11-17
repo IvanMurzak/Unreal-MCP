@@ -568,10 +568,10 @@ Reflection already exposes every type the extension's engine plugin defines, so 
 
 `IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FMyRqlModule>, MyModule)` registers the module for the editor module's
 lifetime; `UnrealMcpRql::SpawnActor` / `AddComponent` / `CreateAsset` / `EditorWorld` / `PluginVersion` share the core
-operations' rules (docs/EXTENSIONS.md). `UnrealMcpRql::LoadWorldPartitionActors(guids)` and
-`LoadWorldPartitionRegion(box2D, &loaded)` load World Partition actors that are not loaded, as `editor | call
-LoadActors` / `LoadRegion` do (the editor's actor-list loader: nothing marked unsaved, no undo step, synchronous;
-loaded, deleted and runtime-only actors are skipped, editor world only), so an extension that needs actors outside the
+operations' rules (docs/EXTENSIONS.md). `UnrealMcpRql::LoadWorldPartitionActors` / `LoadWorldPartitionRegion`
+(docs/EXTENSIONS.md) load World Partition actors that are not loaded, as `editor | call LoadActors` / `LoadRegion` do
+(the editor's actor-list loader: nothing marked unsaved, no undo step, synchronous; loaded, deleted and runtime-only
+actors are skipped, editor world only), so an extension that needs actors outside the
 loaded regions does not call the engine's loader itself.
 
 **Extensions an agent does not have yet** (`UnrealMcpRql/Public/UnrealMcpAvailableExtensions.h`). The editor bundles

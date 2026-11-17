@@ -7,6 +7,7 @@
 #include "LandscapeEditTypes.h"
 
 class ALandscapeProxy;
+class ULandscapeInfo;
 struct FUnrealAILandscapeEdit;
 enum ELandscapeLayerUpdateMode : uint32;
 
@@ -24,6 +25,18 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * foliage) for the next tick. Without rendering (-nullrhi, commandlets) nothing merges: the edit stays in its layer.
 	 */
 	void MergeNow(ALandscapeProxy* Landscape, ELandscapeLayerUpdateMode FollowUp);
+
+	/** 1 at @p T = 0, a smooth (cosine) fall to 0 at @p T = 1 and beyond. */
+	double Cosine(double T);
+
+	/**
+	 * The ground's heights over @p R (row by row): with one height edit layer that layer (@p EditLayer, the one edits are
+	 * written to), with several their sum (the merged heights).
+	 */
+	TArray<uint16> ReadGround(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R);
+
+	/** Add Delta(index) (height units, row by row over @p R) to @p EditLayer, clamped to 0..65535, then write and MergeNow. */
+	void AddToHeightLayer(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R, TFunctionRef<int32(int32)> Delta);
 
 	/** The lowest and highest world Z (cm) the landscape's heightmap can hold (its 16-bit range scaled by the actor's Z scale). */
 	FVector2D HeightRange(const ALandscapeProxy* Landscape);

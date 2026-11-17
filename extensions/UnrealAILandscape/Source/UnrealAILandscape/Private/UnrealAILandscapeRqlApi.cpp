@@ -342,6 +342,21 @@ namespace UnrealAILandscapeRqlApiLocal
 		return Valid;
 	}
 
+	void AddToHeightLayer(ALandscapeProxy* Landscape, ULandscapeInfo* Info, const FGuid& EditLayer, const FIntRect& R, TFunctionRef<int32(int32)> Delta)
+	{
+		FHeightmapAccessor<false> Accessor(Info);
+		Accessor.SetEditLayer(EditLayer);
+		TArray<uint16> Data;
+		Data.SetNumZeroed((R.Width() + 1) * (R.Height() + 1));
+		Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
+		for (int32 Index = 0; Index < Data.Num(); ++Index)
+			Data[Index] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Data[Index]) + Delta(Index), 0, 65535));
+		Landscape->Modify();
+		WriteData(Accessor, R, Data.GetData());
+		Accessor.Flush();
+		MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	}
+
 	/**
 	 * Read the vertices of @p R through @p Accessor (heights or one layer's weights, on the first edit layer), let @p Edit
 	 * change each one given its vertex X, Y (true when it changed), let @p BeforeWrite check the new values of the rectangle
@@ -906,14 +921,14 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	{
 		if (!Inside(X, Y))
 			return false;
+		const FVector World = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y)));
+		if (Box.bIsValid && !Box.IsInsideOrOn(FVector2D(World)))
+			return false;
 		const int32 X0 = X > G.Min.X && Inside(X - 1, Y) ? X - 1 : X, X1 = X < G.Max.X && Inside(X + 1, Y) ? X + 1 : X;
 		const int32 Y0 = Y > G.Min.Y && Inside(X, Y - 1) ? Y - 1 : Y, Y1 = Y < G.Max.Y && Inside(X, Y + 1) ? Y + 1 : Y;
 		const double DzDx = X1 > X0 ? (LocalZ(X1, Y) - LocalZ(X0, Y)) * Scale.Z / ((X1 - X0) * Scale.X) : 0.0;
 		const double DzDy = Y1 > Y0 ? (LocalZ(X, Y1) - LocalZ(X, Y0)) * Scale.Z / ((Y1 - Y0) * Scale.Y) : 0.0;
 		const double Slope = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(DzDx * DzDx + DzDy * DzDy)));
-		const FVector World = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y)));
-		if (Box.bIsValid && !Box.IsInsideOrOn(FVector2D(World)))
-			return false;
 		const double Height = World.Z;
 		const double Weight = Strength * Band(Slope, MinSlope, MaxSlope, 2.0) * Band(Height, MinHeight, MaxHeight, 50.0);
 		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Weight), 0, 255));
@@ -1039,17 +1054,7 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return 0;
 	if (!FitsHeightRange(Landscape, UnitsToCm(Landscape, Low), UnitsToCm(Landscape, High)))
 		return 0;
-	FHeightmapAccessor<false> Accessor(Area.Info);
-	Accessor.SetEditLayer(EditLayer);
-	TArray<uint16> Data;
-	Data.SetNumZeroed(W * H);
-	Accessor.GetDataFast(R.Min.X, R.Min.Y, R.Max.X, R.Max.Y, Data.GetData());
-	for (int32 I = 0; I < Data.Num(); ++I)
-		Data[I] = static_cast<uint16>(FMath::Clamp(static_cast<int32>(Data[I]) + Delta[I], 0, 65535));
-	Landscape->Modify();
-	WriteData(Accessor, R, Data.GetData());
-	Accessor.Flush();
-	MergeNow(Landscape, ELandscapeLayerUpdateMode::Update_Heightmap_All);
+	AddToHeightLayer(Landscape, Area.Info, EditLayer, R, [&Delta](int32 I) { return Delta[I]; });
 	RecordEdit(Landscape, TEXT("Smooth"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength);
 	return Changed;
 }

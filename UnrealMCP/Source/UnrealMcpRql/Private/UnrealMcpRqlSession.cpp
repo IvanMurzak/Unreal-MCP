@@ -27,7 +27,6 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectHash.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <string_view>

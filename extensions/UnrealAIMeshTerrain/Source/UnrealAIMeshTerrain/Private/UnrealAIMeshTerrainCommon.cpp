@@ -157,10 +157,7 @@ namespace UnrealAIMeshTerrain
 				return true;
 			});
 		}
-	}
 
-	namespace
-	{
 		/**
 		 * Whether the actor of @p Instance was deleted in this session: its descriptor stays until the level is saved, its
 		 * package stays in memory, dirty (deleted on save) and without the actor. Unloaded actors' packages are not in memory
