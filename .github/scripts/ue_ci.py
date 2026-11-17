@@ -15,6 +15,7 @@ import codecs
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT / "scripts"), str(ROOT / "bridge")]
 
 from chain_feed import NUGET_CONFIG_NAME, TARGETS_NAME, _is_ours  # noqa: E402  (vendored, same folder)
-from publish import ALL_RUNTIMES as RIDS, zip_dir  # noqa: E402  (bridge/publish.py)
+from publish import ALL_RUNTIMES as RIDS, PROJECT_FILE as BRIDGE_CSPROJ, zip_dir  # noqa: E402  (bridge/publish.py)
 import ue_json  # noqa: E402  (scripts/)
 import ue_machine_lock  # noqa: E402  (scripts/)
 from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402  (same folder)
@@ -246,7 +247,9 @@ def build_bridge(_args) -> None:
     """Build the bridge sidecar and export it as UNREAL_MCP_BRIDGE_PATH (PR builds bundle no sidecar)."""
     if run(["dotnet", "build", ROOT / "bridge/Unreal-MCP-Bridge.sln", "--configuration", "Debug"]) != 0:
         raise StepError("bridge build failed")
-    bridge = ROOT / "bridge/src/bin/Debug/net10.0" / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
+    # The flat framework-dependent output folder is named after the csproj's TFM; read it there.
+    tfm = re.search(r"<TargetFramework>([^<]+)</TargetFramework>", BRIDGE_CSPROJ.read_text(encoding="utf-8")).group(1)
+    bridge = BRIDGE_CSPROJ.parent / "bin/Debug" / tfm / ("unreal-mcp-bridge.exe" if IS_WINDOWS else "unreal-mcp-bridge")
     if not bridge.is_file():
         raise StepError(f"bridge binary not found at {bridge}")
     add_job_env("UNREAL_MCP_BRIDGE_PATH", str(bridge))
