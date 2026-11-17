@@ -535,6 +535,8 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		if (!Spline)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no spline: only Spline and SplineRemesh modifiers follow points"), *ModifierKind(Modifier)));
 		Spline->Modify();
+		// A road's spline (AddRoad) stays straight between its points when SetSplinePoints moves it.
+		bLinear |= Spline->GetNumberOfSplinePoints() > 0 && Spline->GetSplinePointType(0) == ESplinePointType::Linear;
 		Spline->ClearSplinePoints(/*bUpdateSpline*/ false);
 		for (const FVector& Point : Points)
 			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::World, /*bUpdateSpline*/ false);
@@ -738,15 +740,28 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	// 4 m road, Plateau + Falloff alone still left 11.5 degrees at MaxSlope 8 on a hillside corner.
 	const double TurnRadius = 2.5 * (Plateau + Falloff);
 	TArray<FVector2D> Line = { FVector2D(Points[0]) };
-	TArray<FVector2D> TightTurns; // corners that got less than TurnRadius
+	TArray<FVector2D> TightTurns; // corners that got less than TurnRadius (or none: a reversal)
 	int32 Rounded = 0;
+	const auto TurnAt = [&Points](int32 Index)
+	{
+		const FVector2D U = (FVector2D(Points[Index]) - FVector2D(Points[Index - 1])).GetSafeNormal(), V = (FVector2D(Points[Index + 1]) - FVector2D(Points[Index])).GetSafeNormal();
+		return FMath::Acos(FMath::Clamp(FVector2D::DotProduct(U, V), -1.0, 1.0));
+	};
+	const auto Rounds = [](double Turn) { return Turn >= FMath::DegreesToRadians(20.0) && Turn <= FMath::DegreesToRadians(179.0); };
+	// The arcs share what the spline's 1000 points leave (they are split again into the profile's steps below).
+	int32 Corners = 0;
+	for (int32 Index = 1; Index + 1 < Points.Num(); ++Index)
+		Corners += Rounds(TurnAt(Index)) ? 1 : 0;
+	const int32 ArcBudget = FMath::Max(2, (900 - Points.Num()) / FMath::Max(1, Corners));
 	for (int32 Index = 1; Index + 1 < Points.Num(); ++Index)
 	{
 		const FVector2D A(Points[Index - 1]), P(Points[Index]), B(Points[Index + 1]);
 		const FVector2D U = (P - A).GetSafeNormal(), V = (B - P).GetSafeNormal();
-		const double Turn = FMath::Acos(FMath::Clamp(FVector2D::DotProduct(U, V), -1.0, 1.0));
-		if (Turn < FMath::DegreesToRadians(20.0) || Turn > FMath::DegreesToRadians(179.0))
+		const double Turn = TurnAt(Index);
+		if (!Rounds(Turn))
 		{
+			if (Turn > FMath::DegreesToRadians(179.0))
+				TightTurns.Add(P); // a reversal: no curve fits
 			Line.Add(P);
 			continue;
 		}
@@ -759,7 +774,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		const double Side = FVector2D::CrossProduct(U, V) > 0.0 ? 1.0 : -1.0; // left turn: the centre is on the left
 		const FVector2D From = P - U * Trim;
 		const FVector2D Centre = From + FVector2D(-U.Y, U.X) * Side * Radius;
-		const int32 Pieces = FMath::Max(2, FMath::CeilToInt(Radius * Turn / FMath::Max(Width / 2.0, 100.0)));
+		const int32 Pieces = FMath::Clamp(FMath::CeilToInt(Radius * Turn / FMath::Max(Width / 2.0, 100.0)), 2, ArcBudget);
 		for (int32 Piece = 0; Piece <= Pieces; ++Piece)
 			Line.Add(Centre + (From - Centre).GetRotated(FMath::RadiansToDegrees(Side * Turn * Piece / Pieces)));
 		++Rounded;
@@ -777,8 +792,12 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		return Count;
 	};
 	double Step = FMath::Max(FMath::Clamp(Width, 200.0, 1000.0), Length / 999.0);
-	while (Samples(Step) > 1000)
+	for (int32 Guard = 0; Samples(Step) > 1000; ++Guard)
+	{
+		if (Guard > 100)
+			return UnrealMcpRql::Failed<FRoadResult>(FString::Printf(TEXT("the path has too many points and corners for one road (%d after rounding its corners, at most 1000): split it into several roads"), Line.Num()));
 		Step *= 1.1;
+	}
 	TArray<FVector2D> Path = { Line[0] };
 	TArray<double> Along = { 0.0 };
 	for (int32 Index = 1; Index < Line.Num(); ++Index)
@@ -942,14 +961,15 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (-1; WaitForBuild, then sample the road with SurfacePoints)");
 		return Out;
 	}
-	// The built road: its grade along the centre line every metre, from the collision.
+	// The built road: its grade along the centre line every metre (longer steps past 30 km), from the collision.
+	const double Measure = FMath::Max(100.0, Length / 3000.0);
 	FVector2D Steepest = Path[0];
 	{
 		double Previous = SampleSurface(Terrain, Path[0].X, Path[0].Y, /*bChannels*/ false).Height;
 		FVector2D Last = Path[0];
 		for (int32 Index = 1; Index < Path.Num(); ++Index)
 		{
-			const int32 Metres = FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Path[Index - 1], Path[Index]) / 100.0));
+			const int32 Metres = FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(Path[Index - 1], Path[Index]) / Measure));
 			for (int32 Piece = 1; Piece <= Metres; ++Piece)
 			{
 				const FVector2D Point = FMath::Lerp(Path[Index - 1], Path[Index], double(Piece) / Metres);
