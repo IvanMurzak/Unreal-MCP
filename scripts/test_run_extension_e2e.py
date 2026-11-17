@@ -165,12 +165,12 @@ AUTHORING.update({
          'isError': True}),
     'mesh-terrain-surface-missing.e2e.json': (
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Surface on {MESH_TERRAIN}: argument 'Terrain': "
-                                              'value is error(not-found)'}], 'isError': True},
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error coercion-failed: cannot call Surface: argument 'Point': Vector expects 3 numbers"}],
          'isError': True}),
     'modifiers-add-missing-terrain.e2e.json': (
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call AddNoise on {MESH_TERRAIN_MODIFIER}: argument 'Terrain': "
-                                              'value is error(not-found)'}], 'isError': True},
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error call-threw: AddNoise threw: Size [-5, 100] must be above 0"}], 'isError': True}),
     'modifiers-remove-null.e2e.json': (
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Remove on {MESH_TERRAIN_MODIFIER}: argument 'Modifier': "
@@ -186,7 +186,7 @@ AUTHORING.update({
         text_result('LatticeModifier : EditableModifierBase {Extents Vector3d, bDrawLatticePoints bool}')),
     'mesh-terrain-create-delete-missing.e2e.json': (
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Delete on {MESH_TERRAIN_CREATE}: argument 'Terrain': "
-                                              'value is error(not-found)'}], 'isError': True},
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error call-threw: Delete threw: the level has no Mesh Terrain"}], 'isError': True}),
     'mesh-terrain-create-heightmap-missing.e2e.json': (
         {'content': [{'type': 'text', 'text': 'error call-threw: ImportHeightmap threw: heightmap file not found: '
@@ -201,7 +201,7 @@ AUTHORING.update({
         text_result('MeshTerrainCreateOperations : Object {} +methods: Create(string Label)')),
     'mesh-terrain-brush-missing.e2e.json': (
         {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Sculpt on {MESH_TERRAIN_BRUSH}: argument 'Terrain': "
-                                              'value is error(not-found)'}], 'isError': True},
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
         {'content': [{'type': 'text', 'text': "error call-threw: Sculpt threw: Mode 'Pinch' is not one of Raise, Lower, Flatten, Smooth"}],
          'isError': True}),
 })
