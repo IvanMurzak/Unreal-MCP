@@ -61,7 +61,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   or BlueprintReadOnly-only; a Blueprint actor's variable that is not Instance Editable is read-only on placed actors,
   since `AActor::ResetPropertiesForConstruction` resets it to the class default on every construction script run), every struct property, `TArray` / `TSet` / `TMap` as lists and maps, object references
   (instanced sub-objects are owning, others references), soft references as paths. Writes go through the editor's
-  `PreEditChange` / `PostEditChangeProperty`, as an edit in the Details panel does (components refresh, Blueprint
+  `PreEditChange` / `PostEditChangeChainProperty`, as an edit in the Details panel does (components refresh, Blueprint
   actors rerun their construction script).
 - **Blueprint actors' components**: an edit of a placed Blueprint actor's component reruns its construction script,
   which rebuilds the construction-script components; the next writes of the same mutation and the receipt follow the
@@ -87,6 +87,11 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 - **Structs are values**: reading a struct member gives a copy, and a write into it is assigned back up the path, so
   `set DefaultKeyMappings.Mappings[0].Key = {KeyName: "C"}` writes the asset. A struct streamed by `get` (`get Data.Mappings[0] |
   set Key = …`) is a copy without an owner: such a `set` is refused (`value copies`); write from the owner instead.
+  The owner hears of the member that changed, as from the Details panel (`PostEditChangeChainProperty`, the member in a
+  chain under the owner's property), so `set BodyInstance.bSimulatePhysics = true` also makes a static mesh Movable.
+  FBodyInstance's collision members follow its setters: `set BodyInstance.CollisionProfileName = "NoCollision"` loads
+  the profile's settings, and `set BodyInstance.CollisionEnabled = "NoCollision"` (or `ObjectType`) switches the
+  profile to `Custom`, as `SetCollisionEnabled` does; the physics state follows in both cases.
 - **Identity**: `$ref` is `Type#<Id>`, the `Id` of the object's slot in the object array plus that slot's serial number
   (editor-session ids, like Unity's instance ids); `ref(…)` resolves them directly, and a ref to a destroyed object never
   resolves to a new object that reuses the slot. Every object value carries a weak pointer, so destroyed (garbage)
@@ -167,8 +172,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   `unknown-member` error: filter first (`where $ is LightComponentBase`).
 - **Receipts** of a `set` list only the assignments that change a value: one whose planned and read-back values equal
   the old value is left out and counted in the result's `unchanged` (the sidecar prints "(N unchanged assignment(s) not
-  listed)"); outside a dry run the write still runs and the commit hooks see every record, and a write the editor
-  refused or clamped back to the old value stays listed.
+  listed)"); outside a dry run the write still runs and the commit hooks see every record. A write the editor puts back
+  to the old value (the owner derives it from other settings, or refuses it) fails, naming the member, and the
+  mutation's writes are rolled back: it never reports success. A write clamped to another value is listed with that value.
 - **Lists in reads, one rule**: a read never drops items silently. A call result shows up to 1000 items per list and a
   read-only call every row (below, and Read-only operations); a list member in a plain query (`select Edits`,
   `select Components`) shows RQL's first 20 items, then `…+N`, and the answer gets a `list-truncated` warning naming the
