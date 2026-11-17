@@ -878,9 +878,16 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	Out.Reached = FMath::Abs(Z.Last() - Ground.Last()) <= 100.0;
 	Out.MinLengthMeters = FMath::Abs(Ground.Last() - Ground[0]) / Tan / 100.0; // with the profile's margin: what it needs
 	Out.Seconds = SecondsSince(Start);
+	if (!Out.Reached)
+	{
+		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
+			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
+			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" with its Remesh and Corridor"));
+	}
 	if (!Out.Ready)
 	{
-		Out.Note = TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (WaitForBuild, then sample the road with SurfacePoints)");
+		Out.Note += FString(Out.Note.IsEmpty() ? TEXT("") : TEXT("; "))
+			+ TEXT("the road is placed and the terrain is still building: MaxSlope is not measured yet (WaitForBuild, then sample the road with SurfacePoints)");
 		return Out;
 	}
 	// The built road: its grade along the centre line, from the collision.
@@ -893,13 +900,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		Previous = Height;
 	}
 	Out.MaxSlope = FMath::RoundToDouble(Out.MaxSlope * 100.0) / 100.0;
-	if (!Out.Reached)
-	{
-		Out.Note = FString::Printf(TEXT("the path is %.0f m long: at %g degrees the road reaches Z %.0f, %.0f m %s the last point's ground (Z %.0f); a path of at least %.0f m reaches it: wind it (switchbacks or a spiral), Remove this road%s and call AddRoad again"),
-			Out.LengthMeters, MaxSlope, Out.EndZ, FMath::Abs(Out.EndGroundZ - Out.EndZ) / 100.0, Out.EndZ < Out.EndGroundZ ? TEXT("below") : TEXT("above"), Out.EndGroundZ,
-			FMath::CeilToDouble(Out.MinLengthMeters), RemeshLabel.IsEmpty() ? TEXT("") : TEXT(" with its Remesh and Corridor"));
-	}
-	else if (Out.MaxSlope > MaxSlope + 0.5)
+	if (Out.Reached && Out.MaxSlope > MaxSlope + 0.5)
 	{
 		Out.Note = FString::Printf(TEXT("the built road is %.1f degrees steep somewhere: the ground under it is too coarse; AddRemesh over it (EdgeLength %.0f) and Rebuild"), Out.MaxSlope, RoadEdge);
 	}
