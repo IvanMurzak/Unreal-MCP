@@ -26,10 +26,19 @@ rql::Value UnrealMcpRqlClassDefaultsList(FUnrealMcpRqlTypes& Types, UClass* Base
 
 /**
  * " (did you mean /Engine/BasicShapes/Cube?)": up to three asset paths of @p Class whose name matches the last part of
- * @p Text ("Cube", "/Game/Mehses/Cube"), for a reference that resolved to nothing; "" when there is none (or for actor and
- * class references, which do not name assets).
+ * @p Text ("Cube", "/Game/Mehses/Cube"), for a reference that resolved to nothing; "" when there is none (or for class
+ * references, which do not name assets). For an actor class, "; did you mean 'Island' (Landscape)?" (UnrealMcpRqlSimilarActors).
  */
 FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
+
+/**
+ * "did you mean 'Island' (Landscape), 'Island_old' (Landscape, not loaded)?": up to three actor labels of the editor world
+ * close to @p Text, for an actor lookup that found nothing; "" when none is close. The same text but for case and whitespace
+ * first, then typos (edit distance), then labels that contain it; actors of @p Preferred (when given) before any other.
+ * Reads the loaded actors and the World Partition actors that are not loaded (@p Unloaded when the caller has them), at most
+ * 20000 labels in all.
+ */
+FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred = nullptr, const TArray<struct FUnrealMcpUnloadedActor>* Unloaded = nullptr);
 
 /** The same among the assets of every class: for a path with no class to go by. */
 FString UnrealMcpRqlSimilarAssetsOfAnyClass(const FString& Text);

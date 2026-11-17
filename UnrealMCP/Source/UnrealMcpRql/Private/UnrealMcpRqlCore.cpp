@@ -1003,17 +1003,27 @@ namespace UnrealMcpRqlCoreLocal
 		AActor* Actor = FUnrealMcpObjectRef::ResolveActor(Key);
 		if (Actor)
 			return Types.WrapObject(Actor);
+		// Passed as an operation argument, an error value reaches the answer by its code only: the session restores the message.
+		auto Fail = [&Types](const char* Code, const FString& Message)
+		{
+			Types.AddErrorValue(rql::Diagnostic::error(Code, UnrealMcpRqlToStd(Message)));
+			return ErrorValue(Code, Message);
+		};
 		// A World Partition actor that is not loaded has a descriptor, not an actor: name it and how to load it.
 		const FString Wanted = Key.TrimStartAndEnd();
-		for (const FUnrealMcpUnloadedActor& Row : UnrealMcpRqlWorldPartition::Unloaded(EditorWorld()))
+		const TArray<FUnrealMcpUnloadedActor> Unloaded = UnrealMcpRqlWorldPartition::Unloaded(EditorWorld());
+		for (const FUnrealMcpUnloadedActor& Row : Unloaded)
 		{
 			if (UnrealMcpRqlWorldPartition::Matches(Row, Wanted))
-				return ErrorValue("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
+				return Fail("not-loaded", FString::Printf(TEXT("'%s' (%s) is a World Partition actor that is not loaded; load it first: "
 					"rql-query editor | call LoadActors([\"%s\"]) (changes nothing saved), then unreal.find(\"%s\") finds it"),
 					*Row.Label, *Row.Class, *Row.Label, *Row.Label));
 		}
-		return ErrorValue("not-found", FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
-			*Key, *OpenLevelPath(), *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint())));
+		// The key is matched as given (a trailing space is no typo to forgive silently): the nearest labels are named instead.
+		const FString Similar = UnrealMcpRqlSimilarActors(Key, nullptr, &Unloaded);
+		const FString Message = FString::Printf(TEXT("no actor with the label, name or path '%s' in the level open in the editor, \"%s\"; %s"),
+			*Key, *OpenLevelPath(), Similar.IsEmpty() ? *UnrealMcpRqlFromStd(UnrealMcpRqlGuide::OpenLevelHint()) : *Similar);
+		return Fail("not-found", Message);
 	}
 
 	/**
@@ -1157,7 +1167,12 @@ static FString SimilarAssetsAmong(const TArray<FAssetData>& Assets, const FStrin
 
 FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text)
 {
-	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(AActor::StaticClass()) || Class->IsChildOf(UClass::StaticClass()))
+	if (Class && Class->IsChildOf(AActor::StaticClass()))
+	{
+		const FString Actors = UnrealMcpRqlSimilarActors(Text, Class);
+		return Actors.IsEmpty() ? Actors : TEXT("; ") + Actors;
+	}
+	if (!Class || Class == UObject::StaticClass() || Class->IsChildOf(UClass::StaticClass()))
 		return FString();
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	TArray<FAssetData> Assets;
