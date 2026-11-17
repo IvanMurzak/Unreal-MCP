@@ -1,0 +1,10 @@
+{
+  "description": "the mesh terrain guide says how to make an island with the sea all around: seabed below sea level, land raised with a Patch",
+  "tool": "rql-schema",
+  "input": {
+    "guide": "mesh-terrain"
+  },
+  "assert": {
+    "pattern": "sea all around[\\s\\S]*sea level[\\s\\S]*\\[0, 0, -2000\\], 2400\\)[\\s\\S]*AddPatch"
+  }
+}
