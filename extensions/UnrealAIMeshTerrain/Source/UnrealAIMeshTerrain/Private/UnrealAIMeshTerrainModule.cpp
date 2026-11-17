@@ -373,7 +373,7 @@ meshTerrainBrush | call PaintWhere(unreal.find("Terrain"), "Red", 30)           
 meshTerrainBrush | call PaintWhere(unreal.find("Terrain"), "Green", 0, 15, 300, 10000000, 1, "", [-50000, -50000, 50000, 50000])   grass on flat ground in a box
 ```
 
-`PaintWhere(terrain, channel, minSlope = 0, maxSlope = 90, minHeight, maxHeight, strength = 1, label, within = [])` paints a
+`PaintWhere(terrain, channel, minSlope = 0, maxSlope = 90, minHeight = -1e7, maxHeight = 1e7, strength = 1, label, within = [])` paints a
 whole terrain (or the `[MinX, MinY, MaxX, MaxY]` box) by the ground's slope (degrees) and height (world Z, cm): in range the
 channel moves to `strength`, with soft edges (2 degrees, 50 cm); elsewhere it keeps its weight. It reads the ground as the
 modifiers left it when it runs: shape first, paint last (a later change does not repaint). The paint is stored in brush

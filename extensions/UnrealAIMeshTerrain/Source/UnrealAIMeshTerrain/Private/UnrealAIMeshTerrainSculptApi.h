@@ -81,6 +81,10 @@ struct FUnrealAIMeshTerrainPaintWhere
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	FString State;
 
+	/** the tiles left unpainted and why (empty when every tile was painted) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
+	FString Note;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mesh Terrain")
 	double Seconds = 0.0;
 };
@@ -109,7 +113,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true"))
 	FUnrealAIMeshTerrainStroke Erase(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Point, double Radius, double Falloff = 0.5);
 
-	/** paint a channel of a Mesh Terrain (one of its Channels) where the ground's slope is MinSlope..MaxSlope degrees and its height MinHeight..MaxHeight (world Z, cm), within Within ([MinX, MinY, MaxX, MaxY] world cm; empty: the whole terrain): every such vertex moves to Strength (the weight 0..1), with soft edges 2 degrees past the slope bounds and 50 cm past the height bounds; the rest keeps its weight. Sand on beaches: MinHeight -200, MaxHeight 300; rock on cliffs: MinSlope 30; grass on flat ground: MaxSlope 15. Slope and height are the ground's when the call runs (the modifiers before the paint): paint last, after shaping. Stored like Paint strokes, in brush modifiers (one per tile of at most 600 x 600 m, labelled Label or "<terrain>_Paint"; a later call over the same tiles reuses them); one undo step; returns when rebuilt: Brushes, NewBrushes, Vertices (changed), Matched, Ready, State, Seconds */
+	/** paint a channel of a Mesh Terrain (one of its Channels) where the ground's slope is MinSlope..MaxSlope degrees and its height MinHeight..MaxHeight (world Z, cm), within Within ([MinX, MinY, MaxX, MaxY] world cm; empty: the whole terrain): every such vertex moves to Strength (the weight 0..1), with soft edges 2 degrees past the slope bounds and 50 cm past the height bounds; the rest keeps its weight. Sand on beaches: MinHeight -200, MaxHeight 300; rock on cliffs: MinSlope 30; grass on flat ground: MaxSlope 15. Slope and height are the ground's when the call runs (the modifiers before the paint): paint last, after shaping. Stored like Paint strokes, in brush modifiers (one per tile of at most 600 x 600 m, labelled Label or "<terrain>_Paint"; a later call over the same tiles reuses them); one undo step; returns when rebuilt: Brushes, NewBrushes, Vertices (changed), Matched, Ready, State, Note (tiles left unpainted), Seconds */
 	// The defaults are RQL's (C++ cannot default the array after them): UHT's CPP_Default_ keys, which RQL reads.
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Mesh Terrain", meta = (BlueprintInternalUseOnly = "true", CPP_Default_MinSlope = "0.000000",
 		CPP_Default_MaxSlope = "90.000000", CPP_Default_MinHeight = "-10000000.000000", CPP_Default_MaxHeight = "10000000.000000", CPP_Default_Strength = "1.000000",

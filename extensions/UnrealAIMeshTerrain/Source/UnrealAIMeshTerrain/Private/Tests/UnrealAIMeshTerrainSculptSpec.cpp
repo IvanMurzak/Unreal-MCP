@@ -434,6 +434,37 @@ void FUnrealAIMeshTerrainSculptSpec::Define()
 		TestEqual(TEXT("no brush added by a refusal"), SculptSpecBrushes(Terrain).Num(), Brushes);
 	});
 
+
+	It("paints a terrain larger than one brush in tiles, every vertex once, and reuses all its tiles' brushes on the next PaintWhere", [this]()
+	{
+		const FString Label = SculptSpecLabel(TEXT("PaintTiles"));
+		const double X0 = 2900000.0, Y0 = 0.0;
+		// 1300 x 1300 m in 10 m quads: 3 x 3 tiles of at most 600 m.
+		AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, Y0, 0.0), 130000.0, 130000.0, 130, 130);
+		ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+		if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+			return;
+		const FString Plan = FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"PaintWhere","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"%%s"},{"lit":0},{"lit":10}]}]})RQL"), *Label);
+		TSharedPtr<FJsonObject> Result;
+		// meshTerrainBrush | call PaintWhere(<terrain>, "Green", 0, 10): all of it is flat
+		TestTrue(TEXT("PaintWhere Green"), UnrealMcpRqlTools::RunPlan(Plan.Replace(TEXT("%s"), TEXT("Green")), true, &Result));
+		TSharedPtr<FJsonObject> First = SculptSpecResult(Result);
+		TestTrue(*FString::Printf(TEXT("nine new brushes, each of the 131 x 131 vertices painted once (NewBrushes %d, Vertices %d, Matched %d)"), First.IsValid() ? int32(First->GetIntegerField(TEXT("NewBrushes"))) : -1,
+			First.IsValid() ? int32(First->GetIntegerField(TEXT("Vertices"))) : -1, First.IsValid() ? int32(First->GetIntegerField(TEXT("Matched"))) : -1), First.IsValid()
+			&& First->GetIntegerField(TEXT("NewBrushes")) == 9 && First->GetIntegerField(TEXT("Vertices")) == 131 * 131 && First->GetIntegerField(TEXT("Matched")) == 131 * 131);
+		for (const FVector2D Corner : { FVector2D(-65000.0, -65000.0), FVector2D(65000.0, 65000.0), FVector2D(-65000.0, 65000.0), FVector2D(0.0, 0.0) })
+		{
+			const float Green = SculptSpecChannel(Terrain, X0 + Corner.X * 0.999, Y0 + Corner.Y * 0.999, TEXT("Green"));
+			TestTrue(*FString::Printf(TEXT("painted at (%.0f, %.0f), the rim too: %.2f"), Corner.X, Corner.Y, Green), Green >= 0.9f);
+		}
+		// meshTerrainBrush | call PaintWhere(<terrain>, "Yellow", 0, 10): the same tiles' brushes
+		TestTrue(TEXT("PaintWhere Yellow"), UnrealMcpRqlTools::RunPlan(Plan.Replace(TEXT("%s"), TEXT("Yellow")), true, &Result));
+		TSharedPtr<FJsonObject> Second = SculptSpecResult(Result);
+		TestTrue(*FString::Printf(TEXT("no new brush (%s)"), *SculptSpecJson(Result).Left(600)), Second.IsValid() && Second->GetIntegerField(TEXT("NewBrushes")) == 0
+			&& Second->GetArrayField(TEXT("Brushes")).Num() == 9);
+		TestEqual(TEXT("nine brushes in all"), SculptSpecBrushes(Terrain).Num(), 9);
+	});
+
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

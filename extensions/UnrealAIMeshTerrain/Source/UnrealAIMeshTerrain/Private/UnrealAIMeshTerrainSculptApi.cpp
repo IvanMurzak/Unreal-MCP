@@ -592,150 +592,248 @@ namespace UnrealAIMeshTerrainSculptLocal
 		if (TilesX * TilesY > MaxPaintTiles)
 			return PaintWhereFailed(FString::Printf(TEXT("the area needs %d brush tiles (at most %d): pass a smaller Within"), TilesX * TilesY, MaxPaintTiles));
 		const FVector2D Half(Size.X / TilesX / 2.0, Size.Y / TilesY / 2.0);
+		// A brush fades out at the edge of its edit box: each one reaches a few vertices past its tile, so the vertices along a
+		// tile's edge lie well inside a brush (the overlapping brushes write the same weights there).
+		const double Margin = 2.0 * (Density > 0.0 ? FMath::Sqrt(1.0 / Density) : 100.0) + 100.0;
 
 		FScopedTransaction Transaction(FText::Format(NSLOCTEXT("UnrealAIMeshTerrain", "PaintWhere", "Paint Mesh Terrain where ({0})"), FText::FromName(Channel)));
 		UWorld* World = Terrain->GetWorld();
 		const TArray<UModifierComponent*> Stack = Modifiers(Terrain);
-		double Last = 0.0; // new brushes go after every modifier there is
-		for (const UModifierComponent* Modifier : Stack)
-		{
-			if (Cast<UProjectMeshLayersModifier>(Modifier))
-				Last = FMath::Max(Last, Modifier->GetPriority() + 1.0);
-		}
+		// New brushes go after every modifier of their priority layer there is (as Run places a stroke's brush): set from the first.
+		TOptional<double> Last;
 		FStroke Paint;
 		Paint.Kind = EStroke::Paint;
 		Paint.Channel = Channel;
 		FUnrealAIMeshTerrainPaintWhere Out;
 		const float Depth = static_cast<float>(Built.Max.Z - Built.Min.Z + 20000.0);
+		struct FTile { FVector2D Center; FVector2D Half; int32 Splits = 0; };
+		TArray<FTile> Tiles;
 		for (int32 TileY = 0; TileY < TilesY; ++TileY)
 		{
 			for (int32 TileX = 0; TileX < TilesX; ++TileX)
+				Tiles.Add({ Area.Min + FVector2D((2 * TileX + 1) * Half.X, (2 * TileY + 1) * Half.Y), Half });
+		}
+		TArray<FString> Skipped;
+		// A prepared tile: its brush (new or reused), what to restore when it stores nothing, and its edit mesh.
+		struct FPrepared
+		{
+			UProjectMeshLayersModifier* Brush = nullptr;
+			bool bNew = false;
+			AActor* Owner = nullptr;
+			AMeshPartition* Previous = nullptr;
+			TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries;
+			float OldUp = 0.0f, OldDown = 0.0f;
+			FBox2D Box;
+			UE::MeshPartition::UEditableModifierToolTarget* Target = nullptr;
+			FDynamicMesh3 Mesh;
+			int32 Layer = INDEX_NONE;
+		};
+		TArray<FPrepared> Prepared;
+		TMap<FIntPoint, double> TargetWeights; // by world X, Y (cm): the weight each vertex moves by
+		const auto Key = [](const FVector& Point) { return FIntPoint(FMath::RoundToInt32(Point.X), FMath::RoundToInt32(Point.Y)); };
+		// A tile that stores nothing leaves no new brush behind and a reused one as it was.
+		const auto DropTile = [World, Terrain](FPrepared& Prep)
+		{
+			if (Prep.bNew)
 			{
-				const FVector2D Center = Area.Min + FVector2D((2 * TileX + 1) * Half.X, (2 * TileY + 1) * Half.Y);
-				const FBox2D Box(Center - Half, Center + Half);
-				// An earlier PaintWhere's brush for exactly this tile, with nothing applied after it there.
-				UProjectMeshLayersModifier* Brush = nullptr;
-				for (int32 Index = 0; Index < Stack.Num() && !Brush; ++Index)
+				if (Prep.Owner)
+					World->EditorDestroyActor(Prep.Owner, /*bShouldModifyLevel*/ true);
+				for (const AMeshPartition* Bound : { static_cast<const AMeshPartition*>(Terrain), static_cast<const AMeshPartition*>(Prep.Previous) })
 				{
-					UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Stack[Index]);
-					if (!Candidate || !CanTakeStroke(Candidate, Paint) || !FVector2D(Candidate->GetComponentLocation()).Equals(Center, 1.0) || !EditExtents(Candidate).Equals(Half, 1.0))
-						continue;
-					bool bCovered = false;
-					for (int32 Later = Index + 1; Later < Stack.Num() && !bCovered; ++Later)
-					{
-						const FBox Bounds = Stack[Later]->ComputeCombinedBounds();
-						bCovered = !Stack[Later]->GetIsDisabledFlag() && Bounds.IsValid && Box.Intersect(FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)));
-					}
-					Brush = bCovered ? nullptr : Candidate;
+					if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
+						Component->UpdateModifierList();
 				}
-				const bool bNew = Brush == nullptr;
-				AMeshPartition* Previous = nullptr;
-				if (bNew)
+				return;
+			}
+			Prep.Brush->SetChannelEntries(Prep.OldEntries);
+			const auto Restore = [&Prep](const TCHAR* Name, float Old)
+			{
+				const float* Value = PropertyValue<float>(Prep.Brush, Name);
+				if (Value && *Value != Old)
+					SetProperty(Prep.Brush, Name, Old);
+			};
+			Restore(TEXT("VerticalExtentUp"), Prep.OldUp);
+			Restore(TEXT("VerticalExtentDown"), Prep.OldDown);
+		};
+		// A vertex belongs to exactly one tile (half-open boxes; the area's own far edges included), so seams are painted once.
+		const auto Owns = [&Area](const FBox2D& Box, const FVector2D& Point)
+		{
+			// (Tile edges are sums of halves: within 1 cm of the area's far edge counts as on it.)
+			return Point.X >= Box.Min.X && (Point.X < Box.Max.X || Box.Max.X >= Area.Max.X - 1.0) && Point.Y >= Box.Min.Y && (Point.Y < Box.Max.Y || Box.Max.Y >= Area.Max.Y - 1.0);
+		};
+		for (int32 TileIndex = 0; TileIndex < Tiles.Num(); ++TileIndex)
+		{
+			const FTile Piece = Tiles[TileIndex];
+			const FVector2D Center = Piece.Center;
+			const FBox2D Box(Center - Piece.Half, Center + Piece.Half);
+			// An earlier PaintWhere's brush for exactly this tile, with nothing applied after it there (the brushes of the
+			// neighbouring tiles overlap it only by their margins, with the same weights: they do not count).
+			const FBox2D Inner = Box.ExpandBy(-10.0);
+			const FVector2D Extents = Piece.Half + FVector2D(Margin);
+			const auto IsTileBrush = [&Extents, &Center](const UModifierComponent* Modifier)
+			{
+				return Cast<UProjectMeshLayersModifier>(Modifier) && EditExtents(const_cast<UProjectMeshLayersModifier*>(Cast<UProjectMeshLayersModifier>(Modifier))).Equals(Extents, 1.0)
+					&& !FVector2D(Modifier->GetComponentLocation()).Equals(Center, 1.0);
+			};
+			UProjectMeshLayersModifier* Brush = nullptr;
+			for (int32 Index = 0; Index < Stack.Num() && !Brush; ++Index)
+			{
+				UProjectMeshLayersModifier* Candidate = Cast<UProjectMeshLayersModifier>(Stack[Index]);
+				if (!Candidate || !CanTakeStroke(Candidate, Paint) || !FVector2D(Candidate->GetComponentLocation()).Equals(Center, 1.0) || !EditExtents(Candidate).Equals(Extents, 1.0))
+					continue;
+				bool bCovered = false;
+				for (int32 Later = Index + 1; Later < Stack.Num() && !bCovered; ++Later)
 				{
-					const FVector Location(Center, (Built.Min.Z + Built.Max.Z) / 2.0);
-					Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
-						UniqueLabel(World, Label.IsEmpty() ? Terrain->GetActorLabel() + TEXT("_Paint") : Label), Previous));
-					if (!Brush)
+					const FBox Bounds = Stack[Later]->ComputeCombinedBounds();
+					bCovered = !Stack[Later]->GetIsDisabledFlag() && Bounds.IsValid && !IsTileBrush(Stack[Later]) && Inner.Intersect(FBox2D(FVector2D(Bounds.Min), FVector2D(Bounds.Max)));
+				}
+				Brush = bCovered ? nullptr : Candidate;
+			}
+			const bool bNew = Brush == nullptr;
+			AMeshPartition* Previous = nullptr;
+			if (bNew)
+			{
+				const FVector Location(Center, (Built.Min.Z + Built.Max.Z) / 2.0);
+				Brush = Cast<UProjectMeshLayersModifier>(SpawnModifier(Terrain, UProjectMeshLayersModifier::StaticClass(), Location, FRotator::ZeroRotator,
+					UniqueLabel(World, Label.IsEmpty() ? Terrain->GetActorLabel() + TEXT("_Paint") : Label), Previous));
+				if (!Brush)
+				{
+					if (Out.Brushes.IsEmpty())
 					{
 						Transaction.Cancel();
-						return FUnrealAIMeshTerrainPaintWhere(); // SpawnModifier failed with the reason
+						return FUnrealAIMeshTerrainPaintWhere(); // SpawnModifier failed with the reason; nothing was painted
 					}
-					Brush->SetPriority(Last);
-					SetProperty(Brush, TEXT("EditExtents"), Half);
-				}
-				AActor* Owner = Brush->GetOwner();
-				Brush->Modify();
-				if (Owner)
-					Owner->Modify();
-				const FObjectProperty* MeshProperty = CastField<FObjectProperty>(Brush->GetClass()->FindPropertyByName(TEXT("MeshObject")));
-				if (UObject* MeshObject = MeshProperty ? MeshProperty->GetObjectPropertyValue_InContainer(Brush) : nullptr)
-					MeshObject->Modify();
-				for (const TCHAR* Name : { TEXT("VerticalExtentUp"), TEXT("VerticalExtentDown") })
-				{
-					const float* Value = PropertyValue<float>(Brush, Name);
-					if (!Value || *Value < Depth)
-						SetProperty(Brush, Name, Depth);
-				}
-				const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
-				if (!ChannelEntry(OldEntries, Channel))
-				{
-					TArray<FSculptLayerModifierWeightAttributeEntry> Entries = OldEntries;
-					Entries.AddDefaulted_GetRef().ChannelName = Channel;
-					Brush->SetChannelEntries(Entries);
-				}
-				UE::MeshPartition::UEditableModifierToolTarget* Target = NewObject<UE::MeshPartition::UEditableModifierToolTarget>();
-				Target->Initialize(Brush);
-				FDynamicMesh3 Mesh = Target->GetDynamicMesh();
-				const auto Drop = [&]()
-				{
-					if (bNew)
-					{
-						if (Owner)
-							World->EditorDestroyActor(Owner, /*bShouldModifyLevel*/ true);
-						for (const AMeshPartition* Bound : { Terrain, Previous })
-						{
-							if (UMeshPartitionEditorComponent* Component = EditorComponent(Bound))
-								Component->UpdateModifierList();
-						}
-					}
-					else
-					{
-						Brush->SetChannelEntries(OldEntries);
-					}
-				};
-				if (Mesh.VertexCount() > MaxVertices * 1.5)
-				{
-					Drop();
-					Transaction.Cancel();
-					return PaintWhereFailed(FString::Printf(TEXT("a %.0f x %.0f m tile holds %d terrain vertices (at most %.0f): pass a smaller Within"), Half.X / 50.0, Half.Y / 50.0,
-						Mesh.VertexCount(), MaxVertices));
-				}
-				UE::Geometry::FDynamicMeshWeightAttribute* Weights = nullptr;
-				UE::Geometry::FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
-				for (int32 Index = 0; Attributes && Index < Attributes->NumWeightLayers(); ++Index)
-				{
-					if (Attributes->GetWeightLayer(Index)->GetName() == Channel)
-						Weights = Attributes->GetWeightLayer(Index);
-				}
-				if (!Weights)
-				{
-					Drop();
-					Transaction.Cancel();
-					return PaintWhereFailed(FString::Printf(TEXT("the brush modifier %s has no weight attribute for the channel %s"), Owner ? *Owner->GetActorLabel() : TEXT("?"), *Channel.ToString()));
-				}
-				const FTransform Transform = Target->GetWorldTransform();
-				int32 Changed = 0;
-				for (const int32 Vertex : Mesh.VertexIndicesItr())
-				{
-					const FVector World3 = Transform.TransformPosition(Mesh.GetVertex(Vertex));
-					if (!Area.IsInside(FVector2D(World3)))
-						continue;
-					const FVector Normal = Transform.TransformVectorNoScale(UE::Geometry::FMeshNormals::ComputeVertexNormal(Mesh, Vertex));
-					const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Normal.Z), 0.0, 1.0)));
-					const double Weight = RangeWeight(Slope, MinSlope, MaxSlope, SlopeEdgeDegrees) * RangeWeight(World3.Z, MinHeight, MaxHeight, HeightEdge);
-					if (Weight <= 0.0)
-						continue;
-					Out.Matched += Weight >= 1.0 ? 1 : 0;
-					float Old = 0.0f;
-					Weights->GetValue(Vertex, &Old);
-					const float New = static_cast<float>(FMath::Lerp(static_cast<double>(Old), Strength, Weight));
-					if (New != Old)
-					{
-						Weights->SetValue(Vertex, &New);
-						++Changed;
-					}
-				}
-				if (Changed == 0)
-				{
-					Drop(); // nothing to store: no new brush and no new channel entry (it would pin the channel there)
+					Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (no brush could be placed)"), Center.X, Center.Y));
 					continue;
 				}
-				Target->CommitDynamicMesh(Mesh, IDynamicMeshCommitter::FDynamicMeshCommitInfo());
-				Out.Vertices += Changed;
-				Out.NewBrushes += bNew ? 1 : 0;
-				Out.Brushes.Add(Owner ? Owner->GetActorLabel() : FString());
+				if (!Last)
+				{
+					Last = 0.0;
+					for (const UModifierComponent* Modifier : Stack)
+					{
+						if (Modifier->GetType() == Brush->GetType())
+							Last = FMath::Max(*Last, Modifier->GetPriority() + 1.0);
+					}
+				}
+				Brush->SetPriority(*Last);
+				SetProperty(Brush, TEXT("EditExtents"), Extents);
+			}
+			AActor* Owner = Brush->GetOwner();
+			Brush->Modify();
+			if (Owner)
+				Owner->Modify();
+			const FObjectProperty* MeshProperty = CastField<FObjectProperty>(Brush->GetClass()->FindPropertyByName(TEXT("MeshObject")));
+			if (UObject* MeshObject = MeshProperty ? MeshProperty->GetObjectPropertyValue_InContainer(Brush) : nullptr)
+				MeshObject->Modify();
+			const auto FloatProperty = [Brush](const TCHAR* Name) { const float* Value = PropertyValue<float>(Brush, Name); return Value ? *Value : 0.0f; };
+			const float OldUp = FloatProperty(TEXT("VerticalExtentUp")), OldDown = FloatProperty(TEXT("VerticalExtentDown"));
+			for (const TCHAR* Name : { TEXT("VerticalExtentUp"), TEXT("VerticalExtentDown") })
+			{
+				if (FloatProperty(Name) < Depth)
+					SetProperty(Brush, Name, Depth);
+			}
+			const TArray<FSculptLayerModifierWeightAttributeEntry> OldEntries = Brush->GetChannelEntries();
+			if (!ChannelEntry(OldEntries, Channel))
+			{
+				TArray<FSculptLayerModifierWeightAttributeEntry> Entries = OldEntries;
+				Entries.AddDefaulted_GetRef().ChannelName = Channel;
+				Brush->SetChannelEntries(Entries);
+			}
+			FPrepared& Prep = Prepared.AddDefaulted_GetRef();
+			Prep.Brush = Brush;
+			Prep.bNew = bNew;
+			Prep.Owner = Owner;
+			Prep.Previous = Previous;
+			Prep.OldEntries = OldEntries;
+			Prep.OldUp = OldUp;
+			Prep.OldDown = OldDown;
+			Prep.Box = Box;
+			Prep.Target = NewObject<UE::MeshPartition::UEditableModifierToolTarget>();
+			Prep.Target->Initialize(Brush);
+			Prep.Mesh = Prep.Target->GetDynamicMesh();
+			FDynamicMesh3& Mesh = Prep.Mesh;
+			if (Mesh.VertexCount() > MaxVertices * 1.5)
+			{
+				// Denser ground than the base grid (a remeshed shape): split the tile in four (twice at most).
+				DropTile(Prep);
+				if (bNew && Piece.Splits < 2)
+				{
+					const FVector2D Quarter = Piece.Half / 2.0;
+					for (const FVector2D Sign : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
+						Tiles.Add({ Center + Sign * Quarter, Quarter, Piece.Splits + 1 });
+				}
+				else
+				{
+					Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (%d vertices in its %.0f m tile)"), Center.X, Center.Y, Mesh.VertexCount(), Piece.Half.X / 50.0));
+				}
+				Prepared.Pop();
+				continue;
+			}
+			UE::Geometry::FDynamicMeshAttributeSet* Attributes = Mesh.Attributes();
+			for (int32 Index = 0; Attributes && Index < Attributes->NumWeightLayers(); ++Index)
+			{
+				if (Attributes->GetWeightLayer(Index)->GetName() == Channel)
+					Prep.Layer = Index;
+			}
+			if (Prep.Layer == INDEX_NONE)
+			{
+				DropTile(Prep);
+				Skipped.Add(FString::Printf(TEXT("X %.0f, Y %.0f (its brush %s has no weight attribute for %s)"), Center.X, Center.Y, Owner ? *Owner->GetActorLabel() : TEXT("?"), *Channel.ToString()));
+				Prepared.Pop();
+				continue;
+			}
+			// The weights of the vertices this tile owns, from its full neighbourhood (an edge vertex of a tile's mesh has
+			// triangles on one side only; its owner sees both).
+			const FTransform Transform = Prep.Target->GetWorldTransform();
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+			{
+				const FVector World3 = Transform.TransformPosition(Mesh.GetVertex(Vertex));
+				if (!Area.IsInsideOrOn(FVector2D(World3)) || !Owns(Box, FVector2D(World3)))
+					continue;
+				const FVector Normal = Transform.TransformVectorNoScale(UE::Geometry::FMeshNormals::ComputeVertexNormal(Mesh, Vertex));
+				const double Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(Normal.Z), 0.0, 1.0)));
+				const double Weight = RangeWeight(Slope, MinSlope, MaxSlope, SlopeEdgeDegrees) * RangeWeight(World3.Z, MinHeight, MaxHeight, HeightEdge);
+				TargetWeights.Add(Key(World3), Weight);
+				Out.Matched += Weight >= 1.0 ? 1 : 0;
 			}
 		}
+		// Then every tile writes all of its mesh's vertices, those past its edge too: a brush Sets the channel at every vertex
+		// it holds, so overlapping brushes must agree (a neighbour's vertex left at its old value would undo the paint there).
+		TSet<FIntPoint> Painted;
+		for (FPrepared& Prep : Prepared)
+		{
+			FDynamicMesh3& Mesh = Prep.Mesh;
+			UE::Geometry::FDynamicMeshWeightAttribute* Weights = Mesh.Attributes()->GetWeightLayer(Prep.Layer);
+			const FTransform Transform = Prep.Target->GetWorldTransform();
+			int32 Changed = 0;
+			for (const int32 Vertex : Mesh.VertexIndicesItr())
+			{
+				const FIntPoint Where = Key(Transform.TransformPosition(Mesh.GetVertex(Vertex)));
+				const double* Weight = TargetWeights.Find(Where);
+				if (!Weight || *Weight <= 0.0)
+					continue;
+				float Old = 0.0f;
+				Weights->GetValue(Vertex, &Old);
+				const float New = static_cast<float>(FMath::Lerp(static_cast<double>(Old), Strength, *Weight));
+				if (New != Old)
+				{
+					Weights->SetValue(Vertex, &New);
+					++Changed;
+					Painted.Add(Where);
+				}
+			}
+			if (Changed == 0)
+			{
+				DropTile(Prep); // nothing to store: no new brush and no new channel entry (it would pin the channel there)
+				continue;
+			}
+			Prep.Target->CommitDynamicMesh(Mesh, IDynamicMeshCommitter::FDynamicMeshCommitInfo());
+			Out.NewBrushes += Prep.bNew ? 1 : 0;
+			Out.Brushes.Add(Prep.Owner ? Prep.Owner->GetActorLabel() : FString());
+		}
+		Out.Vertices = Painted.Num();
+		if (!Skipped.IsEmpty())
+			Out.Note = FString::Printf(TEXT("not painted: %s; pass a smaller Within there"), *FString::Join(Skipped, TEXT("; ")));
 		FString StillBuilding;
 		Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
 		Out.State = Out.Ready ? FString(TEXT("built")) : StillBuildingState(Terrain, StillBuilding);
