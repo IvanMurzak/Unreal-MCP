@@ -44,7 +44,7 @@ FUnrealAIMeshTerrainBuild UUnrealAIMeshTerrainRqlApi::Rebuild(UE::MeshPartition:
 
 FUnrealAIMeshTerrainBuild UUnrealAIMeshTerrainRqlApi::WaitForBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds)
 {
-	return UnrealAIMeshTerrainRqlApiLocal::RunBuild(Terrain, TimeoutSeconds, &UnrealAIMeshTerrain::WaitForBuild);
+	return UnrealAIMeshTerrainRqlApiLocal::RunBuild(Terrain, TimeoutSeconds, [](UE::MeshPartition::AMeshPartition* Built, double Seconds) { return UnrealAIMeshTerrain::WaitForBuild(Built, Seconds); });
 }
 
 FUnrealAIMeshTerrainSurface UUnrealAIMeshTerrainRqlApi::Surface(UE::MeshPartition::AMeshPartition* Terrain, FVector Point)
@@ -78,11 +78,11 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 	const double Start = FPlatformTime::Seconds();
 	for (const FVector& Point : Points)
 	{
-		if (!bShared && FPlatformTime::Seconds() - Start > UnrealAIMeshTerrain::DefaultBuildTimeoutSeconds)
+		if (!bShared && FPlatformTime::Seconds() - Start > UnrealAIMeshTerrain::SampleBudgetSeconds)
 		{
 			return UnrealMcpRql::Failed<TArray<FUnrealAIMeshTerrainSurface>>(FString::Printf(
 				TEXT("sampling %d points spread over more than 500 m took over %.0f s (%d done; each such point evaluates the terrain around it): pass points within 500 m of each other per call, or fewer points"),
-				Points.Num(), UnrealAIMeshTerrain::DefaultBuildTimeoutSeconds, Out.Num()));
+				Points.Num(), UnrealAIMeshTerrain::SampleBudgetSeconds, Out.Num()));
 		}
 		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, &Evaluated);
 		FUnrealAIMeshTerrainSurface& Surface = Out.AddDefaulted_GetRef();

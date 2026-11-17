@@ -533,6 +533,14 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			const FString Json = ModSpecJson(Result);
 			TestTrue(*FString::Printf(TEXT("it reaches the top (%s)"), *Json.Left(800)), Road->GetBoolField(TEXT("Reached")) && Road->GetBoolField(TEXT("Ready")));
 			TestFalse(TEXT("a remesh under the road over the dome"), Road->GetStringField(TEXT("Remesh")).IsEmpty());
+			// Fine triangles only in a corridor along the road (a SplineRemesh), medium ones over the rest of the dome.
+			UModifierComponent* Corridor = ModSpecFindModifier(Terrain, Road->GetStringField(TEXT("Corridor")));
+			UModifierComponent* Box = ModSpecFindModifier(Terrain, Road->GetStringField(TEXT("Remesh")));
+			TestTrue(*FString::Printf(TEXT("a SplineRemesh corridor along the road (%s)"), *Json.Left(800)), Corridor && UnrealAIMeshTerrain::ModifierKind(Corridor) == TEXT("SplineRemesh"));
+			const FFloatProperty* BoxEdge = Box ? CastField<FFloatProperty>(Box->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength"))) : nullptr;
+			const FFloatProperty* CorridorEdge = Corridor ? CastField<FFloatProperty>(Corridor->GetClass()->FindPropertyByName(TEXT("TargetEdgeLength"))) : nullptr;
+			TestTrue(TEXT("the box has medium edges (at least 5 m), the corridor the road's fine ones (a fifth of its width)"), BoxEdge && CorridorEdge
+				&& BoxEdge->GetPropertyValue_InContainer(Box) >= 500.0f && FMath::IsNearlyEqual(CorridorEdge->GetPropertyValue_InContainer(Corridor), 120.0f, 0.5f));
 			TestTrue(*FString::Printf(TEXT("built no steeper than 8.5 degrees (%s)"), *Json.Left(800)), Road->GetNumberField(TEXT("MaxSlope")) <= 8.5);
 			ModSpecExpectHeight(TEXT("the road's end on the dome's top"), Terrain, X0, 0.0, 1000.0, 100.0);
 			ModSpecExpectHeight(TEXT("the road's start on the plain"), Terrain, X0 - 9000.0, -9000.0, 0.0, 20.0);
@@ -544,6 +552,7 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			// The same path at 2 degrees needs about 1000 / tan(1.8) = 318 m (AddRoad keeps a 10% margin): it falls short and says so.
 			ModSpecRun(TEXT("remove the road"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road")) });
 			ModSpecRun(TEXT("remove its remesh"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Remesh")) });
+			ModSpecRun(TEXT("remove its corridor"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Corridor")) });
 			TestTrue(TEXT("AddRoad 2 degrees"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(2.0) }), true, &Result));
 			Road = ModSpecResult(Result);
 			TestTrue(*FString::Printf(TEXT("too short: not reached, the minimum length and what to do (%s)"), *ModSpecJson(Result).Left(900)), Road.IsValid()
@@ -555,6 +564,41 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecRefuses(TEXT("a timeout of 0"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(8.0), ModSpecNum(-1.0), ModSpecStr(TEXT("")), ModSpecNum(0.0) }, TEXT("1 .. 600"));
 			ModSpecRefuses(TEXT("a road steeper than 45 degrees"), TEXT("AddRoad"), { T, Path, ModSpecNum(600.0), ModSpecNum(60.0) }, TEXT("MaxSlope 60"));
 			ModSpecRefuses(TEXT("a road off the terrain"), TEXT("AddRoad"), { T, FString::Printf(TEXT(R"({"list":[%s,%s]})"), *ModSpecVec(X0, 0.0, 0.0), *ModSpecVec(X0 + 30000.0, 0.0, 0.0)) }, TEXT("leaves"));
+		});
+
+		It("report a change applied while the terrain still builds as Ready false, not as a failure, and build it on WaitForBuild", [this]()
+		{
+			const FString Label = ModSpecLabel(TEXT("ModSlow"));
+			const double X0 = -1700000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 40000.0, 40000.0, 400, 400);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0; UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			const FString T = ModSpecFind(Label);
+			// Every build wait gives up at once, as a remeshed hill's 3-minute rebuild would after 240 s.
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			// meshTerrainModifier | call AddPatch(<terrain>, [X0, 0, 500], 3000, 1000, "<label>_Pad")
+			TSharedPtr<FJsonObject> Result;
+			const bool bOk = UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddPatch"), { T, ModSpecVec(X0, 0.0, 500.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Pad")) }), true, &Result);
+			const TSharedPtr<FJsonObject> Patch = ModSpecResult(Result);
+			TestTrue(*FString::Printf(TEXT("AddPatch succeeds with Ready false and a State saying it is applied and still building (%s)"), *ModSpecJson(Result).Left(800)),
+				bOk && Patch.IsValid() && !Patch->GetBoolField(TEXT("Ready")) && Patch->GetStringField(TEXT("State")).Contains(TEXT("applied"))
+				&& Patch->GetStringField(TEXT("State")).Contains(TEXT("WaitForBuild")));
+			TestNotNull(TEXT("the pad is placed"), ModSpecFindModifier(Terrain, Label + TEXT("_Pad")));
+			// (A wait before a change that times out fails and changes nothing: let the pad build before the stroke.)
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			TestTrue(TEXT("the pad builds"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			// meshTerrainBrush | call Sculpt(<terrain>, "Raise", [X0 + 10000, 0, 0], 1500, 300)
+			const bool bStroke = UnrealMcpRqlTools::RunPlan(FString::Printf(TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"Sculpt","args":[%s,{"lit":"Raise"},%s,{"lit":1500},{"lit":300}]}]})RQL"),
+				*T, *ModSpecVec(X0 + 10000.0, 0.0, 0.0)), true, &Result);
+			const TSharedPtr<FJsonObject> Stroke = ModSpecResult(Result);
+			TestTrue(*FString::Printf(TEXT("a stroke succeeds with Ready false and that State too (%s)"), *ModSpecJson(Result).Left(800)),
+				bStroke && Stroke.IsValid() && !Stroke->GetBoolField(TEXT("Ready")) && Stroke->GetStringField(TEXT("State")).Contains(TEXT("applied")));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			TestTrue(TEXT("WaitForBuild then builds it"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0));
+			ModSpecExpectHeight(TEXT("the pad"), Terrain, X0, 0.0, 500.0);
+			ModSpecExpectHeight(TEXT("the stroke"), Terrain, X0 + 10000.0, 0.0, 300.0, 5.0);
 		});
 
 		It("bind to the terrain they name, not the nearest one, and move between two terrains with Bind", [this]()

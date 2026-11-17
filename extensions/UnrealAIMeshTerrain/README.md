@@ -80,15 +80,15 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   where the ground within `Base` is highest and lowest, to a vertex of the sections' collision.
 - `Surface`, `SurfacePoints`, `WaitForBuild` and the members are read-only: they work in `rql-query`. They read the
   editor's built sections, which Play In Editor hides: during play they refuse (stop play first).
-- `WaitForBuild(terrain, timeoutSeconds = 120)`: after `set` on a modifier or terrain.
-- `Rebuild(terrain, timeoutSeconds = 120)`: rebuild every section from the modifiers.
-- `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 120)`:
+- `WaitForBuild(terrain, timeoutSeconds = 240)`: after `set` on a modifier or terrain.
+- `Rebuild(terrain, timeoutSeconds = 240)`: rebuild every section from the modifiers.
+- `Create(label, location, sizeMeters = 200, sizeYMeters = 0 (square), resolution = 0, definition, timeoutSeconds = 240)`:
   a flat terrain centred on `location` (within 200 km of the origin; its ground at `location` Z), 10 .. 20000 m per side, `resolution` quads along X
   (0: about one per metre, at most 1000; explicit at most 2000 per side, square quads), split into sections of at most
   500 x 500 quads like the Create tool's automatic mode (at most 16). The material, priority layers and paint channels come
   from the `MeshPartitionDefinition` (default `/MeshPartition/DataAssets/MPD_Default`; the definition, not the terrain, holds
   the material). One undo step; built when it returns. Labels must be unique among the level's Mesh Terrains.
-- `ImportHeightmap(label, file, location, sizeMeters = 1000, heightScale = 100, resolution = 0, definition, timeoutSeconds = 120)`:
+- `ImportHeightmap(label, file, location, sizeMeters = 1000, heightScale = 100, resolution = 0, definition, timeoutSeconds = 240)`:
   a 16-bit grayscale `.png` (8-bit and colour PNGs are read as gray) or a `.r16` / `.raw` (little-endian 16-bit, square),
   path absolute or relative to the project, at most 8193 pixels per side. **Units are Landscape's**: value 32768 lands on
   `location` Z and one step is `heightScale / 128` cm, so `heightScale` is the Z scale a Landscape would use for the same
@@ -130,7 +130,10 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   the sculpted ground moves with it (a flattened pad is no longer flat). A brush that has another modifier after it over
   its area is not reused (a new brush is placed after it). A painted channel is `Set` by the brush over its whole box: the
   channel there keeps the values it had when it was first painted, whatever the modifiers below write later.
-- When a stroke fails waiting for the build (timeout), it is already applied: call `WaitForBuild`, do not repeat it.
+- Waits: an operation waits at most 240 s for the build (the MCP server ends a tool call after 300 s by default). When the
+  build after a change takes longer (a remeshed shape), the operation still succeeds with `Ready` false and a `State` saying
+  the change is applied and still building: call `WaitForBuild`, do not repeat the change. A wait before a change that times
+  out fails and changes nothing.
 - Errors are clear RQL failures: an unknown terrain, a timeout outside 1..600 s, a size / resolution / section count
   over the limits, a missing or malformed heightmap, a brush off the terrain, an unknown sculpt mode or paint channel
   (with the ones there are), out-of-range radius / height / strength / weight / falloff, a build that does not finish in time
@@ -160,7 +163,7 @@ meshTerrainModifier | call Remove(unreal.find("Pad").Modifier)
 | `AddPatch(terrain, location, radius, falloff, label)` | Patch: a flat round pad at the location's Z, cut into or built up from any ground height there |
 | `AddWeight(terrain, channel, location, radius, falloff, value, label)` | WeightUtility: paints a channel of the definition (value 0..1) on the ground at every height |
 | `AddSpline(terrain, points, width, falloff, closed, channel, label)` | Spline: ground along a path at the points' Z (road, river bed, plateau outline) |
-| `AddRoad(terrain, points, width = 800, maxSlope = 8, falloff = Width, label, timeoutSeconds = 600)` | Spline: a road along the points' X, Y that follows the ground and cuts or fills where it is steeper than maxSlope (degrees), flat across Width; over a Boolean shape's coarse surface it also places a Remesh box over that part (`Remesh`). Returns `{Modifier, Actor, Remesh, Terrain, LengthMeters, StartZ, EndZ, EndGroundZ, Reached, MinLengthMeters, MaxSlope (built, along its centre line), Ready, Seconds, Note, State}`; a path too short for the climb is built as far up as it goes (`Reached` false, `Note` says how long the path must be); a remeshed hill takes minutes to build, and every later change to that terrain rebuilds it too |
+| `AddRoad(terrain, points, width = 800, maxSlope = 8, falloff = Width, label, timeoutSeconds = 240)` | Spline: a road along the points' X, Y that follows the ground and cuts or fills where it is steeper than maxSlope (degrees), flat across Width; over a Boolean shape's coarse surface it also places a Remesh box with medium triangles over that shape (`Remesh`) and a SplineRemesh with fine ones in a corridor around the road (`Corridor`), so later edits rebuild only the corridor finely. Returns `{Modifier, Actor, Remesh, Corridor, Terrain, LengthMeters, StartZ, EndZ, EndGroundZ, Reached, MinLengthMeters, MaxSlope (built, along its centre line), Ready, Seconds, Note, State}`; a path too short for the climb is built as far up as it goes (`Reached` false, `Note` says how long the path must be); a remeshed hill takes a minute or more to build, and every later change to that terrain rebuilds it too |
 | `AddShape(terrain, shape, location, size, operation, rotation, label)` | Shapes: Box, Sphere, Cylinder, Capsule, Cone, Torus (X, Y outer diameter, Z ring height) as Boolean Union / Subtract / Trim; Rectangle, Disc as MeshProject |
 | `AddLattice(terrain, location, size, resolution, label)` | Lattice: a grid of control points; `SetLatticePoints` moves them (`LatticePoints` lists them) |
 | `AddTexturePatch(terrain, texture, location, size, height, label)` | TexturePatch: a heightmap stamp (mid grey = no change, white = +height / 2); needs a rendering editor (under `-nullrhi` the engine applies no texture); its vertical extents (engine default 100 m up and down, which clamp the stamp) are widened to the terrain's heights plus `height` (Edit Strength and Move too), so it takes in all the ground under it, overhangs included |

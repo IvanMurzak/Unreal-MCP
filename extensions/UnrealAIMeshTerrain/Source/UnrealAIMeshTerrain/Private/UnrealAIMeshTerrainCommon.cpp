@@ -527,13 +527,13 @@ namespace UnrealAIMeshTerrain
 		return State;
 	}
 
-	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds)
+	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds, FString* OutStillBuilding)
 	{
 		UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component"), *TerrainName(Terrain)));
 		const double Start = FPlatformTime::Seconds();
-		const double Deadline = Start + FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
+		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
 		FBuildState State;
 		int32 Rounds = 0;
 		while (true)
@@ -552,14 +552,25 @@ namespace UnrealAIMeshTerrain
 				break;
 			if (FPlatformTime::Seconds() > Deadline)
 			{
-				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s did not finish building within %.0f s (%s); call meshTerrain | call WaitForBuild(...) again with a longer timeout"),
-					*TerrainName(Terrain), TimeoutSeconds, *State.Describe()));
+				if (OutStillBuilding)
+				{
+					*OutStillBuilding = FString::Printf(TEXT("still building after %.0f s (%s)"), FPlatformTime::Seconds() - Start, *State.Describe());
+					return false;
+				}
+				return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s did not finish building within %.0f s (%s); call meshTerrain | call WaitForBuild(...) again (at most %.0f s per call: the server ends a call after 300 s)"),
+					*TerrainName(Terrain), FPlatformTime::Seconds() - Start, *State.Describe(), DefaultBuildTimeoutSeconds));
 			}
 			FPlatformProcess::Sleep(0.01f);
 		}
 		UE_LOG(LogUnrealAIMeshTerrain, Log, TEXT("%s built in %.2f s (%d rounds): %d sections, %d triangles"),
 			*TerrainName(Terrain), FPlatformTime::Seconds() - Start, Rounds, State.Sections, State.Triangles);
 		return true;
+	}
+
+	FString StillBuildingState(const AMeshPartition* Terrain, const FString& Pending)
+	{
+		return FString::Printf(TEXT("applied (one undo step), %s: call meshTerrain | call WaitForBuild(unreal.find(\"%s\")) before reading heights or changing it again"),
+			*Pending, *TerrainName(Terrain));
 	}
 
 	bool Rebuild(AMeshPartition* Terrain, double TimeoutSeconds)
@@ -710,7 +721,7 @@ namespace UnrealAIMeshTerrain
 		for (const double Half : { 250.0, 2500.0, 25000.0, 250000.0 })
 		{
 			const FBox Region(FVector(X - Half, Y - Half, Bounds.Min.Z - 1000.0), FVector(X + Half, Y + Half, Bounds.Max.Z + 1000.0));
-			Around = BuildRegion(Terrain, Region, DefaultBuildTimeoutSeconds, /*bFailOnTimeout*/ false);
+			Around = BuildRegion(Terrain, Region, SampleBudgetSeconds, /*bFailOnTimeout*/ false);
 			if (HitIn(Around) || (Region.Min.X <= Bounds.Min.X && Region.Min.Y <= Bounds.Min.Y && Region.Max.X >= Bounds.Max.X && Region.Max.Y >= Bounds.Max.Y))
 				break;
 		}
