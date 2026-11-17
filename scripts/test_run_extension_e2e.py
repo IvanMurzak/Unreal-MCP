@@ -485,9 +485,11 @@ AUTHORING.update({
                     'double Depth, MaterialInterface Material)|WaterBodyRiver#9304(E2ERiver)'), NO_COUNT),
     'water-8-status.e2e.json': (text_result(WATER_STATUS.format('false')), text_result(WATER_STATUS.format('true'))),
     'water-9-cleanup.e2e.json': (
-        text_result('4 results\nmethod: Destroy()\n$ref|result\nLandscape#9191|null\nWaterZone#9275|null\nWaterBodyOcean#9280|null\n'
-                    'WaterBodyRiver#9304|null'),
-        text_result('1 result\nmethod: Destroy()\n$ref|result\nLandscape#9191|null')),
+        text_result('3 results\nmethod: Destroy()\n$ref|result\nWaterZone#9275|null\nWaterBodyOcean#9280|null\nWaterBodyRiver#9304|null'),
+        text_result('1 result\nmethod: Destroy()\n$ref|result\nWaterZone#9275|null')),
+    'water-9z-island.e2e.json': (
+        pcg_receipt('LandscapeOperations#9190|Delete(LandscapeProxy Landscape)|17'),
+        pcg_receipt('LandscapeOperations#9190|Delete(LandscapeProxy Landscape)|0')),
 })
 
 # The Landscape edit log sequence (a labelled Sculpt survives save, another level and reopening): per check, an answer of the
@@ -537,7 +539,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 170)
+        self.assertEqual(len(all_checks()), 171)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
