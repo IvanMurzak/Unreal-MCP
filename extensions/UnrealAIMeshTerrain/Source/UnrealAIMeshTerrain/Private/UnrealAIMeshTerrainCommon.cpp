@@ -21,7 +21,6 @@
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDesc.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
-#include "WorldPartition/WorldPartitionBlueprintLibrary.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "Async/TaskGraphInterfaces.h"
 
@@ -176,27 +175,20 @@ namespace UnrealAIMeshTerrain
 		}
 	}
 
-	int32 LoadTerrainActors(const AMeshPartition* Terrain)
+	void LoadTerrainActors(const AMeshPartition* Terrain)
 	{
 		TArray<FGuid> Unloaded;
 		ForEachTerrainActorDesc(Terrain, [&Unloaded](const FWorldPartitionActorDescInstance& Instance)
 		{
-			if (!Instance.IsLoaded() && !IsDeletedActor(Instance))
+			if (!Instance.IsLoaded())
 				Unloaded.Add(Instance.GetGuid());
 		});
-		if (!Unloaded.IsEmpty())
+		// The core loader skips the actors deleted in this session (their descriptors stay until the level is saved).
+		if (!Unloaded.IsEmpty() && UnrealMcpRql::LoadWorldPartitionActors(Unloaded))
 		{
-			// UWorldPartitionBlueprintLibrary::LoadActors (what Python's load_actors calls) keeps them in its per-world actor-list
-			// loader adapter and releases it with the world; the class is MinimalAPI, so it is called through reflection.
-			if (UFunction* LoadActors = UWorldPartitionBlueprintLibrary::StaticClass()->FindFunctionByName(TEXT("LoadActors")))
-			{
-				struct { TArray<FGuid> InActorsToLoad; } Params{ Unloaded };
-				UWorldPartitionBlueprintLibrary::StaticClass()->GetDefaultObject()->ProcessEvent(LoadActors, &Params);
-			}
 			if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
 				Component->UpdateModifierList();
 		}
-		return Unloaded.Num();
 	}
 
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain)
