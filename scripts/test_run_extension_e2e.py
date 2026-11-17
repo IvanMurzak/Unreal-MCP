@@ -459,7 +459,7 @@ CONTROL_RIG = {
 AUTHORING.update(CONTROL_RIG)
 
 
-SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height)'
+SCULPT = 'LandscapeOperations#9190|Sculpt(LandscapeProxy Landscape, Vector Center, double Radius, double Height, string Label)'
 WATER = 'WaterOperations#9170'
 # The suite editor runs -nullrhi: water bodies report Ready false there (no water mesh without rendering).
 WATER_STATUS = ('2 results\nLabel|Water|WaterZone.ZoneExtent\nE2EOcean|{{Type:Ocean,SplinePoints:4,Material:Water_Material_Ocean,'
@@ -490,12 +490,53 @@ AUTHORING.update({
         text_result('1 result\nmethod: Destroy()\n$ref|result\nLandscape#9191|null')),
 })
 
+# The Landscape edit log sequence (a labelled Sculpt survives save, another level and reopening): per check, an answer of the
+# live editor's shape and one that must not pass.
+NEW_LEVEL = 'Editor@1|NewLevel(string Path, string Template)'
+OPEN_LEVEL = 'Editor@1|OpenLevel(string Path)'
+CREATE_LANDSCAPE = 'LandscapeOperations#9190|Create(string Label, Vector Location, double SizeMeters, MaterialInterface Material, double MaxHeightMeters)'
+EDIT_LOG = ('1 result\nEdits\n[{{Op:Sculpt,Label:{0},Points:["(0, 0, 0)"],Radius:500,Width:0,Height:200,Layer:"",'
+            'Time:"2026-11-16T10:00:00Z"}}]')
+AUTHORING.update({
+    'landscape-editlog-1-new-level.e2e.json': (
+        pcg_receipt(f'{NEW_LEVEL}|World#9100(LsEditLog)'), pcg_receipt(f'{NEW_LEVEL}|World#9100(Untitled_1)')),
+    'landscape-editlog-2-create.e2e.json': (
+        pcg_receipt(f'{CREATE_LANDSCAPE}|Landscape#9201(E2EEditLog)'), pcg_receipt(f'{CREATE_LANDSCAPE}|Landscape#9201(E2EIsland)')),
+    'landscape-editlog-3-sculpt.e2e.json': (pcg_receipt(f'{SCULPT}|1681'), pcg_receipt(f'{SCULPT}|0')),
+    'landscape-editlog-4-save.e2e.json': (
+        pcg_receipt('Editor@1|SaveLevel(string Path)|null'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: SaveLevel threw: the level could not be saved'}], 'isError': True}),
+    'landscape-editlog-5-other-level.e2e.json': (
+        pcg_receipt(f'{NEW_LEVEL}|World#9300(LsEditLogOther)'), pcg_receipt(f'{NEW_LEVEL}|World#9100(LsEditLog)')),
+    'landscape-editlog-6-reopen.e2e.json': (
+        pcg_receipt(f'{OPEN_LEVEL}|World#9400(LsEditLog)'), pcg_receipt(f'{OPEN_LEVEL}|World#9300(Untitled_2)')),
+    'landscape-editlog-7-read.e2e.json': (text_result(EDIT_LOG.format('e2e-hill')), text_result(EDIT_LOG.format('""'))),
+})
+# The Mesh Terrain schema and guide texts: per check, the text the extension registers and an older or wrong one.
+BOUNDS = ('MeshPartition : Actor {{Bounds object? ro (the built ground\'s world box (cm): Min [X, Y, Z], Max [X, Y, Z] (Z: the lowest '
+          'and highest ground), SizeMeters [X, Y]{0})}}')
+ISLAND = ('An island with the sea all around: Mesh Terrain has no water, so the sea is a height, world Z 0 (sea level) by convention.\n'
+          '```\nmeshTerrainCreate | call Create("Island", [0, 0, -2000], 2400)    2.4 km of seabed at -20 m\n'
+          'meshTerrainModifier | call AddPatch(unreal.find("Island"), [0, 0, 200], {0}, 15000, "Land")\n```')
+STRUCTURE = ('Read a terrain\'s structure through these sources and members, not with Python: ...\n'
+             'meshTerrainModifiers | {0} | select $ref Modifier   leftovers (see Repairs)')
+AUTHORING.update({
+    'mesh-terrain-bounds-schema.e2e.json': (
+        text_result(BOUNDS.format('; Base {Min, Max, SizeMeters}: the terrain\'s own extent ...; Highest and Lowest [X, Y, Z]: where '
+                                  'the ground within Base is highest and lowest')),
+        text_result(BOUNDS.format(''))),
+    'mesh-terrain-guide-island.e2e.json': (text_result(ISLAND.format(90000)), text_result(ISLAND.format(120000))),
+    'mesh-terrain-guide-structure.e2e.json': (
+        text_result(STRUCTURE.format('where Terrain == null')), text_result(STRUCTURE.format('where Terrain != null'))),
+})
+
+
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 159)
+        self.assertEqual(len(all_checks()), 169)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():
