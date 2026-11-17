@@ -77,7 +77,7 @@
 
 - ‏**Unreal Engine 5.5 – 5.8** (خط انتشار هر کدام را اعتبارسنجی می‌کند).
 - **یک پروژه C++**، چون پلاگین به صورت سورس ارائه می‌شود و Unreal ماژول‌های آن را با toolchain مربوط به C++ پلتفرم شما برای پروژه‌تان کامپایل می‌کند. یک پروژه فقط-Blueprint در یک قدم به پروژه C++ تبدیل می‌شود: در ویرایشگر، **Tools → New C++ Class…** و هر کلاسی بسازید. برای پروژه جدید، `unreal-mcp-cli create-project ./MyGame` یک پروژه C++ حداقلی می‌سازد. نسخه Fab به پروژه C++ نیاز ندارد: Epic Games Launcher آن را از پیش کامپایل‌شده نصب می‌کند.
-- **بدون نصب .NET.** میزبان MCP یک برنامه .NET خودکفا (`unreal-mcp-bridge`) است که برای پلتفرم شما درون پلاگین قرار دارد؛ پلاگین آن را اجرا و دوباره راه‌اندازی می‌کند. (نسخه Fab فایل اجرایی ندارد: دکمه **Get bridge** صفحه release را باز می‌کند و شما bridge را یک بار در پوشه bridge پلاگین استخراج می‌کنید.) فقط ساخت bridge از سورس به .NET 9 SDK نیاز دارد.
+- **بدون نصب .NET.** میزبان MCP یک برنامه .NET خودکفا (`unreal-mcp-bridge`) است که برای پلتفرم شما درون پلاگین قرار دارد؛ پلاگین آن را اجرا و دوباره راه‌اندازی می‌کند. (نسخه Fab فایل اجرایی ندارد: دکمه **Get bridge** صفحه release را باز می‌کند و شما bridge را یک بار در پوشه bridge پلاگین استخراج می‌کنید.) فقط ساخت bridge از سورس به .NET 10 SDK نیاز دارد.
 - ‏**Node.js 22.14+**، فقط برای `unreal-mcp-cli` (یک پکیج npm؛ 22.14 حداقل نسخه Node آن است).
 - ‏**Windows یا macOS** (هر نسخه روی هر دو تست می‌شود). **Linux x64:** sidecar ساخته و منتشر می‌شود، اما هیچ تست انتشاری روی Linux اجرا نمی‌شود.
 
@@ -342,7 +342,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | مسیر | چیست |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | پلاگین Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`، sidecar مبتنی بر .NET 9 |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`، sidecar مبتنی بر .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، پکیج npm |
 | [`extensions/`](../extensions/) | هفت افزونه اختیاری موتور با انتشارهای جداگانه |
 | [`samples/`](../samples/) | یک قالب افزونه ویرایشگر و یک نمونه ابزار Runtime (درون بازی) |

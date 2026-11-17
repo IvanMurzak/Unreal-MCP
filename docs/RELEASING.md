@@ -478,7 +478,7 @@ host platform (`Win64`, `Mac`, `Linux`). Every step runs as a Python script unde
 bundled Python (`CHAIN_PY`), so a runner needs nothing beyond the engines: no Python and no
 PowerShell 7. The action's two bootstrap lines use what every OS ships (bash, Windows PowerShell 5.1),
 and the steps use the runner's default shell. Do not put a step on `pwsh`: Homebrew's `pwsh` launcher
-on macOS overwrites `DOTNET_ROOT`, and the smoke's .NET 9 bridge then cannot start. On macOS each engine accepts only an Xcode range (its
+on macOS overwrites `DOTNET_ROOT`, and the smoke's .NET 10 bridge then cannot start. On macOS each engine accepts only an Xcode range (its
 `Engine/Config/Apple/Apple_SDK.json`; UE 5.7 stops at 26.9). Keep the newest Xcode selected
 and install older ones side by side (`xcodes install 26.6 --directory /Applications`);
 `ue_env.py` hands a job a fitting `/Applications/Xcode*.app` through `DEVELOPER_DIR` when the
@@ -634,7 +634,7 @@ the repo (see *The smoke host project*), and `build-plugin-zip` finds UE 5.8 lik
 `.artifacts/tests/` in the checkout), which survive jobs on the runner slot, so its Binaries,
 Intermediate and DerivedDataCache stay warm, and the host editor build recompiles only what changed
 (no from-scratch `BuildPlugin` here: the plugin job validates the packaged plugin). The plugin is a real
-folder, not a link: UBT's build accelerator does not follow a symlinked plugin on macOS. Nothing is provisioned on the machine; .NET 9 comes from
+folder, not a link: UBT's build accelerator does not follow a symlinked plugin on macOS. Nothing is provisioned on the machine; .NET 10 comes from
 `actions/setup-dotnet` (runner-manager keeps `DOTNET_INSTALL_DIR` per slot, so it is cached).
 
 ## Secrets (least-privilege)

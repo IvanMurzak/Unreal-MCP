@@ -71,7 +71,7 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 
 - **Unreal Engine 5.5 – 5.8** (el pipeline de release valida cada una).
 - **Un proyecto C++**, porque el plugin se distribuye como código fuente y Unreal compila sus módulos para tu proyecto con la toolchain de C++ de tu plataforma. Un proyecto solo de Blueprints pasa a ser C++ en un paso: en el editor, **Tools → New C++ Class…** y crea cualquier clase. Para un proyecto nuevo, `unreal-mcp-cli create-project ./MyGame` genera uno mínimo en C++. La build de Fab no necesita un proyecto C++: el Epic Games Launcher la instala precompilada.
-- **Sin instalar .NET.** El host MCP es un programa .NET autocontenido (`unreal-mcp-bridge`) incluido en el plugin para tu plataforma; el plugin lo inicia y lo reinicia. (La build de Fab no contiene ejecutables: su botón **Get bridge** abre la página de la release y extraes el bridge en la carpeta del bridge del plugin una sola vez.) Solo compilar el bridge desde el código fuente requiere el SDK de .NET 9.
+- **Sin instalar .NET.** El host MCP es un programa .NET autocontenido (`unreal-mcp-bridge`) incluido en el plugin para tu plataforma; el plugin lo inicia y lo reinicia. (La build de Fab no contiene ejecutables: su botón **Get bridge** abre la página de la release y extraes el bridge en la carpeta del bridge del plugin una sola vez.) Solo compilar el bridge desde el código fuente requiere el SDK de .NET 10.
 - **Node.js 22.14+**, solo para `unreal-mcp-cli` (un paquete npm; 22.14 es su versión mínima de Node).
 - **Windows o macOS** (cada release se prueba en ambos). **Linux x64:** el sidecar se compila y se publica, pero ninguna prueba de release se ejecuta en Linux.
 
@@ -288,7 +288,7 @@ Las extensiones se compilan desde el código fuente en tu proyecto (la próxima 
 | Ruta | Qué es |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | El plugin de Unreal (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`, el sidecar de .NET 9 |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`, el sidecar de .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, el paquete npm |
 | [`extensions/`](../extensions/) | Siete extensiones de motor opcionales con sus propias releases |
 | [`samples/`](../samples/) | Una plantilla de extensión de editor y un ejemplo de herramienta en runtime (dentro del juego) |

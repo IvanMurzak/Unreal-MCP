@@ -77,7 +77,7 @@
 
 - ‏**Unreal Engine 5.5 – 5.8** (يتحقق خط الإصدار من كل منها).
 - **مشروع C++**، لأن الإضافة تُوزَّع كشيفرة مصدرية ويجمّع Unreal وحداتها لمشروعك بسلسلة أدوات C++ الخاصة بمنصتك. يتحول مشروع Blueprint فقط إلى مشروع C++ بخطوة واحدة: في المحرر، **Tools → New C++ Class…** وأنشئ أي صنف. لمشروع جديد، ينشئ `unreal-mcp-cli create-project ./MyGame` مشروع C++ بسيطًا. لا يحتاج إصدار Fab إلى مشروع C++: يثبّته Epic Games Launcher مُجمَّعًا مسبقًا.
-- **لا حاجة إلى تثبيت .NET.** مضيف MCP برنامج .NET مستقل (`unreal-mcp-bridge`) مضمَّن داخل الإضافة لمنصتك؛ تشغّله الإضافة وتعيد تشغيله. (إصدار Fab لا يحتوي ملفات تنفيذية: يفتح زر **Get bridge** صفحة الإصدار، وتستخرج أنت الـ bridge في مجلد الـ bridge الخاص بالإضافة مرة واحدة.) لا يلزم .NET 9 SDK إلا لبناء الـ bridge من المصدر.
+- **لا حاجة إلى تثبيت .NET.** مضيف MCP برنامج .NET مستقل (`unreal-mcp-bridge`) مضمَّن داخل الإضافة لمنصتك؛ تشغّله الإضافة وتعيد تشغيله. (إصدار Fab لا يحتوي ملفات تنفيذية: يفتح زر **Get bridge** صفحة الإصدار، وتستخرج أنت الـ bridge في مجلد الـ bridge الخاص بالإضافة مرة واحدة.) لا يلزم .NET 10 SDK إلا لبناء الـ bridge من المصدر.
 - ‏**Node.js 22.14+**، لـ `unreal-mcp-cli` فقط (حزمة npm؛ 22.14 هو أدنى إصدار Node لها).
 - ‏**Windows أو macOS** (يُختبر كل إصدار على كليهما). **Linux x64:** يُبنى sidecar ويُنشر، لكن لا يعمل أي اختبار إصدار على Linux.
 
@@ -342,7 +342,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | المسار | ما هو |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | إضافة Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`، العملية المرافقة المبنية على .NET 9 |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`، العملية المرافقة المبنية على .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، حزمة npm |
 | [`extensions/`](../extensions/) | سبعة امتدادات اختيارية للمحرك بإصدارات مستقلة |
 | [`samples/`](../samples/) | قالب امتداد للمحرر ومثال لأداة Runtime (داخل اللعبة) |

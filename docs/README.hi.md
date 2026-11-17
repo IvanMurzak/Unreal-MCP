@@ -71,7 +71,7 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 
 - **Unreal Engine 5.5 – 5.8** (release pipeline हर एक को validate करती है)।
 - **एक C++ project**, क्योंकि plugin source के रूप में आता है और Unreal आपके platform के C++ toolchain से आपके project के लिए उसके modules compile करता है। Blueprint-only project एक कदम में C++ project बन जाता है: editor में **Tools → New C++ Class…** से कोई भी class बनाएँ। नए project के लिए `unreal-mcp-cli create-project ./MyGame` एक minimal C++ project बनाता है। Fab build के लिए C++ project ज़रूरी नहीं: Epic Games Launcher उसे precompiled install करता है।
-- **.NET install की ज़रूरत नहीं।** MCP host एक self-contained .NET program (`unreal-mcp-bridge`) है जो आपके platform के लिए plugin के अंदर bundled है; plugin उसे start और restart करता है। (Fab build में कोई executable नहीं होता: उसका **Get bridge** button release page खोलता है, और आप bridge को plugin के bridge folder में एक बार extract करते हैं।) सिर्फ़ bridge को source से build करने के लिए .NET 9 SDK चाहिए।
+- **.NET install की ज़रूरत नहीं।** MCP host एक self-contained .NET program (`unreal-mcp-bridge`) है जो आपके platform के लिए plugin के अंदर bundled है; plugin उसे start और restart करता है। (Fab build में कोई executable नहीं होता: उसका **Get bridge** button release page खोलता है, और आप bridge को plugin के bridge folder में एक बार extract करते हैं।) सिर्फ़ bridge को source से build करने के लिए .NET 10 SDK चाहिए।
 - **Node.js 22.14+**, सिर्फ़ `unreal-mcp-cli` के लिए (एक npm package; 22.14 उसका minimum Node version है)।
 - **Windows या macOS** (हर release दोनों पर test होता है)। **Linux x64:** sidecar build और ship होता है, लेकिन Linux पर कोई release test नहीं चलता।
 
@@ -288,7 +288,7 @@ Extensions आपके project में source से compile होते ह
 | Path | यह क्या है |
 |---|---|
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
-| [`bridge/`](../bridge/) | `unreal-mcp-bridge`, .NET 9 sidecar |
+| [`bridge/`](../bridge/) | `unreal-mcp-bridge`, .NET 10 sidecar |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, npm package |
 | [`extensions/`](../extensions/) | सात वैकल्पिक engine extensions, जिनकी अपनी releases हैं |
 | [`samples/`](../samples/) | एक editor extension template और एक runtime (game के अंदर) tool sample |
