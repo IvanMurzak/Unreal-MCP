@@ -351,6 +351,15 @@ class UeEnvTests(unittest.TestCase):
             subprocess.run([str(shims / "chmod"), "644", str(tool)], check=True)  # passed on to the real chmod
             self.assertEqual(tool.stat().st_mode & 0o777, 0o644)
 
+    def test_chmod_shim_only_for_linux_ue_5_5_and_5_6(self):
+        # UE 5.8's Linux build (UBA) fails on a chmod script first on PATH; 5.7+ needs no shim.
+        self.assertTrue(ue_env.needs_chmod_shim("5.5", "Linux"))
+        self.assertTrue(ue_env.needs_chmod_shim("5.6", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.7", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.8", "Linux"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.5", "Mac"))
+        self.assertFalse(ue_env.needs_chmod_shim("5.6", "Win64"))
+
     def test_xcode_versions_compare_as_three_parts(self):
         self.assertEqual(ue_env.xcode3("15.2"), (15, 2, 0))
         self.assertLess(ue_env.xcode3("16.4"), ue_env.xcode3("16.9.0"))
