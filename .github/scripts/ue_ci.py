@@ -110,12 +110,13 @@ def module_names(uplugin: Path) -> list:
 def build_plugin(package: Path, strict: bool = False) -> None:
     """RunUAT BuildPlugin -Rocket of the committed (test-free) descriptor for this host's platform.
 
-    strict: -StrictIncludes (UBT -NoPCH -NoSharedPCH -DisableUnity), so a file that compiles only through
-    a shared PCH or a unity blob fails the build (DEV-116: FUnrealMcpStyle.h missed Styling/CoreStyle.h).
-    """
+    strict adds -StrictIncludes (UBT -NoPCH -NoSharedPCH -DisableUnity)."""
     remove_tree(package)
-    code = run([env("UE_RUNUAT"), "BuildPlugin", f"-Plugin={PLUGIN / 'UnrealMCP.uplugin'}", f"-Package={package}",
-                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket", *(["-StrictIncludes"] if strict else [])])
+    command = [env("UE_RUNUAT"), "BuildPlugin", f"-Plugin={PLUGIN / 'UnrealMCP.uplugin'}", f"-Package={package}",
+               f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket"]
+    if strict:
+        command.append("-StrictIncludes")
+    code = run(command)
     if code != 0:
         raise StepError(f"BuildPlugin failed with exit code {code}")
 
@@ -174,9 +175,9 @@ def build_plugin_dist(_args) -> None:
     The Automation suite rebuilds WITH the test module in its own isolated copy. The Fab Win64 zip itself
     is built by release.yml's Windows-only build-plugin-zip.
 
-    It builds with strict includes: every source file must carry its own includes, since a user's build can
-    differ in PCH and unity layout (PCH off, another engine's shared PCH, Epic's Fab recompile). The suite
-    then builds the same code the usual way, with PCH and unity.
+    It builds with strict includes (no PCH, no unity), so a file that compiles only through the shared PCH or
+    a unity neighbour fails here: a user's build can differ in both (PCH off, Epic's Fab recompile). The
+    suite then builds the same code the usual way, with PCH and unity.
     """
     package = temp() / "UnrealMCP-Dist-Package"
     build_plugin(package, strict=True)
