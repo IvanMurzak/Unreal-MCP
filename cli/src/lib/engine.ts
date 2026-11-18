@@ -175,7 +175,8 @@ export function discoverEngine(input: DiscoverEngineInput): DiscoverEngineResult
   // 2. Launcher manifest. Resolve the platform manifest path once — it is
   // reused by the exhausted-path branch below to decide which unresolved
   // reason is most actionable (a Linux host has no launcher manifest).
-  const launcherManifestPath = getDefaultLauncherManifestPath(os);
+  const home = input.env?.['HOME'];
+  const launcherManifestPath = getDefaultLauncherManifestPath(os, { existsImpl: exists, ...(home ? { home } : {}) });
   const launcherEngines = input.enginesImpl
     ? input.enginesImpl()
     : launcherManifestPath

@@ -125,6 +125,7 @@ export {
   matchEngineForAssociation,
   getDefaultLauncherManifestPath,
 } from './utils/launcher.js';
+export type { LauncherManifestPathOptions } from './utils/launcher.js';
 export {
   readCachedEnginePath,
   writeCachedEnginePath,

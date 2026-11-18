@@ -9,13 +9,16 @@
 //
 // Platform default locations:
 //   Windows : C:\ProgramData\Epic\UnrealEngineLauncher\LauncherInstalled.dat
-//   macOS   : /Users/Shared/Epic/UnrealEngineLauncher/LauncherInstalled.dat
+//   macOS   : ~/Library/Application Support/Epic/UnrealEngineLauncher/LauncherInstalled.dat
+//             (older launchers: /Users/Shared/Epic/UnrealEngineLauncher/, read only
+//             when the per-user file is missing)
 //
 // All parsing is pure and defensive — a missing or malformed manifest
 // yields an empty engine list, never a throw.
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { homedir } from 'os';
 
 /** A single engine installation discovered from the launcher manifest. */
 export interface EngineInstallation {
@@ -34,19 +37,37 @@ export interface EngineInstallation {
 
 const RAW_ENGINE_APPNAME_RE = /^UE_(\d+\.\d+)$/;
 
+/** Test seams for {@link getDefaultLauncherManifestPath}. */
+export interface LauncherManifestPathOptions {
+  /** The user's home (macOS). Default: `HOME`, else the account's home. */
+  home?: string;
+  /** Whether a file exists (macOS fallback). Default: `fs.existsSync`. */
+  existsImpl?: (p: string) => boolean;
+}
+
 /**
  * Resolve the platform-default `LauncherInstalled.dat` path. Returns `null`
  * on platforms Epic does not ship a launcher manifest for (Linux), where
  * engine discovery falls back to an explicit `--engine-root`.
+ *
+ * macOS: the current Epic Games Launcher writes the manifest under the
+ * user's `~/Library/Application Support/Epic/UnrealEngineLauncher/`. The
+ * shared `/Users/Shared/Epic/UnrealEngineLauncher/` copy of older launchers
+ * is returned only when the per-user file is missing and the shared one exists.
  */
-export function getDefaultLauncherManifestPath(os: NodeJS.Platform): string | null {
+export function getDefaultLauncherManifestPath(os: NodeJS.Platform, options: LauncherManifestPathOptions = {}): string | null {
   switch (os) {
     case 'win32': {
       const programData = process.env['PROGRAMDATA'] ?? 'C:\\ProgramData';
       return path.win32.join(programData, 'Epic', 'UnrealEngineLauncher', 'LauncherInstalled.dat');
     }
-    case 'darwin':
-      return path.posix.join('/Users', 'Shared', 'Epic', 'UnrealEngineLauncher', 'LauncherInstalled.dat');
+    case 'darwin': {
+      const home = options.home ?? (process.env['HOME'] || homedir());
+      const exists = options.existsImpl ?? fs.existsSync;
+      const perUser = path.posix.join(home, 'Library', 'Application Support', 'Epic', 'UnrealEngineLauncher', 'LauncherInstalled.dat');
+      const shared = path.posix.join('/Users', 'Shared', 'Epic', 'UnrealEngineLauncher', 'LauncherInstalled.dat');
+      return !exists(perUser) && exists(shared) ? shared : perUser;
+    }
     default:
       return null;
   }

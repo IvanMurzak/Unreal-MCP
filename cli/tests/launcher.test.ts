@@ -81,8 +81,33 @@ describe('getDefaultLauncherManifestPath', () => {
   it('returns a Windows ProgramData path', () => {
     expect(getDefaultLauncherManifestPath('win32')).toMatch(/Epic[\\/]UnrealEngineLauncher[\\/]LauncherInstalled\.dat$/);
   });
-  it('returns a macOS shared path', () => {
-    expect(getDefaultLauncherManifestPath('darwin')).toContain('/Users/Shared/Epic');
+  const PER_USER = '/Users/dev/Library/Application Support/Epic/UnrealEngineLauncher/LauncherInstalled.dat';
+  const SHARED = '/Users/Shared/Epic/UnrealEngineLauncher/LauncherInstalled.dat';
+  const existing = (...files: string[]) => (p: string) => files.includes(p);
+  it('returns the per-user Application Support path on macOS', () => {
+    expect(getDefaultLauncherManifestPath('darwin', { home: '/Users/dev', existsImpl: existing(PER_USER) })).toBe(PER_USER);
+    // Neither exists: the current launcher's location, so a later install is found there.
+    expect(getDefaultLauncherManifestPath('darwin', { home: '/Users/dev', existsImpl: existing() })).toBe(PER_USER);
+    // Both exist: the per-user file wins.
+    expect(getDefaultLauncherManifestPath('darwin', { home: '/Users/dev', existsImpl: existing(PER_USER, SHARED) })).toBe(PER_USER);
+  });
+  it('falls back to the older /Users/Shared manifest on macOS only when the per-user one is missing', () => {
+    expect(getDefaultLauncherManifestPath('darwin', { home: '/Users/dev', existsImpl: existing(SHARED) })).toBe(SHARED);
+  });
+  it('defaults the macOS home to HOME', () => {
+    const saved = process.env['HOME'];
+    process.env['HOME'] = '/Users/from-env';
+    try {
+      expect(getDefaultLauncherManifestPath('darwin', { existsImpl: existing() }))
+        .toBe('/Users/from-env/Library/Application Support/Epic/UnrealEngineLauncher/LauncherInstalled.dat');
+    } finally {
+      if (saved === undefined) delete process.env['HOME']; else process.env['HOME'] = saved;
+    }
+  });
+  it('ignores the macOS options on Windows and Linux', () => {
+    const exists = () => true;
+    expect(getDefaultLauncherManifestPath('win32', { home: '/Users/dev', existsImpl: exists })).toBe(getDefaultLauncherManifestPath('win32'));
+    expect(getDefaultLauncherManifestPath('linux', { home: '/Users/dev', existsImpl: exists })).toBeNull();
   });
   it('returns null on linux (no launcher manifest)', () => {
     expect(getDefaultLauncherManifestPath('linux')).toBeNull();
