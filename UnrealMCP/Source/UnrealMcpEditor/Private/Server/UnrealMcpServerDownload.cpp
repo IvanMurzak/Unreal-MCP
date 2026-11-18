@@ -8,6 +8,7 @@
 #include "UnrealMcpProcessUtil.h"
 
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
