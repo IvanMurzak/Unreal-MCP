@@ -115,6 +115,14 @@ class CiStepTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
                 self.assertEqual(ci.main(["build-plugin-dist"]), expected, modules)
 
+    def test_only_the_validation_build_uses_strict_includes(self):
+        calls = []
+        with mock.patch.object(ci, "run", lambda command, **_: calls.append(command) or 5), \
+                mock.patch.dict(os.environ, {"UE_RUNUAT": "uat"}):
+            ci.main(["build-plugin-dist"])
+            ci.main(["plugin-zip", "--version", "1.2.3"])
+        self.assertEqual([("-StrictIncludes" in c) for c in calls], [True, False])
+
     def test_build_plugin_dist_reports_a_uat_failure(self):
         uat = fake_uat(self.temp, "sys.exit(5)\n")
         with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
