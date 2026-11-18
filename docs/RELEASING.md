@@ -529,7 +529,8 @@ them: the run-level group is keyed per PR, ref or chain lock, and a job-level gr
 keeps only ONE pending job and cancels the older one.
 
 So every self-hosted UE job (`plugin` and `connection-smoke` in
-`test_pull_request.yml`; `plugin` and `build-plugin-zip` in `release.yml`) takes a
+`test_pull_request.yml`; `plugin` and `build-plugin-zip` in `release.yml`; `build` in
+`strict_includes.yml`) takes a
 machine-wide lock with `scripts/ue_machine_lock.py`
 (`scripts/extension_suite.py` takes the same lock in-process for local runs):
 
@@ -564,8 +565,8 @@ lock; a wait now comes only from another repo's UE job or a local run on that ma
 
 ### Never red-by-absence
 
-Both plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml` and
-`build-plugin-zip` in `release.yml`) are gated on the repository variable
+The plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml`,
+`build-plugin-zip` in `release.yml` and `build` in `strict_includes.yml`) are gated on the repository variable
 `UNREAL_RUNNER_READY == 'true'`. That variable is currently **`true`**, so the
 plugin jobs run. (If it is ever unset — e.g. while re-provisioning the runner —
 the plugin jobs are SKIPPED rather than failing, so an absent runner never reds
