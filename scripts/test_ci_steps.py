@@ -115,6 +115,18 @@ class CiStepTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
                 self.assertEqual(ci.main(["build-plugin-dist"]), expected, modules)
 
+    def test_build_plugin_dist_strict_includes_only_on_request(self):
+        uat = fake_uat(self.temp, """
+            package.mkdir(parents=True, exist_ok=True)
+            (package / 'UnrealMCP.uplugin').write_text(json.dumps({'Modules': [{'Name': 'UnrealMcpRuntime'}]}))
+            (package.parent / 'argv.json').write_text(json.dumps(sys.argv[1:]))
+        """)
+        with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
+            for argv, strict in ((["build-plugin-dist"], False), (["build-plugin-dist", "--strict-includes"], True)):
+                self.assertEqual(ci.main(argv), 0)
+                uat_args = json.loads((self.runner_temp / "argv.json").read_text())
+                self.assertEqual("-StrictIncludes" in uat_args, strict, argv)
+
     def test_build_plugin_dist_reports_a_uat_failure(self):
         uat = fake_uat(self.temp, "sys.exit(5)\n")
         with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):

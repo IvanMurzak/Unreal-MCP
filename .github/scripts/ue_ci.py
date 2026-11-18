@@ -107,11 +107,15 @@ def module_names(uplugin: Path) -> list:
     return [m.get("Name") for m in ue_json.read(uplugin).get("Modules") or []]
 
 
-def build_plugin(package: Path) -> None:
-    """RunUAT BuildPlugin -Rocket of the committed (test-free) descriptor for this host's platform."""
+def build_plugin(package: Path, strict_includes: bool = False) -> None:
+    """RunUAT BuildPlugin -Rocket of the committed (test-free) descriptor for this host's platform.
+
+    strict_includes: BuildPlugin -StrictIncludes, which passes UBT -NoPCH -NoSharedPCH -DisableUnity
+    (bUsePCHFiles=false, bUseUnityBuild=false), so a missing #include fails here, not in a user's build.
+    """
     remove_tree(package)
     code = run([env("UE_RUNUAT"), "BuildPlugin", f"-Plugin={PLUGIN / 'UnrealMCP.uplugin'}", f"-Package={package}",
-                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket"])
+                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket", *(["-StrictIncludes"] if strict_includes else [])])
     if code != 0:
         raise StepError(f"BuildPlugin failed with exit code {code}")
 
@@ -162,7 +166,7 @@ def chain_sweep(_args) -> None:
         remove_tree(ROOT / ".artifacts" / name)
 
 
-def build_plugin_dist(_args) -> None:
+def build_plugin_dist(args) -> None:
     """BuildPlugin -Rocket of the DISTRIBUTED (test-free) descriptor for this host's platform.
 
     C2 (#139): the committed UnrealMCP.uplugin omits the UnrealMcpEditorTests module (Fab review flags
@@ -171,7 +175,7 @@ def build_plugin_dist(_args) -> None:
     is built by release.yml's Windows-only build-plugin-zip.
     """
     package = temp() / "UnrealMCP-Dist-Package"
-    build_plugin(package)
+    build_plugin(package, args.strict_includes)
     descriptor = package / "UnrealMCP.uplugin"
     if descriptor.is_file():
         modules = module_names(descriptor)
@@ -590,6 +594,7 @@ def main(argv: list | None = None) -> int:
     parser.add_argument("--ue", help="the matrix engine version (suite, fixture-diff)")
     parser.add_argument("--mode", default="verification", help="extension_suite.py mode (suite)")
     parser.add_argument("--version", help="release version (source-zip, fab-zip, fab-engine-zips, plugin-zip)")
+    parser.add_argument("--strict-includes", action="store_true", help="no PCH, no unity build (build-plugin-dist)")
     args = parser.parse_args(argv)
     try:
         return COMMANDS[args.command](args) or 0

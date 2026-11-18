@@ -1,0 +1,62 @@
+# ┌──────────────────────────────────────────────────────────────────┐
+# │  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+# │  Repository: GitHub (https://github.com/IvanMurzak/Unreal-MCP)   │
+# │  Copyright (c) 2026 Ivan Murzak                                  │
+# │  Licensed under the Apache License, Version 2.0.                 │
+# │  See the LICENSE file in the project root for more information.  │
+# └──────────────────────────────────────────────────────────────────┘
+
+# Weekly strict-includes build (DEV-121): BuildPlugin of the core plugin on UE 5.8 with
+# -StrictIncludes, i.e. UBT -NoPCH -NoSharedPCH -DisableUnity (bUsePCHFiles=false,
+# bUseUnityBuild=false). PR and release builds use PCH + unity, which hide a header that
+# does not include what it uses until a user's build (e.g. #472). Build only: no Automation.
+#
+# Not on pull requests (a no-PCH build is slow). Same self-hosted runner label, readiness
+# gate (vars.UNREAL_RUNNER_READY: absent runner => SKIPPED, never red), machine-wide UE lock
+# and ue_ci.py steps as the `plugin` job of test_pull_request.yml.
+name: strict-includes
+
+on:
+  schedule:
+    - cron: '0 2 * * 1' # Monday 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a running build: cancelling a job on the self-hosted Unreal pool wedges the runner.
+concurrency:
+  group: strict-includes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: plugin BuildPlugin strict includes (UE 5.8)
+    if: ${{ vars.UNREAL_RUNNER_READY == 'true' }}
+    runs-on: [self-hosted, unreal-5-8]
+    # A hang guard, not a budget (see the plugin job): the UE lock's 60-min bounded wait + the build.
+    timeout-minutes: 150
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          clean: false
+
+      - name: Resolve UE install + chain python
+        uses: ./.github/actions/ue-env
+        with:
+          version: '5.8'
+
+      - name: Clean staged bridge binaries (gitignored)
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py clean-staged-bridge
+
+      - name: Acquire machine-wide UE lock
+        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire
+
+      - name: BuildPlugin (no PCH, no unity)
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py build-plugin-dist --strict-includes
+
+      - name: Teardown (cleanup, release the machine-wide UE lock)
+        if: always() && env.CHAIN_PY != ''
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
