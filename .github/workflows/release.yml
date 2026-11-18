@@ -326,7 +326,7 @@ jobs:
       - name: Acquire machine-wide UE lock
         id: ue_lock
         run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 180
-      - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free)
+      - name: BuildPlugin (marketplace packaging validation — DISTRIBUTED, test-free, strict includes)
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py build-plugin-dist
       - name: Isolated compilation + one-editor Automation suite
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py suite --ue ${{ matrix.ue }}

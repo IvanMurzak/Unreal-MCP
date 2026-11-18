@@ -115,6 +115,20 @@ class CiStepTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
                 self.assertEqual(ci.main(["build-plugin-dist"]), expected, modules)
 
+    def test_build_plugin_dist_builds_with_strict_includes_and_the_release_zip_does_not(self):
+        # DEV-123: the PR/release validation build has no PCH and no unity blobs, so a missing include fails it;
+        # the shipped zip keeps the normal build.
+        uat = fake_uat(self.temp, """
+            (pathlib.Path(sys.argv[0]).parent / 'argv.json').write_text(json.dumps(sys.argv[1:]))
+            sys.exit(5)
+        """)
+        with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
+            ci.main(["build-plugin-dist"])
+        self.assertIn("-StrictIncludes", json.loads((self.temp / "argv.json").read_text()))
+        with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
+            ci.main(["plugin-zip", "--version", "1.2.3"])
+        self.assertNotIn("-StrictIncludes", json.loads((self.temp / "argv.json").read_text()))
+
     def test_build_plugin_dist_reports_a_uat_failure(self):
         uat = fake_uat(self.temp, "sys.exit(5)\n")
         with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
