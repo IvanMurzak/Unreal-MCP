@@ -7,6 +7,7 @@
 #include "Misc/AutomationTest.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "UObject/Package.h"
 #include "UI/SUnrealMcpSerializationCheckWindow.h"
 #include "Tools/UnrealMcpPropertyJson.h"
 
