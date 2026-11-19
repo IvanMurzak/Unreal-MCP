@@ -990,7 +990,9 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestEqual(*FString::Printf(TEXT("skip 100 | first 80 after a read-only call shows 80 rows (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Page)),
 				UnrealMcpRqlSpecHelpers::RowCount(Page), 80);
 			const FString PageFirst = UnrealMcpRqlSpecHelpers::CellText(Page, 0, 2);
-			TestTrue(*FString::Printf(TEXT("and starts at the 101st call (%s)"), *PageFirst), PageFirst.Contains(TEXT("100")));
+			const FString PageLast = UnrealMcpRqlSpecHelpers::CellText(Page, 79, 2);
+			TestTrue(*FString::Printf(TEXT("and holds the 101st to the 180th call (%s .. %s)"), *PageFirst, *PageLast),
+				PageFirst.Contains(TEXT("100")) && PageLast.Contains(TEXT("179")));
 			// range(0, 200) | call rqlSpecApi.Probe([$, 0, 0]) | skip 10: no first keeps RQL's 50-row page
 			const TSharedPtr<FJsonObject> Paged50 = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":200}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":10}]})RQL"));
 			TestEqual(*FString::Printf(TEXT("read stages without first keep the 50-row page (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paged50)),
