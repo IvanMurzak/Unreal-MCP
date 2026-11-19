@@ -96,14 +96,15 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 	const double SampleStart = FPlatformTime::Seconds();
 	const double Deadline = SampleStart + FCallBudget::Left(SampleBudgetSeconds);
 	int32 Done = 0;
+	// Checked after every point: past the deadline the evaluations give up at once, and the rest would read no Channels.
+	const auto TimedOut = [&Points, &Done, SampleStart, Deadline]()
+	{
+		return FPlatformTime::Seconds() > Deadline && UnrealMcpRql::Failed<bool>(FString::Printf(
+			TEXT("sampling %d points took over %.0f s (%d done; the terrain is evaluated once per 500 m cell holding points): pass fewer points, or points closer together, per call"),
+			Points.Num(), FPlatformTime::Seconds() - SampleStart, Done));
+	};
 	for (const TPair<FIntPoint, TArray<int32>>& Cell : Cells)
 	{
-		if (FPlatformTime::Seconds() > Deadline)
-		{
-			return UnrealMcpRql::Failed<TArray<FUnrealAIMeshTerrainSurface>>(FString::Printf(
-				TEXT("sampling %d points took over %.0f s (%d done; the terrain is evaluated once per 500 m cell holding points): pass fewer points, or points closer together, per call"),
-				Points.Num(), FPlatformTime::Seconds() - SampleStart, Done));
-		}
 		FBox2D Area(ForceInit);
 		for (const int32 Index : Cell.Value)
 			Area += FVector2D(Points[Index]);
@@ -113,14 +114,15 @@ TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE
 		TArray<FRegionMesh> Evaluated;
 		if (Built.IsValid)
 		{
-			Evaluated = BuildRegion(Terrain, FBox(FVector(Area.Min, Built.Min.Z - 1000.0), FVector(Area.Max, Built.Max.Z + 1000.0)), FMath::Max(Deadline - FPlatformTime::Seconds(), 1.0));
-			if (Evaluated.IsEmpty() && FPlatformTime::Seconds() > Deadline)
-				return Out; // BuildRegion failed the call (it took too long)
+			Evaluated = BuildRegion(Terrain, FBox(FVector(Area.Min, Built.Min.Z - 1000.0), FVector(Area.Max, Built.Max.Z + 1000.0)),
+				FMath::Max(Deadline - FPlatformTime::Seconds(), 0.0), /*bFailOnTimeout*/ false);
 		}
 		for (const int32 Index : Cell.Value)
 		{
-			++Done;
 			const FSurfaceSample Sample = SampleSurface(Terrain, Points[Index].X, Points[Index].Y, /*bChannels*/ true, &Evaluated);
+			if (TimedOut())
+				return TArray<FUnrealAIMeshTerrainSurface>();
+			++Done;
 			if (Sample.bInside)
 				Out[Index] = UnrealAIMeshTerrainRqlApiLocal::ToSurface(Points[Index], Sample);
 		}

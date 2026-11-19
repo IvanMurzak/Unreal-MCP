@@ -22,7 +22,6 @@
 #include "Misc/ScopeExit.h"
 
 #include "MeshPartition.h"
-#include "MeshPartitionEditorComponent.h"
 #include "MeshPartitionModifierComponent.h"
 #include "MeshPartitionModifierActor.h"
 #include "Components/SplineComponent.h"
@@ -632,12 +631,18 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			const FString Label = ModSpecLabel(TEXT("ModBudget"));
 			const double X0 = -2100000.0;
 			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 40000.0, 40000.0, 400, 400);
-			ON_SCOPE_EXIT { UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0; UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
 			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
 				return;
-			// A pending rebuild and an operation whose budget is spent: the wait before the change gives up at once, though
-			// its own timeout is 240 s, and nothing is placed.
-			UnrealAIMeshTerrain::EditorComponent(Terrain)->ForceRebuildAllSections(UE::MeshPartition::EChangeType::TransientChange);
+			// A build still running (a new pad, returned before it is built: no cached result can finish it at once) and an
+			// operation whose budget is spent: the wait before its change gives up at once, though its own timeout is 240 s, and
+			// nothing is placed. meshTerrainModifier | call AddPatch(<terrain>, [X0, 0, 500], 3000, 1000, "<label>_Pad")
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			TSharedPtr<FJsonObject> Pad;
+			TestTrue(TEXT("a pad, still building"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddPatch"), { ModSpecFind(Label), ModSpecVec(X0, 0.0, 500.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Pad")) }), true, &Pad));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			if (!TestFalse(TEXT("the terrain is still building"), UnrealAIMeshTerrain::BuildState(Terrain).IsReady()))
+				return;
 			const int32 Before = ModSpecModifierActors();
 			{
 				const FCallBudget Spent(0.0);

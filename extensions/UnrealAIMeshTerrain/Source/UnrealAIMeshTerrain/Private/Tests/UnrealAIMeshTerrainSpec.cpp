@@ -417,7 +417,8 @@ void FUnrealAIMeshTerrainSpec::Define()
 			TestTrue(*FString::Printf(TEXT("PaintWhere (%s)"), *MeshTerrainSpecJson(Result).Left(400)), UnrealMcpRqlTools::RunPlan(FString::Printf(
 				TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"PaintWhere","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Red"}]}]})RQL"),
 				*Label), true, &Result));
-			for (const UnrealAIMeshTerrain::APreviewSection* Section : Sections)
+			// (the sections the paint rebuilt: the ones above are gone)
+			for (const UnrealAIMeshTerrain::APreviewSection* Section : UnrealAIMeshTerrain::PreviewSections(Terrain))
 			{
 				const FBox Box = Section->GetPreviewMeshBounds();
 				for (int32 Step = 0; Step <= 20; ++Step)

@@ -495,10 +495,10 @@ namespace UnrealAIMeshTerrainSculptLocal
 			// entry (a Set entry with nothing painted would pin the channel to its current values under the brush).
 			Restore();
 			Out.Brush = bNew || !Owner ? FString() : Owner->GetActorLabel();
-			if (!WaitForBuild(Terrain))
-				return FUnrealAIMeshTerrainStroke();
-			Out.Ready = true;
-			Out.State = TEXT("built");
+			// (What the first wait left of the budget: a build still running is reported, as after a stroke.)
+			FString StillBuilding;
+			Out.Ready = WaitForBuild(Terrain, DefaultBuildTimeoutSeconds, &StillBuilding);
+			Out.State = Out.Ready ? FString(TEXT("built")) : StillBuilding;
 			Out.Seconds = SecondsSince(Start);
 			return Out;
 		}

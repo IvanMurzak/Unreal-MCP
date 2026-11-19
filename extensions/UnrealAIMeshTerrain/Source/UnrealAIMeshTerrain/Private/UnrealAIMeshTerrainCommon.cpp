@@ -742,37 +742,42 @@ namespace UnrealAIMeshTerrain
 				}
 			}
 			// A point on the edge of a part (a section seam, the terrain's rim) can slip between its triangles and the next
-			// part's: the triangle nearest to where the collision trace hit, when it is within NearSurface of it.
+			// part's: the triangle nearest to where the collision trace hit, when it is within NearSurface (world cm) of it.
 			constexpr double NearSurface = 50.0;
 			const FVector Hit(Start.X, Start.Y, Out.Height);
 			const FRegionMesh* Nearest = nullptr;
 			int32 NearestTriangle = INDEX_NONE;
 			double NearestDistance = FMath::Square(NearSurface);
-			FVector LocalHit = FVector::ZeroVector;
+			FVector3d NearestBary, NearestPoint;
 			for (const FRegionMesh& Part : Parts)
 			{
 				if (!Part.Spatial.IsValid())
 					continue;
+				// (NearSurface in the part's own units, under its scale)
 				const FVector Local = Part.Transform.InverseTransformPosition(Hit);
-				if (!Under(Part, Local, NearSurface))
+				if (!Under(Part, Local, NearSurface * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D()).GetAbsMax()))
 					continue;
-				double DistanceSquared = TNumericLimits<double>::Max();
-				const int32 Triangle = Part.Spatial->FindNearestTriangle(Local, DistanceSquared);
-				if (Triangle != INDEX_NONE && DistanceSquared <= NearestDistance)
+				double LocalDistance = TNumericLimits<double>::Max();
+				const int32 Triangle = Part.Spatial->FindNearestTriangle(Local, LocalDistance);
+				if (Triangle == INDEX_NONE)
+					continue;
+				FVector A, B, C;
+				Part.Mesh->GetTriVertices(Triangle, A, B, C);
+				UE::Geometry::FDistPoint3Triangle3d OnTriangle(Local, UE::Geometry::FTriangle3d(A, B, C));
+				OnTriangle.GetSquared(); // (computes ClosestTrianglePoint and its TriangleBaryCoords)
+				const double Distance = FVector::DistSquared(Part.Transform.TransformPosition(OnTriangle.ClosestTrianglePoint), Hit);
+				if (Distance <= NearestDistance)
 				{
 					Nearest = &Part;
 					NearestTriangle = Triangle;
-					NearestDistance = DistanceSquared;
-					LocalHit = Local;
+					NearestDistance = Distance;
+					NearestBary = OnTriangle.TriangleBaryCoords;
+					NearestPoint = OnTriangle.ClosestTrianglePoint;
 				}
 			}
 			if (!Nearest)
 				return false;
-			FVector A, B, C;
-			Nearest->Mesh->GetTriVertices(NearestTriangle, A, B, C);
-			UE::Geometry::FDistPoint3Triangle3d OnTriangle(LocalHit, UE::Geometry::FTriangle3d(A, B, C));
-			OnTriangle.GetSquared(); // (computes ClosestTrianglePoint and its TriangleBaryCoords)
-			Read(*Nearest, NearestTriangle, OnTriangle.TriangleBaryCoords, OnTriangle.ClosestTrianglePoint);
+			Read(*Nearest, NearestTriangle, NearestBary, NearestPoint);
 			return true;
 		};
 		TArray<FRegionMesh> Local;

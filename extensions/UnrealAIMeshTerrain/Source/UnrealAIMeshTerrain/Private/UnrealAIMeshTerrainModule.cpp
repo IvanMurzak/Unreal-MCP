@@ -13,8 +13,10 @@
 #include "UnrealAIMeshTerrainSculptApi.h"
 #include "UnrealAIMeshTerrainModifiersApi.h"
 
+#include "CoreGlobals.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Misc/ConfigCacheIni.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 
@@ -189,9 +191,14 @@ namespace UnrealAIMeshTerrainModuleLocal
 	void RefuseUnsavedModifiers(TArray<FString>& OutReasons)
 	{
 		const UWorld* World = UnrealMcpRql::EditorWorld();
-		if (!World)
+		// The engine asks only in a world with a terrain, and not when the dialog was suppressed ("do not show again").
+		bool bSuppressed = false;
+		for (const FString& Ini : { GEditorPerProjectIni, GEditorSettingsIni })
+			bSuppressed |= GConfig->GetBoolOrDefault(TEXT("SuppressableDialogs"), TEXT("MeshPartition_DirtyModifiersPIEWarning"), false, Ini);
+		if (!World || bSuppressed || Terrains().IsEmpty())
 			return;
 		int32 Count = 0;
+		TSet<const AActor*> Owners;
 		TArray<FString> Labels;
 		for (TObjectIterator<UModifierComponent> It; It; ++It)
 		{
@@ -199,13 +206,16 @@ namespace UnrealAIMeshTerrainModuleLocal
 			if (!IsValid(Modifier) || Modifier->IsTemplate() || Modifier->GetWorld() != World || !Modifier->GetPackage()->IsDirty())
 				continue;
 			++Count;
-			if (const AActor* Owner = Modifier->GetOwner(); Owner && Labels.Num() < 5)
-				Labels.AddUnique(Owner->GetActorNameOrLabel());
+			bool bKnown = true;
+			if (const AActor* Owner = Modifier->GetOwner())
+				Owners.Add(Owner, &bKnown);
+			if (!bKnown && Labels.Num() < 5)
+				Labels.Add(Modifier->GetOwner()->GetActorNameOrLabel());
 		}
 		if (Count > 0)
 		{
-			OutReasons.Add(FString::Printf(TEXT("%d Mesh Terrain modifier(s) and base mesh(es) are not saved (%s%s): Mesh Partition plays only saved ones and cancels play otherwise; save them first (editor | call SaveAll()), then StartPlay"),
-				Count, *FString::Join(Labels, TEXT(", ")), Count > Labels.Num() ? TEXT(", ...") : TEXT("")));
+			OutReasons.Add(FString::Printf(TEXT("%d Mesh Terrain modifier(s) and base mesh(es) are not saved%s: Mesh Partition plays only saved ones and cancels play otherwise; save them first (editor | call SaveAll()), then StartPlay"),
+				Count, Labels.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (%s%s)"), *FString::Join(Labels, TEXT(", ")), Owners.Num() > Labels.Num() ? TEXT(", ...") : TEXT(""))));
 		}
 	}
 }

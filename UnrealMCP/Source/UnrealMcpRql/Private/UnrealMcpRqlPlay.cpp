@@ -58,6 +58,10 @@ namespace UnrealMcpRqlPlayLocal
 		FPlayStartLog() { GLog->AddOutputDevice(this); }
 		virtual ~FPlayStartLog() override { GLog->RemoveOutputDevice(this); }
 
+		// Unbuffered: a buffered device gets its lines later, on the editor's log thread. Serialize then runs on the thread
+		// that logs, and keeps only this one's lines.
+		virtual bool CanBeUsedOnMultipleThreads() const override { return true; }
+
 		virtual void Serialize(const TCHAR* Text, ELogVerbosity::Type Verbosity, const FName& Category) override
 		{
 			const ELogVerbosity::Type Level = static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask);
