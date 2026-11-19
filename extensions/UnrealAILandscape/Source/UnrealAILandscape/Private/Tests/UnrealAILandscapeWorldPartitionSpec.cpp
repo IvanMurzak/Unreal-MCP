@@ -224,7 +224,9 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 			UDataLayerEditorSubsystem* DataLayers = UDataLayerEditorSubsystem::Get();
 			const FString AssetName = TEXT("DL_WpSpec_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 			UPackage* AssetPackage = CreatePackage(*FString::Printf(TEXT("/Game/%s/%s"), Folder, *AssetName));
-			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, *AssetName, RF_Public | RF_Transactional);
+			// An asset saves only with RF_Standalone; dropped again at the end so garbage collection takes it with the level.
+			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
+			ON_SCOPE_EXIT { Asset->ClearFlags(RF_Standalone); };
 			AssetPackage->MarkPackageDirty();
 			FDataLayerCreationParameters Parameters;
 			Parameters.DataLayerAsset = Asset;
