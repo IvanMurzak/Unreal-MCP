@@ -51,8 +51,8 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * Load the World Partition streaming proxies of the landscape that overlap @p Area (world X, Y; null: all of them), as
 	 * the editor's region loading does, so an edit or read sees all of the ground and not only the region loaded around the
 	 * camera after a map opens. Nothing to do on a map without World Partition. Loading changes and dirties nothing.
-	 * False after Fail when World Partition cannot load at all; actors the loader skips (a data layer that is not loaded,
-	 * runtime-only) stay unloaded and are not reported (UnrealMcpRql::LoadWorldPartitionActors).
+	 * False after Fail when World Partition cannot load at all, or when a proxy stays unloaded (the loader skips one in a
+	 * data layer the editor has not loaded): the operation would see only part of the ground.
 	 */
 	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area = nullptr);
 
@@ -89,6 +89,13 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/** The edit log of @p Landscape's landscape actor, oldest first (empty when it has none). */
 	const TArray<FUnrealAILandscapeEdit>& EditLog(const ALandscapeProxy* Landscape);
+
+	/**
+	 * Warn the caller (UnrealMcpRql::Warn) about every road of the landscape's edit log (RoadBetween, Ramp) that a cut
+	 * @p Width cm wide along @p Points (world) crosses: the road now drops into the cut there. @p What names the cut ("the
+	 * river's bed"). Roads graded another way are not in the log.
+	 */
+	void WarnRoadsCut(const ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, const TCHAR* What);
 
 	/** Carve: a channel Depth cm below the ground along Points (world), Width cm of bottom then 1:1 banks; changed vertices. */
 	int32 CarveAlong(ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, double Depth);

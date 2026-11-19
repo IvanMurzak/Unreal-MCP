@@ -298,6 +298,11 @@ loading them, so the core module (`UnrealMcpRqlWorldPartition.cpp`) makes the re
   `world-partition-unloaded`: "N World Partition actor(s) are not loaded (only loaded actors are listed): Lake
   (WaterBodyLake), ... +K more", whose hint names `unloadedActors` and the load operations. `unreal.find("Lake")` of an
   unloaded actor fails with `not-loaded` and the `LoadActors` call that loads it.
+- A change (`rql-mutate`) over `actors`, `levels` or `world` that reached no actor while some are not loaded fails
+  with that note as the error `world-partition-unloaded` ("nothing was changed: no loaded actor matched, and N World
+  Partition actor(s) are not loaded (they were not searched)"): its empty receipt used to come with only the warning, and
+  agents took a `set` on an unloaded actor for done. It fails whatever the reason no actor matched (a misspelled label
+  too), since the actors that are not loaded were not searched. A change that reaches a loaded actor keeps the warning.
 - `unloadedActors` lists them from the level's actor descriptors (`FUnrealMcpUnloadedActor`): `Label`, `Name`, `Class`
   (the outliner's: `BP_Door_C` for a Blueprint), `Guid`, `Package` (its external actor package), `Folder`, `Location`,
   `Bounds` (editor bounds: `Bounds.Min`, `Bounds.Max`), `SpatiallyLoaded`, `DataLayers`. Runtime-only descriptors (HLODs)
@@ -557,7 +562,8 @@ Reflection already exposes every type the extension's engine plugin defines, so 
   the class types the source in `rql-schema`;
 - operations: `AddApiSource(name, description, UClass*, "TypeName")` (or `AddApiClass` alone) — every UFUNCTION of the
   class becomes callable (declare them `UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"))` so
-  UHT records default arguments; the doc comment is the description; failures via `UnrealMcpRql::Failed<T>`; object
+  UHT records default arguments; the doc comment is the description; failures via `UnrealMcpRql::Failed<T>`, warnings on a call that succeeds via
+  `UnrealMcpRql::Warn` (a `call-warning` diagnostic naming the function, once per message); object
   parameters are required unless their C++ default is `nullptr`);
 - members: `ExposeProperties` (properties reflection hides), `AddJsonMember`, `AddObjectMember`, `AddObjectListMember`;
 - `AddGuide(topic, markdown)`, rendered into the `unreal-rql` skill and returned in-band by `rql-schema` with `guide` (the

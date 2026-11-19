@@ -22,9 +22,12 @@ class UObject;
 class UScriptStruct;
 class UStruct;
 
-/** Bracket a UFUNCTION call made by RQL: UnrealMcpRql::Fail() inside it makes EndCall return true with the message. */
+/**
+ * Bracket a UFUNCTION call made by RQL: UnrealMcpRql::Fail() inside it makes EndCall return true with the message;
+ * UnrealMcpRql::Warn() messages come back in @p OutWarnings either way.
+ */
 void UnrealMcpRqlBeginCall();
-bool UnrealMcpRqlEndCall(FString& OutFailure);
+bool UnrealMcpRqlEndCall(FString& OutFailure, TArray<FString>& OutWarnings);
 
 /** FString <-> UTF-8 std::string (RQL text is UTF-8). */
 std::string UnrealMcpRqlToStd(const FString& Text);

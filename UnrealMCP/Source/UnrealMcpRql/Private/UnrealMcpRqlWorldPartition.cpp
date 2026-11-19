@@ -163,7 +163,7 @@ TArray<AActor*> UnrealMcpRqlWorldPartition::Actors(UWorld* World, const TArray<F
 	return Loaded;
 }
 
-bool UnrealMcpRqlWorldPartition::UnloadedNote(UWorld* World, FString& OutMessage, FString& OutHint)
+bool UnrealMcpRqlWorldPartition::UnloadedNote(UWorld* World, FString& OutMessage, FString& OutHint, bool bChange)
 {
 	// Runs after every query over the world's actors: count them all, describe only the few it names.
 	using namespace UnrealMcpRqlWorldPartitionLocal;
@@ -184,10 +184,12 @@ bool UnrealMcpRqlWorldPartition::UnloadedNote(UWorld* World, FString& OutMessage
 		return false;
 	if (Count > Named)
 		Examples.Add(FString::Printf(TEXT("+%d more"), Count - Named));
-	OutMessage = FString::Printf(TEXT("%d World Partition actor(s) are not loaded (only loaded actors are listed): %s"),
-		Count, *FString::Join(Examples, TEXT(", ")));
+	OutMessage = FString::Printf(TEXT("%s%d World Partition actor(s) are not loaded (%s): %s"),
+		bChange ? TEXT("nothing was changed: no loaded actor matched, and ") : TEXT(""), Count,
+		bChange ? TEXT("they were not searched") : TEXT("only loaded actors are listed"), *FString::Join(Examples, TEXT(", ")));
 	OutHint = FString::Printf(TEXT("list them: rql-query unloadedActors | select Label Class Location Bounds; load them (changes nothing saved, "
-		"rql-query): editor | call LoadActors([\"%s\"]) or editor | call LoadRegion([minX, minY], [maxX, maxY])"), *First);
+		"rql-query): editor | call LoadActors([\"%s\"]) or editor | call LoadRegion([minX, minY], [maxX, maxY])%s"), *First,
+		bChange ? TEXT("; then run the change again") : TEXT(""));
 	return true;
 }
 

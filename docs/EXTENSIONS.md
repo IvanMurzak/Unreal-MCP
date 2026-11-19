@@ -67,6 +67,9 @@ Operations classes: declare the functions `UFUNCTION(BlueprintCallable, meta = (
 (UHT records C++ default arguments for BlueprintCallable functions only; the meta keeps them out of Blueprint menus),
 put the agent-facing description in the doc comment above each, and report failures with
 `return UnrealMcpRql::Failed<T>(TEXT("..."));` (UFUNCTIONs cannot throw) after validating, before changing anything.
+`UnrealMcpRql::Warn(TEXT("..."))` adds a warning to the answer of a call that succeeds (a `call-warning` diagnostic
+that names the function, once per message): something the caller should know about what the call did, e.g. that a
+river's bed cuts a road.
 Object and class parameters are required (RQL refuses null for them) unless the C++ default is `nullptr`, so the
 functions need no null guards for them. A mutation runs in one editor transaction, so create objects with
 `RF_Transactional` and `Modify()` what you change. Object parameters accept asset paths, class names and actor labels as

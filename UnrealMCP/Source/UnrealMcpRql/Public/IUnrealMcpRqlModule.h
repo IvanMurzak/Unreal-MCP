@@ -128,6 +128,13 @@ namespace UnrealMcpRql
 	 */
 	UNREALMCPRQL_API void Fail(const FString& Message);
 
+	/**
+	 * Add a warning to the answer of the UFUNCTION that RQL is calling right now (the call still succeeds and returns its
+	 * value): something the caller should know about what it did, e.g. "the river's bed cuts the road 'Road' at ...". The
+	 * answer lists it under `diagnostics` (code `call-warning`), once per message. Outside an RQL call it does nothing.
+	 */
+	UNREALMCPRQL_API void Warn(const FString& Message);
+
 	/** Fail(@p Message) and return the "nothing" value of the function: `return UnrealMcpRql::Failed<AActor*>(TEXT("..."));`. */
 	template <typename T = void>
 	T Failed(const FString& Message)

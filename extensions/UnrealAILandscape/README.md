@@ -74,8 +74,9 @@ far as it found one); use it for a road up a hill, `Ramp` for a route you choose
 Channel / Ridge; `Location`, `Height`, `Radius`, `Length`); `Coverage` (read-only) lists where a paint layer is painted (`Location`, `Min`, `Max`, `Area`,
 `Weight`); `Paint` adds a paint layer by name (creating
 a weight-blended layer info asset, so painting Rock takes its weight from Grass) and paints it with a soft edge; `PaintWhere`
-paints a layer wherever the ground matches a rule (slope `MinSlope` .. `MaxSlope` degrees, world height `MinHeight` ..
-`MaxHeight` cm, optionally only inside a `Within` box `[MinX, MinY, MaxX, MaxY]`; soft edges 2 degrees and 50 cm past the bounds): sand on the beaches,
+moves a layer's weight to `Strength` (0..1; 0 erases, and the other layers get the weight back) wherever the ground matches a rule (slope `MinSlope` .. `MaxSlope` degrees, world height `MinHeight` ..
+`MaxHeight` cm, defaults `-1e7` .. `1e7`, optionally only inside a `Within` box `[MinX, MinY, MaxX, MaxY]` with `MinX < MaxX`, `MinY < MaxY`; soft edges 2 degrees and 50 cm past the bounds)
+and returns `{Vertices, Matched, Ready, State, Seconds}`, the same arguments, meaning and answer as Mesh Terrain's `PaintWhere`: sand on the beaches,
 rock on every slope steeper than 30 degrees, after a base layer painted with `Paint` (radius 0); `CreateLayerMaterial` makes a material whose Landscape Layer Blend has one
 coloured layer per name; `Delete` removes a whole landscape with every World Partition streaming proxy (`Destroy` on the
 landscape actor alone leaves the proxies behind).
@@ -90,6 +91,7 @@ the `MaxHeightMeters` to recreate with); they never flatten a hilltop at the lim
 
 Every shaping and paint call of these operations that changes the landscape (`Sculpt`, `Flatten`, `Carve`, `Smooth`, `Ramp`, `RoadBetween`, `Paint`, `PaintWhere`, and
 `CreateRiverBetween` with a `Depth`) appends a record to the landscape's edit log, read with `landscapes | where IsPrimary | select Edits`
+(the log is the landscape actor's: `Edits` of a streaming proxy is empty)
 (the last 5000 records, newest first: `Index`, `Op`, `Label`, `Points`, `Radius`, `Width`, `Height`, `Layer`, `Rule`, `Time`).
 A path keeps the points that hold it within 50 cm of the real one (at most 1000 per record; the whole log keeps at most
 100,000 points, dropping its oldest records first), so a road's switchbacks and a river's bends read back as built. Each of these
@@ -103,7 +105,9 @@ On a World Partition map, an editor that opens the map loads only the region aro
 `Bounds` load the landscape's streaming proxies they need first (as the World Partition window's region loading does), so
 they see the whole landscape and not only the loaded part; `landscapes`, `waterBodies` and `waterZones` load every actor of
 their kind on the map, so a far lake or the streaming proxies a deleted landscape left behind are listed too. Loading
-changes and dirties nothing.
+changes and dirties nothing. A streaming proxy in a data layer that is not loaded in the editor cannot be loaded this way: an
+operation that needs it fails, names it and changes nothing (it used to run on the rest of the ground); load the data layer
+in the editor first.
 
 `Create`, `Sculpt` and `Paint` return with the landscape's edit layers merged: its heights, heightfield collision (line
 traces, `GetHeightAtLocation`, actors placed on the ground) and rendered surface match as soon as the call ends. Without
@@ -121,7 +125,8 @@ editor opens the landscape, and `Rebuild` fails there.
 `CreateOcean` (surface at a height, filling the water zone: land above it hides it, so one ocean surrounds an island),
 `CreateLake` (round, its centre's Z the water surface), `CreateRiver` (through your points, upstream first) and
 `CreateRiverBetween` (along the lowest ground of a landscape from a source to a mouth, the water flowing downhill all the
-way; Depth > 0 carves its bed so it shows across a rise) place bodies the way the Place Actors panel does (the Water
+way; Depth > 0 carves its bed so it shows across a rise; on flat ground it winds from side to side, `Meander` 0..1, default 1,
+0 for the straight lowest route; when its bed, or a `Carve`, cuts a road of the edit log the answer warns where) place bodies the way the Place Actors panel does (the Water
 defaults: material, waves), create the water zone when there is none (`SetZone` resizes it; 0 covers every landscape
 plus 25%) and build the water mesh before returning. Each call is bounded work (a river on a 2 km landscape routes and
 carves in about a second); the first water material then compiles its shaders for a while, and `Water.Ready` /
@@ -137,6 +142,18 @@ settings, in memory only): the engine still creates the layer where the dialog's
 Landscape mode. A body spawned without the Water defaults (`SpawnActor`, Python: no material, invisible, and a later
 `set_water_material` makes the water zone draw it without its water mesh, an engine ensure) gets the Place Actors
 defaults of its type on the next tick, its spline kept.
+
+## Breaking changes
+
+- **`PaintWhere` now works as Mesh Terrain's `PaintWhere`** (next release after 0.3.0). It moves the layer's weight to
+  `Strength` where the rule matches, so a lower `Strength` lowers a weight and `Strength` 0 erases the layer (the other
+  layers get the weight back); before, it only raised a weight and refused 0. It refuses swapped `Within` corners
+  (`MinX < MaxX`, `MinY < MaxY`) instead of sorting them, its height bounds default to `-1e7` .. `1e7` cm (were `-1e9` ..
+  `1e9`), and it returns `{Vertices, Matched, Ready, State, Seconds}` instead of the number of changed vertices (read
+  `.Vertices`).
+- **`LandscapeProxy.Edits`** is the landscape actor's only: a streaming proxy's is empty (it repeated the whole log).
+- **`CreateRiverBetween`** winds from side to side on flat ground by default (`Meander` 1, its new last argument), so
+  the same call routes and carves a different path than before; `Meander` 0 keeps the straight lowest route.
 
 ## Releases and development
 

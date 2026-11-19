@@ -206,6 +206,14 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 		TestEqual(TEXT("landscapes loaded every streaming proxy"), WpProxies(Guid), AllProxies);
 		WpNothingChanged(TEXT("landscapes"), UndoBefore, DirtyBefore);
 
+		// The edit log is the landscape actor's: the streaming proxies do not repeat it (DEV-113: 16 copies in a listing).
+		// landscapes | where not IsPrimary and Edits.count() > 0 | count
+		TSharedPtr<FJsonObject> Repeated;
+		UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"not","args":[{"path":["IsPrimary"]}]},{"op":">","args":[{"call":"count","on":{"path":["Edits"]},"args":[]},{"lit":0}]}]}},{"op":"count"}]})RQL"), false, &Repeated);
+		double RepeatedCount = -1.0;
+		TestTrue(*FString::Printf(TEXT("no streaming proxy repeats the edit log (%s)"), *WpJson(Repeated).Left(300)),
+			Repeated.IsValid() && Repeated->TryGetNumberField(TEXT("value"), RepeatedCount) && RepeatedCount == 0.0);
+
 		// landscape | call Delete(unreal.find("WpSpecLand")), unsaved: a later listing must not load the proxies back
 		if (!WpRun(TEXT("deleted"), WpCall(TEXT("landscape"), TEXT("Delete"), WpFind())))
 			return;

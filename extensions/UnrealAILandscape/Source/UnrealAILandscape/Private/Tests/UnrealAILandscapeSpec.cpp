@@ -997,6 +997,66 @@ void FUnrealAILandscapeSpec::Define()
 			TestFalse(TEXT("a Within off the landscape is refused"), Call(Label, TEXT("PaintWhere"), WithinArgs({ X0 + 90000.0, 0.0, X0 + 95000.0, 5000.0 })));
 		});
 
+		It("PaintWhere moves the weight to Strength as Mesh Terrain's does: down too, 0 erases and gives the weight back, swapped Within corners refused", [this]()
+		{
+			const FString Label = TEXT("RqlSpecPaintWhereTo_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 870000.0;
+			ALandscape* Landscape = Create(Label, X0, 40);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			TestTrue(TEXT("grass everywhere"), Call(Label, TEXT("Paint"), TEXT(R"({"lit":"Grass"},)") + P3(X0, 0, 0) + TEXT(",") + Lit(0)));
+			// landscape | call PaintWhere(unreal.find("@LABEL@"), "Rock", 0, 90, -1e7, 1e7, @STRENGTH@)
+			const auto PaintRock = [&Label](double Strength, TSharedPtr<FJsonObject>* Out = nullptr)
+			{
+				return Call(Label, TEXT("PaintWhere"), FString::Printf(TEXT(R"({"lit":"Rock"},{"lit":0},{"lit":90},{"lit":-1e7},{"lit":1e7},{"lit":%g})"), Strength), Out);
+			};
+			const auto Weight = [Landscape, X0](const TCHAR* Layer) { return LandscapeSpecLayerWeight(Landscape, Layer, X0 + 500.0, 500.0); };
+			TSharedPtr<FJsonObject> Out;
+			TestTrue(TEXT("rock to 0.6"), PaintRock(0.6, &Out));
+			const TSharedPtr<FJsonObject> Result = LandscapeSpecCallResult(Out);
+			TestTrue(*FString::Printf(TEXT("answers {Vertices, Matched, Ready, State, Seconds} as Mesh Terrain's PaintWhere (%s)"), *LandscapeSpecJson(Out).Left(400)),
+				Result.IsValid() && Result->GetNumberField(TEXT("Vertices")) > 1000 && Result->GetNumberField(TEXT("Matched")) > 1000 && Result->HasField(TEXT("Ready"))
+				&& Result->HasField(TEXT("State")) && Result->HasField(TEXT("Seconds")));
+			TestTrue(*FString::Printf(TEXT("rock 0.6, grass 0.4 (%d, %d)"), Weight(TEXT("Rock")), Weight(TEXT("Grass"))), FMath::Abs(Weight(TEXT("Rock")) - 153) <= 1 && FMath::Abs(Weight(TEXT("Grass")) - 102) <= 1);
+			// It used to only raise a weight: a lower Strength changed nothing.
+			TestTrue(TEXT("rock to 0.2"), PaintRock(0.2));
+			TestTrue(*FString::Printf(TEXT("rock goes down to 0.2 and grass gets the weight back (%d, %d)"), Weight(TEXT("Rock")), Weight(TEXT("Grass"))),
+				FMath::Abs(Weight(TEXT("Rock")) - 51) <= 1 && FMath::Abs(Weight(TEXT("Grass")) - 204) <= 2);
+			TestTrue(TEXT("Strength 0 erases"), PaintRock(0.0));
+			TestTrue(*FString::Printf(TEXT("no rock left, all grass (%d, %d)"), Weight(TEXT("Rock")), Weight(TEXT("Grass"))), Weight(TEXT("Rock")) == 0 && Weight(TEXT("Grass")) >= 253);
+			TestFalse(TEXT("Strength past 1 is refused"), PaintRock(1.5));
+			// landscape | call PaintWhere(unreal.find("@LABEL@"), "Rock", 0, 90, -1e7, 1e7, 1, "", [X0 + 1000, 1000, X0 - 1000, -1000])
+			TSharedPtr<FJsonObject> Swapped;
+			TestFalse(TEXT("swapped Within corners are refused"), Call(Label, TEXT("PaintWhere"), FString::Printf(
+				TEXT(R"({"lit":"Rock"},{"lit":0},{"lit":90},{"lit":-1e7},{"lit":1e7},{"lit":1},{"lit":""},{"list":[{"lit":%.0f},{"lit":1000},{"lit":%.0f},{"lit":-1000}]})"), X0 + 1000.0, X0 - 1000.0), &Swapped));
+			TestTrue(*FString::Printf(TEXT("naming the order (%s)"), *LandscapeSpecJson(Swapped).Left(400)), LandscapeSpecJson(Swapped).Contains(TEXT("MinX < MaxX and MinY < MaxY")));
+			TestEqual(TEXT("and painting nothing"), Weight(TEXT("Rock")), 0);
+		});
+
+		It("keeps circles round and Within whole on a landscape scaled unevenly on X and Y", [this]()
+		{
+			const FString Label = TEXT("RqlSpecUneven_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const double X0 = 890000.0;
+			ALandscape* Landscape = Create(Label, X0, 20);
+			if (!TestNotNull(TEXT("landscape created"), Landscape))
+				return;
+			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
+			// Half the Y scale: the landscape now spans Y -1000 .. 0, its vertices half as far apart on Y as on X (a level
+			// without World Partition: the landscape actor holds every component).
+			const FVector Scale = Landscape->GetActorScale3D();
+			Landscape->SetActorScale3D(FVector(Scale.X, Scale.Y * 0.5, Scale.Z));
+			const double Yc = -500.0;
+			TestTrue(TEXT("a hill"), Call(Label, TEXT("Sculpt"), P3(X0, Yc, 0) + TEXT(",") + Lit(400) + TEXT(",") + Lit(300)));
+			const double OnX = LandscapeSpecLayerHeight(Landscape, X0 + 200.0, Yc), OnY = LandscapeSpecLayerHeight(Landscape, X0, Yc + 200.0);
+			TestTrue(*FString::Printf(TEXT("as high 2 m from the centre along X and along Y (%.1f, %.1f cm)"), OnX, OnY), OnX > 100.0 && FMath::Abs(OnX - OnY) < 15.0);
+			// landscape | call PaintWhere(unreal.find("@LABEL@"), "Rock", 0, 90, -1e7, 1e7, 1, "", [X0 - 100, -950, X0 + 100, -50]): a strip along Y
+			TestTrue(TEXT("rock along a strip"), Call(Label, TEXT("PaintWhere"), FString::Printf(
+				TEXT(R"({"lit":"Rock"},{"lit":0},{"lit":90},{"lit":-1e7},{"lit":1e7},{"lit":1},{"lit":""},{"list":[{"lit":%.0f},{"lit":-950},{"lit":%.0f},{"lit":-50}]})"), X0 - 100.0, X0 + 100.0)));
+			TestTrue(*FString::Printf(TEXT("painted at both ends of the strip (%d, %d)"), LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, -900.0), LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, -100.0)),
+				LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, -900.0) == 255 && LandscapeSpecLayerWeight(Landscape, TEXT("Rock"), X0, -100.0) == 255);
+		});
+
 		It("Coverage lists where a paint layer is painted, in rql-query, and names the layers for an unknown one", [this]()
 		{
 			const FString Label = TEXT("RqlSpecCoverage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
@@ -1246,13 +1306,57 @@ void FUnrealAILandscapeSpec::Define()
 			FHeightmapAccessor<false> Heights(Info);
 			if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
 				Heights.SetEditLayer(EditLayer->GetGuid());
-			const FVector Middle = Landscape->LandscapeActorToWorld().InverseTransformPosition(FVector(-1200000, -10000, 0));
+			// Under the river near its mouth (it winds, so not at a fixed point), where the ground was flat at 0.
+			const FVector Middle = Landscape->LandscapeActorToWorld().InverseTransformPosition(Spline->GetLocationAtSplinePoint(Count * 4 / 5, ESplineCoordinateSpace::World));
 			uint16 Value = 0;
 			Heights.GetDataFast(FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), &Value);
 			const double Cm = (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
 			TestTrue(*FString::Printf(TEXT("the bed is carved about 3 m deep (%.1f cm)"), Cm), Cm < -200.0 && Cm > -400.0);
 			// water | call CreateRiverBetween("@LABEL@x", unreal.find("@LAND@"), [0, 0, 0], [10, 0, 0])
 			TestFalse(TEXT("points off the landscape are refused"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@x"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":0},{"lit":0},{"lit":0}]},{"list":[{"lit":10},{"lit":0},{"lit":0}]}]}]})RQL"), Label, Land, true));
+		});
+
+		It("winds a river across flat ground (Meander 0 keeps the straight lowest route) and warns when its bed cuts a logged road", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			const FString Land = TEXT("RqlSpecMeanderLand_") + Id;
+			const FString Label = TEXT("RqlSpecMeander_") + Id;
+			// landscape | call Create("@LAND@", [-1300000, 0, 0], 300)
+			TestTrue(TEXT("landscape created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Create","args":[{"lit":"@LAND@"},{"list":[{"lit":-1300000},{"lit":0},{"lit":0}]},{"lit":300}]}]})RQL"), Label, Land, true));
+			ALandscape* Landscape = LandscapeSpecFind<ALandscape>(Land);
+			if (!TestNotNull(TEXT("the landscape"), Landscape))
+				return;
+			const TSet<AActor*> Snapshot = LandscapeSpecSnapshot();
+			ON_SCOPE_EXIT
+			{
+				LandscapeSpecDestroyNewWater(Snapshot);
+				LandscapeSpecDestroy(Landscape);
+			};
+			// landscape | call Ramp(unreal.find("@LAND@"), [[-1314000, 0, 30], [-1286000, 0, 30]], 600, 300, 0, "Spec road"): a road across the valley
+			TestTrue(TEXT("a road"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Ramp","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"list":[{"lit":-1314000},{"lit":0},{"lit":30}]},{"list":[{"lit":-1286000},{"lit":0},{"lit":30}]}]},{"lit":600},{"lit":300},{"lit":0},{"lit":"Spec road"}]}]})RQL"), Label, Land, true));
+			// water | call CreateRiverBetween("@LABEL@s", unreal.find("@LAND@"), [-1295000, 12000, 0], [-1295000, -13000, 0], 800, 0, null, 0):
+			// first, with no bed (a carved bed is the lowest ground a later route follows)
+			TestTrue(TEXT("a straight river"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@s"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1295000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1295000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":0},{"lit":null},{"lit":0}]}]})RQL"), Label, Land, true));
+			double Straight = 0.0;
+			const AWaterBodyRiver* Plain = LandscapeSpecFind<AWaterBodyRiver>(Label + TEXT("s"));
+			for (int32 Index = 0; Plain && Index < Plain->GetWaterSpline()->GetNumberOfSplinePoints(); ++Index)
+				Straight = FMath::Max(Straight, FMath::Abs(Plain->GetWaterSpline()->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).X + 1295000.0));
+			TestTrue(*FString::Printf(TEXT("Meander 0 keeps the lowest route, straight on flat ground (%.0f cm off)"), Straight), Plain && Straight < 150.0);
+			// water | call CreateRiverBetween("@LABEL@", unreal.find("@LAND@"), [-1305000, 12000, 0], [-1305000, -13000, 0], 800, 300)
+			TSharedPtr<FJsonObject> Out;
+			TestTrue(TEXT("river created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1305000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1305000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":300}]}]})RQL"), Label, Land, true, &Out));
+			TestTrue(*FString::Printf(TEXT("the answer warns that the bed cuts the road, and where (%s)"), *LandscapeSpecJson(Out).Left(800)),
+				LandscapeSpecJson(Out).Contains(TEXT("call-warning")) && LandscapeSpecJson(Out).Contains(TEXT("cuts the road 'Spec road' (Ramp")));
+			const AWaterBodyRiver* River = LandscapeSpecFind<AWaterBodyRiver>(Label);
+			if (!TestNotNull(TEXT("the river"), River))
+				return;
+			// The farthest its spline strays from the straight line X = -1305000.
+			double Swing = 0.0;
+			for (int32 Index = 0; Index < River->GetWaterSpline()->GetNumberOfSplinePoints(); ++Index)
+				Swing = FMath::Max(Swing, FMath::Abs(River->GetWaterSpline()->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).X + 1305000.0));
+			const FVector First = River->GetWaterSpline()->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World);
+			TestTrue(*FString::Printf(TEXT("it winds from side to side (%.0f cm off the straight line)"), Swing), Swing > 400.0 && Swing < 1500.0);
+			TestTrue(*FString::Printf(TEXT("from its source (%s)"), *First.ToString()), FVector2D::Distance(FVector2D(First), FVector2D(-1305000, 12000)) < 300.0);
 		});
 
 		It("keeps a water body placed with SpawnActor from opening the modal edit layer dialog, reports it and repairs it with SetMaterial", [this]()

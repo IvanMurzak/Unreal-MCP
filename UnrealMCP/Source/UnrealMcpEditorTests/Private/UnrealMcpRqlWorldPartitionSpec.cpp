@@ -275,6 +275,30 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		TestTrue(TEXT("LoadWorldPartitionActors without World Partition"), UnrealMcpRql::LoadWorldPartitionActors({ FGuid::NewGuid() }));
 		TestTrue(TEXT("LoadWorldPartitionRegion without World Partition"), UnrealMcpRql::LoadWorldPartitionRegion(FBox2D(FVector2D(0, 0), FVector2D(1, 1)), &Loaded) && Loaded.IsEmpty());
 	});
+
+	It("fails a change over actors that reaches no loaded actor while some are not loaded, and changes a loaded one with the warning", [this]()
+	{
+		using namespace UnrealMcpRqlSpecHelpers;
+		ON_SCOPE_EXIT { LeaveLevel(); };
+		if (!MakeFarCubeLevel())
+			return;
+		// rql-mutate actors | where Label == "WpSpecFar" | set HiddenInEditor = true: the cube is not loaded, so nothing is
+		// changed; it used to answer an empty receipt with a warning, which agents read as done (DEV-113).
+		const TSharedPtr<FJsonObject> Unloaded = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"WpSpecFar"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), true);
+		TestTrue(*FString::Printf(TEXT("fails, says nothing was changed and how to load it (%s)"), *Said(Unloaded)),
+			!IsOk(Unloaded) && Said(Unloaded).Contains(TEXT("world-partition-unloaded")) && Said(Unloaded).Contains(TEXT("nothing was changed"))
+			&& Said(Unloaded).Contains(TEXT("editor | call LoadActors(")));
+		// The same as a read stays an empty answer with the warning.
+		const TSharedPtr<FJsonObject> Read = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"WpSpecFar"}]}}]})RQL"));
+		TestTrue(*FString::Printf(TEXT("a read only warns (%s)"), *Said(Read)), IsOk(Read) && Said(Read).Contains(TEXT("world-partition-unloaded")));
+		// editor | call SpawnActor("/Engine/BasicShapes/Cube", "WpSpecNear", [0, 0, 0]): a loaded actor beside the unloaded one
+		const TSharedPtr<FJsonObject> Spawned = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"/Engine/BasicShapes/Cube"},{"lit":"WpSpecNear"},{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]})RQL"), true);
+		TestTrue(*FString::Printf(TEXT("a loaded cube (%s)"), *Said(Spawned)), IsOk(Spawned));
+		// actors | where Label == "WpSpecNear" | set HiddenInEditor = true
+		const TSharedPtr<FJsonObject> Loaded = Run(TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"WpSpecNear"}]}},{"op":"set","assign":[{"target":{"path":["HiddenInEditor"]},"value":{"lit":true}}]}]})RQL"), true);
+		TestTrue(*FString::Printf(TEXT("a change that reaches a loaded actor succeeds, with the warning (%s)"), *Said(Loaded)),
+			IsOk(Loaded) && RowCount(Loaded) == 1 && Said(Loaded).Contains(TEXT("world-partition-unloaded")));
+	});
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

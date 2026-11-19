@@ -46,6 +46,7 @@ namespace UnrealMcpRqlWorldPartition
 	/**
 	 * The `world-partition-unloaded` warning a query over the editor world's actors gets while some are not loaded: how
 	 * many, a few of them, and how to list and load them. False when every actor is loaded (or no World Partition).
+	 * @p bChange words it for a change that reached no actor (an error: nothing was changed).
 	 */
-	bool UnloadedNote(UWorld* World, FString& OutMessage, FString& OutHint);
+	bool UnloadedNote(UWorld* World, FString& OutMessage, FString& OutHint, bool bChange = false);
 }

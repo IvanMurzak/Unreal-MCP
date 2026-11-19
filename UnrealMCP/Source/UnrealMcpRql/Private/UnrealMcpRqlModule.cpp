@@ -14,6 +14,7 @@ namespace UnrealMcpRqlModuleLocal
 	bool GInCall = false;
 	bool GCallFailed = false;
 	FString GCallFailure;
+	TArray<FString> GCallWarnings;
 }
 
 FName IUnrealMcpRqlModule::GetModularFeatureName()
@@ -29,6 +30,13 @@ void UnrealMcpRql::Fail(const FString& Message)
 		return; // outside an RQL call, or the first failure wins
 	GCallFailed = true;
 	GCallFailure = Message.IsEmpty() ? FString(TEXT("the call failed")) : Message;
+}
+
+void UnrealMcpRql::Warn(const FString& Message)
+{
+	using namespace UnrealMcpRqlModuleLocal;
+	if (GInCall && !Message.IsEmpty())
+		GCallWarnings.AddUnique(Message);
 }
 
 UClass* UnrealMcpRql::ResolveClass(const FString& Name)
@@ -58,12 +66,15 @@ void UnrealMcpRqlBeginCall()
 	GInCall = true;
 	GCallFailed = false;
 	GCallFailure.Reset();
+	GCallWarnings.Reset();
 }
 
-bool UnrealMcpRqlEndCall(FString& OutFailure)
+bool UnrealMcpRqlEndCall(FString& OutFailure, TArray<FString>& OutWarnings)
 {
 	using namespace UnrealMcpRqlModuleLocal;
 	GInCall = false;
+	OutWarnings = MoveTemp(GCallWarnings);
+	GCallWarnings.Reset();
 	OutFailure = GCallFailure;
 	const bool bFailed = GCallFailed;
 	GCallFailed = false;

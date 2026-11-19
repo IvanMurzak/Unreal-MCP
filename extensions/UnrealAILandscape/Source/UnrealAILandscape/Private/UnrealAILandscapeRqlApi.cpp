@@ -29,6 +29,7 @@
 #include "Misc/App.h"
 #include "EngineDefines.h" // UE_LARGE_HALF_WORLD_MAX
 #include "Misc/Paths.h"
+#include "UObject/Package.h"
 #include "WorldPartition/ActorPartition/PartitionActorDesc.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -99,24 +100,44 @@ namespace UnrealAILandscapeRqlApiLocal
 
 	/**
 	 * Load the World Partition actors of the editor world's descs @p Wanted accepts (only unloaded ones are offered), as the
-	 * editor's region loading does, through the core loader (it skips actors deleted in this session and adds no undo step
-	 * and no unsaved change); false after Fail when the engine cannot load them.
+	 * editor's region loading does, through the core loader (it adds no undo step and no unsaved change); false after Fail
+	 * when the engine cannot load them, or when some stay unloaded: the loader skips an actor in a data layer the editor has
+	 * not loaded, and an edit over the rest would change only part of the ground. Actors deleted in this session (their
+	 * descriptor stays until save, their package is dirty) are not wanted.
 	 */
 	bool LoadDescs(UClass* Class, TFunctionRef<bool(const FWorldPartitionActorDescInstance*)> Wanted)
 	{
 		UWorld* World = UnrealMcpRql::EditorWorld();
-		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
+		// The loader loads into the editor world only: a Play In Editor world streams by itself.
+		UWorldPartition* Partition = World && World->WorldType == EWorldType::Editor ? World->GetWorldPartition() : nullptr;
 		if (!Partition)
 			return true;
 		TArray<FGuid> ToLoad;
 		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, Class, [&](const FWorldPartitionActorDescInstance* Instance)
 		{
-			if (!Instance->IsLoaded() && Wanted(Instance))
+			const UPackage* Package = FindObject<UPackage>(nullptr, *Instance->GetActorPackage().ToString());
+			if (!Instance->IsLoaded() && !Instance->GetActorIsRuntimeOnly() && !(Package && Package->IsDirty()) && Wanted(Instance))
 				ToLoad.Add(Instance->GetGuid());
 			return true;
 		});
 		FString Error;
-		return UnrealMcpRql::LoadWorldPartitionActors(ToLoad, &Error) || UnrealMcpRql::Failed<bool>(Error);
+		if (!UnrealMcpRql::LoadWorldPartitionActors(ToLoad, &Error))
+			return UnrealMcpRql::Failed<bool>(Error);
+		TArray<FString> Left;
+		for (const FGuid& Guid : ToLoad)
+		{
+			const FWorldPartitionActorDescInstance* Instance = Partition->GetActorDescInstance(Guid);
+			if (Instance && !Instance->IsLoaded())
+				Left.Add((Instance->GetActorLabel().IsNone() ? Instance->GetActorName() : Instance->GetActorLabel()).ToString());
+		}
+		if (Left.IsEmpty())
+			return true;
+		const int32 Named = Left.Num();
+		if (Left.Num() > 5)
+			Left.SetNum(5);
+		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%d World Partition actor(s) could not be loaded (%s%s), e.g. in a data layer that is not loaded in the editor, so the "
+			"operation would see only part of the landscape; nothing was done. Load that data layer in the editor first (Data Layers outliner: Load)"),
+			Named, *FString::Join(Left, TEXT(", ")), Named > Left.Num() ? *FString::Printf(TEXT(", +%d more"), Named - Left.Num()) : TEXT("")));
 	}
 
 	bool LoadLandscape(ALandscapeProxy* Landscape, const FBox2D* Area)
@@ -141,13 +162,21 @@ namespace UnrealAILandscapeRqlApiLocal
 			UE_LOG(LogUnrealAILandscape, Warning, TEXT("could not load the World Partition actors of class %s: only the loaded ones are listed"), *GetNameSafe(Class));
 	}
 
-	/** A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius in vertices (0: everything). */
+	/**
+	 * A circle of landscape vertices to edit: the landscape info, the covered vertex rectangle, centre and radius (0:
+	 * everything). Distances are in X vertices: on a landscape scaled unevenly on X and Y a Y step is AspectY of them, so
+	 * the circle stays round in the world.
+	 */
 	struct FCircle
 	{
 		ULandscapeInfo* Info = nullptr;
 		FIntRect Rect;
 		FVector2D Center = FVector2D::ZeroVector;
 		double Radius = 0.0;
+		double AspectY = 1.0; // Y scale / X scale
+
+		/** The world distance from the centre to vertex @p X, @p Y, in X vertices. */
+		double DistanceTo(double X, double Y) const { return FVector2D(X - Center.X, (Y - Center.Y) * AspectY).Size(); }
 	};
 
 	/** The vertices a circle around @p Center (world X, Y) with @p Radius (cm; <= 0 the whole landscape) covers; false after Fail. */
@@ -170,13 +199,16 @@ namespace UnrealAILandscapeRqlApiLocal
 		Out.Rect = Whole;
 		if (Radius <= 0.0)
 			return true;
-		Out.Radius = Radius / FMath::Max(FMath::Abs(ToWorld.GetScale3D().X), UE_KINDA_SMALL_NUMBER);
+		const FVector2D Scale = FVector2D(ToWorld.GetScale3D().GetAbs()).ComponentMax(FVector2D(UE_KINDA_SMALL_NUMBER));
+		Out.Radius = Radius / Scale.X;
+		Out.AspectY = Scale.Y / Scale.X;
+		const double RadiusY = Radius / Scale.Y; // Y vertices
 		// Clamp in double before converting: a huge radius or far centre would overflow int32.
 		const auto Clamped = [](double Value, int32 Low, int32 High) { return FMath::Clamp(Value, Low - 1.0, High + 1.0); };
 		Out.Rect.Min.X = FMath::Max(Whole.Min.X, FMath::FloorToInt(Clamped(Out.Center.X - Out.Radius, Whole.Min.X, Whole.Max.X)));
-		Out.Rect.Min.Y = FMath::Max(Whole.Min.Y, FMath::FloorToInt(Clamped(Out.Center.Y - Out.Radius, Whole.Min.Y, Whole.Max.Y)));
+		Out.Rect.Min.Y = FMath::Max(Whole.Min.Y, FMath::FloorToInt(Clamped(Out.Center.Y - RadiusY, Whole.Min.Y, Whole.Max.Y)));
 		Out.Rect.Max.X = FMath::Min(Whole.Max.X, FMath::CeilToInt(Clamped(Out.Center.X + Out.Radius, Whole.Min.X, Whole.Max.X)));
-		Out.Rect.Max.Y = FMath::Min(Whole.Max.Y, FMath::CeilToInt(Clamped(Out.Center.Y + Out.Radius, Whole.Min.Y, Whole.Max.Y)));
+		Out.Rect.Max.Y = FMath::Min(Whole.Max.Y, FMath::CeilToInt(Clamped(Out.Center.Y + RadiusY, Whole.Min.Y, Whole.Max.Y)));
 		if (Out.Rect.Min.X > Out.Rect.Max.X || Out.Rect.Min.Y > Out.Rect.Max.Y)
 			return UnrealMcpRql::Failed<bool>(TEXT("the circle does not touch the landscape"));
 		return true;
@@ -188,7 +220,7 @@ namespace UnrealAILandscapeRqlApiLocal
 		return T >= 1.0 ? 0.0 : T <= 0.0 ? 1.0 : 0.5 * (1.0 + FMath::Cos(PI * T));
 	}
 
-	/** 1 at the centre, a smooth fall to 0 at the circle's radius (@p Distance in vertices); 1 everywhere for a whole-landscape edit. */
+	/** 1 at the centre, a smooth fall to 0 at the circle's radius (@p Distance in X vertices); 1 everywhere for a whole-landscape edit. */
 	double Falloff(double Distance, const FCircle& Circle)
 	{
 		return Circle.Radius <= 0.0 ? 1.0 : Cosine(Distance / Circle.Radius);
@@ -389,14 +421,14 @@ namespace UnrealAILandscapeRqlApiLocal
 		return Changed;
 	}
 
-	/** EditRect over a circle's rectangle, @p Edit given each vertex's distance from the centre in vertices. */
+	/** EditRect over a circle's rectangle, @p Edit given each vertex's distance from the centre in X vertices (FCircle). */
 	template <typename T, typename TAccessor>
 	int32 EditCircle(ALandscapeProxy* Landscape, TAccessor& Accessor, const FCircle& Circle, TFunctionRef<bool(T&, double)> Edit,
 		TFunctionRef<bool(const FGuid&, const FIntRect&, const TArray<T>&)> BeforeWrite = [](const FGuid&, const FIntRect&, const TArray<T>&) { return true; })
 	{
 		return EditRect<T>(Landscape, Accessor, Circle.Rect, [&Circle, &Edit](T& Value, int32 X, int32 Y)
 		{
-			return Edit(Value, FVector2D::Distance(FVector2D(X, Y), Circle.Center));
+			return Edit(Value, Circle.DistanceTo(X, Y));
 		}, BeforeWrite);
 	}
 
@@ -404,9 +436,12 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * A weight-blended layer painted to @p Weights over @p R takes its weight from the landscape's other weight-blended layers
 	 * there, in proportion, so the layers sum to at most 1 (255). Landscape mode's paint does this; the engine's alphamap
 	 * accessor writes one layer only (UE 5.7+ normalises weights only at the final merge, which then mixed Rock painted at
-	 * full strength half and half with the Grass under it).
+	 * full strength half and half with the Grass under it). With @p Before (the layer's weights before the edit), where the
+	 * layer lost weight the other layers there get it back, in proportion (as Landscape mode's erase does): an erased layer
+	 * leaves the ground under it, not a hole (where no other layer is painted there is nothing to give it to).
 	 */
-	void TakeWeightFromOthers(ULandscapeInfo* Info, const ULandscapeLayerInfoObject* Painted, const FGuid& EditLayer, const FIntRect& R, const TArray<uint8>& Weights)
+	void TakeWeightFromOthers(ULandscapeInfo* Info, const ULandscapeLayerInfoObject* Painted, const FGuid& EditLayer, const FIntRect& R, const TArray<uint8>& Weights,
+		const TArray<uint8>* Before = nullptr)
 	{
 		if (Painted->GetBlendMethod() == ELandscapeTargetLayerBlendMethod::None)
 			return;
@@ -436,9 +471,11 @@ namespace UnrealAILandscapeRqlApiLocal
 			for (int32 Index = 0; Index < Weights.Num(); ++Index)
 			{
 				const int32 Room = 255 - Weights[Index];
-				if (Sum[Index] <= Room || Data[Layer][Index] == 0)
+				const int32 Freed = Before ? FMath::Max(0, (*Before)[Index] - Weights[Index]) : 0;
+				const int32 Total = FMath::Min(Room, Sum[Index] + Freed); // the other layers' new sum there
+				if (Total == Sum[Index] || Data[Layer][Index] == 0)
 					continue;
-				Data[Layer][Index] = static_cast<uint8>(FMath::FloorToInt(static_cast<double>(Data[Layer][Index]) * Room / Sum[Index]));
+				Data[Layer][Index] = static_cast<uint8>(FMath::Clamp(FMath::FloorToInt(static_cast<double>(Data[Layer][Index]) * Total / Sum[Index]), 0, 255));
 				bChanged = true;
 			}
 			if (!bChanged)
@@ -615,6 +652,53 @@ namespace UnrealAILandscapeRqlApiLocal
 		const ALandscape* Primary = Landscape ? Landscape->GetLandscapeActor() : nullptr;
 		const UUnrealAILandscapeEditLog* Log = Primary ? Primary->FindComponentByClass<UUnrealAILandscapeEditLog>() : nullptr;
 		return Log ? Log->Edits : None;
+	}
+
+	void WarnRoadsCut(const ALandscapeProxy* Landscape, const TArray<FVector>& Points, double Width, const TCHAR* What)
+	{
+		if (Points.Num() < 2)
+			return;
+		const auto Box2D = [](const TArray<FVector>& Path)
+		{
+			FBox2D Box(ForceInit);
+			for (const FVector& Point : Path)
+				Box += FVector2D(Point);
+			return Box;
+		};
+		const auto Flat = [](const FVector& Point) { return FVector(Point.X, Point.Y, 0.0); };
+		const FBox2D Cut = Box2D(Points);
+		const TArray<FUnrealAILandscapeEdit>& Log = EditLog(Landscape);
+		for (int32 Index = 0; Index < Log.Num(); ++Index)
+		{
+			const FUnrealAILandscapeEdit& Road = Log[Index];
+			if ((Road.Op != TEXT("RoadBetween") && Road.Op != TEXT("Ramp")) || Road.Points.Num() < 2)
+				continue;
+			// The cut and the road bed overlap where their centre lines come within half of both widths.
+			const double Reach = 0.5 * (Width + Road.Width);
+			if (!Cut.ExpandBy(Reach).Intersect(Box2D(Road.Points)))
+				continue;
+			// The first place the cut's centre line comes within Reach of the road's.
+			const TOptional<FVector> Crossing = [&]() -> TOptional<FVector>
+			{
+				for (int32 A = 0; A + 1 < Points.Num(); ++A)
+				{
+					for (int32 B = 0; B + 1 < Road.Points.Num(); ++B)
+					{
+						FVector OnCut, OnRoad;
+						FMath::SegmentDistToSegmentSafe(Flat(Points[A]), Flat(Points[A + 1]), Flat(Road.Points[B]), Flat(Road.Points[B + 1]), OnCut, OnRoad);
+						if (FVector::Dist(OnCut, OnRoad) <= Reach)
+							return OnRoad;
+					}
+				}
+				return {};
+			}();
+			if (!Crossing.IsSet())
+				continue;
+			const FString Name = Road.Label.IsEmpty() ? FString::Printf(TEXT("the %s road"), *Road.Op) : FString::Printf(TEXT("the road '%s'"), *Road.Label);
+			UnrealMcpRql::Warn(FString::Printf(TEXT("%s cuts %s (%s, edit #%d in LandscapeProxy.Edits) at [%.0f, %.0f]: the road drops into it there. "
+				"Bridge it (a bridge mesh, or Ramp the road over it again), or route the road again with RoadBetween"),
+				What, *Name, *Road.Op, Index, Crossing->X, Crossing->Y));
+		}
 	}
 
 	TArray<FVector> ThinPath(const TArray<FVector>& Points, double Tolerance)
@@ -816,6 +900,8 @@ int32 UUnrealAILandscapeRqlApi::Carve(ALandscapeProxy* Landscape, const TArray<F
 	if (!(Depth >= 1.0 && Depth <= 10000.0))
 		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Depth %g is outside 1 .. 10000 cm"), Depth));
 	const int32 Changed = CarveAlong(Landscape, Points, Width, Depth);
+	if (Changed > 0)
+		WarnRoadsCut(Landscape, Points, Width + 2.0 * Depth, TEXT("the channel")); // its bottom and 1:1 banks
 	return Logged(Changed, Landscape, TEXT("Carve"), Label, Points, 0.0, Width, Depth);
 }
 
@@ -850,22 +936,32 @@ int32 UUnrealAILandscapeRqlApi::Paint(ALandscapeProxy* Landscape, const FString&
 	return Logged(Changed, Landscape, TEXT("Paint"), Label, { FVector(Center.X, Center.Y, 0.0) }, Radius, 0.0, Strength, Name);
 }
 
-int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope, double MinHeight,
-	double MaxHeight, double Strength, const FString& Label, const TArray<double>& Within)
+FUnrealAILandscapePaintWhere UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope,
+	double MinHeight, double MaxHeight, double Strength, const FString& Label, const TArray<double>& Within)
 {
+	// The same validation, defaults and answer as Mesh Terrain's PaintWhere (UnrealAIMeshTerrainSculptApi.cpp RunPaintWhere).
+	using FResult = FUnrealAILandscapePaintWhere;
+	const double Start = FPlatformTime::Seconds();
+	for (const double Value : { MinSlope, MaxSlope, MinHeight, MaxHeight, Strength })
+	{
+		if (!FMath::IsFinite(Value))
+			return UnrealMcpRql::Failed<FResult>(TEXT("the slopes, heights and Strength must be finite numbers"));
+	}
+	if (!(MinSlope >= 0.0 && MinSlope <= MaxSlope && MaxSlope <= 90.0))
+		return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("MinSlope %g / MaxSlope %g: need 0 <= MinSlope <= MaxSlope <= 90 degrees"), MinSlope, MaxSlope));
+	if (MinHeight > MaxHeight)
+		return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("MinHeight %g is above MaxHeight %g (world Z, cm)"), MinHeight, MaxHeight));
+	if (!(Strength >= 0.0 && Strength <= 1.0))
+		return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("Strength %g is outside 0 .. 1 (the weight to paint; 0 erases)"), Strength));
+	if (Within.Num() != 0 && Within.Num() != 4)
+		return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("Within has %d numbers: pass [MinX, MinY, MaxX, MaxY] (world cm) or [] for the whole landscape"), Within.Num()));
+	if (Within.ContainsByPredicate([](double Value) { return !FMath::IsFinite(Value); }))
+		return UnrealMcpRql::Failed<FResult>(TEXT("Within must be finite numbers"));
+	if (Within.Num() == 4 && !(Within[0] < Within[2] && Within[1] < Within[3]))
+		return UnrealMcpRql::Failed<FResult>(TEXT("Within must be [MinX, MinY, MaxX, MaxY] with MinX < MaxX and MinY < MaxY (world cm)"));
 	const FString Name = Layer.TrimStartAndEnd();
 	if (!ValidLayerName(Name, Layer))
-		return 0;
-	if (!(Strength > 0.0 && Strength <= 1.0))
-		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
-	if (!(MinSlope >= 0.0 && MaxSlope <= 90.0 && MinSlope <= MaxSlope))
-		return UnrealMcpRql::Failed<int32>(TEXT("MinSlope and MaxSlope must be within 0 .. 90 degrees, MinSlope at most MaxSlope"));
-	if (!(MinHeight <= MaxHeight))
-		return UnrealMcpRql::Failed<int32>(TEXT("MinHeight must be at most MaxHeight (world Z, cm)"));
-	if (Within.Num() != 0 && Within.Num() != 4)
-		return UnrealMcpRql::Failed<int32>(TEXT("Within is [MinX, MinY, MaxX, MaxY] (world cm), or empty for the whole landscape"));
-	if (Within.ContainsByPredicate([](double Value) { return !FMath::IsFinite(Value); }))
-		return UnrealMcpRql::Failed<int32>(TEXT("Within must be finite numbers"));
+		return FResult();
 	FCircle Area;
 	FBox2D Box(ForceInit);
 	if (Within.Num() == 4)
@@ -873,10 +969,10 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 		Box += FVector2D(Within[0], Within[1]);
 		Box += FVector2D(Within[2], Within[3]);
 		if (!Circle(Landscape, FVector(Box.GetCenter(), 0.0), FMath::Max(Box.GetExtent().Size(), 1.0), Area))
-			return 0;
+			return FResult();
 	}
 	else if (!Circle(Landscape, FVector::ZeroVector, 0.0, Area))
-		return 0;
+		return FResult();
 	const FTransform ToWorld = Landscape->LandscapeActorToWorld();
 	FIntRect R = Area.Rect;
 	if (Box.bIsValid)
@@ -890,16 +986,25 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 		R.Max.X = FMath::Min(R.Max.X, FMath::CeilToInt(Local.Max.X));
 		R.Max.Y = FMath::Min(R.Max.Y, FMath::CeilToInt(Local.Max.Y));
 		if (R.Min.X > R.Max.X || R.Min.Y > R.Max.Y)
-			return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Within does not overlap %s"), *Landscape->GetActorNameOrLabel()));
+			return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("Within is off the landscape %s"), *Landscape->GetActorNameOrLabel()));
+	}
+	// Erasing a layer the landscape does not have changes nothing (and must not add it: a misspelled name).
+	if (Strength <= 0.0 && !Area.Info->GetLayerInfoByName(FName(*Name)))
+	{
+		FResult Nothing;
+		Nothing.Ready = true;
+		Nothing.State = TEXT("merged");
+		Nothing.Seconds = FPlatformTime::Seconds() - Start;
+		return Nothing;
 	}
 	ULandscapeLayerInfoObject* LayerInfo = LayerInfoFor(Landscape, Area.Info, FName(*Name));
 	if (!LayerInfo)
-		return 0;
+		return FResult();
 
 	// The ground over the rectangle and one vertex around it (the slopes at its edge).
 	const FGuid HeightLayer = EditLayerGuid(Landscape, ELandscapeToolTargetType::Heightmap);
 	if (!HeightLayer.IsValid())
-		return 0;
+		return FResult();
 	FIntRect Whole;
 	Area.Info->GetLandscapeExtent(Whole);
 	const FIntRect G(FIntPoint(FMath::Max(Whole.Min.X, R.Min.X - 1), FMath::Max(Whole.Min.Y, R.Min.Y - 1)),
@@ -916,9 +1021,15 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	{
 		return Value < Low ? Cosine((Low - Value) / Edge) : Value > High ? Cosine((Value - High) / Edge) : 1.0;
 	};
+	FResult Out;
+	// The layer's weights before the edit, row by row over R: where it loses weight, the other layers get it back.
+	const int32 RW = R.Width() + 1;
+	TArray<uint8> Before;
+	Before.SetNumZeroed(RW * (R.Height() + 1));
 	TAlphamapAccessor<false> Accessor(Area.Info, LayerInfo);
-	const int32 Changed = EditRect<uint8>(Landscape, Accessor, R, [&](uint8& Value, int32 X, int32 Y)
+	Out.Vertices = EditRect<uint8>(Landscape, Accessor, R, [&](uint8& Value, int32 X, int32 Y)
 	{
+		Before[(Y - R.Min.Y) * RW + (X - R.Min.X)] = Value;
 		if (!Inside(X, Y))
 			return false;
 		const FVector World = ToWorld.TransformPosition(FVector(X, Y, LocalZ(X, Y)));
@@ -929,16 +1040,17 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 		const double DzDx = X1 > X0 ? (LocalZ(X1, Y) - LocalZ(X0, Y)) * Scale.Z / ((X1 - X0) * Scale.X) : 0.0;
 		const double DzDy = Y1 > Y0 ? (LocalZ(X, Y1) - LocalZ(X, Y0)) * Scale.Z / ((Y1 - Y0) * Scale.Y) : 0.0;
 		const double Slope = FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(DzDx * DzDx + DzDy * DzDy)));
-		const double Height = World.Z;
-		const double Weight = Strength * Band(Slope, MinSlope, MaxSlope, 2.0) * Band(Height, MinHeight, MaxHeight, 50.0);
-		const uint8 Target = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(255.0 * Weight), 0, 255));
-		if (Target <= Value)
+		const double Weight = Band(Slope, MinSlope, MaxSlope, 2.0) * Band(World.Z, MinHeight, MaxHeight, 50.0);
+		Out.Matched += Weight >= 1.0 ? 1 : 0;
+		// Towards Strength, as far as the rule's weight goes (1: all the way, 0 at the soft edges' far end).
+		const uint8 New = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(FMath::Lerp(static_cast<double>(Value), 255.0 * Strength, Weight)), 0, 255));
+		if (New == Value)
 			return false;
-		Value = Target;
+		Value = New;
 		return true;
-	}, [&Area, LayerInfo](const FGuid& EditLayer, const FIntRect& Rect, const TArray<uint8>& Weights)
+	}, [&Area, LayerInfo, &Before](const FGuid& EditLayer, const FIntRect& Rect, const TArray<uint8>& Weights)
 	{
-		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, Rect, Weights);
+		TakeWeightFromOthers(Area.Info, LayerInfo, EditLayer, Rect, Weights, &Before);
 		return true;
 	});
 	const auto Range = [](double Low, double High, double Any, const TCHAR* Unit)
@@ -948,9 +1060,16 @@ int32 UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProxy* Landscape, const FSt
 	};
 	const FString Rule = FString::Printf(TEXT("slope %s, height %s"),
 		*(MinSlope <= 0.0 && MaxSlope >= 90.0 ? FString(TEXT("any")) : FString::Printf(TEXT("%s..%s deg"), *FString::SanitizeFloat(MinSlope), *FString::SanitizeFloat(MaxSlope))),
-		*Range(MinHeight, MaxHeight, 1.0e8, TEXT("cm")));
-	return Logged(Changed, Landscape, TEXT("PaintWhere"), Label, Box.bIsValid ? TArray<FVector>{ FVector(Box.Min, 0.0), FVector(Box.Max, 0.0) } : TArray<FVector>(),
+		*Range(MinHeight, MaxHeight, 1.0e7, TEXT("cm")));
+	Logged(Out.Vertices, Landscape, TEXT("PaintWhere"), Label, Box.bIsValid ? TArray<FVector>{ FVector(Box.Min, 0.0), FVector(Box.Max, 0.0) } : TArray<FVector>(),
 		0.0, 0.0, Strength, Name, Rule);
+	const ALandscape* Primary = Landscape->GetLandscapeActor();
+	Out.Ready = Out.Vertices == 0 || (FApp::CanEverRender() && Primary && !MergePending(Primary));
+	Out.State = Out.Ready ? FString(TEXT("merged"))
+		: !FApp::CanEverRender() ? FString(TEXT("this editor does not render (-nullrhi): the weights are in the edit layer and merge in a rendering editor"))
+		: FString(TEXT("the weights are written; the landscape merges them over the next editor frames"));
+	Out.Seconds = FPlatformTime::Seconds() - Start;
+	return Out;
 }
 
 int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Center, double Radius, double Strength, const FString& Label)
@@ -961,9 +1080,11 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
 	// The circle plus a ring of 3 vertices around it: the ground the new surface is fitted to.
 	const double Quad = FMath::Max(Landscape ? FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X) : 1.0, UE_KINDA_SMALL_NUMBER);
+	// The cap counts the denser axis: a landscape scaled down on Y has more vertices across the circle there.
+	const double Densest = FMath::Max(Landscape ? FVector2D(Landscape->LandscapeActorToWorld().GetScale3D().GetAbs()).GetMin() : 1.0, UE_KINDA_SMALL_NUMBER);
 	constexpr double MaxInner = 512.0; // vertices: the fill converges within the time limit up to here
-	if (Radius / Quad > MaxInner)
-		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Quad, MaxInner, MaxInner * Quad));
+	if (Radius / Densest > MaxInner)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Densest, MaxInner, MaxInner * Densest));
 	FCircle Area;
 	if (!Circle(Landscape, Center, Radius + 3.0 * Quad, Area))
 		return 0;
@@ -993,7 +1114,7 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 			if (!Valid[I])
 				continue;
 			const double Dx = R.Min.X + X - Area.Center.X, Dy = R.Min.Y + Y - Area.Center.Y;
-			const double D = FMath::Sqrt(Dx * Dx + Dy * Dy);
+			const double D = Area.DistanceTo(R.Min.X + X, R.Min.Y + Y);
 			// Free: inside, not on the rectangle's border, and all four neighbours on loaded ground.
 			const bool bInside = D <= Inner && X > 0 && Y > 0 && X < W - 1 && Y < H - 1
 				&& Valid[I - 1] && Valid[I + 1] && Valid[I - W] && Valid[I + W];
