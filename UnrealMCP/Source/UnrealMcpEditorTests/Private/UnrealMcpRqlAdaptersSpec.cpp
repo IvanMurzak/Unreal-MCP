@@ -927,6 +927,40 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestFalse(TEXT("and only it"), Schema.Contains(TEXT("[read-only] add two numbers")));
 		});
 
+		It("reads the rows of a read-only call with skip / first in rql-query; a call that changes something stays last", [this]()
+		{
+			FUnrealMcpRqlAdaptersSpecModule Module;
+			UUnrealMcpRqlSpecFixture* Current = Fixture;
+			Module.Fixture = [Current]() -> UObject* { return Current; };
+			IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module);
+			ON_SCOPE_EXIT { IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module); };
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Probes = 0;
+			Api->Marks = 0;
+
+			// range(0, 5) | call rqlSpecApi.Probe([$, 0, 0]) | skip 1 | first 2: rql-query takes the call from its call stage, not
+			// from the last stage, so the read runs every call and returns the rows the read stages keep
+			const TSharedPtr<FJsonObject> Paged = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":5}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":1},{"op":"first","n":2}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("rql-query reads after a read-only call (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paged)),
+				UnrealMcpRqlSpecHelpers::IsOk(Paged) && Api->Probes == 5);
+			TestEqual(TEXT("skip 1 | first 2 keeps two rows"), UnrealMcpRqlSpecHelpers::RowCount(Paged), 2);
+			TestTrue(TEXT("the rows of the second and third calls"), UnrealMcpRqlSpecHelpers::CellText(Paged, 0, 2).Contains(TEXT("1"))
+				&& UnrealMcpRqlSpecHelpers::CellText(Paged, 1, 2).Contains(TEXT("2")));
+			TestTrue(TEXT("and the answer is marked readOnly"),
+				Paged.IsValid() && Paged->HasTypedField<EJson::Boolean>(TEXT("readOnly")) && Paged->GetBoolField(TEXT("readOnly")));
+
+			// rqlSpecApi | call Add(1) | first 1: not read-only, so rql-query still refuses the call before it runs
+			const TSharedPtr<FJsonObject> Add = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Add","args":[{"lit":1}]},{"op":"first","n":1}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a call of another operation followed by a read is permission-denied in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Add)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Add) && UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("permission-denied")));
+			// rqlSpecApi | call Mark([5, 0, 0], [[0, 0, 0]]) | first 1: a change must end the query, even in rql-mutate
+			const TSharedPtr<FJsonObject> Mark = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Mark","args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]},{"op":"first","n":1}]})RQL"), true);
+			const FString MarkSaid = UnrealMcpRqlSpecHelpers::Codes(Mark) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Mark);
+			TestTrue(*FString::Printf(TEXT("a mutating call followed by a read is refused as not read-only (%s)"), *MarkSaid),
+				!UnrealMcpRqlSpecHelpers::IsOk(Mark) && MarkSaid.Contains(TEXT("is not read-only")));
+			TestEqual(TEXT("and it never ran"), Api->Marks, 0);
+		});
+
 		It("registers sources, members, operations and guides of an IUnrealMcpRqlModule", [this]()
 		{
 			FUnrealMcpRqlAdaptersSpecModule Module;

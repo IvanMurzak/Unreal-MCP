@@ -159,7 +159,9 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   The 64 KB answer usually ends a big read first (a Landscape `Surface` row is about 220 characters rendered): RQL then
   returns the rows that fit with an `output-truncated` warning, whose hint for a read names the batches to read the rest
   in (`skip N | first N`; RQL's receipt hint "do not repeat it" is for changes). `rql-schema` prefixes their description
-  with `[read-only]`.
+  with `[read-only]`. Read stages may follow a call of read-only operations (`... | call Surface(...) | where ... | first 10`,
+  RQL spec §8 "Reading call results": `where` / `sort` / `first` / `skip` / `select` over its rows); the session takes the
+  method from the `call` stage, not the last stage, and a call that changes something must still end the query.
 - **Target limit**: `rql-mutate` changes at most 200 targets per statement by default (a mutation is one undo step whatever its
   size, RQL spec §8); its `max_targets` argument raises the limit of each statement of one call up to the ceiling of 1000
   (`MutationPolicy::limit_argument`, mapped to `Budgets::max_mutation_targets`; passed only when the caller gives it, and
