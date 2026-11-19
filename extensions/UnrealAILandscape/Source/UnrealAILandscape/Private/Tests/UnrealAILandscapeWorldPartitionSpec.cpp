@@ -230,8 +230,14 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 				if (It->GetLandscapeGuid() == Guid && Half.Num() < AllProxies / 2)
 					Half.Add(*It);
 			}
-			if (TestNotNull(TEXT("a data layer"), Instance) && TestTrue(TEXT("half the proxies are in it"), DataLayers->AddActorsToDataLayer(Half, Instance))
-				&& TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, false)))
+			bool bSaved = false;
+			if (TestNotNull(TEXT("a data layer"), Instance) && TestTrue(TEXT("half the proxies are in it"), DataLayers->AddActorsToDataLayer(Half, Instance)))
+			{
+				// World Partition keeps an actor with unsaved changes loaded: save the proxies (and the data layer asset) first.
+				TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
+				bSaved = TestTrue(TEXT("saved"), UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true));
+			}
+			if (bSaved && TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, false)))
 			{
 				TestEqual(TEXT("its proxies are unloaded"), WpProxies(Guid), AllProxies - Half.Num());
 				// landscape | call Paint(unreal.find("WpSpecLand"), "Grass", [500000, 500000, 0], 0)

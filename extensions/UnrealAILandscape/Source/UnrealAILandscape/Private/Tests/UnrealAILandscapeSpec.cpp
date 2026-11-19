@@ -1305,7 +1305,8 @@ void FUnrealAILandscapeSpec::Define()
 			FHeightmapAccessor<false> Heights(Info);
 			if (const ULandscapeEditLayerBase* EditLayer = Landscape->GetEditLayerConst(0))
 				Heights.SetEditLayer(EditLayer->GetGuid());
-			const FVector Middle = Landscape->LandscapeActorToWorld().InverseTransformPosition(FVector(-1200000, -10000, 0));
+			// Under the river near its mouth (it winds, so not at a fixed point), where the ground was flat at 0.
+			const FVector Middle = Landscape->LandscapeActorToWorld().InverseTransformPosition(Spline->GetLocationAtSplinePoint(Count * 4 / 5, ESplineCoordinateSpace::World));
 			uint16 Value = 0;
 			Heights.GetDataFast(FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), FMath::RoundToInt(Middle.X), FMath::RoundToInt(Middle.Y), &Value);
 			const double Cm = (static_cast<double>(Value) - LandscapeDataAccess::MidValue) * Landscape->GetActorScale3D().Z * LANDSCAPE_ZSCALE;
@@ -1332,33 +1333,29 @@ void FUnrealAILandscapeSpec::Define()
 			};
 			// landscape | call Ramp(unreal.find("@LAND@"), [[-1314000, 0, 30], [-1286000, 0, 30]], 600, 300, 0, "Spec road"): a road across the valley
 			TestTrue(TEXT("a road"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscape"]},"stages":[{"op":"call","method":"Ramp","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"list":[{"lit":-1314000},{"lit":0},{"lit":30}]},{"list":[{"lit":-1286000},{"lit":0},{"lit":30}]}]},{"lit":600},{"lit":300},{"lit":0},{"lit":"Spec road"}]}]})RQL"), Label, Land, true));
-			// water | call CreateRiverBetween("@LABEL@", unreal.find("@LAND@"), [-1300000, 12000, 0], [-1300000, -13000, 0], 800, 300)
-			TSharedPtr<FJsonObject> Out;
-			TestTrue(TEXT("river created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1300000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1300000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":300}]}]})RQL"), Label, Land, true, &Out));
-			TestTrue(*FString::Printf(TEXT("the answer warns that the bed cuts the road, and where (%s)"), *LandscapeSpecJson(Out).Left(800)),
-				LandscapeSpecJson(Out).Contains(TEXT("call-warning")) && LandscapeSpecJson(Out).Contains(TEXT("cuts the road 'Spec road' (Ramp")));
-			// The farthest a river's spline strays from the straight line X = -1300000.
-			const auto Swing = [](const AWaterBodyRiver* River)
-			{
-				double Most = 0.0;
-				const UWaterSplineComponent* Spline = River ? River->GetWaterSpline() : nullptr;
-				for (int32 Index = 0; Spline && Index < Spline->GetNumberOfSplinePoints(); ++Index)
-					Most = FMath::Max(Most, FMath::Abs(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).X + 1300000.0));
-				return Most;
-			};
-			const AWaterBodyRiver* River = LandscapeSpecFind<AWaterBodyRiver>(Label);
-			if (!TestNotNull(TEXT("the river"), River))
-				return;
-			const FVector First = River->GetWaterSpline()->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World);
-			TestTrue(*FString::Printf(TEXT("it winds from side to side (%.0f cm off the straight line)"), Swing(River)), Swing(River) > 400.0 && Swing(River) < 1500.0);
-			TestTrue(*FString::Printf(TEXT("from its source (%s)"), *First.ToString()), FVector2D::Distance(FVector2D(First), FVector2D(-1300000, 12000)) < 300.0);
-			// water | call CreateRiverBetween("@LABEL@s", unreal.find("@LAND@"), [-1295000, 12000, 0], [-1295000, -13000, 0], 800, 0, null, 0)
+			// water | call CreateRiverBetween("@LABEL@s", unreal.find("@LAND@"), [-1295000, 12000, 0], [-1295000, -13000, 0], 800, 0, null, 0):
+			// first, with no bed (a carved bed is the lowest ground a later route follows)
 			TestTrue(TEXT("a straight river"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@s"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1295000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1295000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":0},{"lit":null},{"lit":0}]}]})RQL"), Label, Land, true));
 			double Straight = 0.0;
 			const AWaterBodyRiver* Plain = LandscapeSpecFind<AWaterBodyRiver>(Label + TEXT("s"));
 			for (int32 Index = 0; Plain && Index < Plain->GetWaterSpline()->GetNumberOfSplinePoints(); ++Index)
 				Straight = FMath::Max(Straight, FMath::Abs(Plain->GetWaterSpline()->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).X + 1295000.0));
 			TestTrue(*FString::Printf(TEXT("Meander 0 keeps the lowest route, straight on flat ground (%.0f cm off)"), Straight), Plain && Straight < 150.0);
+			// water | call CreateRiverBetween("@LABEL@", unreal.find("@LAND@"), [-1305000, 12000, 0], [-1305000, -13000, 0], 800, 300)
+			TSharedPtr<FJsonObject> Out;
+			TestTrue(TEXT("river created"), LandscapeSpecRun(TEXT(R"RQL({"rql":"0.1","source":{"path":["water"]},"stages":[{"op":"call","method":"CreateRiverBetween","args":[{"lit":"@LABEL@"},{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"@LAND@"}]},{"list":[{"lit":-1305000},{"lit":12000},{"lit":0}]},{"list":[{"lit":-1305000},{"lit":-13000},{"lit":0}]},{"lit":800},{"lit":300}]}]})RQL"), Label, Land, true, &Out));
+			TestTrue(*FString::Printf(TEXT("the answer warns that the bed cuts the road, and where (%s)"), *LandscapeSpecJson(Out).Left(800)),
+				LandscapeSpecJson(Out).Contains(TEXT("call-warning")) && LandscapeSpecJson(Out).Contains(TEXT("cuts the road 'Spec road' (Ramp")));
+			const AWaterBodyRiver* River = LandscapeSpecFind<AWaterBodyRiver>(Label);
+			if (!TestNotNull(TEXT("the river"), River))
+				return;
+			// The farthest its spline strays from the straight line X = -1305000.
+			double Swing = 0.0;
+			for (int32 Index = 0; Index < River->GetWaterSpline()->GetNumberOfSplinePoints(); ++Index)
+				Swing = FMath::Max(Swing, FMath::Abs(River->GetWaterSpline()->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World).X + 1305000.0));
+			const FVector First = River->GetWaterSpline()->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::World);
+			TestTrue(*FString::Printf(TEXT("it winds from side to side (%.0f cm off the straight line)"), Swing), Swing > 400.0 && Swing < 1500.0);
+			TestTrue(*FString::Printf(TEXT("from its source (%s)"), *First.ToString()), FVector2D::Distance(FVector2D(First), FVector2D(-1305000, 12000)) < 300.0);
 		});
 
 		It("keeps a water body placed with SpawnActor from opening the modal edit layer dialog, reports it and repairs it with SetMaterial", [this]()
