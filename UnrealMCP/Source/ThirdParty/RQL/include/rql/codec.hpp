@@ -28,6 +28,9 @@ bool try_decode_plan(std::string_view json_text, QueryPlan& out, Diagnostic& err
 /// Structural validation shared by codec and host-built plans (terminal placement).
 void validate_plan_structure(const QueryPlan& plan);
 
+/// A terminal stage followed by other stages (also a mutating `call` followed by read stages, spec §8).
+RqlException terminal_not_last(const Stage& st, std::string hint = {});
+
 /// ["key"] / [1.5] display form of a key literal.
 std::string format_key_literal(const Literal& key);
 

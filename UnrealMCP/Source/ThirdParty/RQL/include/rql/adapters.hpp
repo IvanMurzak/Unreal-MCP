@@ -211,6 +211,9 @@ public:
     }
     /// Remove callable methods by name (all overloads). Every name must exist (else internal-error).
     MemberTable& hide_methods(const std::vector<std::string>& names);
+    /// Mark callable methods read-only by name (all overloads): they change nothing, so a `call` of them may be followed by
+    /// read stages over its rows (spec §8 "Reading call results"). Every name must exist (else internal-error).
+    MemberTable& read_only_methods(const std::vector<std::string>& names);
 
     // ---- virtual maps (spec §13 "Virtual maps")
 

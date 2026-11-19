@@ -112,6 +112,15 @@ MemberTable& MemberTable::hide_methods(const std::vector<std::string>& names) {
     return *this;
 }
 
+MemberTable& MemberTable::read_only_methods(const std::vector<std::string>& names) {
+    for (auto& n : names)
+        if (!std::any_of(methods_.begin(), methods_.end(), [&](const MethodDescriptor& m) { return m.name == n; }))
+            throw std::logic_error("type " + type_.name + " has no callable method '" + n + "' to mark read-only");
+    for (auto& m : methods_)
+        if (std::find(names.begin(), names.end(), m.name) != names.end()) m.read_only = true;
+    return *this;
+}
+
 MemberTable& MemberTable::map(std::string name, const TypeDescriptor* value_type, VirtualMapAdapter::Spec spec, std::string description) {
     if (!spec.keys || !spec.get) throw std::logic_error("virtual map '" + name + "' needs keys and get");
     if (spec.set && type_.kind == TypeKind::Struct && !writes_through_)
