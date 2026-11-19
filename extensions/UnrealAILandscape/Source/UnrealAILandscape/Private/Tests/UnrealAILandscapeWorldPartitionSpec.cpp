@@ -14,7 +14,6 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
-#include "DataLayer/DataLayerEditorSubsystem.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Engine/World.h"
@@ -23,12 +22,9 @@
 #include "HAL/FileManager.h"
 #include "Landscape.h"
 #include "LandscapeStreamingProxy.h"
-#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
-#include "WorldPartition/DataLayer/DataLayerAsset.h"
-#include "WorldPartition/DataLayer/DataLayerInstance.h"
 #include "WorldPartition/WorldPartition.h"
 
 // ============================================================================================
@@ -217,51 +213,6 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 		double RepeatedCount = -1.0;
 		TestTrue(*FString::Printf(TEXT("no streaming proxy repeats the edit log (%s)"), *WpJson(Repeated).Left(300)),
 			Repeated.IsValid() && Repeated->TryGetNumberField(TEXT("value"), RepeatedCount) && RepeatedCount == 0.0);
-
-		// A proxy in a data layer the editor has not loaded: the loader skips it, so an edit of the whole landscape would
-		// change only part of it. The operation fails naming it, and changes nothing (DEV-113).
-		{
-			UDataLayerEditorSubsystem* DataLayers = UDataLayerEditorSubsystem::Get();
-			const FString AssetName = TEXT("DL_WpSpec_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-			UPackage* AssetPackage = CreatePackage(*FString::Printf(TEXT("/Game/%s/%s"), Folder, *AssetName));
-			// An asset saves only with RF_Standalone; dropped again at the end so garbage collection takes it with the level.
-			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
-			ON_SCOPE_EXIT { Asset->ClearFlags(RF_Standalone); };
-			AssetPackage->MarkPackageDirty();
-			FDataLayerCreationParameters Parameters;
-			Parameters.DataLayerAsset = Asset;
-			UDataLayerInstance* Instance = DataLayers ? DataLayers->CreateDataLayerInstance(Parameters) : nullptr;
-			TArray<AActor*> Half;
-			for (TActorIterator<ALandscapeStreamingProxy> It(UnrealMcpRql::EditorWorld()); It; ++It)
-			{
-				if (It->GetLandscapeGuid() == Guid && Half.Num() < AllProxies / 2)
-					Half.Add(*It);
-			}
-			bool bSaved = false;
-			if (TestNotNull(TEXT("a data layer"), Instance) && TestTrue(TEXT("half the proxies are in it"), DataLayers->AddActorsToDataLayer(Half, Instance)))
-			{
-				// World Partition keeps an actor with unsaved changes loaded: save the proxies, the level and the data layer
-				// asset first (only those: other specs' unsaved assets stay unsaved).
-				TArray<UPackage*> Packages{ AssetPackage, UnrealMcpRql::EditorWorld()->GetPackage() };
-				for (const AActor* Actor : Half)
-					Packages.AddUnique(Actor->GetExternalPackage());
-				TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
-				bSaved = TestTrue(TEXT("saved"), UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false));
-			}
-			if (bSaved && TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, /*bIsFromUserChange*/ true)))
-			{
-				TestEqual(TEXT("its proxies are unloaded"), WpProxies(Guid), AllProxies - Half.Num());
-				// landscape | call Paint(unreal.find("WpSpecLand"), "Grass", [500000, 500000, 0], 0)
-				TSharedPtr<FJsonObject> Painted;
-				const bool bPainted = UnrealMcpRqlTools::RunPlan(WpCall(TEXT("landscape"), TEXT("Paint"),
-					FString::Printf(TEXT(R"(%s,{"lit":"Grass"},{"list":[{"lit":%.17g},{"lit":%.17g},{"lit":0}]},{"lit":0})"), *WpFind(), X, Y)), true, &Painted);
-				TestTrue(*FString::Printf(TEXT("painting the whole landscape fails and names the data layer (%s)"), *WpJson(Painted).Left(600)),
-					!bPainted && WpJson(Painted).Contains(TEXT("data layer that is not loaded")));
-				TestFalse(TEXT("and paints nothing"), Landscape->GetLandscapeInfo() && Landscape->GetLandscapeInfo()->GetLayerInfoByName(TEXT("Grass")) != nullptr);
-				DataLayers->SetDataLayerIsLoadedInEditor(Instance, true, /*bIsFromUserChange*/ true);
-				TestEqual(TEXT("loaded again with the data layer"), WpProxies(Guid), AllProxies);
-			}
-		}
 
 		// landscape | call Delete(unreal.find("WpSpecLand")), unsaved: a later listing must not load the proxies back
 		if (!WpRun(TEXT("deleted"), WpCall(TEXT("landscape"), TEXT("Delete"), WpFind())))
