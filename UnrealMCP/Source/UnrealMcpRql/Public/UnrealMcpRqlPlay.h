@@ -100,6 +100,12 @@ struct UNREALMCPRQL_API FUnrealMcpPlayState
 DECLARE_MULTICAST_DELEGATE_TwoParams(FUnrealMcpOnReadPlayState, APlayerController* /*Controller*/, FUnrealMcpPlayState& /*State*/);
 
 /**
+ * Lets an extension refuse to start play before anything happens: it adds why (and what to do) to @p OutReasons when its
+ * content would make the start fail or ask in a dialog (Mesh Terrain: unsaved Mesh Partition modifiers).
+ */
+DECLARE_MULTICAST_DELEGATE_OneParam(FUnrealMcpOnStartPlayCheck, TArray<FString>& /*OutReasons*/);
+
+/**
  * Deterministic play testing for agents (docs/rql.md "Play testing"). Between tool calls an MCP client cannot rely on the
  * editor ticking PIE (a background editor is throttled, a one-frame input injection is consumed or dropped), so play
  * operations advance the PIE world themselves, inside the call, in fixed 1/60 s steps, and read the result back before
@@ -125,7 +131,9 @@ namespace UnrealMcpRql
 	/**
 	 * Start Play In Editor now (inside this call, not on the next editor tick) with the editor's play settings; keeps a
 	 * running session. bPaused pauses it so the world moves only inside play operations. False + the reason when it did
-	 * not start. Blueprints that failed to compile are listed in @p OutNotes (no dialog is shown).
+	 * not start: an OnStartPlayCheck refusal (nothing was started), or the warnings and errors the editor logged while it
+	 * tried (a plugin that cancels play says why there). Blueprints that failed to compile are listed in @p OutNotes (no
+	 * dialog is shown).
 	 */
 	UNREALMCPRQL_API bool StartPlay(bool bPaused, FString& OutError, TArray<FString>* OutNotes = nullptr);
 
@@ -159,6 +167,9 @@ namespace UnrealMcpRql
 
 	/** Bound by extensions to add to ReadPlayState (remove the binding when the module shuts down). */
 	UNREALMCPRQL_API FUnrealMcpOnReadPlayState& OnReadPlayState();
+
+	/** Bound by extensions to refuse StartPlay before it starts anything (remove the binding when the module shuts down). */
+	UNREALMCPRQL_API FUnrealMcpOnStartPlayCheck& OnStartPlayCheck();
 
 	/**
 	 * AdvancePlay for PlayFrameCount(@p Seconds, @p Frames) frames while holding @p Keys ("W, LeftShift", axes with a

@@ -6,6 +6,7 @@
 #include "Dom/JsonValue.h"
 
 #include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlPlay.h"
 #include "UnrealAIMeshTerrainCommon.h"
 #include "UnrealAIMeshTerrainRqlApi.h"
 #include "UnrealAIMeshTerrainCreateApi.h"
@@ -13,6 +14,8 @@
 #include "UnrealAIMeshTerrainModifiersApi.h"
 
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 
 #include "MeshPartition.h"
@@ -185,9 +188,50 @@ namespace UnrealAIMeshTerrainModuleLocal
  * ("MeshPartition", "MeshPartitionDefinition", "NoiseModifier", ...); the module adds world sources, the build state,
  * sections, bounds and modifier summaries, and the agent guide rendered into the unreal-rql skill.
  */
+namespace UnrealAIMeshTerrainModuleLocal
+{
+	/**
+	 * StartPlay's check: Mesh Partition plays only saved modifiers. With an unsaved one it asks in a modal dialog ("Your
+	 * editor world contains N dirty Mesh Partition modifiers"), which an unattended start cancels with a stack dump in the
+	 * log, and play does not start: refuse first, saying what to save.
+	 */
+	void RefuseUnsavedModifiers(TArray<FString>& OutReasons)
+	{
+		const UWorld* World = UnrealMcpRql::EditorWorld();
+		if (!World)
+			return;
+		int32 Count = 0;
+		TArray<FString> Labels;
+		for (TObjectIterator<UModifierComponent> It; It; ++It)
+		{
+			const UModifierComponent* Modifier = *It;
+			if (!IsValid(Modifier) || Modifier->IsTemplate() || Modifier->GetWorld() != World || !Modifier->GetPackage()->IsDirty())
+				continue;
+			++Count;
+			if (const AActor* Owner = Modifier->GetOwner(); Owner && Labels.Num() < 5)
+				Labels.AddUnique(Owner->GetActorNameOrLabel());
+		}
+		if (Count > 0)
+		{
+			OutReasons.Add(FString::Printf(TEXT("%d Mesh Terrain modifier(s) and base mesh(es) are not saved (%s%s): Mesh Partition plays only saved ones and cancels play otherwise; save them first (editor | call SaveAll()), then StartPlay"),
+				Count, *FString::Join(Labels, TEXT(", ")), Count > Labels.Num() ? TEXT(", ...") : TEXT("")));
+		}
+	}
+}
+
 class FUnrealAIMeshTerrainRqlModule : public IUnrealMcpRqlModule
 {
 public:
+	FUnrealAIMeshTerrainRqlModule()
+	{
+		StartPlayCheck = UnrealMcpRql::OnStartPlayCheck().AddStatic(&UnrealAIMeshTerrainModuleLocal::RefuseUnsavedModifiers);
+	}
+
+	virtual ~FUnrealAIMeshTerrainRqlModule() override
+	{
+		UnrealMcpRql::OnStartPlayCheck().Remove(StartPlayCheck);
+	}
+
 	virtual FString GetRqlModuleName() const override { return TEXT("MeshTerrain"); }
 	virtual FString GetExtensionId() const override { return TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"); }
 	virtual FString GetExtensionVersion() const override { return UnrealMcpRql::PluginVersion(TEXT("UnrealAIMeshTerrain")); }
@@ -428,8 +472,8 @@ measured every metre, every Length / 3000 on roads over 3 km), `SteepestAt` and 
 (about rise / tan(maxSlope), with a margin) ends below the target; wind it (switchbacks, a spiral around a hill), `Remove`
 the road (with its `Remesh` and `Corridor`) and call again.
 
-Waits: an operation waits at most 240 s for each build it needs, the one before its change and the one after (the server ends a
-call after 300 s; AddRoad's TimeoutSeconds bounds both together). A remeshed hill can take
+Waits: every wait of an operation (the build before its change and the one after) shares one budget of 240 s (the server ends
+a call after 300 s; AddRoad's TimeoutSeconds is that budget). A remeshed hill can take
 longer after a change there: the operation then succeeds with `Ready` false and a `State` saying the change is applied and
 still building. Do not repeat the change: call `meshTerrain | call WaitForBuild(terrain)` (again, until `Ready`).
 
@@ -456,8 +500,8 @@ for another material. `ImportHeightmap(label, file, location, sizeMeters, height
 timeoutSeconds)` reads a 16-bit grayscale `.png` or a `.r16` / `.raw` (little-endian, square) in Landscape units: value 32768
 is `location` Z and one step is `heightScale / 128` cm (a Landscape's Z scale; 100 gives -256 .. +256 m); one quad per pixel
 step (at most 2048 per side), image row 0 at the -Y edge, Y size from the image's aspect. Place terrains side by side, not
-overlapping: Play In Editor's section build then warns about the other terrain's actors. Save the level before Play In Editor:
-the engine asks about unsaved Mesh Terrain base meshes otherwise.
+overlapping: Play In Editor's section build then warns about the other terrain's actors. Save the level before Play In Editor
+(`editor | call SaveAll()`): with unsaved base meshes or modifiers `StartPlay` refuses, naming them.
 
 An island with the sea all around: Mesh Terrain has no water, so the sea is a height, world Z 0 (sea level) by convention.
 Create the terrain larger than the island with its ground on the seabed, raise the land with a Patch, then shape the
@@ -475,6 +519,9 @@ under half its shorter side (90000 + 15000 < 120000 cm), so a ring of seabed sta
 surface at sea level (a Water plugin ocean looks better where the project has one); turn its collision off as above, or it
 blocks traces and walking at Z 0. Read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
 	}
+
+private:
+	FDelegateHandle StartPlayCheck;
 };
 
 IMPLEMENT_MODULE(TUnrealMcpRqlEditorModule<FUnrealAIMeshTerrainRqlModule>, UnrealAIMeshTerrain)

@@ -239,6 +239,9 @@ describe('the unreal-mcp-cli skill', () => {
     expect(r.editorSkills).toMatchObject({ generated: false, reachable: false });
     expect(r.filesWritten).toHaveLength(4);
     expect(EDITOR_SKILLS_HINT).toContain('`unreal-rql` (RQL + extension guides) needs the editor');
+    // How to get it from a shell, and the guides without it (DEV-112).
+    expect(EDITOR_SKILLS_HINT).toContain('`unreal-mcp-cli open --headless`');
+    expect(EDITOR_SKILLS_HINT).toContain('run-tool rql-schema --input \'{"guide": "<name>"}\'');
   });
 
   it('reports an editor that answers but fails to generate, and still writes the offline skills', async () => {

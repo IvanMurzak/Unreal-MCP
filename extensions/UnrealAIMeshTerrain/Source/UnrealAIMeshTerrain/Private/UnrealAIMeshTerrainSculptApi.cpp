@@ -275,6 +275,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 	FUnrealAIMeshTerrainStroke Run(AMeshPartition* Terrain, const FStroke& Stroke, const FText& Description)
 	{
 		const double Start = FPlatformTime::Seconds();
+		const FCallBudget Budget; // one for the waits before and after the stroke
 		if (!FMath::IsFinite(Stroke.Point.X) || !FMath::IsFinite(Stroke.Point.Y) || !FMath::IsFinite(Stroke.Amount))
 			return Failed(TEXT("Point and the amounts must be finite numbers"));
 		if (!(Stroke.Radius >= 1.0 && Stroke.Radius <= MaxRadius))
@@ -551,6 +552,7 @@ namespace UnrealAIMeshTerrainSculptLocal
 		double Strength, const FString& Label, const TArray<double>& Within)
 	{
 		const double Start = FPlatformTime::Seconds();
+		const FCallBudget Budget; // one for the waits before and after the paint
 		for (const double Value : { MinSlope, MaxSlope, MinHeight, MaxHeight, Strength })
 		{
 			if (!FMath::IsFinite(Value))

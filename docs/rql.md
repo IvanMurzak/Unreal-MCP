@@ -356,7 +356,10 @@ the game inside the call (`UnrealMcpRqlPlay.h`):
 - `editor | call StartPlay(bPaused = true)` starts PIE now (not on the next editor tick) with the editor's play
   settings and returns the play state; paused (the default), the game moves only inside the play operations, so results
   do not depend on the editor's frame rate. A running session is kept. Blueprints with compile errors are listed in
-  `Notes` (PIE's modal error dialog is skipped). The RQL transaction is closed first: PIE start would cancel it.
+  `Notes` (PIE's modal error dialog is skipped). The RQL transaction is closed first: PIE start would cancel it. An
+  extension can refuse the start before anything happens (`UnrealMcpRql::OnStartPlayCheck`: Mesh Terrain refuses while
+  its modifiers are unsaved, naming them); a start that fails anyway names the warnings and errors the editor logged
+  while it tried (a plugin that cancels play says why there; the stack dump of a skipped modal is left out).
 - `editor | call AdvancePlay(Seconds, Frames, Keys)` ticks the play world in fixed 1/60 s frames (seconds rounded up;
   both given: the larger; neither: one frame; at most 3600 frames = 60 s per call, and about 25 s of wall clock), with
   `Keys` (`"W, LeftShift"`, axes `"Gamepad_LeftY=1"`) held as player 0 presses them (pressed on the first frame,
