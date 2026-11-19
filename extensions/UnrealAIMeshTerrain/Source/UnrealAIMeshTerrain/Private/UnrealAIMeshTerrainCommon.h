@@ -52,6 +52,27 @@ namespace UnrealAIMeshTerrain
 	/** Fail ("TimeoutSeconds .. is outside 1 .. 600") and return false unless @p TimeoutSeconds is in that range. */
 	bool CheckTimeout(double TimeoutSeconds);
 
+	/**
+	 * One time budget for the whole operation (@p Seconds, DefaultBuildTimeoutSeconds by default): every build wait
+	 * (WaitForBuild) and every evaluation of the modifier stack it makes while the budget is on the stack shares it, so an
+	 * operation that waits before its change and again after it stays under the MCP server's 300 s tool timeout. Nested
+	 * budgets keep the earlier deadline. Game thread only (operations run there).
+	 */
+	class FCallBudget
+	{
+	public:
+		explicit FCallBudget(double Seconds = DefaultBuildTimeoutSeconds);
+		~FCallBudget();
+		FCallBudget(const FCallBudget&) = delete;
+		FCallBudget& operator=(const FCallBudget&) = delete;
+
+		/** The seconds left of the innermost budget (0 when it is spent), at most @p Cap; @p Cap when no budget is on the stack. */
+		static double Left(double Cap);
+
+	private:
+		double PreviousDeadline;
+	};
+
 	/** The seconds since @p Start (an FPlatformTime::Seconds()), rounded to 0.01: the operations' Seconds fields. */
 	double SecondsSince(double Start);
 
@@ -163,7 +184,7 @@ namespace UnrealAIMeshTerrain
 
 	/**
 	 * Drive @p Terrain's build on this (game) thread until every section shows its final mesh with its collision, for at
-	 * most @p TimeoutSeconds: true when built; false after Fail naming what is still pending (with @p OutStillBuilding: no
+	 * most @p TimeoutSeconds and what is left of the operation's FCallBudget (at least one round): true when built; false after Fail naming what is still pending (with @p OutStillBuilding: no
 	 * Fail, that text in it instead, for an operation whose change is already applied). Pumps the editor component
 	 * (UMeshPartitionEditorComponent::Update: queued modifier changes start, finished builds are applied), the game thread's
 	 * task queue (collision cooking and the transformer pipeline complete there) and the asset compiler (the static

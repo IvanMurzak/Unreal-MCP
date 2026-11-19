@@ -107,7 +107,8 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   under half the terrain's shorter side), shape mountains on top, and optionally place a plane at Z 0 as the sea surface (turn its
   collision off: `set BodyInstance.CollisionProfileName = "NoCollision"` on its StaticMeshComponent).
 - Save the level before Play In Editor: with unsaved base meshes or modifiers the engine asks in a modal dialog
-  ("Unsaved Mesh Partition Modifiers"). Place terrains side by side, not overlapping: the editor builds overlapping
+  ("Unsaved Mesh Partition Modifiers") and play does not start, so `editor | call StartPlay()` refuses first, naming
+  them (`editor | call SaveAll()`, then play). Place terrains side by side, not overlapping: the editor builds overlapping
   terrains fine, but Play In Editor's section build of one loads the other's actors and logs `LogLinker` warnings
   ("Mapping for ... not provided while outer '/Temp/MeshPartitionBuilderPackage' is instanced").
 - `Sculpt(terrain, mode, point, radius, height = 100, strength = 1, falloff = 0.5)`: a brush stroke around a world X, Y
@@ -138,8 +139,9 @@ is reopened its modifiers are unloaded and `unreal.find("<modifier label>")` fin
   the sculpted ground moves with it (a flattened pad is no longer flat). A brush that has another modifier after it over
   its area is not reused (a new brush is placed after it). A painted channel is `Set` by the brush over its whole box: the
   channel there keeps the values it had when it was first painted, whatever the modifiers below write later.
-- Waits: an operation waits at most 240 s for each build it needs, before and after its change (the MCP server ends a tool
-  call after 300 s by default; `AddRoad`'s TimeoutSeconds bounds both waits together). When the
+- Waits: every wait of an operation, the build before its change and the one after (both terrains' for `Bind`), shares one
+  budget of 240 s (the MCP server ends a tool call after 300 s by default; `AddRoad`'s TimeoutSeconds is that budget;
+  `SurfacePoints` samples within 270 s with its wait). When the
   build after a change takes longer (a remeshed shape), the operation still succeeds with `Ready` false and a `State` saying
   the change is applied and still building: call `WaitForBuild`, do not repeat the change. A wait before a change that times
   out fails and changes nothing. `Create` / `ImportHeightmap` whose build takes longer fail saying the terrain is created:

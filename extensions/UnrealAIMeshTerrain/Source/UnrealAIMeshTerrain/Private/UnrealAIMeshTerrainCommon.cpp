@@ -23,6 +23,7 @@
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "Async/TaskGraphInterfaces.h"
+#include "Distance/DistPoint3Triangle3.h"
 
 #include "MeshPartition.h"
 #include "MeshPartitionMeshBuilder.h"
@@ -78,6 +79,29 @@ namespace UnrealAIMeshTerrain
 	{
 		return (TimeoutSeconds >= MinTimeoutSeconds && TimeoutSeconds <= MaxTimeoutSeconds)
 			|| UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("TimeoutSeconds %g is outside %g .. %g"), TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+	}
+
+	namespace
+	{
+		/** The innermost FCallBudget's deadline (FPlatformTime::Seconds), 0 when none is on the stack. */
+		double GCallDeadline = 0.0;
+	}
+
+	FCallBudget::FCallBudget(double Seconds)
+		: PreviousDeadline(GCallDeadline)
+	{
+		const double Deadline = FPlatformTime::Seconds() + Seconds;
+		GCallDeadline = PreviousDeadline > 0.0 ? FMath::Min(PreviousDeadline, Deadline) : Deadline;
+	}
+
+	FCallBudget::~FCallBudget()
+	{
+		GCallDeadline = PreviousDeadline;
+	}
+
+	double FCallBudget::Left(double Cap)
+	{
+		return GCallDeadline > 0.0 ? FMath::Clamp(GCallDeadline - FPlatformTime::Seconds(), 0.0, Cap) : Cap;
 	}
 
 	double SecondsSince(double Start)
@@ -530,7 +554,8 @@ namespace UnrealAIMeshTerrain
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component"), *TerrainName(Terrain)));
 		const double Start = FPlatformTime::Seconds();
-		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests
+			: FCallBudget::Left(FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds)));
 		FBuildState State;
 		int32 Rounds = 0;
 		while (true)
@@ -614,7 +639,8 @@ namespace UnrealAIMeshTerrain
 		Settings.bCacheResult = true;
 		Settings.bAllowDDCRead = true;
 		TArray<UE::MeshPartition::FBuildTaskHandle> Handles = UE::MeshPartition::Build::LaunchBuilds(Settings);
-		const double Deadline = FPlatformTime::Seconds() + TimeoutSeconds;
+		const double Budget = FCallBudget::Left(TimeoutSeconds);
+		const double Deadline = FPlatformTime::Seconds() + Budget;
 		while (!UE::MeshPartition::Build::AreAllTasksComplete(Handles))
 		{
 			if (FPlatformTime::Seconds() > Deadline)
@@ -622,7 +648,7 @@ namespace UnrealAIMeshTerrain
 				for (UE::MeshPartition::FBuildTaskHandle& Handle : Handles)
 					Handle.Cancel();
 				if (bFailOnTimeout)
-					UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), TimeoutSeconds));
+					UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), Budget));
 				return {};
 			}
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
@@ -671,40 +697,88 @@ namespace UnrealAIMeshTerrain
 		// The paint channels are not in the collision: evaluate the modifier stack around the point (cached per region).
 		// The builder keeps only triangles wholly inside the region: retry wider for coarse geometry (quads over ~2.5 m, a
 		// Boolean shape's triangles of 100+ m), and keep what was evaluated in Evaluated for the caller's next points.
-		const auto HitIn = [&Out, &Start, &End](const TArray<FRegionMesh>& Parts)
+		// The channels, model height and face normal of @p Triangle of @p Part at @p Bary (local @p LocalPoint on it).
+		const auto Read = [&Out](const FRegionMesh& Part, int32 Triangle, const FVector3d& Bary, const FVector& LocalPoint)
+		{
+			const UE::Geometry::FIndex3i Corners = Part.Mesh->GetTriangle(Triangle);
+			for (const FName& Channel : Part.Mesh->GetWeightLayerNames())
+			{
+				Out.Channels.Add(Channel, Part.Mesh->GetWeightLayerValue(Channel, Corners.A) * Bary.X + Part.Mesh->GetWeightLayerValue(Channel, Corners.B) * Bary.Y
+					+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
+			}
+			Out.ModelHeight = Part.Transform.TransformPosition(LocalPoint).Z;
+			// The evaluated face's normal: a trace that lands on an edge of the collision (a section seam, the terrain's
+			// border) reports the edge's normal (45 degrees or more on flat ground), not the ground's.
+			// (the inverse transpose of the terrain's transform: right under a non-uniform scale too)
+			const FVector Face = Part.Transform.GetRotation().RotateVector(Part.Mesh->GetTriNormal(Triangle) * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D())).GetSafeNormal();
+			if (!Face.IsNearlyZero())
+				Out.Normal = Face;
+		};
+		// Parts cached for other points: skip the ones that are not under this one before searching them (the ray is
+		// vertical in an unrotated terrain's space; @p Slack cm around the part).
+		const auto Under = [](const FRegionMesh& Part, const FVector& LocalStart, double Slack)
+		{
+			const UE::Geometry::FAxisAlignedBox3d Box = Part.Spatial->GetBoundingBox();
+			return !Part.Transform.GetRotation().IsIdentity(1e-6) || (LocalStart.X >= Box.Min.X - Slack && LocalStart.X <= Box.Max.X + Slack
+				&& LocalStart.Y >= Box.Min.Y - Slack && LocalStart.Y <= Box.Max.Y + Slack);
+		};
+		const auto HitIn = [&Out, &Start, &End, &Read, &Under](const TArray<FRegionMesh>& Parts)
 		{
 			for (const FRegionMesh& Part : Parts)
 			{
 				if (!Part.Spatial.IsValid())
 					continue;
 				const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
-				// Parts cached for other points: skip the ones that are not under this one before tracing them (the ray is
-				// vertical in an unrotated terrain's space).
-				const UE::Geometry::FAxisAlignedBox3d Box = Part.Spatial->GetBoundingBox();
-				if (Part.Transform.GetRotation().IsIdentity(1e-6) && (LocalStart.X < Box.Min.X || LocalStart.X > Box.Max.X || LocalStart.Y < Box.Min.Y || LocalStart.Y > Box.Max.Y))
+				if (!Under(Part, LocalStart, 0.0))
 					continue;
 				const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
 				double Distance = 0.0;
 				int32 Triangle = INDEX_NONE;
 				FVector3d Bary;
-				if (!Part.Spatial->FindNearestHitTriangle(FRay3d(LocalStart, LocalDirection), Distance, Triangle, Bary))
-					continue;
-				const UE::Geometry::FIndex3i Corners = Part.Mesh->GetTriangle(Triangle);
-				for (const FName& Channel : Part.Mesh->GetWeightLayerNames())
+				if (Part.Spatial->FindNearestHitTriangle(FRay3d(LocalStart, LocalDirection), Distance, Triangle, Bary))
 				{
-					Out.Channels.Add(Channel, Part.Mesh->GetWeightLayerValue(Channel, Corners.A) * Bary.X + Part.Mesh->GetWeightLayerValue(Channel, Corners.B) * Bary.Y
-						+ Part.Mesh->GetWeightLayerValue(Channel, Corners.C) * Bary.Z);
+					Read(Part, Triangle, Bary, LocalStart + LocalDirection * Distance);
+					return true;
 				}
-				Out.ModelHeight = Part.Transform.TransformPosition(LocalStart + LocalDirection * Distance).Z;
-				// The evaluated face's normal: a trace that lands on an edge of the collision (a section seam, the terrain's
-				// border) reports the edge's normal (45 degrees or more on flat ground), not the ground's.
-				// (the inverse transpose of the terrain's transform: right under a non-uniform scale too)
-				const FVector Face = Part.Transform.GetRotation().RotateVector(Part.Mesh->GetTriNormal(Triangle) * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D())).GetSafeNormal();
-				if (!Face.IsNearlyZero())
-					Out.Normal = Face;
-				return true;
 			}
-			return false;
+			// A point on the edge of a part (a section seam, the terrain's rim) can slip between its triangles and the next
+			// part's: the triangle nearest to where the collision trace hit, when it is within NearSurface (world cm) of it.
+			constexpr double NearSurface = 50.0;
+			const FVector Hit(Start.X, Start.Y, Out.Height);
+			const FRegionMesh* Nearest = nullptr;
+			int32 NearestTriangle = INDEX_NONE;
+			double NearestDistance = FMath::Square(NearSurface);
+			FVector3d NearestBary, NearestPoint;
+			for (const FRegionMesh& Part : Parts)
+			{
+				if (!Part.Spatial.IsValid())
+					continue;
+				// (NearSurface in the part's own units, under its scale)
+				const FVector Local = Part.Transform.InverseTransformPosition(Hit);
+				if (!Under(Part, Local, NearSurface * Part.Transform.GetSafeScaleReciprocal(Part.Transform.GetScale3D()).GetAbsMax()))
+					continue;
+				double LocalDistance = TNumericLimits<double>::Max();
+				const int32 Triangle = Part.Spatial->FindNearestTriangle(Local, LocalDistance);
+				if (Triangle == INDEX_NONE)
+					continue;
+				FVector A, B, C;
+				Part.Mesh->GetTriVertices(Triangle, A, B, C);
+				UE::Geometry::FDistPoint3Triangle3d OnTriangle(Local, UE::Geometry::FTriangle3d(A, B, C));
+				OnTriangle.GetSquared(); // (computes ClosestTrianglePoint and its TriangleBaryCoords)
+				const double Distance = FVector::DistSquared(Part.Transform.TransformPosition(OnTriangle.ClosestTrianglePoint), Hit);
+				if (Distance <= NearestDistance)
+				{
+					Nearest = &Part;
+					NearestTriangle = Triangle;
+					NearestDistance = Distance;
+					NearestBary = OnTriangle.TriangleBaryCoords;
+					NearestPoint = OnTriangle.ClosestTrianglePoint;
+				}
+			}
+			if (!Nearest)
+				return false;
+			Read(*Nearest, NearestTriangle, NearestBary, NearestPoint);
+			return true;
 		};
 		TArray<FRegionMesh> Local;
 		TArray<FRegionMesh>& Parts = Evaluated ? *Evaluated : Local;

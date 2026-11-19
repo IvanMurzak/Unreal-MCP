@@ -114,6 +114,20 @@ void FUnrealMcpRqlPlaySpec::Define()
 			TestFalse(TEXT("StopPlay without a session is refused"), IsOk(Stop));
 		});
 
+		It("StartPlay starts nothing when an extension's OnStartPlayCheck refuses, and says why", [this]()
+		{
+			EndPlay();
+			const FDelegateHandle Check = UnrealMcpRql::OnStartPlayCheck().AddLambda([](TArray<FString>& OutReasons)
+			{
+				OutReasons.Add(TEXT("the spec's level is not ready"));
+			});
+			const TSharedPtr<FJsonObject> Start = PlayCall(TEXT("StartPlay"));
+			UnrealMcpRql::OnStartPlayCheck().Remove(Check);
+			TestFalse(TEXT("refused"), IsOk(Start));
+			TestTrue(*FString::Printf(TEXT("names the reason (%s)"), *Codes(Start)), Codes(Start).Contains(TEXT("Play In Editor was not started: the spec's level is not ready")));
+			TestNull(TEXT("no play world"), UnrealMcpRql::PlayWorld());
+		});
+
 		It("refuses a key name that is not a key before simulating", [this]()
 		{
 			FString Error;

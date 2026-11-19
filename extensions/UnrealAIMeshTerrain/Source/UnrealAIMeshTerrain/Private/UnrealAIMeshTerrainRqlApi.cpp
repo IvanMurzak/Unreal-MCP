@@ -27,6 +27,20 @@ namespace UnrealAIMeshTerrainRqlApiLocal
 		return Out;
 	}
 
+	/** A sample on the terrain (bInside) at @p Point as the operations' answer. */
+	FUnrealAIMeshTerrainSurface ToSurface(const FVector& Point, const UnrealAIMeshTerrain::FSurfaceSample& Sample)
+	{
+		FUnrealAIMeshTerrainSurface Surface;
+		Surface.Inside = true;
+		Surface.Height = Sample.Height;
+		Surface.Normal = Sample.Normal.Z < 0.0 ? -Sample.Normal : Sample.Normal;
+		Surface.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Surface.Normal.Z, -1.0, 1.0)));
+		Surface.Location = FVector(Point.X, Point.Y, Sample.Height);
+		for (const TPair<FName, float>& Channel : Sample.Channels)
+			Surface.Channels.Add(Channel.Key.ToString(), FMath::RoundToDouble(Channel.Value * 1000.0) / 1000.0);
+		return Surface;
+	}
+
 	/** The guards, then @p Build (UnrealAIMeshTerrain::Rebuild or WaitForBuild) timed, as the operations' result. */
 	FUnrealAIMeshTerrainBuild RunBuild(UE::MeshPartition::AMeshPartition* Terrain, double TimeoutSeconds, bool (*Build)(UE::MeshPartition::AMeshPartition*, double))
 	{
@@ -55,46 +69,63 @@ FUnrealAIMeshTerrainSurface UUnrealAIMeshTerrainRqlApi::Surface(UE::MeshPartitio
 
 TArray<FUnrealAIMeshTerrainSurface> UUnrealAIMeshTerrainRqlApi::SurfacePoints(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points)
 {
+	using namespace UnrealAIMeshTerrain;
 	TArray<FUnrealAIMeshTerrainSurface> Out;
 	if (Points.Num() > 10000)
 		return UnrealMcpRql::Failed<TArray<FUnrealAIMeshTerrainSurface>>(FString::Printf(TEXT("%d points: at most 10000 per call"), Points.Num()));
-	if (!UnrealAIMeshTerrain::CheckTerrain(Terrain) || !UnrealAIMeshTerrain::WaitForBuild(Terrain))
+	// The build wait (at most DefaultBuildTimeoutSeconds) leaves the sampling at least 30 s: together under the server's 300 s.
+	const FCallBudget Budget(DefaultBuildTimeoutSeconds + 30.0);
+	if (!CheckTerrain(Terrain) || !UnrealAIMeshTerrain::WaitForBuild(Terrain)) // (not this class's WaitForBuild)
 		return Out;
-	// The paint channels come from evaluating the modifier stack: once over all the points (cached by the builder).
-	const FBox Built = UnrealAIMeshTerrain::BuiltBounds(Terrain);
-	FBox Region(ForceInit);
+	// The paint channels come from evaluating the modifier stack, which builds whole sections (cached by the builder): once
+	// per cell of at most 500 m that holds points (all of them when they lie within 500 m), not once per point.
+	const FBox Built = BuiltBounds(Terrain);
+	FBox2D Spread(ForceInit);
 	for (const FVector& Point : Points)
-		Region += FVector(Point.X, Point.Y, 0.0);
-	TArray<UnrealAIMeshTerrain::FRegionMesh> Evaluated;
-	// Points spread wider than 500 m (a long road, scattered spawn points) evaluate a small region each instead.
-	constexpr double MaxSharedRegion = 50000.0;
-	const bool bShared = Built.IsValid && Region.IsValid && Region.GetSize().X <= MaxSharedRegion && Region.GetSize().Y <= MaxSharedRegion;
-	if (bShared)
+		Spread += FVector2D(Point);
+	constexpr double CellSize = 50000.0;
+	const bool bOneCell = Spread.GetSize().GetMax() <= CellSize;
+	TMap<FIntPoint, TArray<int32>> Cells;
+	for (int32 Index = 0; Index < Points.Num(); ++Index)
 	{
-		Region = Region.ExpandBy(FVector(250.0, 250.0, 0.0));
-		Evaluated = UnrealAIMeshTerrain::BuildRegion(Terrain, FBox(FVector(Region.Min.X, Region.Min.Y, Built.Min.Z - 1000.0), FVector(Region.Max.X, Region.Max.Y, Built.Max.Z + 1000.0)));
+		const FIntPoint Cell = bOneCell ? FIntPoint::ZeroValue : FIntPoint(FMath::FloorToInt32(Points[Index].X / CellSize), FMath::FloorToInt32(Points[Index].Y / CellSize));
+		Cells.FindOrAdd(Cell).Add(Index);
 	}
-	// Each scattered point evaluates its own region: bound the whole call, not only each evaluation.
-	const double Start = FPlatformTime::Seconds();
-	for (const FVector& Point : Points)
+	Out.SetNum(Points.Num());
+	// The sampling gets what the build wait left of the call's budget, at most SampleBudgetSeconds.
+	const double SampleStart = FPlatformTime::Seconds();
+	const double Deadline = SampleStart + FCallBudget::Left(SampleBudgetSeconds);
+	int32 Done = 0;
+	// Checked after every point: past the deadline the evaluations give up at once, and the rest would read no Channels.
+	const auto TimedOut = [&Points, &Done, SampleStart, Deadline]()
 	{
-		if (!bShared && FPlatformTime::Seconds() - Start > UnrealAIMeshTerrain::SampleBudgetSeconds)
+		return FPlatformTime::Seconds() > Deadline && UnrealMcpRql::Failed<bool>(FString::Printf(
+			TEXT("sampling %d points took over %.0f s (%d done; the terrain is evaluated once per 500 m cell holding points): pass fewer points, or points closer together, per call"),
+			Points.Num(), FPlatformTime::Seconds() - SampleStart, Done));
+	};
+	for (const TPair<FIntPoint, TArray<int32>>& Cell : Cells)
+	{
+		FBox2D Area(ForceInit);
+		for (const int32 Index : Cell.Value)
+			Area += FVector2D(Points[Index]);
+		// The builder keeps only the triangles wholly inside the region: 25 m around the points holds the ones under them
+		// (points on a line, or along the terrain's rim, would otherwise each evaluate a region of their own).
+		Area = Area.ExpandBy(2500.0);
+		TArray<FRegionMesh> Evaluated;
+		if (Built.IsValid)
 		{
-			return UnrealMcpRql::Failed<TArray<FUnrealAIMeshTerrainSurface>>(FString::Printf(
-				TEXT("sampling %d points spread over more than 500 m took over %.0f s (%d done; each such point evaluates the terrain around it): pass points within 500 m of each other per call, or fewer points"),
-				Points.Num(), UnrealAIMeshTerrain::SampleBudgetSeconds, Out.Num()));
+			Evaluated = BuildRegion(Terrain, FBox(FVector(Area.Min, Built.Min.Z - 1000.0), FVector(Area.Max, Built.Max.Z + 1000.0)),
+				FMath::Max(Deadline - FPlatformTime::Seconds(), 0.0), /*bFailOnTimeout*/ false);
 		}
-		const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y, /*bChannels*/ true, &Evaluated);
-		FUnrealAIMeshTerrainSurface& Surface = Out.AddDefaulted_GetRef();
-		if (!Sample.bInside)
-			continue;
-		Surface.Inside = true;
-		Surface.Height = Sample.Height;
-		Surface.Normal = Sample.Normal.Z < 0.0 ? -Sample.Normal : Sample.Normal;
-		Surface.Slope = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Surface.Normal.Z, -1.0, 1.0)));
-		Surface.Location = FVector(Point.X, Point.Y, Sample.Height);
-		for (const TPair<FName, float>& Channel : Sample.Channels)
-			Surface.Channels.Add(Channel.Key.ToString(), FMath::RoundToDouble(Channel.Value * 1000.0) / 1000.0);
+		for (const int32 Index : Cell.Value)
+		{
+			const FSurfaceSample Sample = SampleSurface(Terrain, Points[Index].X, Points[Index].Y, /*bChannels*/ true, &Evaluated);
+			if (TimedOut())
+				return TArray<FUnrealAIMeshTerrainSurface>();
+			++Done;
+			if (Sample.bInside)
+				Out[Index] = UnrealAIMeshTerrainRqlApiLocal::ToSurface(Points[Index], Sample);
+		}
 	}
 	return Out;
 }
