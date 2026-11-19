@@ -36,8 +36,11 @@ STAGED_BRIDGE = PLUGIN / "Source/ThirdParty/UnrealMcpBridge"
 # The SHA-256 manifest of the per-RID release zips, shipped INSIDE the plugin: FUnrealMcpBridgeDownloader, or the user of
 # a Fab install, checks a downloaded bridge against it (docs/ARCHITECTURE.md §6.8). Gitignored, written by stage-bridge.
 BRIDGE_SUMS = "SHA256SUMS"
-# The engines the release validates (release.yml) and the Fab listing offers: one Fab project file per engine.
-FAB_ENGINES = ("5.5", "5.6", "5.7", "5.8")
+# The supported engines: the release validates them (release.yml), the Fab listing offers one project file per engine,
+# and the release ships one prebuilt Win64 plugin per engine (prebuilt-zip; its matrix reads `engines`).
+ENGINES = ("5.5", "5.6", "5.7", "5.8")
+# The RID of the platform a prebuilt plugin is for (prebuilt-zip): the one bridge payload it keeps.
+PREBUILT_RIDS = {"Win64": "win-x64"}
 # Fab asset only: its presence compiles UNREAL_MCP_FAB_DISTRIBUTION=1 (UnrealMcpRuntime.Build.cs): no download, no auto-start.
 FAB_MARKER = "Config/FabDistribution.ini"
 # The download code is not compiled in the Fab build, and Epic's review reads the source, so these files do not ship.
@@ -63,7 +66,8 @@ EXECUTABLE_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1", 
 # Only the chain's own feeds: .artifacts/tests holds the suite's build caches and the smoke host.
 CHAIN_FEEDS = ("nuget", "npm", "server", "unity-dll", "nuget-cache")
 # This job's per-run BuildPlugin / report outputs under RUNNER_TEMP.
-TEMP_OUTPUTS = ("UnrealMCP-Package", "UnrealMCP-Dist-Package", "UnrealMCP-Source-Package", "UnrealMCP-Fab-Engines", "AutomationReport")
+TEMP_OUTPUTS = ("UnrealMCP-Package", "UnrealMCP-Dist-Package", "UnrealMCP-Source-Package", "UnrealMCP-Fab-Engines",
+                "UnrealMCP-Prebuilt-Source", "UnrealMCP-Prebuilt-Package", "AutomationReport")
 
 
 class StepError(Exception):
@@ -107,12 +111,12 @@ def module_names(uplugin: Path) -> list:
     return [m.get("Name") for m in ue_json.read(uplugin).get("Modules") or []]
 
 
-def build_plugin(package: Path, strict: bool = False) -> None:
-    """RunUAT BuildPlugin -Rocket of the committed (test-free) descriptor for this host's platform.
+def build_plugin(package: Path, strict: bool = False, plugin: Path | None = None) -> None:
+    """RunUAT BuildPlugin -Rocket of the committed (test-free) descriptor, or of `plugin`, for this host's platform.
 
     strict adds -StrictIncludes (UBT -NoPCH -NoSharedPCH -DisableUnity)."""
     remove_tree(package)
-    command = [env("UE_RUNUAT"), "BuildPlugin", f"-Plugin={PLUGIN / 'UnrealMCP.uplugin'}", f"-Package={package}",
+    command = [env("UE_RUNUAT"), "BuildPlugin", f"-Plugin={(plugin or PLUGIN) / 'UnrealMCP.uplugin'}", f"-Package={package}",
                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket"]
     if strict:
         command.append("-StrictIncludes")
@@ -535,40 +539,101 @@ def fab_engine_zips(args) -> None:
     description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
     shutil.copy2(PLUGIN / "ThirdPartyNotices.txt", stage / "ThirdPartyNotices.txt")
     require_fab_build(stage)
-    names = [f"unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip" for engine in FAB_ENGINES]
+    names = [f"unreal-mcp-plugin-fab-{args.version}-ue{engine}.zip" for engine in ENGINES]
     for stale in (ROOT / "dist").glob(f"unreal-mcp-plugin-fab-{args.version}-ue*.zip"):
         stale.unlink()  # the runner keeps dist/; the release attaches every match, so drop engines no longer built
-    for engine, name in zip(FAB_ENGINES, names):
+    for engine, name in zip(ENGINES, names):
         pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
         descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
         zip_dir(stage, ROOT / "dist" / name, prefix="UnrealMCP/")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"fab_engine_zips={' '.join(names)}\n")
-    print(f"Fab project files for UE {', '.join(FAB_ENGINES)}: {count_files(stage)} file(s) each, no executable.")
+    print(f"Fab project files for UE {', '.join(ENGINES)}: {count_files(stage)} file(s) each, no executable.")
 
 
-def plugin_zip(args) -> None:
-    """BuildPlugin -Rocket with the staged signed bridge, verify both bridge copies, zip the PACKAGED plugin."""
-    package = temp() / "UnrealMCP-Package"
-    build_plugin(package)
-    # RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/<rid>/ into the package's
-    # Binaries/ThirdParty/UnrealMcpBridge/<rid>/ (the resolver's staged path). If UBT did not (design R6),
-    # copy them there so the shipped zip always carries them. The Fab-surviving Source copy must ship INSIDE
-    # the package too: Fab strips Binaries/, so it is what Epic's recompile stages from.
-    for rid in RIDS:
+def require_packaged_bridge(package: Path, staged: Path, rids=RIDS) -> None:
+    """Both bridge copies of a BuildPlugin package, per RID: Binaries/ThirdParty (the resolver's staged path) and the
+    Fab-surviving Source/ThirdParty. RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/<rid>/ into
+    Binaries/ThirdParty/UnrealMcpBridge/<rid>/; where UBT did not (design R6, or a RID of another platform), copy it
+    from `staged` so the shipped zip always carries it. The Source copy must ship INSIDE the package too: Fab strips
+    Binaries/, so it is what Epic's recompile (or a game package build) stages from."""
+    for rid in rids:
         packaged = package / "Binaries/ThirdParty/UnrealMcpBridge" / rid
         if count_files(packaged) < 1:
             print(f"RuntimeDependencies did not stage {rid} into the package; applying the post-step copy from "
                   "Source/ThirdParty/UnrealMcpBridge/ (design R6 fallback).")
-            shutil.copytree(STAGED_BRIDGE / rid, packaged, dirs_exist_ok=True)
+            shutil.copytree(staged / rid, packaged, dirs_exist_ok=True)
         binaries, source = count_files(packaged), count_files(package / "Source/ThirdParty/UnrealMcpBridge" / rid)
         print(f"Packaged bridge for {rid}: {binaries} file(s) in Binaries/, {source} in the Fab-surviving Source/.")
         if binaries < 1:
             raise StepError(f"Packaged plugin is missing the bundled bridge for RID '{rid}'.")
         if source < 1:
             raise StepError(f"Packaged plugin is missing the Fab-surviving Source/ThirdParty/UnrealMcpBridge/{rid} payload (FilterPlugin.ini).")
+
+
+def plugin_zip(args) -> None:
+    """BuildPlugin -Rocket with the staged signed bridge, verify both bridge copies, zip the PACKAGED plugin."""
+    package = temp() / "UnrealMCP-Package"
+    build_plugin(package)
+    require_packaged_bridge(package, STAGED_BRIDGE)
     zip_dir(package, ROOT / f"dist/unreal-mcp-plugin-{args.version}.zip")
+
+
+def prebuilt_zip_name(version: str, engine: str) -> str:
+    return f"unreal-mcp-plugin-{version}-ue{engine}-win64.zip"
+
+
+def prebuilt_zip(args) -> None:
+    """The prebuilt Win64 editor plugin for this runner's engine: unreal-mcp-plugin-<version>-ue<engine>-win64.zip.
+
+    BuildPlugin -Rocket of the released SOURCE asset (dist/unreal-mcp-plugin-source-<version>.zip, signed bridge
+    inside), so a Blueprint-only project needs no build: the editor loads Binaries/Win64 as is. Same layout as the
+    source asset (one UnrealMCP/ folder), the descriptor pinned to `<engine>.0` (the binaries load in that engine minor
+    only), and only the win-x64 bridge payload (the other RIDs cannot run with these binaries; SHA256SUMS stays).
+    """
+    if not args.ue or not re.fullmatch(r"\d+\.\d+", args.ue):
+        raise StepError("prebuilt-zip needs --ue <major>.<minor> (this runner's engine)")
+    rid = PREBUILT_RIDS.get(env("UE_PLATFORM"))
+    if not rid:
+        raise StepError(f"A prebuilt plugin is built on Windows only (UE_PLATFORM={env('UE_PLATFORM')}).")
+    source_zip_path = ROOT / f"dist/unreal-mcp-plugin-source-{args.version}.zip"
+    if not source_zip_path.is_file():
+        raise StepError(f"{source_zip_path} is missing: download the release's source asset there first.")
+    source_root = temp() / "UnrealMCP-Prebuilt-Source"
+    remove_tree(source_root)
+    with zipfile.ZipFile(source_zip_path) as archive:
+        archive.extractall(source_root)
+    plugin = source_root / "UnrealMCP"
+    package = temp() / "UnrealMCP-Prebuilt-Package"
+    build_plugin(package, plugin=plugin)
+    for other in RIDS:
+        if other != rid:
+            for copy in ("Binaries/ThirdParty/UnrealMcpBridge", "Source/ThirdParty/UnrealMcpBridge"):
+                remove_tree(package / copy / other)
+    require_packaged_bridge(package, plugin / "Source/ThirdParty/UnrealMcpBridge", rids=[rid])
+    if not (package / "Source/ThirdParty/UnrealMcpBridge" / BRIDGE_SUMS).is_file():
+        raise StepError(f"The prebuilt plugin is missing Source/ThirdParty/UnrealMcpBridge/{BRIDGE_SUMS}.")
+    descriptor_path = package / "UnrealMCP.uplugin"
+    descriptor = ue_json.read(descriptor_path)
+    binaries = package / "Binaries" / env("UE_PLATFORM")
+    modules = module_names(descriptor_path)
+    missing = [f"UnrealEditor-{name}.dll" for name in modules if not (binaries / f"UnrealEditor-{name}.dll").is_file()]
+    if not modules or missing or not (binaries / "UnrealEditor.modules").is_file():
+        raise StepError(f"The prebuilt plugin lacks editor binaries in {binaries} (UnrealEditor.modules, missing: {missing}).")
+    descriptor_path.write_text(json.dumps({**descriptor, "EngineVersion": f"{args.ue}.0"}, indent=2) + "\n", encoding="utf-8")
+    name = prebuilt_zip_name(args.version, args.ue)
+    zip_dir(package, ROOT / "dist" / name, prefix="UnrealMCP/")
+    print(f"Prebuilt plugin for UE {args.ue} ({rid}): {count_files(package)} file(s) -> dist/{name}")
+
+
+def engines(_args) -> None:
+    """The supported engines as the step output `engines` (a JSON list: the prebuilt matrix and verify-release)."""
+    value = json.dumps(list(ENGINES))
+    print(f"engines={value}")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"engines={value}\n")
 
 
 COMMANDS = {
@@ -587,6 +652,8 @@ COMMANDS = {
     "fab-zip": fab_zip,
     "fab-engine-zips": fab_engine_zips,
     "plugin-zip": plugin_zip,
+    "prebuilt-zip": prebuilt_zip,
+    "engines": engines,
 }
 
 
@@ -596,9 +663,9 @@ def main(argv: list | None = None) -> int:
         stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=sorted(COMMANDS))
-    parser.add_argument("--ue", help="the matrix engine version (suite, fixture-diff)")
+    parser.add_argument("--ue", help="the matrix engine version (suite, fixture-diff, prebuilt-zip)")
     parser.add_argument("--mode", default="verification", help="extension_suite.py mode (suite)")
-    parser.add_argument("--version", help="release version (source-zip, fab-zip, fab-engine-zips, plugin-zip)")
+    parser.add_argument("--version", help="release version (source-zip, fab-zip, fab-engine-zips, plugin-zip, prebuilt-zip)")
     args = parser.parse_args(argv)
     try:
         return COMMANDS[args.command](args) or 0

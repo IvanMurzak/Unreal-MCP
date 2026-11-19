@@ -114,7 +114,7 @@ handshake is independent of it. NuGet pins: see `bridge/AGENTS.md`.
 `['5.8']`; `UE_ROOT` resolved per runner by the `.github/actions/ue-env` action). UE jobs run on self-hosted
 runners that carry the engine's label (e.g. `unreal-5-8`): PR `plugin` and `connection-smoke` on any OS
 (Windows, macOS, Linux; the smoke host project is `tests/smoke-host`), release `plugin` / extension `test`
-on a fixed Windows + macOS matrix, release `build-plugin-zip` on Windows only. They are serialized by the machine-wide lock
+on a fixed Windows + macOS matrix, release `build-plugin-zip` and `build-prebuilt-plugins` (one prebuilt Win64 plugin per engine, [RELEASING](docs/RELEASING.md#prebuilt-win64-plugins)) on Windows only. They are serialized by the machine-wide lock
 `scripts/ue_machine_lock.py` ([RELEASING](docs/RELEASING.md#machine-wide-ue-lock)), and are
 gated on `vars.UNREAL_RUNNER_READY` / `vars.UNREAL_SMOKE_READY == 'true'` and same-repo PRs — otherwise
 SKIPPED, never red. `release.yml` is `workflow_dispatch`-only (`dry_run` input; validates UE 5.5–5.8) and

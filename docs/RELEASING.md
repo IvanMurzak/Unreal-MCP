@@ -36,8 +36,9 @@ version bump publishes nothing. The Fab portal step (File Links, submit for revi
 - [ ] **Fab (Epic marketplace) submission.** The portal step is manual — the release pipeline produces the
       executable-free Fab asset (`unreal-mcp-plugin-fab-<version>.zip`) and **the per-engine zips to submit**
       (`unreal-mcp-plugin-fab-<version>-ue<engine>.zip`, C5 below), the dedicated source-plugin zip
-      (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset) and the packaged
-      BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`), but no job submits to Fab. Fab carries
+      (`unreal-mcp-plugin-source-<version>.zip`, the CLI install asset), the packaged
+      BuildPlugin zip (`unreal-mcp-plugin-<version>.zip`) and the [prebuilt Win64 plugins](#prebuilt-win64-plugins)
+      (`unreal-mcp-plugin-<version>-ue<engine>-win64.zip`), but no job submits to Fab. Fab carries
       its own metadata/screenshot requirements and an Epic review; do it by hand when the listing
       is ready. The `-fab-` zips ship no executable (Epic rejected the bundled sidecar; Fab users
       download it by hand, `docs/ARCHITECTURE.md` §6.8), the distributed `.uplugin` ships no
@@ -53,7 +54,7 @@ npm/tag/Release/Discord job.
 | --- | --- | --- |
 | `test_pull_request.yml` | `pull_request` to `main` (+ manual) | Fans out the PR test legs: bridge build+xUnit (ubuntu + windows), cli node 22/24/26, and — when a runner is registered — the UE 5.8 plugin BuildPlugin + Automation leg. A PR changing only `docs/**` and the root `AGENTS.md` skips the legs and stays green through the `docs-only gate` job (`.github/scripts/docs-only.mjs`); a dispatch or a `train/` label always runs in full. |
 | `test_cli.yml` | `workflow_call` (reusable) | Builds + tests `unreal-mcp-cli` on Node 22, 24 & 26. Called by both `test_pull_request.yml` and `release.yml`. |
-| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI installs and an executable-free **Fab** asset, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
+| `release.yml` | manual `workflow_dispatch` **only** | Dispatch-only release: builds + **code-signs** the self-contained bridge per RID, validates the plugin Automation leg across UE 5.5/5.6/5.7/5.8, publishes a dedicated **source** plugin asset for CLI installs and an executable-free **Fab** asset, **bundles the signed sidecar into the packaged plugin** (BuildPlugin), builds a **prebuilt Win64 plugin per supported engine**, and (on a real run) publishes `unreal-mcp-cli` to npm, cuts the GitHub Release + tag, verifies both, and announces in Discord. `dry_run=true` rehearses everything without publishing. |
 
 ### The signed self-bootstrapping sidecar bundle (release.yml artifact graph)
 
@@ -97,9 +98,48 @@ artifact jobs in `release.yml`:
   so its UE 5.8 `BuildPlugin` run does not overlap the UE 5.8 validation leg on
   the same machine's AutomationTool lock. Like every self-hosted UE job, it also
   holds the [machine-wide UE lock](#machine-wide-ue-lock) around its UE steps.
-- **`sign-plugin-source`** **signs** `unreal-mcp-plugin-source-<version>.zip` and
-  `unreal-mcp-plugin-fab-<version>.zip` with `minisign`; `publish-release` attaches both `.minisig` files as
-  sibling release assets (see [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
+- **`build-prebuilt-plugins`** (self-hosted Windows, one leg per supported engine) — BuildPlugins the
+  source asset above for that engine into `unreal-mcp-plugin-<version>-ue<engine>-win64.zip`, the
+  no-build install for Blueprint-only projects; see [Prebuilt Win64 plugins](#prebuilt-win64-plugins).
+- **`sign-plugin-source`** **signs** `unreal-mcp-plugin-source-<version>.zip`,
+  `unreal-mcp-plugin-fab-<version>.zip` (and its per-engine copies) and the prebuilt Win64 plugins with
+  `minisign`; `publish-release` attaches every `.minisig` file as a sibling release asset (see
+  [Plugin-source signing key](#plugin-source-signing-key-d12--cli-verifies-before-install)).
+
+### Prebuilt Win64 plugins
+
+A Blueprint-only (content-only) project has no C++ target, and building the source asset there costs
+1–5 minutes and ~1.1 GB of intermediates. So every release also ships the plugin **already built** for
+the editor on Windows, one zip per supported engine minor (`ue_ci.py` `ENGINES`, today 5.5, 5.6, 5.7, 5.8):
+
+| Asset | What it is |
+| --- | --- |
+| `unreal-mcp-plugin-<version>-ue<major>.<minor>-win64.zip` | the plugin built for that engine, e.g. `unreal-mcp-plugin-0.34.0-ue5.7-win64.zip` |
+| `unreal-mcp-plugin-<version>-ue<major>.<minor>-win64.zip.minisig` | its detached minisign signature |
+
+- **How it is built** — `build-prebuilt-plugins` (matrix from `build-plugin-zip`'s `engines` output, each leg on
+  `[self-hosted, windows, unreal-5-x]`) runs `ue_ci.py prebuilt-zip`: `BuildPlugin -Rocket -TargetPlatforms=Win64`
+  of the exact `unreal-mcp-plugin-source-<version>.zip` of the same run, with that engine.
+- **Layout** — the source asset's: one top-level `UnrealMCP/` folder, so it extracts to
+  `<Project>/Plugins/UnrealMCP/` the same way. It carries `Binaries/Win64/UnrealEditor.modules` and an
+  `UnrealEditor-<Module>.dll` for every module (the step fails otherwise), the source (`Source/`, so a later C++
+  build or a game package build still works), and **only the `win-x64` bridge** (in `Binaries/ThirdParty/` and the
+  Fab-surviving `Source/ThirdParty/`; the other RIDs cannot run with Win64 binaries, `SHA256SUMS` stays).
+- **Descriptor** — `UnrealMCP.uplugin` pins `"EngineVersion": "<major>.<minor>.0"`: the binaries load only in that
+  engine minor (its hotfixes included: Epic keeps them binary-compatible, which Fab's per-minor binaries rely on too). That is why the CLI's source install, which refuses any `EngineVersion`
+  pin, never takes this zip.
+- **Integrity** — like the source zip: the `.minisig` is a minisign (Ed25519) signature by the same publisher key
+  (`cli/src/lib/plugin-signature.ts` `MINISIGN_PUBLIC_KEY`), made by `sign-plugin-source`; verify it before
+  extracting (`verifyMinisign`). There is no separate checksum file; GitHub's release-asset API also reports each
+  asset's SHA-256 (`assets[].digest`, `sha256:<hex>`). `verify-release` fails the release if a zip or its
+  signature is missing.
+- **Picking one (the App)** — read the project's `EngineAssociation`; when it is a supported `<major>.<minor>`
+  (a launcher install) and the host is Windows, install `…-ue<that minor>-win64.zip` and skip the build. Anything
+  else — another OS, a source-built engine (a GUID association), an engine minor not in `ENGINES`, a missing asset
+  or signature, a failed verification, or modules the editor reports as incompatible — falls back to the source
+  zip + build. The release fails if any supported engine's zip is missing, so a published release always has all.
+- **Legacy packaged zip** — `unreal-mcp-plugin-<version>.zip` (UE 5.8, all four RIDs, files at the zip root) is
+  still attached unchanged; prefer the per-engine zips.
 
 ### Plugin-source signing key (D12 — CLI verifies before install)
 
@@ -366,7 +406,7 @@ gh run watch --repo IvanMurzak/Unreal-MCP "$(gh run list --repo IvanMurzak/Unrea
 
 Expected: `bridge`, `test-cli`, `build-bridge-macos`, `build-bridge-windows`
 succeed (the bridge build + sign jobs run on every rehearsal; with no secrets
-they produce unsigned-but-green artifacts); the `plugin` / `build-plugin-zip`
+they produce unsigned-but-green artifacts); the `plugin` / `build-plugin-zip` / `build-prebuilt-plugins`
 legs run only if the self-hosted runner is registered (otherwise skipped);
 `sign-plugin-source` runs (it needs `MINISIGN_SECRET_KEY`); `publish-npm`,
 `publish-release`, `verify-release` and `publish_discord` are **skipped**. A dry-run is the right way

@@ -230,11 +230,11 @@ class CiStepTests(unittest.TestCase):
             github_output = self.runner_temp / "github_output"
             with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
                 self.assertEqual(ci.main(["fab-engine-zips", "--version", "1.2.3"]), 0)
-        names = [f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip" for engine in ci.FAB_ENGINES]
+        names = [f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip" for engine in ci.ENGINES]
         self.assertEqual(github_output.read_text(encoding="utf-8"), "fab_engine_zips=" + " ".join(names) + "\n")
         self.assertFalse(stale.exists())
         dist = plugin.parent / "dist"
-        for engine in ci.FAB_ENGINES:
+        for engine in ci.ENGINES:
             with zipfile.ZipFile(dist / f"unreal-mcp-plugin-fab-1.2.3-ue{engine}.zip") as archive:
                 pinned = json.loads(archive.read("UnrealMCP/UnrealMCP.uplugin"))
                 self.assertEqual(archive.read("UnrealMCP/ThirdPartyNotices.txt"), b"corrected")
@@ -246,7 +246,7 @@ class CiStepTests(unittest.TestCase):
 
     def test_fab_engines_match_the_release_matrix(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertEqual(sorted(set(re.findall(r"ue: '([0-9.]+)' }", workflow))), sorted(ci.FAB_ENGINES))
+        self.assertEqual(sorted(set(re.findall(r"ue: '([0-9.]+)' }", workflow))), sorted(ci.ENGINES))
 
     def test_fab_zip_refuses_any_other_executable(self):
         plugin = self.fake_plugin()
@@ -288,6 +288,70 @@ class CiStepTests(unittest.TestCase):
         self.assertIn("UnrealMCP.uplugin", archive.namelist())
         apphost = archive.getinfo("Binaries/ThirdParty/UnrealMcpBridge/osx-arm64/unreal-mcp-bridge")
         self.assertTrue((apphost.external_attr >> 16) & 0o111, "the non-Windows apphost must stay executable")
+
+    def released_source_zip(self) -> Path:
+        """dist/unreal-mcp-plugin-source-1.2.3.zip as the release's build-plugin-zip makes it (signed bridge inside)."""
+        plugin = self.fake_plugin()
+        with self.patch_repo(plugin):
+            self.stage_fake_bridge(plugin)
+            self.assertEqual(ci.main(["stage-bridge"]), 0)
+            self.assertEqual(ci.main(["source-zip", "--version", "1.2.3"]), 0)
+        return plugin
+
+    def prebuilt_uat(self, modules=("UnrealMcpRuntime",)) -> str:
+        """A fake BuildPlugin: the package is the plugin it was given plus Win64 editor binaries (RuntimeDependencies
+        stage only the Win64 RID into Binaries/ThirdParty), and it stamps EngineVersion like the real one."""
+        return fake_uat(self.temp, f"""
+            import shutil
+            plugin = pathlib.Path(args['-Plugin']).parent
+            shutil.copytree(plugin, package)
+            (package / 'Binaries/ThirdParty/UnrealMcpBridge').mkdir(parents=True)
+            shutil.copytree(plugin / 'Source/ThirdParty/UnrealMcpBridge/win-x64', package / 'Binaries/ThirdParty/UnrealMcpBridge/win-x64')
+            (package / 'Binaries/Win64').mkdir(parents=True)
+            (package / 'Binaries/Win64/UnrealEditor.modules').write_text('{{}}')
+            for name in {list(modules)!r}:
+                (package / 'Binaries/Win64' / ('UnrealEditor-' + name + '.dll')).write_bytes(b'MZ')
+            descriptor = json.loads((package / 'UnrealMCP.uplugin').read_text())
+            (package / 'UnrealMCP.uplugin').write_text(json.dumps({{**descriptor, 'EngineVersion': '5.6.0'}}))
+        """)
+
+    def test_prebuilt_zip_builds_the_released_source_for_one_engine_and_keeps_only_win64(self):
+        plugin = self.released_source_zip()
+        with self.patch_repo(plugin), mock.patch.dict(os.environ, {"UE_RUNUAT": self.prebuilt_uat()}):
+            self.assertEqual(ci.main(["prebuilt-zip", "--version", "1.2.3", "--ue", "5.6"]), 0)
+        with zipfile.ZipFile(plugin.parent / "dist/unreal-mcp-plugin-1.2.3-ue5.6-win64.zip") as archive:
+            names = archive.namelist()
+            descriptor = json.loads(archive.read("UnrealMCP/UnrealMCP.uplugin"))
+        # The source asset's layout: one UnrealMCP/ folder, so the App extracts it like the source zip.
+        self.assertTrue(all(n.startswith("UnrealMCP/") for n in names))
+        self.assertIn("UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMcpRuntime.dll", names)
+        self.assertIn("UnrealMCP/Binaries/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge", names)
+        self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/win-x64/unreal-mcp-bridge", names)
+        self.assertIn("UnrealMCP/Source/ThirdParty/UnrealMcpBridge/SHA256SUMS", names)
+        self.assertFalse([n for n in names if "osx-" in n or "linux-" in n], "only the win-x64 bridge ships")
+        self.assertEqual(descriptor["EngineVersion"], "5.6.0")
+        self.assertEqual([m["Name"] for m in descriptor["Modules"]], ["UnrealMcpRuntime"])
+
+    def test_prebuilt_zip_refuses_missing_inputs_and_binaries(self):
+        plugin = self.fake_plugin()
+        with self.patch_repo(plugin):
+            self.assertEqual(ci.main(["prebuilt-zip", "--version", "1.2.3", "--ue", "5.6"]), 1)  # no source asset
+        plugin = self.released_source_zip()
+        with self.patch_repo(plugin), mock.patch.dict(os.environ, {"UE_RUNUAT": self.prebuilt_uat(modules=())}):
+            self.assertEqual(ci.main(["prebuilt-zip", "--version", "1.2.3"]), 1)  # no --ue
+            self.assertEqual(ci.main(["prebuilt-zip", "--version", "1.2.3", "--ue", "5.6"]), 1)  # no editor DLL
+            with mock.patch.dict(os.environ, {"UE_PLATFORM": "Mac"}):
+                self.assertEqual(ci.main(["prebuilt-zip", "--version", "1.2.3", "--ue", "5.6"]), 1)  # Windows only
+        self.assertFalse((plugin.parent / "dist/unreal-mcp-plugin-1.2.3-ue5.6-win64.zip").exists())
+
+    def test_engines_output_and_the_prebuilt_matrix_read_one_list(self):
+        github_output = self.runner_temp / "github_output"
+        with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+            self.assertEqual(ci.main(["engines"]), 0)
+        self.assertEqual(github_output.read_text(encoding="utf-8"), f"engines={json.dumps(list(ci.ENGINES))}\n")
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("ue: ${{ fromJSON(needs.build-plugin-zip.outputs.engines) }}", workflow)
+        self.assertIn("prebuilt-zip --version", workflow)
 
     def test_teardown_cleans_releases_and_removes_the_link_last(self):
         repo = self.temp / "repo"
