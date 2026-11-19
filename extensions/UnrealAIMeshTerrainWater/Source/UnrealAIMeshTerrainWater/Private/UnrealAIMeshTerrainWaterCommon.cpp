@@ -40,6 +40,7 @@
 #include "WaterBodyActor.h"
 #include "WaterBodyComponent.h"
 #include "WaterBodyTypes.h"
+#include "WaterSplineComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIMeshTerrainWater, Log, All);
 
@@ -170,19 +171,24 @@ namespace UnrealAIMeshTerrainWater
 		}
 	}
 
+	void LoadActorsOf(UClass* Class)
+	{
+		if (!UnavailableReason().IsEmpty())
+			return;
+		const TArray<FGuid> Unloaded = UnloadedActors(UnrealMcpRql::EditorWorld(), [Class](const FWorldPartitionActorDesc& Desc)
+		{
+			const UClass* Native = Desc.GetActorNativeClass();
+			return Native && Native->IsChildOf(Class);
+		});
+		if (!Unloaded.IsEmpty())
+			UnrealMcpRql::LoadWorldPartitionActors(Unloaded);
+	}
+
 	TArray<AWaterBody*> WaterBodies(bool bLoad)
 	{
 		UWorld* World = UnrealMcpRql::EditorWorld();
-		if (bLoad && UnavailableReason().IsEmpty())
-		{
-			const TArray<FGuid> Unloaded = UnloadedActors(World, [](const FWorldPartitionActorDesc& Desc)
-			{
-				const UClass* Class = Desc.GetActorNativeClass();
-				return Class && Class->IsChildOf(AWaterBody::StaticClass());
-			});
-			if (!Unloaded.IsEmpty())
-				UnrealMcpRql::LoadWorldPartitionActors(Unloaded);
-		}
+		if (bLoad)
+			LoadActorsOf(AWaterBody::StaticClass());
 		TArray<AWaterBody*> Out;
 		if (!World)
 			return Out;
@@ -393,25 +399,44 @@ namespace UnrealAIMeshTerrainWater
 		const double Start = FPlatformTime::Seconds();
 		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
 		const bool bStaticMeshes = MakesStaticMeshes(Terrain);
+		// The loaded water modifiers bound to the terrain: one spawned or rebound in this call may join the terrain's
+		// modifier list only after a later UpdateModifierList; until every one is listed the build is not done.
+		TArray<const UModifierComponent*> Expected;
+		for (TActorIterator<AWaterBody> It(Terrain->GetWorld()); It; ++It)
+		{
+			for (const UWaterModifier* Modifier : WaterModifiers(*It))
+			{
+				if (Modifier->GetAffectedMeshPartition() == Terrain && !Modifier->GetIsDisabledFlag())
+					Expected.Add(Modifier);
+			}
+		}
+		const auto Unregistered = [Component, &Expected]()
+		{
+			const TArray<UModifierComponent*> Listed = Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier); });
+			return Expected.ContainsByPredicate([&Listed](const UModifierComponent* Modifier) { return !Listed.Contains(Modifier); });
+		};
 		FBuildState State;
+		bool bUnregistered = true;
 		int32 Rounds = 0;
 		while (true)
 		{
-			// A water body spawned or changed in this call joins the terrain's modifier list here (first round), then queued
-			// modifier changes start their section builds and finished builds are applied.
-			if (Rounds == 0)
+			// Queued modifier changes start their section builds and finished builds are applied (a modifier spawned or
+			// changed in this call first joins the terrain's modifier list).
+			if (bUnregistered)
 				Component->UpdateModifierList();
 			Component->Update();
 			// Collision cooking and the transformer pipeline finish through game-thread tasks.
 			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 			FAssetCompilingManager::Get().ProcessAsyncTasks(true);
 			State = BuildState(Terrain, bStaticMeshes);
+			bUnregistered = Unregistered();
 			++Rounds;
-			if (State.IsReady())
+			if (State.IsReady() && !bUnregistered)
 				break;
 			if (FPlatformTime::Seconds() > Deadline)
 			{
-				OutPending = FString::Printf(TEXT("%s still building after %.0f s (%s)"), *NameOf(Terrain), FPlatformTime::Seconds() - Start, *State.Describe());
+				OutPending = FString::Printf(TEXT("%s still building after %.0f s (%s%s)"), *NameOf(Terrain), FPlatformTime::Seconds() - Start, *State.Describe(),
+					bUnregistered ? TEXT(", a water modifier not registered with it yet") : TEXT(""));
 				return false;
 			}
 			FPlatformProcess::Sleep(0.01f);
@@ -506,6 +531,28 @@ namespace UnrealAIMeshTerrainWater
 		return Base && Base->MaterialDomain == MD_Surface && Base->GetUsageByFlag(MATUSAGE_Water);
 	}
 
+	namespace
+	{
+		/** Whether @p Body's spline (or actor) lies over some Mesh Terrain of its world (XY). */
+		bool OverMeshTerrain(const AWaterBody* Body)
+		{
+			FBox2D Area(ForceInit);
+			Area += FVector2D(Body->GetActorLocation());
+			if (const UWaterSplineComponent* Spline = Body->GetWaterSpline())
+			{
+				for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
+					Area += FVector2D(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World));
+			}
+			for (TActorIterator<AMeshPartition> It(Body->GetWorld()); It; ++It)
+			{
+				const FBox Box = IsValid(*It) ? TerrainBounds(*It) : FBox(ForceInit);
+				if (Box.IsValid && FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(Area))
+					return true;
+			}
+			return false;
+		}
+	}
+
 	FString Problem(const AWaterBody* Body)
 	{
 		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
@@ -526,7 +573,7 @@ namespace UnrealAIMeshTerrainWater
 					Modifiers.Num(), *Modifiers[0]->GetClass()->GetName(), *Me);
 			}
 		}
-		else if (const UClass* Wanted = ModifierClassFor(Body))
+		else if (const UClass* Wanted = ModifierClassFor(Body); Wanted && (!Modifiers.IsEmpty() || OverMeshTerrain(Body)))
 		{
 			if (!Modifier)
 				return FString::Printf(TEXT("it does not shape any Mesh Terrain (no %s): meshTerrainWater | call Attach(%s, unreal.find(\"<terrain>\"))"), *Wanted->GetName(), *Me);
@@ -554,6 +601,7 @@ namespace UnrealAIMeshTerrainWater
 		}
 		if (!FApp::CanEverRender())
 			return TEXT("this editor does not render (-nullrhi): the water mesh is built in a rendering editor");
+		// UWaterBodyInfoMeshComponent is private to the Water plugin: find the info mesh by its component name.
 		bool bMesh = false;
 		TArray<UStaticMeshComponent*> Meshes;
 		Body->GetComponents(Meshes);

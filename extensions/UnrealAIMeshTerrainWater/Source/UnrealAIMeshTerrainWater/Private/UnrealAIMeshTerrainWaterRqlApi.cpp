@@ -11,8 +11,10 @@
 #include "Editor/EditorEngine.h" // FActorLabelUtilities
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Interfaces/IPluginManager.h"
 #include "Interfaces/IProjectManager.h"
+#include "LandscapeProxy.h"
 #include "Materials/MaterialInterface.h"
 #include "ProjectDescriptor.h"
 #include "ScopedTransaction.h"
@@ -81,19 +83,31 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		return Actor;
 	}
 
-	/** Give @p Body the Place Actors defaults of its type keeping its spline points; false when the Water plugin has no factory for it. */
+	/**
+	 * Give @p Body the Place Actors defaults of its type (material, waves), keeping what shapes the terrain: its spline
+	 * points, its per-point width / depth / velocity (the spline metadata), its Terrain settings (CurveSettings: the bed's
+	 * ChannelDepth, WaterHeightmapSettings) and bAffectsLandscape; false when the Water plugin has no factory for it.
+	 */
 	bool ApplyWaterDefaults(AWaterBody* Body)
 	{
 		UActorFactory* Factory = GEditor && Body ? GEditor->FindActorFactoryForActorClass(Body->GetClass()) : nullptr;
 		UWaterSplineComponent* Spline = Body ? Body->GetWaterSpline() : nullptr;
 		if (!Factory || !Spline)
 			return false;
+		UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
 		TArray<FSplinePoint> Points;
 		for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
 			Points.Add(Spline->GetSplinePointAt(Index, ESplineCoordinateSpace::Local));
+		UWaterSplineMetadata* Metadata = Component->GetWaterSplineMetadata();
+		const UWaterSplineMetadata* Saved = Metadata ? DuplicateObject(Metadata, GetTransientPackage()) : nullptr;
+		const FWaterCurveSettings Curve = Component->CurveSettings;
+		const FWaterBodyHeightmapSettings Heightmap = Component->WaterHeightmapSettings;
+		const bool bAffects = Component->bAffectsLandscape;
 		Body->Modify();
-		Body->GetWaterBodyComponent()->Modify();
+		Component->Modify();
 		Spline->Modify();
+		if (Metadata)
+			Metadata->Modify();
 		(Factory->*FPostSpawnAccess::PostSpawn)(Body->GetClass(), Body);
 		if (Points.Num())
 		{
@@ -101,7 +115,17 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 			Spline->AddPoints(Points, false);
 			Spline->UpdateSpline();
 			Spline->SynchronizeWaterProperties();
+			if (Metadata && Saved && Saved->RiverWidth.Points.Num() == Points.Num())
+			{
+				Metadata->Depth = Saved->Depth;
+				Metadata->WaterVelocityScalar = Saved->WaterVelocityScalar;
+				Metadata->RiverWidth = Saved->RiverWidth;
+				Metadata->AudioIntensity = Saved->AudioIntensity;
+			}
 		}
+		Component->CurveSettings = Curve;
+		Component->WaterHeightmapSettings = Heightmap;
+		Component->bAffectsLandscape = bAffects;
 		RebuildBody(Body);
 		return true;
 	}
@@ -166,45 +190,131 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		Component->FillWaterZoneWithOcean();
 	}
 
+	/** The XY area @p Zone renders: its location +- half its extent. */
+	FBox2D ZoneArea(const AWaterZone* Zone)
+	{
+		const FVector2D Centre(Zone->GetActorLocation());
+		const FVector2D Half = Zone->GetZoneExtent() / 2.0;
+		return FBox2D(Centre - Half, Centre + Half);
+	}
+
+	/** The XY area of every Mesh Terrain plus 25% (centred on them; invalid without a terrain). */
+	FBox2D TerrainsArea(UWorld* World)
+	{
+		const FBox Bounds = TerrainsBounds(World);
+		if (!Bounds.IsValid)
+			return FBox2D(ForceInit);
+		const FVector2D Centre(Bounds.GetCenter());
+		const FVector2D Half = FVector2D(Bounds.GetExtent()) * 1.25;
+		return FBox2D(Centre - Half, Centre + Half);
+	}
+
+	/** The world's water zone (World Partition: its actor loaded first; null when there is none). */
+	AWaterZone* FindZone(UWorld* World)
+	{
+		LoadActorsOf(AWaterZone::StaticClass());
+		return Cast<AWaterZone>(FindFirst(World, AWaterZone::StaticClass()));
+	}
+
+	/** Make @p Zone (spawned when null) the square around @p Area and refit the ocean to it. Null after Fail. */
+	AWaterZone* PlaceZone(UWorld* World, AWaterZone* Zone, const FBox2D& Area)
+	{
+		const FVector2D Centre = Area.GetCenter();
+		const double Extent = FMath::Max(Area.GetSize().X, Area.GetSize().Y);
+		if (!Zone)
+			Zone = Cast<AWaterZone>(SpawnWater(World, AWaterZone::StaticClass(), FVector(Centre.X, Centre.Y, 0.0), TEXT("WaterZone")));
+		if (!Zone)
+			return nullptr;
+		Zone->Modify();
+		Zone->SetActorLocation(FVector(Centre.X, Centre.Y, Zone->GetActorLocation().Z));
+		Zone->SetZoneExtent(FVector2D(Extent, Extent));
+		LoadActorsOf(AWaterBodyOcean::StaticClass());
+		RefitOcean(Cast<AWaterBodyOcean>(FindFirst(World, AWaterBodyOcean::StaticClass())), Zone);
+		return Zone;
+	}
+
 	/**
-	 * Create or resize @p World's water zone: SizeMeters 0 covers every Mesh Terrain plus 25% (Center ignored; refused
-	 * without one), else a square SizeMeters wide around Center. Refits the ocean. Null after Fail.
+	 * Create or resize @p World's water zone: SizeMeters 0 covers every Mesh Terrain plus 25% and whatever the zone already
+	 * covers (it only grows: a Landscape's water keeps its zone; Center ignored; refused without a terrain), else exactly a
+	 * square SizeMeters wide around Center. Refits the ocean. Null after Fail.
 	 */
 	AWaterZone* FitZone(UWorld* World, double SizeMeters, FVector Center)
 	{
 		if (!FMath::IsFinite(SizeMeters) || Center.ContainsNaN())
 			return UnrealMcpRql::Failed<AWaterZone*>(TEXT("SizeMeters and Center must be finite numbers"));
-		double Extent = SizeMeters * 100.0;
-		if (SizeMeters <= 0.0)
-		{
-			const FBox Bounds = TerrainsBounds(World);
-			if (!Bounds.IsValid)
-				return UnrealMcpRql::Failed<AWaterZone*>(TEXT("there is no Mesh Terrain to cover: pass SizeMeters (and Center)"));
-			Extent = FMath::Max(Bounds.GetSize().X, Bounds.GetSize().Y) * 1.25;
-			Center = Bounds.GetCenter();
-		}
-		else if (SizeMeters < 10.0 || SizeMeters > 100000.0)
-		{
+		if (SizeMeters > 0.0 && (SizeMeters < 10.0 || SizeMeters > 100000.0))
 			return UnrealMcpRql::Failed<AWaterZone*>(FString::Printf(TEXT("SizeMeters %g is outside 10 .. 100000 (0 covers the Mesh Terrains)"), SizeMeters));
+		AWaterZone* Zone = FindZone(World);
+		if (SizeMeters > 0.0)
+		{
+			const FVector2D Half(SizeMeters * 50.0);
+			return PlaceZone(World, Zone, FBox2D(FVector2D(Center) - Half, FVector2D(Center) + Half));
 		}
-		AWaterZone* Zone = Cast<AWaterZone>(FindFirst(World, AWaterZone::StaticClass()));
-		if (!Zone)
-			Zone = Cast<AWaterZone>(SpawnWater(World, AWaterZone::StaticClass(), FVector(Center.X, Center.Y, 0.0), TEXT("WaterZone")));
-		if (!Zone)
-			return nullptr;
-		Zone->Modify();
-		Zone->SetActorLocation(FVector(Center.X, Center.Y, Zone->GetActorLocation().Z));
-		Zone->SetZoneExtent(FVector2D(Extent, Extent));
-		RefitOcean(Cast<AWaterBodyOcean>(FindFirst(World, AWaterBodyOcean::StaticClass())), Zone);
-		return Zone;
+		FBox2D Area = TerrainsArea(World);
+		if (!Area.bIsValid)
+			return UnrealMcpRql::Failed<AWaterZone*>(TEXT("there is no Mesh Terrain to cover: pass SizeMeters (and Center)"));
+		if (Zone)
+			Area += ZoneArea(Zone);
+		return PlaceZone(World, Zone, Area);
 	}
 
-	/** @p World's water zone, made when there is none (over the Mesh Terrains, else 2 km around @p Center). Null after Fail. */
-	AWaterZone* EnsureZone(UWorld* World, const FVector& Center)
+	/**
+	 * @p World's water zone grown, when needed, to render @p Body (XY, invalid for none): made when there is none (over the
+	 * Mesh Terrains and the body, else 2 km around the body or the origin); an existing one only grows (it may render a
+	 * Landscape's water too). Null after Fail.
+	 */
+	AWaterZone* EnsureZone(UWorld* World, const FBox2D& Body)
 	{
-		if (AWaterZone* Zone = Cast<AWaterZone>(FindFirst(World, AWaterZone::StaticClass())))
+		AWaterZone* Zone = FindZone(World);
+		if (Zone && (!Body.bIsValid || ZoneArea(Zone).IsInside(Body)))
 			return Zone;
-		return FitZone(World, TerrainsBounds(World).IsValid ? 0.0 : 2000.0, Center);
+		FBox2D Area = TerrainsArea(World);
+		if (Zone)
+			Area += ZoneArea(Zone);
+		if (Body.bIsValid)
+			Area += Body;
+		if (!Area.bIsValid)
+			Area = FBox2D(FVector2D(-100000.0), FVector2D(100000.0));
+		return PlaceZone(World, Zone, Area);
+	}
+
+	/** The XY box of @p Points grown by @p Margin cm (a river's half width, a shore's falloff). */
+	FBox2D PointsArea(TConstArrayView<FVector> Points, double Margin)
+	{
+		FBox2D Area(ForceInit);
+		for (const FVector& Point : Points)
+			Area += FVector2D(Point);
+		return Area.bIsValid ? Area.ExpandBy(Margin) : Area;
+	}
+
+	/** The XY box of @p Body's spline (and its actor), grown by 20 m: what its zone must render. */
+	FBox2D BodyArea(const AWaterBody* Body)
+	{
+		TArray<FVector> Points = { Body->GetActorLocation() };
+		if (const UWaterSplineComponent* Spline = Body->GetWaterSpline())
+		{
+			for (int32 Index = 0; Index < Spline->GetNumberOfSplinePoints(); ++Index)
+				Points.Add(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World));
+		}
+		return PointsArea(Points, 2000.0);
+	}
+
+	/**
+	 * Warn (the call still succeeds) when a Landscape lies under @p Area: a body that shapes a Mesh Terrain has Affects
+	 * Landscape on, so the Water plugin's brush also edits that Landscape (its "Water" edit layer).
+	 */
+	void WarnLandscape(UWorld* World, const FBox2D& Area, const FString& Label)
+	{
+		for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
+		{
+			const FBox Box = IsValid(*It) ? It->GetComponentsBoundingBox() : FBox(ForceInit);
+			if (Box.IsValid && FBox2D(FVector2D(Box.Min), FVector2D(Box.Max)).Intersect(Area))
+			{
+				UnrealMcpRql::Warn(FString::Printf(TEXT("%s also lies over the Landscape %s: a water body that shapes a Mesh Terrain (Affects Landscape on) also edits that Landscape through the Water brush (its \"Water\" edit layer)"),
+					*Label, *It->GetActorNameOrLabel()));
+				return;
+			}
+		}
 	}
 
 	/** Fail unless some of @p Points (X, Y) lie on @p Terrain's area (a body off the terrain shapes nothing). */
@@ -294,8 +404,11 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		UWaterModifier* Kept = MatchingModifier(Body);
 		for (UWaterModifier* Modifier : WaterModifiers(Body))
 		{
-			if (Modifier != Kept)
-				RemoveModifier(Modifier);
+			if (Modifier == Kept)
+				continue;
+			if (AMeshPartition* Other = Modifier->GetAffectedMeshPartition(); IsValid(Other) && Other != Terrain)
+				OutLeft.AddUnique(Other);
+			RemoveModifier(Modifier);
 		}
 		UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
 		if (!Component->bAffectsLandscape)
@@ -331,7 +444,8 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 	 * fills it).
 	 */
 	void WaitTerrains(TConstArrayView<AMeshPartition*> Terrains, double TimeoutSeconds, FUnrealAIMeshTerrainWaterResult& Out,
-		TConstArrayView<AMeshPartition*> RebuildWhole = {})
+		TConstArrayView<AMeshPartition*> RebuildWhole = {},
+		const TCHAR* PendingFormat /* %s: what still builds */ = TEXT("applied (one undo step), %s: call meshTerrainWater | call WaitForBuild(body) before reading heights"))
 	{
 		const double Start = FPlatformTime::Seconds();
 		TArray<FString> Pending;
@@ -341,14 +455,17 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 			if (!Component)
 				continue;
 			if (RebuildWhole.Contains(Terrain))
-				Component->ForceRebuildAllSections(UE::MeshPartition::EChangeType::StateChange); // WaitForBuild updates its modifier list first
+			{
+				Component->UpdateModifierList();
+				Component->ForceRebuildAllSections(UE::MeshPartition::EChangeType::StateChange);
+			}
 			FString Still;
 			if (!WaitForBuild(Terrain, FMath::Max(MinTimeoutSeconds, TimeoutSeconds - (FPlatformTime::Seconds() - Start)), Still))
 				Pending.Add(Still);
 		}
 		Out.Seconds = SecondsSince(Start);
 		Out.State = Pending.IsEmpty() ? FString(TEXT("built"))
-			: FString::Printf(TEXT("applied (one undo step), %s: call meshTerrainWater | call WaitForBuild(body) before reading heights"), *FString::Join(Pending, TEXT("; ")));
+			: FString(PendingFormat).Replace(TEXT("%s"), *FString::Join(Pending, TEXT("; "))); // a runtime format: Printf checks literals only
 	}
 
 	/** The result fields of @p Body (Body, Label, Type, Terrain, Modifier, Location, Problem, Ready). */
@@ -391,7 +508,9 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		FUnrealAIMeshTerrainWaterResult Out;
 		UWorld* World = UnrealMcpRql::EditorWorld();
 		WarnGround(Terrain, Points);
-		if (!EnsureZone(World, Location))
+		const FBox2D Area = PointsArea(Points, 2000.0);
+		WarnLandscape(World, Area, Label);
+		if (!EnsureZone(World, Area))
 			return Out;
 		const FScopedTransaction Transaction(FText::Format(LOCTEXT("CreateWater", "Create {0} on Mesh Terrain"), FText::FromString(Class->GetName())));
 		AWaterBody* Body = Cast<AWaterBody>(SpawnWater(World, Class, Location, Label));
@@ -479,6 +598,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateOcean(con
 	if (!FMath::IsFinite(Height) || FMath::Abs(Height) > 1000000.0)
 		return UnrealMcpRql::Failed<FUnrealAIMeshTerrainWaterResult>(TEXT("Height must be within -1000000 .. 1000000 cm"));
 	UWorld* World = UnrealMcpRql::EditorWorld();
+	LoadActorsOf(AWaterBodyOcean::StaticClass());
 	if (const AActor* Existing = FindFirst(World, AWaterBodyOcean::StaticClass()))
 	{
 		return UnrealMcpRql::Failed<FUnrealAIMeshTerrainWaterResult>(FString::Printf(
@@ -486,7 +606,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateOcean(con
 			*Existing->GetActorLabel(), *Existing->GetActorLabel()));
 	}
 	const FScopedTransaction Transaction(LOCTEXT("CreateOcean", "Create Ocean on Mesh Terrain"));
-	const AWaterZone* Zone = EnsureZone(World, FVector::ZeroVector);
+	const AWaterZone* Zone = EnsureZone(World, FBox2D(ForceInit));
 	if (!Zone)
 		return {};
 	// The ocean's actor factory fills the zone (collision and ocean extents), as the Place Actors panel does.
@@ -523,6 +643,10 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::Attach(AWaterBo
 			*Body->GetActorNameOrLabel()));
 	}
 	const FScopedTransaction Transaction(LOCTEXT("AttachWater", "Attach Water Body to Mesh Terrain"));
+	if (bShapes)
+		WarnLandscape(Body->GetWorld(), BodyArea(Body), Body->GetActorNameOrLabel());
+	if (!EnsureZone(Body->GetWorld(), BodyArea(Body)))
+		return {};
 	TArray<AMeshPartition*> Left;
 	if (!BindModifier(Body, Terrain, Left))
 		return {};
@@ -566,17 +690,19 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::Delete(AWaterBo
 	TArray<AMeshPartition*> Changed;
 	{
 		const FScopedTransaction Transaction(LOCTEXT("DeleteWater", "Delete Water Body"));
-		// Its modifiers go first, each queuing a rebuild of the area it shaped (as Detach), then the body.
+		// Each modifier queues a rebuild of the area it shaped (as Detach), then the body goes with them; the build wait's
+		// first UpdateModifierList drops them from the terrain's stack.
 		for (UWaterModifier* Modifier : WaterModifiers(Body))
 		{
 			AddAffected(Modifier, Changed);
-			RemoveModifier(Modifier);
+			Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		}
 		if (!Body->GetWorld()->EditorDestroyActor(Body, /*bShouldModifyLevel*/ true))
 			return UnrealMcpRql::Failed<FUnrealAIMeshTerrainWaterResult>(FString::Printf(TEXT("could not delete %s"), *Out.Label));
 	}
 	Out.Terrain = Changed.IsEmpty() ? FString() : Changed[0]->GetActorLabel();
-	WaitTerrains(Changed, TimeoutSeconds, Out);
+	WaitTerrains(Changed, TimeoutSeconds, Out, {},
+		TEXT("deleted (one undo step), %s: call meshTerrain | call WaitForBuild(terrain) (Mesh Terrain extension) before reading heights there"));
 	Out.Ready = Out.State == TEXT("built");
 	if (!Out.Ready)
 		Out.Problem = Out.State;
@@ -592,7 +718,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::WaitForBuild(AW
 	if (AMeshPartition* Terrain = TerrainOf(Body))
 	{
 		LoadTerrainActors(Terrain);
-		WaitTerrains({ Terrain }, TimeoutSeconds, Out);
+		WaitTerrains({ Terrain }, TimeoutSeconds, Out, {}, TEXT("%s: call WaitForBuild again"));
 	}
 	else
 	{
@@ -617,7 +743,7 @@ AWaterBody* UUnrealAIMeshTerrainWaterRqlApi::SetMaterial(AWaterBody* Body, UMate
 	if (!CheckBody(Body) || (Material && !RequireWaterMaterial(Material)))
 		return nullptr;
 	const FScopedTransaction Transaction(LOCTEXT("SetMaterial", "Set Water Material"));
-	if (!EnsureZone(Body->GetWorld(), Body->GetActorLocation()))
+	if (!EnsureZone(Body->GetWorld(), BodyArea(Body)))
 		return nullptr;
 	UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
 	if (Material)

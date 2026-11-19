@@ -165,25 +165,35 @@ BEGIN_DEFINE_SPEC(FUnrealAIMeshTerrainWaterSpec, "UnrealAIMeshTerrainWater",
 	}
 
 	/**
-	 * A test's cleanup on exit: its terrain (with its base meshes), the actors labelled @p Labels, and the water zone when the
-	 * test made it (none existed when the scope began).
+	 * A test's cleanup on exit: its terrain (with its base meshes), the actors labelled @p Labels, and the water zone as it
+	 * was when the scope began (deleted when the test made it, else moved and sized back: the operations grow it).
 	 */
 	struct FWaterSpecScope
 	{
 		FString TerrainLabel;
 		TArray<FString> Labels;
-		bool bHadZone = WaterSpecZone() != nullptr;
+		TWeakObjectPtr<AWaterZone> Zone = WaterSpecZone();
+		FVector ZoneLocation = Zone.IsValid() ? Zone->GetActorLocation() : FVector::ZeroVector;
+		FVector2D ZoneExtent = Zone.IsValid() ? Zone->GetZoneExtent() : FVector2D::ZeroVector;
 
 		~FWaterSpecScope()
 		{
 			WaterSpecCleanup(TerrainLabel, Labels);
-			if (!bHadZone)
+			if (AWaterZone* Now = WaterSpecZone(); Now && !Zone.IsValid())
+				WaterSpecWorld()->EditorDestroyActor(Now, true);
+			else if (Zone.IsValid())
 			{
-				if (AWaterZone* Zone = WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(Zone, true);
+				Zone->SetActorLocation(ZoneLocation);
+				Zone->SetZoneExtent(ZoneExtent);
 			}
 		}
 	};
+
+	/** Whether a call's result JSON says its terrain build finished: State "built" (not "still building ..."). */
+	static bool WaterSpecBuilt(const FString& Json)
+	{
+		return Json.Contains(TEXT("\"State\":\"built\""));
+	}
 END_DEFINE_SPEC(FUnrealAIMeshTerrainWaterSpec)
 
 void FUnrealAIMeshTerrainWaterSpec::Define()
@@ -246,7 +256,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 			if (!TestNotNull(TEXT("lake labelled"), Lake))
 				return;
 			TestTrue(*FString::Printf(TEXT("answer names the terrain, the modifier and a built state (%s)"), *Json),
-				Json.Contains(TerrainLabel) && Json.Contains(TEXT("LakeModifier")) && Json.Contains(TEXT("built")));
+				Json.Contains(TerrainLabel) && Json.Contains(TEXT("LakeModifier")) && WaterSpecBuilt(Json));
 			TestEqual(TEXT("one water modifier"), UnrealAIMeshTerrainWater::WaterModifiers(Lake).Num(), 1);
 			TestTrue(TEXT("bound to the terrain"), UnrealAIMeshTerrainWater::TerrainOf(Lake) == Terrain);
 			TestTrue(TEXT("affects the terrain"), Lake->GetWaterBodyComponent()->bAffectsLandscape);
@@ -526,7 +536,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 			UnrealAIMeshTerrainWater::BuildTimeoutForTests = 0.0;
 			// meshTerrainWater | call WaitForBuild(unreal.find("<label>"))
 			TestTrue(TEXT("WaitForBuild"), UnrealMcpRqlTools::RunPlan(WaterSpecCall(TEXT("WaitForBuild"), WaterSpecFind(Label)), false, &Result));
-			TestTrue(*FString::Printf(TEXT("built after the wait (%s)"), *WaterSpecJson(Result)), WaterSpecJson(Result).Contains(TEXT("built")));
+			TestTrue(*FString::Printf(TEXT("built after the wait (%s)"), *WaterSpecJson(Result)), WaterSpecBuilt(WaterSpecJson(Result)));
 		});
 	});
 }

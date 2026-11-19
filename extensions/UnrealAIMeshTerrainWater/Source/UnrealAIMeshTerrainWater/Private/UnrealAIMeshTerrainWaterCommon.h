@@ -83,9 +83,12 @@ namespace UnrealAIMeshTerrainWater
 	void LoadTerrainActors(const AMeshPartition* Terrain);
 
 	/**
-	 * Every water body of the editor world; with @p bLoad first loads the unloaded ones (World Partition; only while the
-	 * operations can run: not during Play In Editor).
+	 * Load (in the editor) every unloaded actor of @p Class of the editor world (World Partition: water bodies, the water
+	 * zone, the ocean), only while the operations can run (not during Play In Editor). No unsaved change, no undo step.
 	 */
+	void LoadActorsOf(UClass* Class);
+
+	/** Every water body of the editor world; with @p bLoad the unloaded ones are loaded first (LoadActorsOf). */
 	TArray<AWaterBody*> WaterBodies(bool bLoad);
 
 	/** The editor component that builds @p Terrain (null outside the editor or before the actor registered). */
@@ -163,7 +166,8 @@ namespace UnrealAIMeshTerrainWater
 
 	/**
 	 * Why @p Body does not render or does not shape its terrain yet, with what to call (empty when it is ready): the
-	 * operations' answer and the MeshTerrainWater member.
+	 * operations' answer and the MeshTerrainWater member. A lake or river with no water modifier over no Mesh Terrain (a
+	 * Landscape's water) is not asked to shape one.
 	 */
 	FString Problem(const AWaterBody* Body);
 }
