@@ -544,6 +544,12 @@ UClass* FUnrealMcpRqlTypes::ClassOf(const rql::TypeDescriptor* Descriptor) const
 	return Found ? *Found : nullptr;
 }
 
+UScriptStruct* FUnrealMcpRqlTypes::StructOf(const rql::TypeDescriptor* Descriptor) const
+{
+	UScriptStruct* const* Found = Descriptor ? StructByDescriptor.Find(Descriptor) : nullptr;
+	return Found ? *Found : nullptr;
+}
+
 void FUnrealMcpRqlTypes::AddNativeType(const rql::TypeDescriptor* Descriptor)
 {
 	if (Descriptor)
@@ -1447,7 +1453,8 @@ static void UnrealMcpRqlChangedMemberPath(const FProperty* Property, const void*
  * default) stops doing so first, as the Details panel's MarkAllBodiesDefaultCollision(false): the mesh's profile would
  * otherwise be loaded over any edit. A write that puts a member back to its value before this call's first collision
  * write (the runtime's rollback of a failed mutation, or an edit undone in the same query) restores the whole collision
- * state as it was, default collision included: the setters alone would leave the profile at Custom.
+ * state as it was, default collision included: the setters alone would leave the profile at Custom. That holds for a
+ * Blueprint's construction-script component too, which the first write's construction rerun replaced (FindBodySnapshot).
  * Returns whether it turned the static mesh's default collision off (the template's objects follow that too).
  */
 bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before)
@@ -1479,7 +1486,8 @@ bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Pro
 	if (Mesh && Live != &Mesh->BodyInstance)
 		Mesh = nullptr;
 
-	if (const FBodySnapshot* First = BodySnapshots.Find(Live))
+	const SIZE_T Offset = static_cast<const uint8*>(Live) - reinterpret_cast<const uint8*>(Owner);
+	if (const FBodySnapshot* First = FindBodySnapshot(Owner, Offset))
 	{
 		const void* Original = First->Body->GetStructMemory();
 		const bool bRestores = (NewProfile == OldProfile || NewProfile == Profile->GetPropertyValue_InContainer(Original))
@@ -1497,7 +1505,7 @@ bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Pro
 	}
 	else
 	{
-		FBodySnapshot& Snapshot = BodySnapshots.Add(Live);
+		FBodySnapshot& Snapshot = BodySnapshots.Add({ Owner, Offset });
 		Snapshot.Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
 		FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot.Body->GetStructMemory(), Before);
 		Snapshot.bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
@@ -1523,6 +1531,22 @@ bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Pro
 		Body.SetObjectType(static_cast<ECollisionChannel>(NewObjectType));
 	}
 	return bDefaultCollisionOff;
+}
+
+FUnrealMcpRqlTypes::FBodySnapshot* FUnrealMcpRqlTypes::FindBodySnapshot(const UObject* Owner, SIZE_T Offset)
+{
+	if (FBodySnapshot* Found = BodySnapshots.Find({ Owner, Offset }))
+		return Found;
+	// The owner may be the replacement of the one first written (OnObjectsReplaced: every earlier copy leads to the newest).
+	for (const TPair<const UObject*, TWeakObjectPtr<UObject>>& Entry : Replaced)
+	{
+		if (Entry.Value.Get() == Owner)
+		{
+			if (FBodySnapshot* Found = BodySnapshots.Find({ Entry.Key, Offset }))
+				return Found;
+		}
+	}
+	return nullptr;
 }
 
 void FUnrealMcpRqlTypes::WriteObjectProperty(UObject* Object, FProperty* Property, const rql::Value& Value)

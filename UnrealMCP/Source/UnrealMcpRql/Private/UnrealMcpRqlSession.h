@@ -126,6 +126,12 @@ private:
 	bool bReadOnlyCalls = false;
 	/** A call record of an operation that declares itself read-only (meta = (RqlReadOnly)). */
 	bool IsReadOnlyCall(const rql::MutationRecord& Record) const;
+	/**
+	 * The plan's call goes to an operations source whose operation of that name is read-only: `call landscape.Surface(...)`,
+	 * or `editor | where ... | call LoadActors(...)` (only filtering stages before it). Known before anything runs, so a
+	 * limit error, which comes before any record, can be told apart from a same-named call that changes something.
+	 */
+	bool CallsReadOnlySource(const rql::QueryPlan& Plan) const;
 	/** @p Records is a non-empty batch of read-only calls only. */
 	bool AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const;
 	/** @p Records is a non-empty batch of calls of operations that work the undo buffer themselves (Undo / Redo). */

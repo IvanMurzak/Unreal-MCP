@@ -90,6 +90,7 @@ static TMap<FString, FString> GUnrealMcpRqlSimilarActorsCache;
 void UnrealMcpRqlForgetSimilarActors()
 {
 	GUnrealMcpRqlSimilarActorsCache.Reset();
+	UnrealMcpRqlWorldPartition::ForgetUnloaded(); // the unloaded rows it scans are kept for one request too
 }
 
 FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred, const TArray<FUnrealMcpUnloadedActor>* InUnloaded)
@@ -138,8 +139,7 @@ static FString UnrealMcpRqlSimilarActorsScan(UWorld* World, const FString& Wante
 	};
 	for (TActorIterator<AActor> It(World); It && Scanned < MaxScanned; ++It)
 		Consider(It->GetActorLabel(), It->GetClass()->GetName(), true, Preferred && It->IsA(Preferred));
-	TArray<FUnrealMcpUnloadedActor> Own;
-	const TArray<FUnrealMcpUnloadedActor>& Unloaded = InUnloaded ? *InUnloaded : (Own = UnrealMcpRqlWorldPartition::Unloaded(World));
+	const TArray<FUnrealMcpUnloadedActor>& Unloaded = InUnloaded ? *InUnloaded : UnrealMcpRqlWorldPartition::UnloadedForRequest(World);
 	TMap<FString, bool> PreferredClasses; // descriptor class name -> is a Preferred
 	for (const FUnrealMcpUnloadedActor& Row : Unloaded)
 	{
