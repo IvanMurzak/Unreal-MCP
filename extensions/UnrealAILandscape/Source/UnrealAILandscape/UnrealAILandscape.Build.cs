@@ -40,6 +40,8 @@ public class UnrealAILandscape : ModuleRules
 			"UnrealEd",
 			// IPluginManager / IProjectManager: EnableWater enables the Water plugin in the project file.
 			"Projects",
+			// UDataLayerEditorSubsystem: the World Partition spec puts streaming proxies in a data layer it unloads.
+			"DataLayerEditor",
 		});
 	}
 }

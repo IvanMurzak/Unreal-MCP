@@ -164,6 +164,32 @@ struct FUnrealAILandscapeRoad
 	int32 Changed = 0;
 };
 
+/** The result of `landscape | call PaintWhere(...)`: the same fields as Mesh Terrain's PaintWhere where they mean the same. */
+USTRUCT(BlueprintType)
+struct FUnrealAILandscapePaintWhere
+{
+	GENERATED_BODY()
+
+	/** the landscape vertices whose weight of the layer changed */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	int32 Vertices = 0;
+
+	/** the landscape vertices in Within that matched the slope and height ranges (moved all the way to Strength) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	int32 Matched = 0;
+
+	/** true when the landscape's merged weights and rendering show the paint (false: it shows after the next editor frames, or in a rendering editor) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	bool Ready = false;
+
+	/** "merged", or (Ready false) why the paint is not merged yet */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	FString State;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Landscape")
+	double Seconds = 0.0;
+};
+
 /** One result of `landscape | call Coverage(landscape, layer)`: a connected area where a paint layer is painted. */
 USTRUCT(BlueprintType)
 struct FUnrealAILandscapeCoverage
@@ -223,13 +249,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Paint(ALandscapeProxy* Landscape, const FString& Layer, FVector Center, double Radius = 0.0, double Strength = 1.0, const FString& Label = TEXT(""));
 
-	/** paint a layer by name onto every vertex of a landscape whose ground matches a rule: slope MinSlope .. MaxSlope degrees (0 .. 90) and world height MinHeight .. MaxHeight cm (default: any), only inside Within ([MinX, MinY, MaxX, MaxY] world cm; empty: the whole landscape); soft edges (2 degrees past the slope bounds, 50 cm past the height bounds); Strength 0..1; weight-blended like Paint (it takes its weight from the other layers), adding a layer that has none of that name; sand on beaches, grass on flat ground, rock on slopes: Paint the base layer with radius 0 first, then one PaintWhere per rule; Label (optional, "" for none) names the edit in the edit log (its Rule records the ranges); returns how many vertices changed */
+	/** paint a layer by name on a landscape where the ground's slope is MinSlope..MaxSlope degrees (0 .. 90) and its height MinHeight..MaxHeight (world Z, cm), within Within ([MinX, MinY, MaxX, MaxY] world cm, MinX < MaxX and MinY < MaxY; empty: the whole landscape): every such vertex moves to Strength (the weight 0..1, 0 erases), with soft edges 2 degrees past the slope bounds and 50 cm past the height bounds; the rest keeps its weight; weight-blended like Paint (a layer that gains weight takes it from the other layers, one that loses it gives it back to them), adding a layer that has none of that name. Sand on beaches: MinHeight -200, MaxHeight 300; rock on cliffs: MinSlope 30; grass on flat ground: MaxSlope 15 (Paint the base layer with radius 0 first, then one PaintWhere per rule). Label (optional, "" for none) names the edit in the edit log (its Rule records the ranges); returns {Vertices (changed), Matched, Ready, State, Seconds}, as Mesh Terrain's PaintWhere does */
 	// UHT reads no default for an array, and C++ wants one on every parameter after a defaulted one: the defaults RQL
 	// offers are written as the metadata UHT would write (CPP_Default_*; an empty text is the type's zero value).
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Landscape", meta = (BlueprintInternalUseOnly = "true", CPP_Default_MinSlope = "0",
-		CPP_Default_MaxSlope = "90", CPP_Default_MinHeight = "-1000000000", CPP_Default_MaxHeight = "1000000000", CPP_Default_Strength = "1",
+		CPP_Default_MaxSlope = "90", CPP_Default_MinHeight = "-10000000", CPP_Default_MaxHeight = "10000000", CPP_Default_Strength = "1",
 		CPP_Default_Label = "", CPP_Default_Within = ""))
-	int32 PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope, double MinHeight, double MaxHeight,
+	FUnrealAILandscapePaintWhere PaintWhere(ALandscapeProxy* Landscape, const FString& Layer, double MinSlope, double MaxSlope, double MinHeight, double MaxHeight,
 		double Strength, const FString& Label, const TArray<double>& Within);
 
 	/** replace the ground within Radius (cm) of Center (world X and Y) by a smooth surface fitted to the ground around that circle, so a spike, pit, bump or hole disappears into its surroundings (a slope stays a slope); Strength 0..1 (1: all the way); fails without changing anything when the result leaves the height range; Label (optional) names the edit in the landscape's edit log (LandscapeProxy.Edits); returns how many vertices changed */

@@ -1043,7 +1043,11 @@ void FUnrealMcpRqlTypes::AddFunctionMethod(rql::TypeDescriptor& Descriptor, UFun
 		UnrealMcpRqlBeginCall();
 		Object->ProcessEvent(Function, Params);
 		FString Failure;
-		if (UnrealMcpRqlEndCall(Failure))
+		TArray<FString> Warnings;
+		const bool bFailed = UnrealMcpRqlEndCall(Failure, Warnings);
+		for (const FString& Warning : Warnings)
+			Self->AddWarning(rql::Diagnostic::warning("call-warning", UnrealMcpRqlToStd(FString::Printf(TEXT("%s: %s"), *Function->GetName(), *Warning))));
+		if (bFailed)
 			Throw(Failure);
 
 		if (Return)

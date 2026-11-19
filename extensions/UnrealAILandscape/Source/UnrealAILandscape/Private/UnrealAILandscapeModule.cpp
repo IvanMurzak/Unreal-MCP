@@ -150,7 +150,7 @@ public:
 			TEXT("Landscape operations: call Create(label, location, sizeMeters, material, maxHeightMeters) / Sculpt(landscape, center, radius, height) / Flatten(landscape, center, radius, height, falloff) / Carve(landscape, points, width, depth) / Smooth(landscape, center, radius, strength) / Ramp(landscape, points, width, falloff, maxSlope) / RoadBetween(landscape, start, end, width, maxSlope, falloff) / Bumps(landscape, minHeight, scale) / Coverage(landscape, layer, minWeight) / Paint(landscape, layer, center, radius, strength) / PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength, label, within) / CreateLayerMaterial(path, layers) / Surface(landscape, point) / Delete(landscape) / Rebuild(landscape)"),
 			UUnrealAILandscapeRqlApi::StaticClass(), TEXT("LandscapeOperations"));
 		Context.AddApiSource(TEXT("water"),
-			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
+			TEXT("Water operations: call CreateOcean(label, height, material) / CreateLake(label, center, radius, material) / CreateRiver(label, points, width, material) / CreateRiverBetween(label, landscape, source, mouth, width, depth, material, meander) / SetMaterial(body, material) / SetZone(sizeMeters, center) / EnableWater()"),
 			UUnrealAIWaterRqlApi::StaticClass(), TEXT("WaterOperations"));
 
 		// The fields queries filter on are scalar members; `Sections` keeps the layout together for select output.
@@ -237,11 +237,15 @@ public:
 				return MakeShared<FJsonValueObject>(Out);
 			});
 		Context.AddJsonMember(ALandscapeProxy::StaticClass(), TEXT("Edits"),
-			TEXT("the landscape's edit log, newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it, and the undo history is no record of them (no locations, empty after a restart): to find them (\"I edited the terrain myself, check it\") use landscape | call Bumps(unreal.find(\"<label>\")): a place with no Edit was most likely made outside these operations"),
+			TEXT("the landscape's edit log, on its landscape actor (IsPrimary; a streaming proxy has none: landscapes | where IsPrimary | select Label Edits), newest first (the last 5000 records, 100,000 path points in all): each shaping or paint operation of this extension {Index, Op, Label, Points (a path within 50 cm), Radius, Width, Height, Layer, Rule, Time}; saved with the level, undone with the edit; edits made another way (Landscape mode, Python, imports) are not in it, and the undo history is no record of them (no locations, empty after a restart): to find them (\"I edited the terrain myself, check it\") use landscape | call Bumps(unreal.find(\"<label>\")): a place with no Edit was most likely made outside these operations"),
 			[](UObject* Object) -> TSharedPtr<FJsonValue>
 			{
 				TArray<TSharedPtr<FJsonValue>> Out;
 				const auto Number = [](double Value) { return MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Value * 100.0) / 100.0); };
+				// The log is the landscape actor's: a streaming proxy repeating it made landscapes | select Edits show it once per
+				// proxy (16 times for a 500 m World Partition landscape).
+				if (!Cast<ALandscape>(Object))
+					return MakeShared<FJsonValueArray>(Out);
 				// Newest first (a long list is shown cut after its first items), each with its Index in the log (oldest 0), the
 				// number Bumps' Edit names.
 				const TArray<FUnrealAILandscapeEdit>& Log = UnrealAILandscapeRqlApiLocal::EditLog(Cast<ALandscapeProxy>(Object));
@@ -377,11 +381,14 @@ landscape | call Paint(unreal.find("Terrain"), "Grass", [0, 0, 0], 0)           
 landscapes | select Label PaintLayers Sections
 ```
 
-Paint by the ground instead of circles with `PaintWhere(landscape, layer, minSlope, maxSlope, minHeight, maxHeight, strength,
-label, within)`: every vertex whose slope (degrees) and world height (cm) fall in the ranges, with soft edges (2 degrees past
-the slope bounds, 50 cm past the height bounds); `within` ([minX, minY, maxX, maxY] world cm, optional) limits it to a
-box. Each call takes its weight from the layers painted before it, so paint the base layer first, then one rule per layer,
-the one that must win last; a Paint circle afterwards paints over a rule (and a rule over a circle) the same way.
+)MD") TEXT(R"MD(Paint by the ground instead of circles with `PaintWhere(landscape, layer, minSlope = 0, maxSlope = 90, minHeight = -1e7,
+maxHeight = 1e7, strength = 1, label, within = [])`, the same arguments and meaning as Mesh Terrain's PaintWhere: every
+vertex whose slope (degrees) and world height (cm) fall in the ranges moves to `strength` (the layer's weight 0..1, so a
+lower strength lowers it and 0 erases it), with soft edges (2 degrees past the slope bounds, 50 cm past the height
+bounds); `within` ([minX, minY, maxX, maxY] world cm, minX < maxX and minY < maxY, optional) limits it to a box. A layer
+that gains weight takes it from the other layers, one that loses it gives it back to them, so paint the base layer first,
+then one rule per layer, the one that must win last; a Paint circle afterwards paints over a rule (and a rule over a circle)
+the same way. It returns {Vertices (changed), Matched (in the ranges), Ready, State, Seconds}.
 
 ```
 landscape | call Paint(unreal.find("Island"), "Grass", [0, 0, 0], 0)                                   grass everywhere
@@ -392,7 +399,7 @@ landscape | call PaintWhere(unreal.find("Island"), "Rock", 30, 90, -100000, 1000
 ```
 
 History: every shaping and paint call of these operations that changes the landscape (Sculpt, Flatten, Carve, Smooth,
-Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` (the last 5000, newest first:
+Ramp, RoadBetween, Paint, PaintWhere, and CreateRiverBetween with a Depth) appends a record to the landscape's edit log, `Edits` of the landscape actor (`landscapes | where IsPrimary`; a streaming proxy has none) (the last 5000, newest first:
 Index, Op, Label, Points, Radius, Width, Height, Layer, Rule, Time). A path's Points stay within 50 cm of the real path (a road's
 switchbacks, a river's bends: at most 1000 points; a query shows the first 20, read them all with `get Edits[0].Points`). Give a call an optional argument `Label` (the last one; PaintWhere: before Within; CreateRiverBetween's edit takes the river's label) ("river", "road to the
 top") to name it. The log is saved with the level and undone and redone with its edit; `Bumps` names the logged edit that
@@ -489,10 +496,11 @@ water | call EnableWater()                                                      
 
 Land above the ocean's height hides it, so one ocean surrounds an island. `CreateRiverBetween` follows the lowest
 ground from source to mouth, keeps the water flowing downhill and (Depth > 0, cm) carves its bed into the landscape, so
-it shows even across a rise; keep the mouth a little inside the landscape. Its bed (and a Carve) cuts through whatever
-lies on its route, a road or path included: where the route crosses one (compare the river's or Carve's logged Points with the road's logged
-Points; read them all with `get Edits[n].Points`; a road not in the log: read Surface along it), lower the road to a ford no
-steeper than its slope with Ramp or place a bridge over the bed, and say so. A water body's surface is its spline's Z: a
+it shows even across a rise; keep the mouth a little inside the landscape. On flat ground it winds from side to side
+(`Meander`, its last argument, 0..1, default 1; 0 keeps the straight lowest route); it never climbs the valley's sides
+for a bend. Its bed (and a Carve) cuts through whatever lies on its route, a road or path included: when it cuts a road
+of the edit log (RoadBetween, Ramp) the answer warns (`call-warning`) where; a road not in the log: read Surface along
+it. Then lower the road to a ford no steeper than its slope with Ramp or place a bridge over the bed, and say so. A water body's surface is its spline's Z: a
 lake or river below the ground around it is hidden. `Water.Problem` names what to call when a body does not render.
 The first water material compiles its shaders for a while after the call; `Water.Ready` turns true when they are done.)MD"));
 	}

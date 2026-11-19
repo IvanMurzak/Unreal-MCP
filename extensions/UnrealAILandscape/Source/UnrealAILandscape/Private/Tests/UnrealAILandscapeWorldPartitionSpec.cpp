@@ -14,6 +14,7 @@
 #include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 
+#include "DataLayer/DataLayerEditorSubsystem.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Engine/World.h"
@@ -25,6 +26,8 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
+#include "WorldPartition/DataLayer/DataLayerAsset.h"
+#include "WorldPartition/DataLayer/DataLayerInstance.h"
 #include "WorldPartition/WorldPartition.h"
 
 // ============================================================================================
@@ -205,6 +208,43 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 		WpRun(TEXT("landscapes lists"), TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"), false);
 		TestEqual(TEXT("landscapes loaded every streaming proxy"), WpProxies(Guid), AllProxies);
 		WpNothingChanged(TEXT("landscapes"), UndoBefore, DirtyBefore);
+
+		// The edit log is the landscape actor's: the streaming proxies do not repeat it (DEV-113: 16 copies in a listing).
+		// landscapes | where not IsPrimary and Edits.count() > 0 | count
+		TSharedPtr<FJsonObject> Repeated;
+		UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"not","args":[{"path":["IsPrimary"]}]},{"op":">","args":[{"call":"count","on":{"path":["Edits"]},"args":[]},{"lit":0}]}]}},{"op":"count"}]})RQL"), false, &Repeated);
+		TestTrue(*FString::Printf(TEXT("no streaming proxy repeats the edit log (%s)"), *WpJson(Repeated).Left(300)), WpJson(Repeated).Contains(TEXT("\"value\":0")));
+
+		// A proxy in a data layer the editor has not loaded: the loader skips it, so an edit of the whole landscape would
+		// change only part of it. The operation fails naming it, and changes nothing (DEV-113).
+		{
+			UDataLayerEditorSubsystem* DataLayers = UDataLayerEditorSubsystem::Get();
+			UPackage* AssetPackage = CreatePackage(*FString::Printf(TEXT("/Game/%s/DL_WpSpec"), Folder));
+			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, TEXT("DL_WpSpec"), RF_Public | RF_Transactional);
+			FDataLayerCreationParameters Parameters;
+			Parameters.DataLayerAsset = Asset;
+			UDataLayerInstance* Instance = DataLayers ? DataLayers->CreateDataLayerInstance(Parameters) : nullptr;
+			TArray<AActor*> Half;
+			for (TActorIterator<ALandscapeStreamingProxy> It(UnrealMcpRql::EditorWorld()); It; ++It)
+			{
+				if (It->GetLandscapeGuid() == Guid && Half.Num() < AllProxies / 2)
+					Half.Add(*It);
+			}
+			if (TestNotNull(TEXT("a data layer"), Instance) && TestTrue(TEXT("half the proxies are in it"), DataLayers->AddActorsToDataLayer(Half, Instance))
+				&& TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, false)))
+			{
+				TestEqual(TEXT("its proxies are unloaded"), WpProxies(Guid), AllProxies - Half.Num());
+				// landscape | call Paint(unreal.find("WpSpecLand"), "Grass", [500000, 500000, 0], 0)
+				TSharedPtr<FJsonObject> Painted;
+				const bool bPainted = UnrealMcpRqlTools::RunPlan(WpCall(TEXT("landscape"), TEXT("Paint"),
+					FString::Printf(TEXT(R"(%s,{"lit":"Grass"},{"list":[{"lit":%.17g},{"lit":%.17g},{"lit":0}]},{"lit":0})"), *WpFind(), X, Y)), true, &Painted);
+				TestTrue(*FString::Printf(TEXT("painting the whole landscape fails and names the data layer (%s)"), *WpJson(Painted).Left(600)),
+					!bPainted && WpJson(Painted).Contains(TEXT("data layer that is not loaded")));
+				TestFalse(TEXT("and paints nothing"), Landscape->GetLandscapeInfo() && Landscape->GetLandscapeInfo()->GetLayerInfoByName(TEXT("Grass")) != nullptr);
+				DataLayers->SetDataLayerIsLoadedInEditor(Instance, true, false);
+				TestEqual(TEXT("loaded again with the data layer"), WpProxies(Guid), AllProxies);
+			}
+		}
 
 		// landscape | call Delete(unreal.find("WpSpecLand")), unsaved: a later listing must not load the proxies back
 		if (!WpRun(TEXT("deleted"), WpCall(TEXT("landscape"), TEXT("Delete"), WpFind())))

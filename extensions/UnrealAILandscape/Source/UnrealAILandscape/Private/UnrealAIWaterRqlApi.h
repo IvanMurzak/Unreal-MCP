@@ -50,9 +50,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Water", meta = (BlueprintInternalUseOnly = "true"))
 	AWaterBodyRiver* CreateRiver(const FString& Label, const TArray<FVector>& Points, double Width = 1500.0, UMaterialInterface* Material = nullptr);
 
-	/** create a river on Landscape from Source to Mouth (world X, Y) along the lowest ground between them, flowing downhill all the way: Depth > 0 (cm) also carves its bed that deep into the landscape (one undo step with the river), so the water shows even where the path crosses higher ground; Width cm (100 .. 20000); returns the river (read its points with waterBodies | select Path) */
+	/** create a river on Landscape from Source to Mouth (world X, Y) along the lowest ground between them, flowing downhill all the way: Depth > 0 (cm) also carves its bed that deep into the landscape (one undo step with the river), so the water shows even where the path crosses higher ground; Width cm (100 .. 20000); Meander 0..1 (default 1): how far it winds from side to side on the valley floor (bends every 12 widths, up to 1.5 widths out; it never climbs the valley's sides for it), 0 keeps the lowest route; when its bed cuts a road of the edit log (RoadBetween, Ramp) the answer warns where; returns the river (read its points with waterBodies | select Path) */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Water", meta = (BlueprintInternalUseOnly = "true"))
-	AWaterBodyRiver* CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width = 1500.0, double Depth = 300.0, UMaterialInterface* Material = nullptr);
+	AWaterBodyRiver* CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width = 1500.0, double Depth = 300.0, UMaterialInterface* Material = nullptr, double Meander = 1.0);
 
 	/** give a water body its water material safely, building its water mesh first (null: the Place Actors defaults of its type, which also repairs a body with no material); the material must be a water material (Material Domain Surface with "Used with Water"); returns the body */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Water", meta = (BlueprintInternalUseOnly = "true"))

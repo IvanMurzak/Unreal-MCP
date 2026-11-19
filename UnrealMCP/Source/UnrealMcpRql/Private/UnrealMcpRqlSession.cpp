@@ -200,9 +200,11 @@ namespace UnrealMcpRqlSessionLocal
 
 	/**
 	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
-	 * while some are not loaded, the answer says how many, names a few and how to list and load them.
+	 * while some are not loaded, the answer says how many, names a few and how to list and load them. A mutation that
+	 * reached no actor at all then fails with that note (nothing was changed): it only warned, and agents read the empty
+	 * receipt of a set on an actor that is not loaded as done.
 	 */
-	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan)
+	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan, bool bMutation)
 	{
 		const rql::ExprPtr& Source = Plan.source;
 		if (!Result.ok || !Source || Source->kind != rql::ExprKind::Path || Source->on || Source->segments.empty()
@@ -213,8 +215,16 @@ namespace UnrealMcpRqlSessionLocal
 			return;
 		FString Message;
 		FString Hint;
-		if (UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint))
-			Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
+		if (!UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint))
+			return;
+		const bool bReachedNothing = (!Result.rows || Result.rows->empty()) && (!Result.items || Result.items->empty()) && Result.unchanged == 0;
+		if (bMutation && bReachedNothing && !Plan.stages.empty())
+		{
+			Result = rql::QueryResult::fail({ rql::Diagnostic::error("world-partition-unloaded", UnrealMcpRqlToStd(TEXT("nothing was changed: no loaded actor matched, and ")
+				+ Message.Replace(TEXT(" (only loaded actors are listed)"), TEXT(" (they were not searched)"))), UnrealMcpRqlToStd(Hint + TEXT("; then run the change again"))) });
+			return;
+		}
+		Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
 	}
 
 	/**
@@ -1120,7 +1130,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
 	UnrealMcpRqlSessionLocal::AddExtensionHint(Result, PlanJson, Plan, bAllowMutation);
 	UnrealMcpRqlSessionLocal::AddOpenLevelHint(Result, Plan, bAllowMutation);
-	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan);
+	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan, bAllowMutation);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
 	if (bReadOnlyCalls && !Plan.stages.empty())

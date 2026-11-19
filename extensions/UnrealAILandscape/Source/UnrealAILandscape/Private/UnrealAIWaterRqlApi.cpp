@@ -429,6 +429,58 @@ namespace UnrealAIWaterRqlLocal
 	}
 
 	/**
+	 * @p Path (vertex space, resampled) winding from side to side: each point moved across the path's direction by a sine of
+	 * wavelength 12 river widths (at least 6 samples), up to @p Amount x 1.5 widths, fading in and out over half a wavelength
+	 * at both ends (Source and Mouth stay). A point whose moved ground lies more than @p Climb cm above the route's ground
+	 * there swings less (a half, a quarter, not at all): the river stays on the valley floor and never climbs its sides for
+	 * a bend. The lowest route on flat ground is a straight grid line; real rivers on a plain meander.
+	 */
+	TArray<FVector2D> Meander(const FHeightGrid& Grid, const TArray<FVector2D>& Path, double WidthCm, double Amount, double Climb)
+	{
+		if (Amount <= 0.0 || Path.Num() < 3)
+			return Path;
+		TArray<double> Along; // distance from the source, vertices
+		Along.Add(0.0);
+		for (int32 Index = 1; Index < Path.Num(); ++Index)
+			Along.Add(Along.Last() + FVector2D::Distance(Path[Index - 1], Path[Index]));
+		const double Length = Along.Last();
+		const double Spacing = Length / (Path.Num() - 1);
+		const double Wave = FMath::Max(12.0 * WidthCm / Grid.QuadCm, 6.0 * Spacing); // vertices
+		const double Swing = Amount * 1.5 * WidthCm / Grid.QuadCm;                  // vertices
+		const auto Ground = [&Grid](const FVector2D& P) -> TOptional<double>
+		{
+			const int32 X = FMath::RoundToInt(P.X), Y = FMath::RoundToInt(P.Y);
+			return Grid.Valid(X, Y) ? TOptional<double>(Grid.At(X, Y)) : TOptional<double>();
+		};
+		TArray<FVector2D> Out = Path;
+		for (int32 Index = 1; Index + 1 < Path.Num(); ++Index)
+		{
+			const FVector2D Direction = (Path[Index + 1] - Path[Index - 1]).GetSafeNormal();
+			const FVector2D Across(-Direction.Y, Direction.X);
+			const double Fade = FMath::Clamp(FMath::Min(Along[Index], Length - Along[Index]) / (0.5 * Wave), 0.0, 1.0);
+			const double Offset = Swing * Fade * FMath::Sin(2.0 * PI * Along[Index] / Wave);
+			const TOptional<double> Here = Ground(Path[Index]);
+			if (!Here.IsSet())
+				continue;
+			for (const double Part : { 1.0, 0.5, 0.25 })
+			{
+				const FVector2D Moved = Path[Index] + Across * Offset * Part;
+				const TOptional<double> There = Ground(Moved);
+				if (There.IsSet() && There.GetValue() <= Here.GetValue() + Climb)
+				{
+					Out[Index] = Moved;
+					break;
+				}
+			}
+		}
+		// One smoothing pass: neighbours that swung by different parts would zigzag.
+		TArray<FVector2D> Smooth = Out;
+		for (int32 Index = 1; Index + 1 < Out.Num(); ++Index)
+			Smooth[Index] = (Out[Index - 1] + Out[Index] * 2.0 + Out[Index + 1]) * 0.25;
+		return Smooth;
+	}
+
+	/**
 	 * Lower the landscape along the river (vertex-space @p Path with bed heights @p Bed, cm): flat bed HalfWidth either
 	 * side of the centre line, then banks rising 1:1 (at most 2 x the width) to the original ground; only ever lowers.
 	 * Works on the band around the path only; one write, merged before returning. How many vertices it lowered (0: none).
@@ -903,7 +955,7 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiver(const FString& Label, const T
 	return SpawnRiver(Label, Points, Width, 0.0, Material);
 }
 
-AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width, double Depth, UMaterialInterface* Material)
+AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, ALandscapeProxy* Landscape, FVector Source, FVector Mouth, double Width, double Depth, UMaterialInterface* Material, double Meander)
 {
 	if (!Landscape)
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(TEXT("Landscape is null: pass unreal.find(\"<label>\")"));
@@ -911,6 +963,8 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 		return nullptr;
 	if (!(Depth >= 0.0 && Depth <= 10000.0))
 		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("Depth %g is outside 0 .. 10000 cm"), Depth));
+	if (!(Meander >= 0.0 && Meander <= 1.0))
+		return UnrealMcpRql::Failed<AWaterBodyRiver*>(FString::Printf(TEXT("Meander %g is outside 0 .. 1"), Meander));
 	FHeightGrid Grid;
 	if (!ReadGrid(Landscape, Grid))
 		return nullptr;
@@ -928,7 +982,10 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	double Length = 0.0;
 	for (int32 Index = 1; Index < Route.Num(); ++Index)
 		Length += FVector2D::Distance(Route[Index - 1], Route[Index]);
-	const TArray<FVector2D> Path = Resample(Route, FMath::Max(2.0 * Width / Grid.QuadCm, Length / 149.0));
+	// A bend may lift the river onto ground no higher than its surface would sit above the old ground (a third of the bed
+	// with a bed, else the 20 cm it floats).
+	const TArray<FVector2D> Path = UnrealAIWaterRqlLocal::Meander(Grid, Resample(Route, FMath::Max(2.0 * Width / Grid.QuadCm, Length / 149.0)), Width, Meander,
+		Depth > 0.0 ? Depth / 3.0 : 20.0);
 
 	// The water surface flows downhill: never above any ground upstream of it. With a bed it sits a third of the depth
 	// below the old ground (the bed Depth below that ground), so the water shows even where the route crosses a rise.
@@ -949,7 +1006,10 @@ AWaterBodyRiver* UUnrealAIWaterRqlApi::CreateRiverBetween(const FString& Label, 
 	for (int32 Index = 0; Index < Path.Num(); ++Index)
 		Points.Add(Grid.ToWorldPoint(Path[Index].X, Path[Index].Y, Surface[Index]));
 	if (Carved > 0) // its bed is carved into the landscape (whether or not the river then spawns): logged like a Carve
+	{
+		UnrealAILandscapeRqlApiLocal::WarnRoadsCut(Landscape, Points, Width + 2.0 * Depth, TEXT("the river's bed")); // its bottom and banks
 		UnrealAILandscapeRqlApiLocal::RecordEdit(Landscape, TEXT("CreateRiverBetween"), Label, Points, 0.0, Width, Depth);
+	}
 	return SpawnRiver(Label, Points, Width, Depth > 0.0 ? Depth * 2.0 / 3.0 : 0.0, Material);
 }
 
