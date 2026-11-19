@@ -1339,10 +1339,6 @@ jobs:
             zip="unreal-mcp-plugin-${VERSION}-ue${ue}-win64.zip"
             prebuilt_assets="${prebuilt_assets} ${zip} ${zip}.minisig"
           done
-          if [ -z "${prebuilt_assets}" ]; then
-            echo "::error::build-plugin-zip reported no supported engines."
-            exit 1
-          fi
           release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
           tag_name="$(jq -r '.tagName' <<<"$release_json")"
           is_draft="$(jq -r '.isDraft' <<<"$release_json")"

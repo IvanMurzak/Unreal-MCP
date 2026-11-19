@@ -518,6 +518,30 @@ def fab_zip(args) -> None:
     zip_dir(stage, ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip", prefix="UnrealMCP/")
 
 
+def set_output(name: str, value: str) -> None:
+    """A step output for later jobs (no-op outside Actions)."""
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"{name}={value}\n")
+
+
+def extract_dist_asset(name: str, folder: str) -> Path:
+    """Extract dist/<name> (a zip with one UnrealMCP/ folder) into RUNNER_TEMP/<folder>; returns its UnrealMCP/."""
+    source = ROOT / "dist" / name
+    if not source.is_file():
+        raise StepError(f"{source} is missing: build or download that asset there first.")
+    stage_root = temp() / folder
+    remove_tree(stage_root)
+    with zipfile.ZipFile(source) as archive:
+        archive.extractall(stage_root)
+    return stage_root / "UnrealMCP"
+
+
+def write_pinned_descriptor(descriptor_path: Path, descriptor: dict, engine: str) -> None:
+    """Only per-engine assets pin EngineVersion, always to `<engine>.0` (any hotfix of that minor)."""
+    descriptor_path.write_text(json.dumps({**descriptor, "EngineVersion": f"{engine}.0"}, indent=2) + "\n", encoding="utf-8")
+
+
 def fab_engine_zips(args) -> None:
     """One Fab project file per engine: unreal-mcp-plugin-fab-<version>-ue<engine>.zip, from dist/'s Fab zip.
 
@@ -526,14 +550,7 @@ def fab_engine_zips(args) -> None:
     them; they take the checkout's ThirdPartyNotices.txt and Description, so rerunning this on a released version's
     Fab zip corrects that text without a release. In CI the zip names go to the step output `fab_engine_zips`.
     """
-    source = ROOT / f"dist/unreal-mcp-plugin-fab-{args.version}.zip"
-    if not source.is_file():
-        raise StepError(f"{source} is missing: build or download the Fab asset there first.")
-    stage_root = temp() / "UnrealMCP-Fab-Engines"
-    remove_tree(stage_root)
-    with zipfile.ZipFile(source) as archive:
-        archive.extractall(stage_root)
-    stage = stage_root / "UnrealMCP"
+    stage = extract_dist_asset(f"unreal-mcp-plugin-fab-{args.version}.zip", "UnrealMCP-Fab-Engines")
     descriptor_path = stage / "UnrealMCP.uplugin"
     descriptor = ue_json.read(descriptor_path)
     description = ue_json.read(PLUGIN / "UnrealMCP.uplugin")["Description"]
@@ -543,12 +560,9 @@ def fab_engine_zips(args) -> None:
     for stale in (ROOT / "dist").glob(f"unreal-mcp-plugin-fab-{args.version}-ue*.zip"):
         stale.unlink()  # the runner keeps dist/; the release attaches every match, so drop engines no longer built
     for engine, name in zip(ENGINES, names):
-        pinned = {**descriptor, "Description": description, "EngineVersion": f"{engine}.0"}
-        descriptor_path.write_text(json.dumps(pinned, indent=2) + "\n", encoding="utf-8")
+        write_pinned_descriptor(descriptor_path, {**descriptor, "Description": description}, engine)
         zip_dir(stage, ROOT / "dist" / name, prefix="UnrealMCP/")
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            output.write(f"fab_engine_zips={' '.join(names)}\n")
+    set_output("fab_engine_zips", " ".join(names))
     print(f"Fab project files for UE {', '.join(ENGINES)}: {count_files(stage)} file(s) each, no executable.")
 
 
@@ -580,10 +594,6 @@ def plugin_zip(args) -> None:
     zip_dir(package, ROOT / f"dist/unreal-mcp-plugin-{args.version}.zip")
 
 
-def prebuilt_zip_name(version: str, engine: str) -> str:
-    return f"unreal-mcp-plugin-{version}-ue{engine}-win64.zip"
-
-
 def prebuilt_zip(args) -> None:
     """The prebuilt Win64 editor plugin for this runner's engine: unreal-mcp-plugin-<version>-ue<engine>-win64.zip.
 
@@ -597,20 +607,12 @@ def prebuilt_zip(args) -> None:
     rid = PREBUILT_RIDS.get(env("UE_PLATFORM"))
     if not rid:
         raise StepError(f"A prebuilt plugin is built on Windows only (UE_PLATFORM={env('UE_PLATFORM')}).")
-    source_zip_path = ROOT / f"dist/unreal-mcp-plugin-source-{args.version}.zip"
-    if not source_zip_path.is_file():
-        raise StepError(f"{source_zip_path} is missing: download the release's source asset there first.")
-    source_root = temp() / "UnrealMCP-Prebuilt-Source"
-    remove_tree(source_root)
-    with zipfile.ZipFile(source_zip_path) as archive:
-        archive.extractall(source_root)
-    plugin = source_root / "UnrealMCP"
+    plugin = extract_dist_asset(f"unreal-mcp-plugin-source-{args.version}.zip", "UnrealMCP-Prebuilt-Source")
+    # Drop the other RIDs before the build, so BuildPlugin never copies or stages them.
+    for other in set(RIDS) - {rid}:
+        remove_tree(plugin / "Source/ThirdParty/UnrealMcpBridge" / other)
     package = temp() / "UnrealMCP-Prebuilt-Package"
     build_plugin(package, plugin=plugin)
-    for other in RIDS:
-        if other != rid:
-            for copy in ("Binaries/ThirdParty/UnrealMcpBridge", "Source/ThirdParty/UnrealMcpBridge"):
-                remove_tree(package / copy / other)
     require_packaged_bridge(package, plugin / "Source/ThirdParty/UnrealMcpBridge", rids=[rid])
     if not (package / "Source/ThirdParty/UnrealMcpBridge" / BRIDGE_SUMS).is_file():
         raise StepError(f"The prebuilt plugin is missing Source/ThirdParty/UnrealMcpBridge/{BRIDGE_SUMS}.")
@@ -621,8 +623,8 @@ def prebuilt_zip(args) -> None:
     missing = [f"UnrealEditor-{name}.dll" for name in modules if not (binaries / f"UnrealEditor-{name}.dll").is_file()]
     if not modules or missing or not (binaries / "UnrealEditor.modules").is_file():
         raise StepError(f"The prebuilt plugin lacks editor binaries in {binaries} (UnrealEditor.modules, missing: {missing}).")
-    descriptor_path.write_text(json.dumps({**descriptor, "EngineVersion": f"{args.ue}.0"}, indent=2) + "\n", encoding="utf-8")
-    name = prebuilt_zip_name(args.version, args.ue)
+    write_pinned_descriptor(descriptor_path, descriptor, args.ue)
+    name = f"unreal-mcp-plugin-{args.version}-ue{args.ue}-win64.zip"
     zip_dir(package, ROOT / "dist" / name, prefix="UnrealMCP/")
     print(f"Prebuilt plugin for UE {args.ue} ({rid}): {count_files(package)} file(s) -> dist/{name}")
 
@@ -631,9 +633,7 @@ def engines(_args) -> None:
     """The supported engines as the step output `engines` (a JSON list: the prebuilt matrix and verify-release)."""
     value = json.dumps(list(ENGINES))
     print(f"engines={value}")
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            output.write(f"engines={value}\n")
+    set_output("engines", value)
 
 
 COMMANDS = {
