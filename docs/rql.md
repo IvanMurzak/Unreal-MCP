@@ -259,6 +259,9 @@ hook, not a per-type adapter, so RQL's own default would not cover them.)
   class without `$type` fails naming concrete subclasses. A `$type` that names no class makes the hook register the
   loaded concrete subclasses of the member's class (at most 200; a broader class gets none), so RQL's
   `coercion-failed` message suggests the closest: `{$type: "InputTrigerHold"}` gets `(did you mean 'InputTriggerHold' ...)`. A class name two loaded classes share is not offered.
+- Structs: a struct value holds exactly its declared struct, so a struct literal's `$type` may only name that struct (its
+  name, with or without the `F` prefix, or its path): `set WeightChannels = [{$type: "SplineModifierWeightEntry", Value: 1}]`
+  is the same as leaving `$type` out. Another name fails with RQL's "did you mean" naming the struct the member takes.
 
 ### Finding actors
 

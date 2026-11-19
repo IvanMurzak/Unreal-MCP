@@ -312,7 +312,10 @@ Stopped → LaunchingSidecar → WaitingHandshake → Ready ⇄ Degraded → Sto
   answered `ResponseCallTool.NotExecuted` (HTTP 503): the MCP server may re-send it within its reconnect wait,
   and otherwise reports it as safe to retry (`[plugin_reloading]`). (While this sidecar stays connected, a
   same-id re-send is answered from McpPlugin's duplicate-request cache, so it reaches the editor only after a
-  sidecar restart.)
+  sidecar restart.) A call the link dropped under may already have run: it is answered `Unavailable` with
+  HTTP 502, McpPlugin's "maybe delivered", never re-sent. The server's guard then words it itself; since the
+  sidecar's own server connection stayed up, it says `[plugin_reconnected]` ("connected again, check the effect,
+  then retry"), even when the editor is still down: a retry is then refused before it is sent (503) until it is back.
   Both sides silently drop `tool-response`s for unknown or already-completed `requestId`s (covers late responses straddling a reconnect).
 
 ---

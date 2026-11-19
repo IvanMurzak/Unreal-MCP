@@ -139,6 +139,39 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Null(ctorEx);
         }
 
+        [Theory]
+        [InlineData(LogLevel.Information, false)]
+        [InlineData(LogLevel.Debug, true)]
+        public void ToolPayloads_AreLoggedWholeOnlyAtDebug(LogLevel minLevel, bool whole)
+        {
+            // DEV-114: McpPlugin logs each call's arguments and answer at Information, the bridge's default level.
+            var dir = Path.Combine(Path.GetTempPath(), "unreal-mcp-bridge-tests", Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(dir, "UnrealMcpBridge.log");
+            try
+            {
+                using (var provider = new BridgeConsoleLoggerProvider(minLevel, path))
+                {
+                    var logger = provider.CreateLogger("com.IvanMurzak.McpPlugin.McpToolManager");
+                    logger.LogInformation("Run tool 'rql-query' with parameters[1]:\n[query, \"actors | where Label == 'SecretLevel'\"]\n");
+                    logger.LogInformation("Success Response to AI:\n{\"rows\":[[\"SecretLevel\"]]}");
+                    logger.LogInformation("Connected to the server:\nsecond line kept");
+                    logger.LogError("Error Response to AI:\nthe error text stays");
+                }
+
+                var contents = File.ReadAllText(path);
+                Assert.Contains("Run tool 'rql-query' with parameters[1]", contents);
+                Assert.Contains("Success Response to AI", contents);
+                Assert.Equal(whole, contents.Contains("SecretLevel"));
+                Assert.Equal(!whole, contents.Contains("payload logged at UNREAL_MCP_LOG_LEVEL=debug"));
+                Assert.Contains("second line kept", contents);
+                Assert.Contains("the error text stays", contents);
+            }
+            finally
+            {
+                TryDeleteDir(Path.Combine(Path.GetTempPath(), "unreal-mcp-bridge-tests"));
+            }
+        }
+
         private static void TryDeleteDir(string dir)
         {
             try

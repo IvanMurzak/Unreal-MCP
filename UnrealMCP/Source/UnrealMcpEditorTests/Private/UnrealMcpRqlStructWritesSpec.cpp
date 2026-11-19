@@ -196,6 +196,24 @@ void FUnrealMcpRqlStructWritesSpec::Define()
 			TestEqual(TEXT("as a member of Nest"), Fixture->LastEditMember, FName(TEXT("Nest")));
 		});
 
+		It("a list of structs takes object literals that name their struct with $type (DEV-114)", [this]()
+		{
+			// A wave agent's `set WeightChannels = [{$type: "SplineModifierWeightEntry", ...}]` failed: "no concrete type named
+			// ... derives from SplineModifierWeightEntry". The struct's own name, with or without its F prefix, now names it.
+			/* ref("UnrealMcpRqlSpecFixture#@F@") | set Bag.Rows = [{$type: "UnrealMcpRqlSpecRow", Damage: 3}, {$type: "FUnrealMcpRqlSpecRow", Damage: 4}] */
+			const TSharedPtr<FJsonObject> Set = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Bag","Rows"]},"value":{"list":[{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecRow"}},{"key":"Damage","value":{"lit":3}}]},{"object":[{"key":"$type","value":{"lit":"FUnrealMcpRqlSpecRow"}},{"key":"Damage","value":{"lit":4}}]}]}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("set ok (%s)"), *Codes(Set)), IsOk(Set));
+			TestTrue(TEXT("both rows written"), Fixture->Bag.Rows.Num() == 2 && Fixture->Bag.Rows[0].Damage == 3 && Fixture->Bag.Rows[1].Damage == 4);
+
+			// Another struct's name is no subtype of a struct: refused, naming the one it takes.
+			/* ref("UnrealMcpRqlSpecFixture#@F@") | set Bag.Rows = [{$type: "UnrealMcpRqlSpecNest"}] */
+			const TSharedPtr<FJsonObject> Wrong = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]},"stages":[{"op":"set","assign":[{"target":{"path":["Bag","Rows"]},"value":{"list":[{"object":[{"key":"$type","value":{"lit":"UnrealMcpRqlSpecNest"}}]}]}}]}]})RQL"), true);
+			TestFalse(TEXT("another struct is refused"), IsOk(Wrong));
+			TestTrue(*FString::Printf(TEXT("naming the struct the list takes (%s)"), *Codes(Wrong)),
+				Codes(Wrong).Contains(TEXT("UnrealMcpRqlSpecNest")) && Codes(Wrong).Contains(TEXT("UnrealMcpRqlSpecRow")));
+			TestEqual(TEXT("the rows are unchanged"), Fixture->Bag.Rows.Num(), 2);
+		});
+
 		It("that the editor resets is refused with the reason, never reported as a change", [this]()
 		{
 			/* ref("UnrealMcpRqlSpecFixture#@F@") | set Nest.Locked = 3 */

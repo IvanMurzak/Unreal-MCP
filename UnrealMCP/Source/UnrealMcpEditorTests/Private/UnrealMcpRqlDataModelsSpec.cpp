@@ -166,6 +166,20 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 		return Made;
 	}
 
+	/** The editor world's actor labelled @p Label, or null. */
+	static AActor* SpecActorLabelled(const TCHAR* Label)
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!World)
+			return nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel() == Label)
+				return *It;
+		}
+		return nullptr;
+	}
+
 	static void DestroySpecActors()
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -972,6 +986,35 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			// The receipt reads the values back from the live component, not from the discarded copy.
 			TestEqual(TEXT("receipt: new location"), UnrealMcpRqlSpecHelpers::CellText(Receipt, 0, 3), FString(TEXT("(0, 0, 500)")));
 			TestEqual(TEXT("receipt: new scale"), UnrealMcpRqlSpecHelpers::CellText(Receipt, 1, 3), FString(TEXT("(2, 2, 2)")));
+		});
+
+		It("rolls a failed mutation's collision write on a construction-script component back whole (DEV-114)", [this]()
+		{
+			// The collision write reruns the construction script, which replaces the component: the rollback's write reached
+			// the new one, missed the snapshot taken under the old one's address and left the profile at Custom.
+			UBlueprint* Made = MakeBlueprint();
+			USCS_Node* Node = Made->SimpleConstructionScript->CreateNode(UStaticMeshComponent::StaticClass(), TEXT("RqlMesh"));
+			Made->SimpleConstructionScript->AddNode(Node);
+			Cast<UStaticMeshComponent>(Node->ComponentTemplate)->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+			FKismetEditorUtilities::CompileBlueprint(Made);
+			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
+			auto Mesh = []() -> const UStaticMeshComponent*
+			{
+				const AActor* Placed = SpecActorLabelled(TEXT("RqlSeqLampBP"));
+				return Placed ? Placed->FindComponentByClass<UStaticMeshComponent>() : nullptr;
+			};
+			const UStaticMeshComponent* Before = Mesh();
+			if (!TestNotNull(TEXT("placed with its mesh component"), Before))
+				return;
+			TestEqual(TEXT("on the template's profile"), Before->GetCollisionProfileName(), FName(TEXT("OverlapAllDynamic")));
+
+			// OverriddenLightMapRes is rounded up to a multiple of 4 by the component: 62 comes back as 64, a reset that fails the mutation.
+			Refuses(TEXT("a mutation failing after the collision write"), /* unreal.find("RqlSeqLampBP") | get Components | where Name == "RqlMesh" | set BodyInstance.CollisionEnabled = "NoCollision", OverriddenLightMapRes = 62 */ TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"RqlSeqLampBP"}]},"stages":[{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"RqlMesh"}]}},{"op":"set","assign":[{"target":{"path":["BodyInstance","CollisionEnabled"]},"value":{"lit":"NoCollision"}},{"target":{"path":["OverriddenLightMapRes"]},"value":{"lit":62}}]}]})RQL"), TEXT("OverriddenLightMapRes"));
+			const UStaticMeshComponent* After = Mesh();
+			if (!TestNotNull(TEXT("the component after the rollback"), After))
+				return;
+			TestEqual(TEXT("the profile is back (not Custom)"), After->GetCollisionProfileName(), FName(TEXT("OverlapAllDynamic")));
+			TestEqual(TEXT("and its collision"), static_cast<int32>(After->GetCollisionEnabled()), static_cast<int32>(ECollisionEnabled::QueryOnly));
 		});
 
 		It("refuses writing a variable that is not Instance Editable on a placed actor (it would be reset)", [this]()

@@ -176,6 +176,10 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		TestTrue(*FString::Printf(TEXT("rql-query loads it (%s)"), *Said(Loaded)), IsOk(Loaded) && CellText(Loaded, 0, 2).Contains(TEXT("StaticMeshActor#")));
 		TestEqual(TEXT("actors lists it now"), CountFar(), 1.0);
 		TestEqual(TEXT("unloadedActors no longer does"), CountUnloadedFar(), 0.0);
+		// unreal.find keeps the unloaded actors for one request only: the next one finds the loaded cube.
+		// unreal.find("WpSpecFar") | select Label
+		const TSharedPtr<FJsonObject> Found = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"WpSpecFar"}]},"stages":[{"op":"select","fields":[{"name":"Label","expr":{"path":["Label"]}}]}]})RQL"));
+		TestEqual(*FString::Printf(TEXT("unreal.find finds it once loaded (%s)"), *Said(Found)), CellText(Found), FString(TEXT("WpSpecFar")));
 		TestEqual(*FString::Printf(TEXT("nothing marked unsaved (%s)"), *FString::Join(DirtyPackages(), TEXT(", "))), DirtyPackages(), DirtyBefore);
 		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBefore);
 		// Loading it again is harmless: an already loaded actor is returned.
@@ -238,6 +242,15 @@ void FUnrealMcpRqlWorldPartitionSpec::Define()
 		TestTrue(*FString::Printf(TEXT("loads by GUID, skipping a repeat and an unknown one (%s)"), *Error), bOk);
 		TestEqual(TEXT("actors lists it"), CountFar(), 1.0);
 		TestTrue(TEXT("a loaded actor's GUID is nothing to do"), UnrealMcpRql::LoadWorldPartitionActors({ Guid }));
+		// DEV-114: editor | call LoadActors(["<the loaded cube's GUID>"]) failed (the actor lookup knows no GUIDs); it returns the actor.
+		for (const EGuidFormats Format : { EGuidFormats::Digits, EGuidFormats::DigitsWithHyphens })
+		{
+			const FString ByGuid = FString(TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"LoadActors","args":[{"list":[{"lit":"@GUID@"}]}]}]})RQL"))
+				.Replace(TEXT("@GUID@"), *Guid.ToString(Format));
+			const TSharedPtr<FJsonObject> Again = Run(*ByGuid);
+			TestTrue(*FString::Printf(TEXT("LoadActors by the GUID of a loaded actor returns it (%s)"), *Said(Again)),
+				IsOk(Again) && CellText(Again, 0, 2).Contains(TEXT("StaticMeshActor#")));
+		}
 		TestEqual(TEXT("nothing marked unsaved"), DirtyPackages(), DirtyBeforeGuid);
 		TestEqual(TEXT("no undo step"), UndoSteps(), StepsBeforeGuid);
 	});

@@ -1005,7 +1005,7 @@ namespace UnrealMcpRqlCoreLocal
 			return Types.WrapObject(Actor);
 		// A World Partition actor that is not loaded has a descriptor, not an actor: name it and how to load it.
 		const FString Wanted = Key.TrimStartAndEnd();
-		const TArray<FUnrealMcpUnloadedActor> Unloaded = UnrealMcpRqlWorldPartition::Unloaded(EditorWorld());
+		const TArray<FUnrealMcpUnloadedActor>& Unloaded = UnrealMcpRqlWorldPartition::UnloadedForRequest(EditorWorld());
 		for (const FUnrealMcpUnloadedActor& Row : Unloaded)
 		{
 			if (UnrealMcpRqlWorldPartition::Matches(Row, Wanted))

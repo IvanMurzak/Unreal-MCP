@@ -83,18 +83,22 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public async Task Create_LinkDropsMidCall_IsAPlainError_NotNotExecuted()
+        public async Task Create_LinkDropsMidCall_IsMaybeDelivered_NotNotExecuted()
         {
-            // The call may already be running in the editor: it must never be marked safe to re-send.
+            // The call may already be running in the editor: it must never be marked safe to re-send (503), and it is
+            // no server fault either (DEV-114: it had no error kind and surfaced as HTTP 500). Unavailable + 502 is
+            // McpPlugin's "maybe delivered": the server reports it and never re-sends it.
             var channel = new FakeToolCallChannel { DropsMidCall = true };
             var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "ping" }, channel);
 
             var result = await proxy.Run("req-2", null);
 
             Assert.Equal(ResponseStatus.Error, result.Status);
+            Assert.Equal("req-2", result.RequestID);
             Assert.Contains("disconnected", result.GetMessage());
+            Assert.Equal(ResponseErrorKind.Unavailable, result.ErrorKind);
+            Assert.Equal(ProxyToolFactory.MaybeDeliveredStatusCode, result.HttpStatusCode);
             Assert.NotEqual(ResponseCallTool.NotExecutedStatusCode, result.HttpStatusCode);
-            Assert.NotEqual(ResponseErrorKind.Unavailable, result.ErrorKind);
         }
 
         [Fact]

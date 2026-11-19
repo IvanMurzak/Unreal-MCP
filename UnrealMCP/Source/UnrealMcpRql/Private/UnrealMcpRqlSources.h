@@ -40,7 +40,7 @@ FString UnrealMcpRqlSimilarAssets(UClass* Class, const FString& Text);
  */
 FString UnrealMcpRqlSimilarActors(const FString& Text, UClass* Preferred = nullptr, const TArray<struct FUnrealMcpUnloadedActor>* Unloaded = nullptr);
 
-/** Forget UnrealMcpRqlSimilarActors' answers, which it keeps for the running request (FUnrealMcpRqlSession::Execute). */
+/** Forget the answers UnrealMcpRqlSimilarActors and UnloadedForRequest keep for the running request (FUnrealMcpRqlSession::Execute). */
 void UnrealMcpRqlForgetSimilarActors();
 
 /** The same among the assets of every class: for a path with no class to go by. */
