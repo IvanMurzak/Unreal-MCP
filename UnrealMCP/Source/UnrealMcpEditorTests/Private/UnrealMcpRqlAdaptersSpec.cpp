@@ -979,6 +979,31 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 				&& CutSaid.Contains(TEXT("| call ReadSequence(...) | <the same read stages> | skip ") + CutShown + TEXT(" | first ") + CutShown)
 				&& !CutSaid.Contains(TEXT("read the rest in batches of")));
 
+			// An explicit first N after a read-only call shows up to N rows, not RQL's 50-row page (DEV-139):
+			// range(0, 200) | call rqlSpecApi.Probe([$, 0, 0]) | first 120
+			const TSharedPtr<FJsonObject> Wide = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":200}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"first","n":120}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("first 120 after a read-only call runs (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Wide)),
+				UnrealMcpRqlSpecHelpers::IsOk(Wide) && !UnrealMcpRqlSpecHelpers::Codes(Wide).Contains(TEXT("output-truncated")));
+			TestEqual(TEXT("first 120 after a read-only call shows 120 rows"), UnrealMcpRqlSpecHelpers::RowCount(Wide), 120);
+			// range(0, 200) | call rqlSpecApi.Probe([$, 0, 0]) | skip 100 | first 80: paging past the 50-row page
+			const TSharedPtr<FJsonObject> Page = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":200}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":100},{"op":"first","n":80}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("skip 100 | first 80 after a read-only call shows 80 rows (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Page)),
+				UnrealMcpRqlSpecHelpers::RowCount(Page), 80);
+			const FString PageFirst = UnrealMcpRqlSpecHelpers::CellText(Page, 0, 2);
+			TestTrue(*FString::Printf(TEXT("and starts at the 101st call (%s)"), *PageFirst), PageFirst.Contains(TEXT("100")));
+			// range(0, 200) | call rqlSpecApi.Probe([$, 0, 0]) | skip 10: no first keeps RQL's 50-row page
+			const TSharedPtr<FJsonObject> Paged50 = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":200}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":10}]})RQL"));
+			TestEqual(*FString::Printf(TEXT("read stages without first keep the 50-row page (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paged50)),
+				UnrealMcpRqlSpecHelpers::RowCount(Paged50), 50);
+			// range(0, 200) | call rqlSpecApi.ReadSequence(1000) | first 120: 120 rows of about 4 KB overflow the 64 KB answer,
+			// which cuts them with the paging hint
+			const TSharedPtr<FJsonObject> WideCut = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":200}]},"stages":[{"op":"call","method":"ReadSequence","on":{"path":["rqlSpecApi"]},"args":[{"lit":1000}]},{"op":"first","n":120}]})RQL"));
+			const FString WideCutSaid = UnrealMcpRqlSpecHelpers::Codes(WideCut) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(WideCut);
+			const FString WideCutShown = FString::FromInt(UnrealMcpRqlSpecHelpers::RowCount(WideCut));
+			TestTrue(*FString::Printf(TEXT("first 120 beyond the 64 KB answer is cut with the paging hint (%s)"), *WideCutSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(WideCut) && UnrealMcpRqlSpecHelpers::RowCount(WideCut) < 120 && WideCutSaid.Contains(TEXT("output-truncated"))
+				&& WideCutSaid.Contains(TEXT("| call ReadSequence(...) | <the same read stages> | skip ") + WideCutShown + TEXT(" | first ") + WideCutShown));
+
 			// actors | first 1 | call rqlSpecApi.Probe([0, 0, 0]) | skip 100: the read stages left no row, which is not "nothing
 			// found in the level"
 			const TSharedPtr<FJsonObject> Filtered = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"first","n":1},{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},{"op":"skip","n":100}]})RQL"));
