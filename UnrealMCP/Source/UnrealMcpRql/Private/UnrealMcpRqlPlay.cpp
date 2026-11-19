@@ -19,7 +19,10 @@
 #if !UE_VERSION_OLDER_THAN(5, 6, 0)
 #include "InputKeyEventArgs.h"
 #endif
+#include "CoreGlobals.h"
 #include "Misc/ITransaction.h"
+#include "Misc/OutputDevice.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "Misc/PackageName.h"
 #include "PlayInEditorDataTypes.h"
 #include "Tickable.h"
@@ -43,6 +46,45 @@ namespace UnrealMcpRqlPlayLocal
 		for (int32 Guard = 0; Guard < 8 && GEditor->IsTransactionActive(); ++Guard)
 			GEditor->EndTransaction();
 	}
+
+	/**
+	 * The warnings and errors logged on this thread while it lives: why a play session did not start. A plugin that refuses
+	 * play logs its reason (e.g. Mesh Partition's "Your editor world contains N dirty Mesh Partition modifiers ...") and asks
+	 * in a modal dialog, which the unattended start skips; the stack dump the skipped modal logs (LogOutputDevice) is left out.
+	 */
+	class FPlayStartLog : public FOutputDevice
+	{
+	public:
+		FPlayStartLog() { GLog->AddOutputDevice(this); }
+		virtual ~FPlayStartLog() override { GLog->RemoveOutputDevice(this); }
+
+		// Unbuffered: a buffered device gets its lines later, on the editor's log thread. Serialize then runs on the thread
+		// that logs, and keeps only this one's lines.
+		virtual bool CanBeUsedOnMultipleThreads() const override { return true; }
+
+		virtual void Serialize(const TCHAR* Text, ELogVerbosity::Type Verbosity, const FName& Category) override
+		{
+			const ELogVerbosity::Type Level = static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask);
+			if (Level > ELogVerbosity::Warning || Level == ELogVerbosity::NoLogging || Category == LogOutputDevice.GetCategoryName() || !IsInGameThread())
+				return;
+			FString Line = FString(Text).TrimStartAndEnd();
+			if (!Line.IsEmpty())
+				Lines.AddUnique(FString::Printf(TEXT("%s: %s"), *Category.ToString(), *Line.Left(400)));
+		}
+
+		/** The reason to report: the first few lines, in order (a cause comes before what follows from it). */
+		FString Reason() const
+		{
+			constexpr int32 MaxLines = 5;
+			FString Out = FString::Join(TArrayView<const FString>(Lines).Slice(0, FMath::Min(MaxLines, Lines.Num())), TEXT(" | "));
+			if (Lines.Num() > MaxLines)
+				Out += FString::Printf(TEXT(" | (+%d more in the console source)"), Lines.Num() - MaxLines);
+			return Out;
+		}
+
+	private:
+		TArray<FString> Lines;
+	};
 
 	/** Loaded Blueprints that failed to compile, as PIE's own check lists them (it would show a modal dialog). */
 	TArray<FString> ErroredBlueprints()
@@ -90,6 +132,13 @@ bool UnrealMcpRql::StartPlay(bool bPaused, FString& OutError, TArray<FString>* O
 	}
 	if (!PlayWorld())
 	{
+		TArray<FString> Refusals;
+		OnStartPlayCheck().Broadcast(Refusals);
+		if (!Refusals.IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("Play In Editor was not started: %s"), *FString::Join(Refusals, TEXT("; ")));
+			return false;
+		}
 		UnrealMcpRqlPlayLocal::CloseOpenTransactions();
 		// A stop that was requested but not yet run (set IsPlaying = false): finish it, then start a new session.
 		if (GEditor->PlayWorld)
@@ -97,11 +146,15 @@ bool UnrealMcpRql::StartPlay(bool bPaused, FString& OutError, TArray<FString>* O
 		// Unattended: PIE's "Blueprint Compilation Errors" dialog (a modal on the game thread) is skipped and play goes on;
 		// the errored Blueprints are reported instead.
 		TGuardValue<bool> Unattended(GIsRunningUnattendedScript, true);
+		UnrealMcpRqlPlayLocal::FPlayStartLog StartLog;
 		GEditor->RequestPlaySession(FRequestPlaySessionParams());
 		GEditor->StartQueuedPlaySessionRequest();
 		if (!PlayWorld())
 		{
-			OutError = TEXT("Play In Editor did not start (the console source has the reason: console | where Verbosity == \"Error\" | sort Sequence desc | first 5)");
+			const FString Reason = StartLog.Reason();
+			OutError = Reason.IsEmpty()
+				? FString(TEXT("Play In Editor did not start (the console source may have the reason: console | where Verbosity == \"Error\" | sort Sequence desc | first 5)"))
+				: FString::Printf(TEXT("Play In Editor did not start; the editor logged: %s"), *Reason);
 			return false;
 		}
 		if (OutNotes)
@@ -278,6 +331,12 @@ TArray<FString> UnrealMcpRql::AppliedMappingContexts(const APlayerController* Co
 FUnrealMcpOnReadPlayState& UnrealMcpRql::OnReadPlayState()
 {
 	static FUnrealMcpOnReadPlayState Delegate;
+	return Delegate;
+}
+
+FUnrealMcpOnStartPlayCheck& UnrealMcpRql::OnStartPlayCheck()
+{
+	static FUnrealMcpOnStartPlayCheck Delegate;
 	return Delegate;
 }
 

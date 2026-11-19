@@ -410,6 +410,35 @@ void FUnrealAIMeshTerrainSpec::Define()
 				TestTrue(*FString::Printf(TEXT("flat at %s: height %.2f, slope %.2f (normal %s)"), *Point.ToString(), Sample.Height, Slope, *Sample.Normal.ToString()),
 					Sample.bInside && FMath::IsNearlyEqual(Sample.Height, 40.0, 0.5) && Slope < 0.5);
 			}
+			// The paint channels there too: a point on the edge of an evaluated part can slip between its triangles and the next
+			// part's (DEV-112: empty Channels on a seam of a painted terrain). Every vertex painted Red 1:
+			// meshTerrainBrush | call PaintWhere(unreal.find("<label>"), "Red")
+			TSharedPtr<FJsonObject> Result;
+			TestTrue(*FString::Printf(TEXT("PaintWhere (%s)"), *MeshTerrainSpecJson(Result).Left(400)), UnrealMcpRqlTools::RunPlan(FString::Printf(
+				TEXT(R"RQL({"rql":"0.1","source":{"path":["meshTerrainBrush"]},"stages":[{"op":"call","method":"PaintWhere","args":[{"call":"find","on":{"path":["unreal"]},"args":[{"lit":"%s"}]},{"lit":"Red"}]}]})RQL"),
+				*Label), true, &Result));
+			// (the sections the paint rebuilt: the ones above are gone)
+			for (const UnrealAIMeshTerrain::APreviewSection* Section : UnrealAIMeshTerrain::PreviewSections(Terrain))
+			{
+				const FBox Box = Section->GetPreviewMeshBounds();
+				for (int32 Step = 0; Step <= 20; ++Step)
+				{
+					Points.Add(FVector2D(Box.Max.X, FMath::Lerp(Box.Min.Y, Box.Max.Y, Step / 20.0)));
+					Points.Add(FVector2D(FMath::Lerp(Box.Min.X, Box.Max.X, Step / 20.0), Box.Max.Y));
+				}
+			}
+			int32 Missing = 0;
+			FString First;
+			for (const FVector2D& Point : Points)
+			{
+				const UnrealAIMeshTerrain::FSurfaceSample Sample = UnrealAIMeshTerrain::SampleSurface(Terrain, Point.X, Point.Y);
+				if (Sample.bInside && !FMath::IsNearlyEqual(Sample.Channels.FindRef(TEXT("Red")), 1.0f, 0.01f))
+				{
+					First = First.IsEmpty() ? Point.ToString() : First;
+					++Missing;
+				}
+			}
+			TestEqual(*FString::Printf(TEXT("Red 1 on every seam and border point (%d points; first without it: %s)"), Points.Num(), *First), Missing, 0);
 		});
 
 		It("rebuilds every section with Rebuild and keeps the ground", [this]()

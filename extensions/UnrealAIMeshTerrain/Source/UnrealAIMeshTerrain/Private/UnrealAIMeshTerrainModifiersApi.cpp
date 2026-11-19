@@ -557,6 +557,28 @@ namespace UnrealAIMeshTerrainModifiersLocal
 		return true;
 	}
 
+	/** The remesh edge length under a road @p Width cm wide (AddRoad's corridor). */
+	double RoadEdgeLength(double Width)
+	{
+		return FMath::Clamp(Width / 5.0, 50.0, 300.0);
+	}
+
+	/**
+	 * A road's flat half-width (its spline's PlateauDistance) for a road @p Width cm wide: flat past each edge by more than a
+	 * triangle, so no bank vertex tilts the road's edge (the banks start outside it). AddRoad and Edit(road, Width) set it.
+	 */
+	double RoadPlateau(double Width)
+	{
+		return Width / 2.0 + FMath::Max(100.0, 1.5 * RoadEdgeLength(Width));
+	}
+
+	/** Whether @p Modifier is a road AddRoad made: a spline modifier whose spline is straight between its points (ApplySplinePoints). */
+	bool IsRoad(UModifierComponent* Modifier)
+	{
+		const USplineComponent* Spline = Cast<USplineModifier>(Modifier) ? SplineOf(Modifier, /*bCreate*/ false) : nullptr;
+		return Spline && Spline->GetNumberOfSplinePoints() > 0 && Spline->GetSplinePointType(0) == ESplinePointType::Linear;
+	}
+
 	/** A Remesh box's coverage (Size, cm) and edge length, as AddRemesh and AddRoad set them. */
 	bool SetRemesh(UModifierComponent* Remesh, const FVector& Size, double EdgeLength)
 	{
@@ -635,6 +657,7 @@ TArray<FVector> UnrealAIMeshTerrain::LatticeWorldPoints(const UE::MeshPartition:
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddNoise(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector2D Size, double Strength, double Frequency, double Falloff, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!IsLength(Size.X) || !IsLength(Size.Y))
@@ -659,6 +682,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddNoise(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, double Radius, double Falloff, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!IsLength(Radius) || !IsLength(Falloff, /*bAllowZero*/ true))
@@ -675,6 +699,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddPatch(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(UE::MeshPartition::AMeshPartition* Terrain, const FString& Channel, FVector Location, double Radius, double Falloff, double Value, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ false))
 		return FModifierOpResult();
 	if (!IsLength(Radius) || !IsLength(Falloff, /*bAllowZero*/ true))
@@ -695,6 +720,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddWeight(U
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddSpline(UE::MeshPartition::AMeshPartition* Terrain, const TArray<FVector>& Points, double Width, double Falloff, bool Closed, const FString& Channel, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckTerrain(Terrain) || !CheckPoints(Points, Closed) || !CheckChannel(Terrain, Channel, /*bAllowEmpty*/ true))
 		return FModifierOpResult();
 	if (!IsLength(Width, /*bAllowZero*/ true) || !IsLength(Falloff) || Falloff < 0.1)
@@ -713,6 +739,8 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 {
 	using FRoadResult = FUnrealAIMeshTerrainRoadResult;
 	const double Start = FPlatformTime::Seconds();
+	// TimeoutSeconds is the budget of every wait of the call together (the MCP server ends a call after 300 s).
+	const FCallBudget Budget(FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
 	if (!CheckTimeout(TimeoutSeconds) || !CheckTerrain(Terrain) || !CheckPoints(Points))
 		return FRoadResult();
 	if (!FMath::IsFinite(Width) || Width < 100.0 || Width > 10000.0)
@@ -726,9 +754,8 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 	if (!CheckFootprint(Terrain, PointsArea(Points, Width / 2.0 + Falloff), TimeoutSeconds)) // the terrain may still rebuild a remeshed hill
 		return FRoadResult();
 
-	const double RoadEdge = FMath::Clamp(Width / 5.0, 50.0, 300.0); // remesh edges under a road
-	// Flat past each edge by more than a triangle, so no bank vertex tilts the road's edge (the banks start outside it).
-	const double Plateau = Width / 2.0 + FMath::Max(100.0, 1.5 * RoadEdge);
+	const double RoadEdge = RoadEdgeLength(Width);
+	const double Plateau = RoadPlateau(Width);
 	for (int32 Index = 1; Index < Points.Num(); ++Index)
 	{
 		if (FVector2D::Distance(FVector2D(Points[Index - 1]), FVector2D(Points[Index])) < 1.0) // the path is X, Y: points apart only in Z are the same place
@@ -924,8 +951,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 		return FRoadResult();
 	Remeshed.bKept = true;
 	Cored.bKept = true;
-	// One budget for the call: the wait before placing the road took part of it (the MCP server ends a call after 300 s).
-	const FModifierOpResult Built = Placed.Keep(FMath::Max(MinTimeoutSeconds, TimeoutSeconds - SecondsSince(Start)));
+	const FModifierOpResult Built = Placed.Keep(TimeoutSeconds);
 	if (!Built.Modifier)
 		return FRoadResult();
 
@@ -999,6 +1025,7 @@ FUnrealAIMeshTerrainRoadResult UUnrealAIMeshTerrainModifiersApi::AddRoad(UE::Mes
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE::MeshPartition::AMeshPartition* Terrain, const FString& Shape, FVector Location, FVector Size, const FString& Operation, FRotator Rotation, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckTerrain(Terrain))
 		return FModifierOpResult();
 	const FString* ShapeName = ShapeNames().FindByPredicate([&Shape](const FString& Name) { return Name.Equals(Shape.TrimStartAndEnd(), ESearchCase::IgnoreCase); });
@@ -1051,6 +1078,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddShape(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddLattice(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, int32 Resolution, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!IsLength(Size.X) || !IsLength(Size.Y) || !IsLength(Size.Z))
@@ -1071,6 +1099,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddLattice(
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetLatticePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	ULatticeModifier* Lattice = Cast<ULatticeModifier>(Modifier);
@@ -1091,6 +1120,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetLatticeP
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTexturePatch(UE::MeshPartition::AMeshPartition* Terrain, UTexture2D* Texture, FVector Location, FVector2D Size, double Height, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!Texture)
@@ -1130,6 +1160,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddTextureP
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(UE::MeshPartition::AMeshPartition* Terrain, FVector Location, FVector Size, double EdgeLength, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	if (!IsLength(Size.X) || !IsLength(Size.Y) || !IsLength(Size.Z))
@@ -1151,6 +1182,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::AddRemesh(U
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Add(UE::MeshPartition::AMeshPartition* Terrain, const FString& Kind, FVector Location, const FString& Label)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckAdd(Terrain, Location))
 		return FModifierOpResult();
 	UClass* Class = ModifierClassOf(Kind);
@@ -1181,6 +1213,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Add(UE::Mes
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::MeshPartition::UModifierComponent* Modifier, FVector Size, double Radius, double Width, double Strength, double Falloff)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	const FString Kind = ModifierKind(Modifier);
@@ -1359,7 +1392,8 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 	}
 	if (Radius >= 0.0 && !SetNumber(Modifier, TEXT("Radius"), Radius))
 		return FModifierOpResult();
-	if (Width >= 0.0 && !SetNumber(Modifier, TEXT("PlateauDistance"), Width / 2.0))
+	// A road keeps AddRoad's flat margin past its edges.
+	if (Width >= 0.0 && !SetNumber(Modifier, TEXT("PlateauDistance"), IsRoad(Modifier) ? RoadPlateau(Width) : Width / 2.0))
 		return FModifierOpResult();
 	if (Strength >= 0.0)
 	{
@@ -1385,6 +1419,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Edit(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::MeshPartition::UModifierComponent* Modifier, FVector Location)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	if (!IsPoint(Location))
@@ -1418,6 +1453,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Move(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePoints(UE::MeshPartition::UModifierComponent* Modifier, const TArray<FVector>& Points, int32 Closed)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	if (Closed < -1 || Closed > 1)
@@ -1434,6 +1470,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetSplinePo
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetOrder(UE::MeshPartition::UModifierComponent* Modifier, double Priority, const FString& PriorityLayer)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	if (!FMath::IsFinite(Priority) || FMath::Abs(Priority) > 1.0e9)
@@ -1466,6 +1503,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::SetOrder(UE
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Enable(UE::MeshPartition::UModifierComponent* Modifier)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("EnableModifier", "Enable Mesh Terrain Modifier"), { Modifier });
@@ -1479,6 +1517,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Enable(UE::
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Disable(UE::MeshPartition::UModifierComponent* Modifier)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier))
 		return FModifierOpResult();
 	FTerrainTransaction Transaction(LOCTEXT("DisableModifier", "Disable Mesh Terrain Modifier"), { Modifier });
@@ -1489,6 +1528,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Disable(UE:
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::MeshPartition::UModifierComponent* Modifier, UE::MeshPartition::AMeshPartition* Terrain)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false) || !CheckTerrain(Terrain))
 		return FModifierOpResult();
 	const FBox Bounds = Modifier->ComputeCombinedBounds();
@@ -1510,6 +1550,7 @@ FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Bind(UE::Me
 
 FUnrealAIMeshTerrainModifierResult UUnrealAIMeshTerrainModifiersApi::Remove(UE::MeshPartition::UModifierComponent* Modifier)
 {
+	const FCallBudget Budget; // one for every wait of the call
 	if (!CheckModifier(Modifier, /*bNeedsTerrain*/ false, /*bOrphanBase*/ true))
 		return FModifierOpResult();
 	// A deleted terrain the modifier still points at counts as none (it may not be garbage collected yet).

@@ -549,6 +549,18 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			const double Left = ModSpecHeight(Terrain, X0 - 4500.0 - 212.0, -4500.0 + 212.0), Right = ModSpecHeight(Terrain, X0 - 4500.0 + 212.0, -4500.0 - 212.0);
 			TestTrue(*FString::Printf(TEXT("flat across (%.1f / %.1f / %.1f)"), Left, Mid, Right), FMath::Abs(Left - Mid) <= 15.0 && FMath::Abs(Right - Mid) <= 15.0);
 
+			// A wider road keeps AddRoad's flat margin past its edges (an ordinary spline's Width is its flat width):
+			// meshTerrainModifier | call Edit(unreal.find("<label>_Road").Modifier, [-1, -1, -1], -1, 800)
+			const auto Plateau = [](const UModifierComponent* Spline)
+			{
+				const FNumericProperty* Property = Spline ? CastField<FNumericProperty>(Spline->GetClass()->FindPropertyByName(TEXT("PlateauDistance"))) : nullptr;
+				return Property ? Property->GetFloatingPointPropertyValue(Property->ContainerPtrToValuePtr<void>(Spline)) : -1.0;
+			};
+			UModifierComponent* RoadSpline = ModSpecFindModifier(Terrain, Label + TEXT("_Road"));
+			TestTrue(*FString::Printf(TEXT("AddRoad's 6 m road is flat 300 cm + its 180 cm margin each side (%.1f)"), Plateau(RoadSpline)), FMath::IsNearlyEqual(Plateau(RoadSpline), 480.0, 0.5));
+			ModSpecRun(TEXT("widen the road"), TEXT("Edit"), { ModSpecModifier(Label + TEXT("_Road")), ModSpecVec(-1.0, -1.0, -1.0), ModSpecNum(-1.0), ModSpecNum(800.0) });
+			TestTrue(*FString::Printf(TEXT("Edit Width 800 keeps the margin: 400 + 240 (%.1f)"), Plateau(RoadSpline)), FMath::IsNearlyEqual(Plateau(RoadSpline), 640.0, 0.5));
+
 			// The same path at 2 degrees needs about 1000 / tan(1.8) = 318 m (AddRoad keeps a 10% margin): it falls short and says so.
 			ModSpecRun(TEXT("remove the road"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road")) });
 			ModSpecRun(TEXT("remove its remesh"), TEXT("Remove"), { ModSpecModifier(Label + TEXT("_Road_Remesh")) });
@@ -601,6 +613,50 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			ModSpecExpectHeight(TEXT("the stroke"), Terrain, X0 + 10000.0, 0.0, 300.0, 5.0);
 		});
 
+		It("share one time budget between every build wait of an operation (the server ends a call after 300 s)", [this]()
+		{
+			using UnrealAIMeshTerrain::FCallBudget;
+			TestEqual(TEXT("no budget: the cap"), FCallBudget::Left(240.0), 240.0);
+			{
+				const FCallBudget Outer(100.0);
+				TestTrue(*FString::Printf(TEXT("the operation's budget (%.1f)"), FCallBudget::Left(240.0)), FCallBudget::Left(240.0) <= 100.0 && FCallBudget::Left(240.0) > 90.0);
+				{
+					const FCallBudget Inner(1000.0);
+					TestTrue(TEXT("a nested budget keeps the earlier deadline"), FCallBudget::Left(240.0) <= 100.0);
+				}
+				TestTrue(TEXT("at most the cap"), FCallBudget::Left(5.0) <= 5.0);
+			}
+			TestEqual(TEXT("restored when it goes"), FCallBudget::Left(240.0), 240.0);
+
+			const FString Label = ModSpecLabel(TEXT("ModBudget"));
+			const double X0 = -2100000.0;
+			AMeshPartition* Terrain = UnrealAIMeshTerrain::SpawnFlatTerrain(Label, FVector(X0, 0.0, 0.0), 40000.0, 40000.0, 400, 400);
+			ON_SCOPE_EXIT { UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0; UnrealAIMeshTerrain::DestroyTerrain(Terrain); };
+			if (!TestNotNull(TEXT("terrain spawned"), Terrain) || !TestTrue(TEXT("built"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0)))
+				return;
+			// A build still running (a new pad, returned before it is built: no cached result can finish it at once) and an
+			// operation whose budget is spent: the wait before its change gives up at once, though its own timeout is 240 s, and
+			// nothing is placed. meshTerrainModifier | call AddPatch(<terrain>, [X0, 0, 500], 3000, 1000, "<label>_Pad")
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.001;
+			TSharedPtr<FJsonObject> Pad;
+			TestTrue(TEXT("a pad, still building"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddPatch"), { ModSpecFind(Label), ModSpecVec(X0, 0.0, 500.0), ModSpecNum(3000.0), ModSpecNum(1000.0), ModSpecStr(Label + TEXT("_Pad")) }), true, &Pad));
+			UnrealAIMeshTerrain::BuildTimeoutForTests = 0.0;
+			if (!TestFalse(TEXT("the terrain is still building"), UnrealAIMeshTerrain::BuildState(Terrain).IsReady()))
+				return;
+			const int32 Before = ModSpecModifierActors();
+			{
+				const FCallBudget Spent(0.0);
+				const double Start = FPlatformTime::Seconds();
+				TSharedPtr<FJsonObject> Result;
+				// meshTerrainModifier | call AddPatch(<terrain>, [X0, 0, 500], 3000, 1000)
+				TestFalse(TEXT("AddPatch fails"), UnrealMcpRqlTools::RunPlan(ModSpecCall(TEXT("AddPatch"), { ModSpecFind(Label), ModSpecVec(X0, 0.0, 500.0), ModSpecNum(3000.0), ModSpecNum(1000.0) }), true, &Result));
+				TestTrue(*FString::Printf(TEXT("at once, saying the terrain is still building (%s)"), *ModSpecJson(Result).Left(600)),
+					FPlatformTime::Seconds() - Start < 30.0 && ModSpecJson(Result).Contains(TEXT("did not finish building")));
+			}
+			TestEqual(TEXT("nothing placed"), ModSpecModifierActors(), Before);
+			TestTrue(TEXT("it builds afterwards"), UnrealAIMeshTerrain::WaitForBuild(Terrain, 120.0));
+		});
+
 		It("round a switchback road's sharp corners so the built road keeps MaxSlope through them, and say where it is steepest", [this]()
 		{
 			const FString Label = ModSpecLabel(TEXT("ModZig"));
@@ -638,8 +694,10 @@ void FUnrealAIMeshTerrainModifiersSpec::Define()
 			if (!TestNotNull(TEXT("the road's spline"), Curve))
 				return;
 			// The corners (where an unrounded road measured 28.7 degrees): within 25 m of each, under 11 degrees. (The road cuts
-			// into a steep, noisy hillside here; a deep cut still exceeds MaxSlope 8 by about 2 degrees, an open item: macOS
-			// measured just under 10, Windows 10.27, so the bound keeps a margin and still fails an unrounded corner.)
+			// into a steep, noisy hillside here and still exceeds MaxSlope 8 by about 2 degrees: macOS measured just under 10,
+			// Windows 10.27, so the bound keeps a margin and still fails an unrounded corner. DEV-112: the road's spline keeps
+			// its 7.2 degree profile; the built ground (the sections' collision) strays up to about 10 cm from it, most on
+			// curves, which a one-metre step reads as 2 to 5 degrees more; finer triangles under the road do not change it.)
 			TArray<FVector2D> Corners;
 			for (int32 Leg = 0; Leg < 6; ++Leg)
 			{

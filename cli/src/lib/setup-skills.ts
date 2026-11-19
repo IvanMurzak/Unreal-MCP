@@ -46,7 +46,9 @@ export type EditorSkillsOutcome =
 
 /** What setup-skills prints when no editor wrote `unreal-rql`. */
 export const EDITOR_SKILLS_HINT =
-  '`unreal-rql` (RQL + extension guides) needs the editor: open it and run setup-skills again, or click "Generate skill files" in the editor\'s AI Game Developer window, or enable auto-generate there.';
+  `\`unreal-rql\` (RQL + extension guides) needs the editor: start it (\`${CLI_NAME} open --headless\`, or open it yourself) and run setup-skills again, ` +
+  `or click "Generate skill files" in the editor's AI Game Developer window. Until then an installed extension's guide is ` +
+  `\`${CLI_NAME} run-tool rql-schema --input '{"guide": "<name>"}'\`.`;
 
 export interface SetupSkillsSuccess {
   kind: 'success';
