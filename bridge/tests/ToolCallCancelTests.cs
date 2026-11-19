@@ -154,7 +154,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                     {
                         while (await reader.ReadLineAsync(_cts.Token) is { } line)
                         {
-                            if (JsonNode.Parse(line) is JsonObject frame && frame["type"]?.GetValue<string>() is not (IpcProtocol.Type.Ping or IpcProtocol.Type.Pong))
+                            if (JsonNode.Parse(line) is JsonObject frame && frame["type"]?.GetValue<string>() != IpcProtocol.Type.Ping)
                                 _frames.Writer.TryWrite(frame);
                         }
                     }
