@@ -363,7 +363,8 @@ Sidecar flow on each `tool-manifest` (revision N):
    `enabled`-flag-only change (the tool's Visible flag) → `SetToolVisible`.
 2. Each added tool is a `ProxyTool : IRunTool` whose `Run` serializes a `tool-call` IPC message,
    awaits the matching `tool-response` (or forwards `CancellationToken` as `tool-cancel`), and maps
-   it to `ResponseCallTool`.
+   it to `ResponseCallTool`. McpPlugin runs a call without a token; the proxy then uses the call's
+   `ToolCallCancellation.Token`, which fires when the server sends `CancelCall` (the caller went away).
 3. Out-of-order revisions are ignored if `revision <= lastApplied` — but this guard only filters
    races *within* one connection: **every `handshake-ack` resets the sidecar's `lastApplied`
    manifest revision to −1** (§1.5), so a post-reconnect re-push with an unchanged revision is

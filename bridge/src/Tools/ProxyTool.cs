@@ -125,8 +125,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
             _handler = handler ?? throw new ArgumentNullException(nameof(handler));
         }
 
+        /// <summary>
+        /// Dispatches the call to the handler. McpPlugin runs a tool call without a token of its own: the call's
+        /// <see cref="ToolCallCancellation.Token"/> fires when the server reports that the caller went away. The handler
+        /// gets that token when <paramref name="cancellationToken"/> cannot be cancelled, so the IPC round trip sends the
+        /// plugin a <c>tool-cancel</c> and a call still queued for the game thread is not run (§4).
+        /// </summary>
         public Task<ResponseCallTool> Run(string requestId, IReadOnlyDictionary<string, JsonElement>? namedParameters, CancellationToken cancellationToken = default)
-            => _handler(requestId, namedParameters, cancellationToken);
+            => _handler(requestId, namedParameters, cancellationToken.CanBeCanceled ? cancellationToken : ToolCallCancellation.Token);
 
         /// <summary>
         /// The chars/4 token approximation, inlined from <c>RunTool.CalculateTokenCount</c> / the 6.8.0

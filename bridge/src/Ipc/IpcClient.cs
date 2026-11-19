@@ -594,8 +594,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
             await _writeLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await stream.WriteAsync(framed.AsMemory(), ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
+                // A frame, once started, is written whole: a call cancelled mid-write would leave half a line that the
+                // plugin merges with the next frame (its tool-cancel) and drops. A dead link ends the write by closing
+                // the stream (CloseConnection / DisposeAsync).
+                await stream.WriteAsync(framed.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+                await stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {

@@ -59,6 +59,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task Run_PassesTheCallersToken_WhenItCanBeCancelled()
+        {
+            using var cts = new System.Threading.CancellationTokenSource();
+            System.Threading.CancellationToken seen = default;
+            var tool = Make(handler: (_, _, token) =>
+            {
+                seen = token;
+                return Task.FromResult(ResponseCallTool.Success("handled"));
+            });
+
+            await tool.Run("req-1", null, cts.Token);
+            Assert.Equal(cts.Token, seen);
+
+            // Outside a McpPlugin call there is no call token: the handler gets one that never fires.
+            await tool.Run("req-2", null);
+            Assert.False(seen.CanBeCanceled);
+        }
+
+        [Fact]
         public void Hints_AreCarried()
         {
             var tool = Make();
