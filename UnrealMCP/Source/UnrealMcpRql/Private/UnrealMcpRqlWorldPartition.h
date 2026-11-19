@@ -22,6 +22,14 @@ namespace UnrealMcpRqlWorldPartition
 	 */
 	TArray<FUnrealMcpUnloadedActor> Unloaded(UWorld* World, TArray<FGuid>* OutGuids = nullptr);
 
+	/**
+	 * Unloaded(@p World) as this request first listed it: unreal.find looks every key it does not find up there, once per
+	 * stream item (a big World Partition level has thousands of descriptors). Forgotten by ForgetUnloaded (each request) and
+	 * by every load.
+	 */
+	const TArray<FUnrealMcpUnloadedActor>& UnloadedForRequest(UWorld* World);
+	void ForgetUnloaded();
+
 	/** @p Key names @p Row: its label, name, GUID or package, case-insensitively. */
 	bool Matches(const FUnrealMcpUnloadedActor& Row, const FString& Key);
 

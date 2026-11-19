@@ -108,10 +108,30 @@ TArray<FUnrealMcpUnloadedActor> UnrealMcpRqlWorldPartition::Unloaded(UWorld* Wor
 	return Rows;
 }
 
+static TWeakObjectPtr<UWorld> GUnrealMcpRqlUnloadedWorld;
+static TOptional<TArray<FUnrealMcpUnloadedActor>> GUnrealMcpRqlUnloadedRows;
+
+const TArray<FUnrealMcpUnloadedActor>& UnrealMcpRqlWorldPartition::UnloadedForRequest(UWorld* World)
+{
+	if (!GUnrealMcpRqlUnloadedRows.IsSet() || GUnrealMcpRqlUnloadedWorld.Get() != World)
+	{
+		GUnrealMcpRqlUnloadedWorld = World;
+		GUnrealMcpRqlUnloadedRows = Unloaded(World);
+	}
+	return GUnrealMcpRqlUnloadedRows.GetValue();
+}
+
+void UnrealMcpRqlWorldPartition::ForgetUnloaded()
+{
+	GUnrealMcpRqlUnloadedRows.Reset();
+	GUnrealMcpRqlUnloadedWorld.Reset();
+}
+
 bool UnrealMcpRqlWorldPartition::Load(const TArray<FGuid>& Guids, FString& OutError)
 {
 	if (Guids.IsEmpty())
 		return true;
+	ForgetUnloaded();
 	// UWorldPartitionBlueprintLibrary::LoadActors (what Python's load_actors calls) keeps them in its per-world actor-list
 	// loader adapter, released with the world; the class is MinimalAPI (LoadActors is not exported), so it is called
 	// through reflection. It loads into the editor world.
@@ -223,8 +243,16 @@ TArray<AActor*> UUnrealMcpRqlEditorApi::LoadActors(const TArray<FString>& Actors
 		}
 		if (bMatched)
 			continue;
-		// Already loaded: nothing to do, and the caller still gets the actor.
-		if (AActor* Loaded = FUnrealMcpObjectRef::ResolveActor(Wanted))
+		// Already loaded: nothing to do, and the caller still gets the actor. A GUID names it through its descriptor (the
+		// actor lookup knows labels, names and paths only).
+		AActor* Loaded = FUnrealMcpObjectRef::ResolveActor(Wanted);
+		FGuid Guid;
+		if (!Loaded && FGuid::Parse(Wanted, Guid))
+		{
+			const TArray<AActor*> ByGuid = UnrealMcpRqlWorldPartition::Actors(World, { Guid });
+			Loaded = ByGuid.IsEmpty() ? nullptr : ByGuid[0];
+		}
+		if (Loaded)
 		{
 			AlreadyLoaded.AddUnique(Loaded);
 			continue;

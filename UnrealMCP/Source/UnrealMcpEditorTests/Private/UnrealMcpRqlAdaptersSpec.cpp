@@ -885,6 +885,13 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 					Said.Contains(TEXT("mutation-limit")) || Said.Contains(TEXT("nothing was changed")) || Said.Contains(TEXT("max_targets")));
 			}
 			TestEqual(TEXT("and nothing ran"), Api->Probes, 634);
+			// range(0, 1001) | get ref("UnrealMcpRqlSpecFixture#@F@") | call Probe(): a same-named call that changes something
+			// (the fixture's button), past the limit: RQL's refused change, never reworded as a read (DEV-114)
+			const TSharedPtr<FJsonObject> Pokes = Run(TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1001}]},"stages":[{"op":"get","expr":{"call":"ref","args":[{"lit":"UnrealMcpRqlSpecFixture#@F@"}]}},{"op":"call","method":"Probe","args":[]}]})RQL"), true);
+			const FString PokesSaid = UnrealMcpRqlSpecHelpers::Codes(Pokes) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Pokes);
+			TestTrue(*FString::Printf(TEXT("a same-named change keeps its mutation-limit (%s)"), *PokesSaid),
+				!UnrealMcpRqlSpecHelpers::IsOk(Pokes) && PokesSaid.Contains(TEXT("mutation-limit")) && !PokesSaid.Contains(TEXT("read-limit")));
+			TestEqual(TEXT("and it never ran"), Fixture->Pokes, 0);
 			// range(0, 1000) | call rqlSpecApi.Probe([$ + 0.123456789, $ + 0.987654321, 123456.789012]): 1000 long rows overflow the
 			// 64 KB answer; a read is told to read the rest
 			const TSharedPtr<FJsonObject> Full = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":1000}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"+","args":[{"path":[]},{"lit":0.123456789}]},{"op":"+","args":[{"path":[]},{"lit":0.987654321}]},{"lit":123456.789012}]}]}]})RQL"));

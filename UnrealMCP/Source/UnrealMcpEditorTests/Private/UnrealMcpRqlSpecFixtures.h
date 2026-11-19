@@ -168,6 +168,14 @@ public:
 	/** Reset to 1 by PostEditChangeProperty: a write of it never stays. */
 	UPROPERTY(EditAnywhere, Category = "Spec") int32 Pinned = 1;
 
+	/**
+	 * A Details-panel button that shares its name with the read-only operation UUnrealMcpRqlSpecApi::Probe but changes
+	 * something: a limit error of a call of it is a refused change, not a read-limit (DEV-114).
+	 */
+	UFUNCTION(CallInEditor, Category = "Spec")
+	void Probe() { ++Pokes; }
+	int32 Pokes = 0;
+
 	/** PostEditChangeProperty calls (writes go through the editor's property-change path). */
 	int32 PostEditCount = 0;
 	/** The last edit's changed property and member property, as the Details panel names them ("Damage" in "Nest"). */

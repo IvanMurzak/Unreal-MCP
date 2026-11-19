@@ -29,6 +29,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
     /// </summary>
     public static class ProxyToolFactory
     {
+        /// <summary>
+        /// The HTTP status McpPlugin's server pairs with <see cref="ResponseErrorKind.Unavailable"/> for a call that may
+        /// have run before its connection failed (McpPlugin <c>ClientUtils.MaybeDeliveredStatusCode</c>, internal there):
+        /// unlike NotExecuted's 503 it is never re-sent.
+        /// </summary>
+        public const int MaybeDeliveredStatusCode = 502;
+
         /// <param name="toolTimeoutMs">
         /// Reads the per-call timeout at call time, so a <c>config</c> push (<c>UNREAL_MCP_TOOL_TIMEOUT</c>, §8)
         /// reaches already-registered proxies. Null means <see cref="IpcProtocol.DefaultToolTimeoutMs"/>.
@@ -72,9 +79,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tools
                     {
                         // Fail fast — never hang to timeoutMs (§2.2 step 4). A call refused before it was sent
                         // (editor not connected / handshake not done) never started: answer NotExecuted (503), the
-                        // contract for "safe to re-send" (docs/ARCHITECTURE.md). Anything that may have reached
-                        // the editor stays a plain error, never re-sent.
-                        var refusal = ex.NotSent ? ResponseCallTool.NotExecuted(ex.Message) : ResponseCallTool.Error(ex.Message);
+                        // contract for "safe to re-send" (docs/ARCHITECTURE.md). A link that dropped mid-call may have
+                        // run it: Unavailable with 502, McpPlugin's "maybe delivered" (never re-sent; the server says
+                        // to check the effect before a retry). Without a kind it read as a server fault (500).
+                        var refusal = ex.NotSent
+                            ? ResponseCallTool.NotExecuted(ex.Message)
+                            : ResponseCallTool.Error(ex.Message, ResponseErrorKind.Unavailable, MaybeDeliveredStatusCode);
                         return refusal.SetRequestID(requestId);
                     }
                 },

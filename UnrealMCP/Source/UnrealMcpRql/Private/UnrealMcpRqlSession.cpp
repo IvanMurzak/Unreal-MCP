@@ -811,10 +811,20 @@ void FUnrealMcpRqlSession::ConfigureMutations()
 	// package. An abstract class is returned too, so the factory's error names its concrete classes.
 	Policy.resolve_subtype = [TypeProvider, OfferedBases = MakeShared<TSet<UClass*>>()](const rql::TypeDescriptor& Target, const std::string& Name) -> const rql::TypeDescriptor*
 	{
+		const FString Text = UnrealMcpRqlFromStd(Name).TrimStartAndEnd();
+		// A struct literal's $type ([{$type: "SplineModifierWeightEntry", ...}] for a list of structs): a struct value holds
+		// exactly its declared struct, so only that struct's own name (an F prefix or its path tolerated) names it. RQL knows only
+		// registered descriptors, and a struct's is made on first read: registered here, a wrong name gets its "did you mean".
+		if (UScriptStruct* Struct = TypeProvider->StructOf(&Target))
+		{
+			TypeProvider->Registry().register_descriptor(const_cast<rql::TypeDescriptor*>(&Target)); // idempotent
+			const FString Short = Struct->GetName();
+			return Text.Equals(Short, ESearchCase::IgnoreCase) || Text.Equals(TEXT("F") + Short, ESearchCase::IgnoreCase)
+				|| Text.Equals(Struct->GetPathName(), ESearchCase::IgnoreCase) ? &Target : nullptr;
+		}
 		UClass* Base = TypeProvider->ClassOf(&Target);
 		if (!Base)
 			return nullptr;
-		const FString Text = UnrealMcpRqlFromStd(Name).TrimStartAndEnd();
 		UClass* Class = nullptr;
 		if (Text.Contains(TEXT("/")))
 		{
@@ -958,6 +968,30 @@ bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) con
 		&& TypesPtr->IsReadOnlyOperation(Receiver->GetClass(), UnrealMcpRqlFromStd(Record.method->name));
 }
 
+bool FUnrealMcpRqlSession::CallsReadOnlySource(const rql::QueryPlan& Plan) const
+{
+	if (!EndsWithCall(Plan))
+		return false;
+	const rql::Stage& Call = Plan.stages.back();
+	const rql::ExprPtr& Receiver = Call.on ? Call.on : Plan.source;
+	if (!Call.on)
+	{
+		for (size_t Index = 0; Index + 1 < Plan.stages.size(); ++Index)
+		{
+			const rql::StageKind Kind = Plan.stages[Index].kind;
+			if (Kind != rql::StageKind::Where && Kind != rql::StageKind::First && Kind != rql::StageKind::Skip && Kind != rql::StageKind::Sort)
+				return false; // the items reaching the call are no longer the source's
+		}
+	}
+	if (!Receiver || Receiver->kind != rql::ExprKind::Path || Receiver->on || Receiver->segments.size() != 1
+		|| Receiver->segments[0].kind != rql::SegmentKind::Member)
+		return false;
+	const FString Source = UnrealMcpRqlFromStd(Receiver->segments[0].name);
+	const FEntry* Entry = SourceEntries.FindByPredicate([&Source](const FEntry& Candidate) { return Candidate.Name.Equals(Source, ESearchCase::CaseSensitive); });
+	const UClass* Class = Entry ? TypesPtr->ClassOf(Entry->Type) : nullptr;
+	return Class && TypesPtr->IsReadOnlyOperation(Class, UnrealMcpRqlFromStd(Call.method));
+}
+
 bool FUnrealMcpRqlSession::AllReadOnlyCalls(const std::vector<rql::MutationRecord>& Records) const
 {
 	return !Records.empty() && std::all_of(Records.begin(), Records.end(), [this](const rql::MutationRecord& Record) { return IsReadOnlyCall(Record); });
@@ -1072,6 +1106,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 {
 	Types().SetMutationRequest(bAllowMutation);
 	UnrealMcpRqlForgetSimilarActors();
+	UnrealMcpRqlWorldPartition::ForgetUnloaded();
 	bReadOnlyCallRequest = false;
 	bRefusedReadOnlyCall = false;
 	bReadOnlyLimit = false;
@@ -1113,7 +1148,9 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 			AddCallResultListNote(Result);
 		else if (!bAllowMutation) // a set receipt's old / new columns are no members to get
 			UnrealMcpRqlSessionLocal::AddListMemberNote(Result, Plan);
-		if (bReadOnlyLimit)
+		// A limit error comes before any call is planned: reworded as a read only when the receiver is known to be the
+		// read-only operation (a same-named call on other objects that changes something keeps RQL's mutation-limit).
+		if (bReadOnlyLimit && CallsReadOnlySource(Plan))
 			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
 	}
 	CloseTransaction();

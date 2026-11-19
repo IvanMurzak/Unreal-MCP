@@ -81,6 +81,7 @@ public:
 	/** Make sure a (possibly lazily created) descriptor has its members and methods. */
 	void Fill(const rql::TypeDescriptor* Descriptor);
 	UClass* ClassOf(const rql::TypeDescriptor* Descriptor) const;
+	UScriptStruct* StructOf(const rql::TypeDescriptor* Descriptor) const;
 	bool IsObjectType(const rql::TypeDescriptor* Descriptor) const { return ClassOf(Descriptor) != nullptr; }
 
 	// ---- values
@@ -208,7 +209,12 @@ private:
 		TSharedPtr<FStructOnScope> Body;
 		bool bUseDefaultCollision = false;
 	};
-	TMap<const void*, FBodySnapshot> BodySnapshots; // by the FBodyInstance's memory
+	/**
+	 * By the body's owner as this call first wrote it and the body's offset in it: a construction-script component is
+	 * replaced by the rerun its own write starts, so a later write of the same body (the rollback) reaches another address.
+	 */
+	TMap<TPair<const UObject*, SIZE_T>, FBodySnapshot> BodySnapshots;
+	FBodySnapshot* FindBodySnapshot(const UObject* Owner, SIZE_T Offset);
 	bool ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before);
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;

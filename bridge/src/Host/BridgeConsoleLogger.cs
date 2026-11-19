@@ -127,12 +127,30 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             if (!IsEnabled(logLevel))
                 return;
 
-            var message = formatter(state, exception);
+            var message = Redact(logLevel, formatter(state, exception));
             var line = $"[unreal-mcp-bridge] {logLevel.ToString().ToLowerInvariant()} {_category}: {message}";
             if (exception != null)
                 line += $" | {exception.GetType().Name}: {exception.Message}";
             Console.Error.WriteLine(line);
             _fileSink?.WriteLine(line);
+        }
+
+        /// <summary>
+        /// McpPlugin logs every tool call's full arguments ("Run tool 'x' with parameters[2]:\n...") and its whole answer
+        /// ("Success Response to AI:\n...") at Information, the bridge's default level: queries, file paths and scene
+        /// data went into UnrealMcpBridge.log on every call (DEV-114). At Information and above only their first line is
+        /// kept; UNREAL_MCP_LOG_LEVEL=debug logs them whole.
+        /// </summary>
+        internal static readonly string[] PayloadHeaders = { "Run tool '", "Success Response to AI:", "Processing Response to AI:" };
+
+        private string Redact(LogLevel logLevel, string message)
+        {
+            if (_minLevel <= LogLevel.Debug || logLevel != LogLevel.Information)
+                return message;
+            var newline = message.IndexOf('\n');
+            if (newline < 0 || !Array.Exists(PayloadHeaders, header => message.StartsWith(header, StringComparison.Ordinal)))
+                return message;
+            return message.Substring(0, newline).TrimEnd('\r', ':') + " (payload logged at UNREAL_MCP_LOG_LEVEL=debug)";
         }
 
         private sealed class NullScope : IDisposable
