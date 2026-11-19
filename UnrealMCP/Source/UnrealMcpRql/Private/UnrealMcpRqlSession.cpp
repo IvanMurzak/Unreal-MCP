@@ -979,7 +979,8 @@ bool FUnrealMcpRqlSession::CallsReadOnlySource(const rql::QueryPlan& Plan) const
 		for (size_t Index = 0; Index + 1 < Plan.stages.size(); ++Index)
 		{
 			const rql::StageKind Kind = Plan.stages[Index].kind;
-			if (Kind != rql::StageKind::Where && Kind != rql::StageKind::First && Kind != rql::StageKind::Skip && Kind != rql::StageKind::Sort)
+			if (Kind != rql::StageKind::Where && Kind != rql::StageKind::First && Kind != rql::StageKind::Skip && Kind != rql::StageKind::Sort
+				&& Kind != rql::StageKind::Distinct)
 				return false; // the items reaching the call are no longer the source's
 		}
 	}
@@ -987,7 +988,19 @@ bool FUnrealMcpRqlSession::CallsReadOnlySource(const rql::QueryPlan& Plan) const
 		|| Receiver->segments[0].kind != rql::SegmentKind::Member)
 		return false;
 	const FString Source = UnrealMcpRqlFromStd(Receiver->segments[0].name);
+	// As RQL finds a source: the exact name, else the one name that matches ignoring case (Editor, Landscape).
 	const FEntry* Entry = SourceEntries.FindByPredicate([&Source](const FEntry& Candidate) { return Candidate.Name.Equals(Source, ESearchCase::CaseSensitive); });
+	if (!Entry)
+	{
+		for (const FEntry& Candidate : SourceEntries)
+		{
+			if (!Candidate.Name.Equals(Source, ESearchCase::IgnoreCase))
+				continue;
+			if (Entry)
+				return false; // ambiguous: RQL resolves no source either
+			Entry = &Candidate;
+		}
+	}
 	const UClass* Class = Entry ? TypesPtr->ClassOf(Entry->Type) : nullptr;
 	return Class && TypesPtr->IsReadOnlyOperation(Class, UnrealMcpRqlFromStd(Call.method));
 }
