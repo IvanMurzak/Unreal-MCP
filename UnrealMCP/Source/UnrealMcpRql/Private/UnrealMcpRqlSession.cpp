@@ -51,12 +51,12 @@ namespace UnrealMcpRqlSessionLocal
 		return INDEX_NONE;
 	}
 
-	/** RQL refused a call followed by read stages because a planned call is not read-only (spec §8). */
+	/** RQL refused a call followed by read stages because a planned call is not read-only (spec §8; invalid-plan). */
 	bool RefusedAsNotReadOnly(const rql::QueryResult& Result)
 	{
 		for (const rql::Diagnostic& Diagnostic : Result.diagnostics)
 		{
-			if (Diagnostic.severity == rql::Severity::Error
+			if (Diagnostic.severity == rql::Severity::Error && Diagnostic.code == "invalid-plan"
 				&& (Diagnostic.hint.find(" is not read-only") != std::string::npos || Diagnostic.message.find(" is not read-only") != std::string::npos))
 				return true;
 		}
@@ -351,8 +351,9 @@ namespace UnrealMcpRqlSessionLocal
 		const std::vector<std::string>& Columns = *Result.columns;
 		// The call's own rows carry a "result" column; a select after the call may rename it: then every column is read.
 		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
+		const bool bResultColumn = Column != Columns.end();
 		std::vector<size_t> Indexes;
-		if (Column != Columns.end())
+		if (bResultColumn)
 			Indexes.push_back(static_cast<size_t>(Column - Columns.begin()));
 		else
 			for (size_t Index = 0; Index < Columns.size(); ++Index)
@@ -368,7 +369,7 @@ namespace UnrealMcpRqlSessionLocal
 					continue;
 				const int32 Before = Lists;
 				CountCutLists(Row[Index], Lists, LeftOut);
-				if (Before == 0 && Lists == 1)
+				if (bResultColumn && Before == 0 && Lists == 1)
 					bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
 			}
 		}

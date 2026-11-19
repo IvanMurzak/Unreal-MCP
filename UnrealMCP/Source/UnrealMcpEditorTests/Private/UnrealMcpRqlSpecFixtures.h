@@ -241,6 +241,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
 	int32 Mark(FVector Point, const TArray<FVector>& Path) { return ++Marks; }
 
+	/** the numbers 0 .. Count - 1, as a read (a list-valued read-only call result: read stages may follow it) */
+	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true", RqlReadOnly))
+	TArray<int32> ReadSequence(int32 Count)
+	{
+		TArray<int32> Out;
+		for (int32 I = 0; I < Count; ++I)
+			Out.Add(I);
+		return Out;
+	}
+
 	/** the numbers 0 .. Count - 1 (a list-valued call result) */
 	UFUNCTION(BlueprintCallable, Category = "Spec", meta = (BlueprintInternalUseOnly = "true"))
 	TArray<int32> Sequence(int32 Count)
