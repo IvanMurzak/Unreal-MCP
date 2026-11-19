@@ -1106,7 +1106,6 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 {
 	Types().SetMutationRequest(bAllowMutation);
 	UnrealMcpRqlForgetSimilarActors();
-	UnrealMcpRqlWorldPartition::ForgetUnloaded();
 	bReadOnlyCallRequest = false;
 	bRefusedReadOnlyCall = false;
 	bReadOnlyLimit = false;

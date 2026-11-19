@@ -345,7 +345,7 @@ void UnrealMcpRqlAddWorldPartition(FUnrealMcpRqlSession& Session)
 		[Types, RowStruct]()
 	{
 		std::vector<rql::Value> Rows;
-		for (const FUnrealMcpUnloadedActor& Row : UnrealMcpRqlWorldPartition::Unloaded(UnrealMcpRql::EditorWorld()))
+		for (const FUnrealMcpUnloadedActor& Row : UnrealMcpRqlWorldPartition::UnloadedForRequest(UnrealMcpRql::EditorWorld()))
 			Rows.push_back(Types->WrapStruct(RowStruct, &Row));
 		return rql::Value::list_of(std::move(Rows));
 	});

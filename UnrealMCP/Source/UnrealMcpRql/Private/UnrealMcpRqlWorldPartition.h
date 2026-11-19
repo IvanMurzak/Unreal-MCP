@@ -24,8 +24,8 @@ namespace UnrealMcpRqlWorldPartition
 
 	/**
 	 * Unloaded(@p World) as this request first listed it: unreal.find looks every key it does not find up there, once per
-	 * stream item (a big World Partition level has thousands of descriptors). Forgotten by ForgetUnloaded (each request) and
-	 * by every load.
+	 * stream item (a big World Partition level has thousands of descriptors). Forgotten by ForgetUnloaded (each request,
+	 * through UnrealMcpRqlForgetSimilarActors) and by every load.
 	 */
 	const TArray<FUnrealMcpUnloadedActor>& UnloadedForRequest(UWorld* World);
 	void ForgetUnloaded();

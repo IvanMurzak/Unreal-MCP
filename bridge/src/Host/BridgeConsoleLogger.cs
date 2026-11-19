@@ -141,7 +141,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// data went into UnrealMcpBridge.log on every call (DEV-114). At Information and above only their first line is
         /// kept; UNREAL_MCP_LOG_LEVEL=debug logs them whole.
         /// </summary>
-        internal static readonly string[] PayloadHeaders = { "Run tool '", "Success Response to AI:", "Processing Response to AI:" };
+        private static readonly string[] PayloadHeaders = { "Run tool '", "Success Response to AI:", "Processing Response to AI:" };
 
         private string Redact(LogLevel logLevel, string message)
         {

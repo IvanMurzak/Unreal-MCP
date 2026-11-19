@@ -166,6 +166,20 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlDataModelsSpec, "UnrealMcp.Tools.Rql.DataModels",
 		return Made;
 	}
 
+	/** The editor world's actor labelled @p Label, or null. */
+	static AActor* SpecActorLabelled(const TCHAR* Label)
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!World)
+			return nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->GetActorLabel() == Label)
+				return *It;
+		}
+		return nullptr;
+	}
+
 	static void DestroySpecActors()
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -986,13 +1000,8 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 			Must(TEXT("spawned"), /* editor | call SpawnActor("@BPNAME@", "RqlSeqLampBP") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"SpawnActor","args":[{"lit":"@BPNAME@"},{"lit":"RqlSeqLampBP"}]}]})RQL"), { { TEXT("BPNAME"), FPackageName::GetShortName(Blueprint) } });
 			auto Mesh = []() -> const UStaticMeshComponent*
 			{
-				UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-				for (TActorIterator<AActor> It(World); It; ++It)
-				{
-					if (It->GetActorLabel() == TEXT("RqlSeqLampBP"))
-						return It->FindComponentByClass<UStaticMeshComponent>();
-				}
-				return nullptr;
+				const AActor* Placed = SpecActorLabelled(TEXT("RqlSeqLampBP"));
+				return Placed ? Placed->FindComponentByClass<UStaticMeshComponent>() : nullptr;
 			};
 			const UStaticMeshComponent* Before = Mesh();
 			if (!TestNotNull(TEXT("placed with its mesh component"), Before))
