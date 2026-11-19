@@ -726,8 +726,10 @@ namespace UnrealAIMeshTerrain
 		{
 			for (const FRegionMesh& Part : Parts)
 			{
-				const FVector LocalStart = Part.Spatial.IsValid() ? Part.Transform.InverseTransformPosition(Start) : FVector::ZeroVector;
-				if (!Part.Spatial.IsValid() || !Under(Part, LocalStart, 0.0))
+				if (!Part.Spatial.IsValid())
+					continue;
+				const FVector LocalStart = Part.Transform.InverseTransformPosition(Start);
+				if (!Under(Part, LocalStart, 0.0))
 					continue;
 				const FVector LocalDirection = Part.Transform.InverseTransformVector(End - Start).GetSafeNormal();
 				double Distance = 0.0;
@@ -749,8 +751,10 @@ namespace UnrealAIMeshTerrain
 			FVector LocalHit = FVector::ZeroVector;
 			for (const FRegionMesh& Part : Parts)
 			{
-				const FVector Local = Part.Spatial.IsValid() ? Part.Transform.InverseTransformPosition(Hit) : FVector::ZeroVector;
-				if (!Part.Spatial.IsValid() || !Under(Part, Local, NearSurface))
+				if (!Part.Spatial.IsValid())
+					continue;
+				const FVector Local = Part.Transform.InverseTransformPosition(Hit);
+				if (!Under(Part, Local, NearSurface))
 					continue;
 				double DistanceSquared = TNumericLimits<double>::Max();
 				const int32 Triangle = Part.Spatial->FindNearestTriangle(Local, DistanceSquared);
@@ -767,7 +771,7 @@ namespace UnrealAIMeshTerrain
 			FVector A, B, C;
 			Nearest->Mesh->GetTriVertices(NearestTriangle, A, B, C);
 			UE::Geometry::FDistPoint3Triangle3d OnTriangle(LocalHit, UE::Geometry::FTriangle3d(A, B, C));
-			OnTriangle.GetSquared();
+			OnTriangle.GetSquared(); // (computes ClosestTrianglePoint and its TriangleBaryCoords)
 			Read(*Nearest, NearestTriangle, OnTriangle.TriangleBaryCoords, OnTriangle.ClosestTrianglePoint);
 			return true;
 		};

@@ -180,16 +180,7 @@ namespace UnrealAIMeshTerrainModuleLocal
 		Out->SetField(TEXT("Bounds"), BoxJson(Modifier->ComputeCombinedBounds()));
 		return MakeShared<FJsonValueObject>(Out);
 	}
-}
 
-/**
- * The extension's RQL module (Unreal-MCP docs/rql.md "Extensions"): Mesh Terrains (UE 5.8 Mesh Partition, Experimental)
- * are queried with rql-query. Reflection exposes the MeshPartition actor, its definition and the modifier components
- * ("MeshPartition", "MeshPartitionDefinition", "NoiseModifier", ...); the module adds world sources, the build state,
- * sections, bounds and modifier summaries, and the agent guide rendered into the unreal-rql skill.
- */
-namespace UnrealAIMeshTerrainModuleLocal
-{
 	/**
 	 * StartPlay's check: Mesh Partition plays only saved modifiers. With an unsaved one it asks in a modal dialog ("Your
 	 * editor world contains N dirty Mesh Partition modifiers"), which an unattended start cancels with a stack dump in the
@@ -219,6 +210,12 @@ namespace UnrealAIMeshTerrainModuleLocal
 	}
 }
 
+/**
+ * The extension's RQL module (Unreal-MCP docs/rql.md "Extensions"): Mesh Terrains (UE 5.8 Mesh Partition, Experimental)
+ * are queried with rql-query. Reflection exposes the MeshPartition actor, its definition and the modifier components
+ * ("MeshPartition", "MeshPartitionDefinition", "NoiseModifier", ...); the module adds world sources, the build state,
+ * sections, bounds and modifier summaries, and the agent guide rendered into the unreal-rql skill.
+ */
 class FUnrealAIMeshTerrainRqlModule : public IUnrealMcpRqlModule
 {
 public:
