@@ -9,7 +9,6 @@
 #include "UnrealAIMeshTerrainWaterCommon.h"
 #include "UnrealAIMeshTerrainWaterRqlApi.h"
 
-#include "EngineUtils.h"
 #include "LandscapeSettings.h"
 #include "Materials/MaterialInterface.h"
 
@@ -26,21 +25,9 @@ namespace UnrealAIMeshTerrainWaterModuleLocal
 {
 	using namespace UnrealAIMeshTerrainWater;
 
-	/** Every water body of the editor world, World Partition ones loaded first (while the operations can run). */
-	TArray<UObject*> Bodies()
+	TArray<UObject*> Objects(const TArray<AWaterBody*>& Bodies)
 	{
-		if (UnavailableReason().IsEmpty())
-			LoadWaterBodies();
-		TArray<UObject*> Out;
-		if (UWorld* World = UnrealMcpRql::EditorWorld())
-		{
-			for (TActorIterator<AWaterBody> It(World); It; ++It)
-			{
-				if (IsValid(*It))
-					Out.Add(*It);
-			}
-		}
-		return Out;
+		return TArray<UObject*>(Bodies);
 	}
 
 	TSharedPtr<FJsonValue> StatusJson(UObject* Object)
@@ -51,13 +38,13 @@ namespace UnrealAIMeshTerrainWaterModuleLocal
 		if (!Component)
 			return MakeShared<FJsonValueObject>(Out);
 		const UWaterModifier* Modifier = MatchingModifier(Body);
-		const AMeshPartition* Terrain = TerrainOf(Body);
+		const AMeshPartition* Terrain = Modifier ? Modifier->GetAffectedMeshPartition() : nullptr;
 		const UWaterSplineComponent* Spline = Component->GetWaterSpline();
 		const UMaterialInterface* Material = Component->GetWaterMaterial();
 		const AWaterZone* Zone = Component->GetWaterZone();
 		const FString Issue = Problem(Body);
 		Out->SetStringField(TEXT("Type"), WaterType(Body));
-		Out->SetStringField(TEXT("Terrain"), Terrain ? Terrain->GetActorLabel() : FString());
+		Out->SetStringField(TEXT("Terrain"), IsValid(Terrain) ? Terrain->GetActorLabel() : FString());
 		Out->SetStringField(TEXT("Modifier"), Modifier ? Modifier->GetClass()->GetName() : FString());
 		Out->SetNumberField(TEXT("Modifiers"), WaterModifiers(Body).Num());
 		Out->SetBoolField(TEXT("AffectsTerrain"), Component->bAffectsLandscape);
@@ -92,7 +79,7 @@ public:
 
 		Context.AddObjectListSource(TEXT("meshTerrainWaterBodies"),
 			TEXT("the Water body actors (lake, river, ocean, custom) of the editor world, with the Mesh Terrain each shapes (on a World Partition map all of them: it loads the unloaded ones)"),
-			BodyClass, []() { return Bodies(); });
+			BodyClass, []() { return Objects(WaterBodies(/*bLoad*/ true)); });
 		Context.AddApiSource(TEXT("meshTerrainWater"),
 			TEXT("water on Mesh Terrain: call CreateLake(terrain, label, center, radius, depth) / CreateRiver(terrain, label, points, width, depth) / CreateOcean(label, height) / Attach(body, terrain) / Detach(body) / Delete(body) / WaitForBuild(body) / SetZone / SetMaterial / EnableMeshTerrainWater; each waits until the terrain is rebuilt"),
 			UUnrealAIMeshTerrainWaterRqlApi::StaticClass(), TEXT("MeshTerrainWaterOperations"));
@@ -108,12 +95,7 @@ public:
 		Context.AddObjectListMember(TerrainClass, TEXT("WaterBodies"), TEXT("the lakes and rivers whose water modifier shapes the terrain"),
 			BodyClass, [](UObject* Object)
 			{
-				if (UnrealAIMeshTerrainWater::UnavailableReason().IsEmpty())
-					UnrealAIMeshTerrainWater::LoadWaterBodies();
-				TArray<UObject*> Out;
-				for (AWaterBody* Body : UnrealAIMeshTerrainWater::BodiesOf(Cast<AMeshPartition>(Object)))
-					Out.Add(Body);
-				return Out;
+				return UnrealAIMeshTerrainWaterModuleLocal::Objects(UnrealAIMeshTerrainWater::BodiesOf(Cast<AMeshPartition>(Object), /*bLoad*/ true));
 			});
 
 		Context.AddGuide(TEXT("Water on Mesh Terrain (Experimental, UE 5.8+)"), TEXT(R"MD(Oceans, lakes and rivers of the Water plugin on a Mesh Terrain (Unreal 5.8's

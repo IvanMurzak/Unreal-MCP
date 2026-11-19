@@ -66,13 +66,14 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 	 */
 	AActor* SpawnWater(UWorld* World, UClass* Class, const FVector& Location, const FString& Label)
 	{
+		UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryForActorClass(Class) : nullptr;
+		if (!Factory)
+			return UnrealMcpRql::SpawnActor(Class, Location, FRotator::ZeroRotator, Label); // Fails itself
 		ULevel* Level = World->GetCurrentLevel() ? World->GetCurrentLevel() : World->PersistentLevel.Get();
 		FActorSpawnParameters Params;
 		Params.ObjectFlags |= RF_Transactional;
-		UActorFactory* Factory = GEditor ? GEditor->FindActorFactoryForActorClass(Class) : nullptr;
-		AActor* Actor = Factory
-			? Factory->CreateActor(Class, Level, FTransform(Location), Params) // the class is the placed "asset", as in Place Actors
-			: World->SpawnActor(Class, &Location, nullptr, Params);
+		// The class is the placed "asset", as in Place Actors.
+		AActor* Actor = Factory->CreateActor(Class, Level, FTransform(Location), Params);
 		if (!Actor)
 			return UnrealMcpRql::Failed<AActor*>(FString::Printf(TEXT("could not spawn %s"), *Class->GetName()));
 		if (!Label.IsEmpty())
@@ -124,6 +125,16 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 	{
 		return Depth == 0.0 || (Depth >= 10.0 && Depth <= 20000.0)
 			|| UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("Depth %g is outside 10 .. 20000 cm (0 keeps the Water default)"), Depth));
+	}
+
+	/** Give @p Body @p Material (null keeps its own); the caller rebuilds the body. */
+	void SetBodyMaterial(AWaterBody* Body, UMaterialInterface* Material)
+	{
+		if (!Material)
+			return;
+		UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
+		Component->Modify();
+		Component->SetWaterMaterial(Material);
 	}
 
 	/** Place @p Points (world) on @p Body's spline, quietly (RebuildBody rebuilds it once, with its final profile). */
@@ -196,35 +207,13 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		return FitZone(World, TerrainsBounds(World).IsValid ? 0.0 : 2000.0, Center);
 	}
 
-	/** The XY box of @p Terrain's ground (its built sections, else its base meshes). */
-	FBox2D TerrainArea(const AMeshPartition* Terrain)
-	{
-		FBox2D Area(ForceInit);
-		if (UWorld* World = Terrain ? Terrain->GetWorld() : nullptr)
-		{
-			// TerrainsBounds over one terrain: the same rule (built, else base meshes).
-			const FBox Box = [Terrain]()
-			{
-				FBox Out(ForceInit);
-				if (const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
-				{
-					for (const UModifierComponent* Base : Component->GetModifiersFiltered([](const UModifierComponent* M) { return IsValid(M) && M->IsBase(); }))
-						Out += Base->ComputeCombinedBounds();
-				}
-				return Out;
-			}();
-			if (Box.IsValid)
-				Area = FBox2D(FVector2D(Box.Min), FVector2D(Box.Max));
-		}
-		return Area;
-	}
-
 	/** Fail unless some of @p Points (X, Y) lie on @p Terrain's area (a body off the terrain shapes nothing). */
 	bool CheckOnTerrain(const AMeshPartition* Terrain, TConstArrayView<FVector> Points, const TCHAR* What)
 	{
-		const FBox2D Area = TerrainArea(Terrain);
-		if (!Area.bIsValid)
+		const FBox Box = TerrainBounds(Terrain);
+		if (!Box.IsValid)
 			return true; // nothing to compare with (no base mesh): the build says so
+		const FBox2D Area(FVector2D(Box.Min), FVector2D(Box.Max));
 		for (const FVector& Point : Points)
 		{
 			if (Area.IsInside(FVector2D(Point)))
@@ -242,10 +231,11 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 	void WarnGround(const AMeshPartition* Terrain, TConstArrayView<FVector> Points)
 	{
 		constexpr double Above = 200.0, Below = 3000.0;
+		const TArray<UPrimitiveComponent*> Colliders = TerrainColliders(Terrain);
 		TArray<FString> High, Low;
 		for (int32 Index = 0; Index < Points.Num(); ++Index)
 		{
-			const TOptional<double> Ground = GroundHeight(Terrain, Points[Index].X, Points[Index].Y);
+			const TOptional<double> Ground = GroundHeight(Colliders, Points[Index].X, Points[Index].Y);
 			if (!Ground)
 				continue;
 			const double Over = Points[Index].Z - Ground.GetValue();
@@ -266,9 +256,20 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		}
 	}
 
-	/** Remove @p Modifier from its actor (the component only; the body stays). */
+	/** Add the terrain @p Modifier shapes (when it still exists) to @p OutTerrains. */
+	void AddAffected(const UWaterModifier* Modifier, TArray<AMeshPartition*>& OutTerrains)
+	{
+		if (AMeshPartition* Terrain = Modifier->GetAffectedMeshPartition(); IsValid(Terrain))
+			OutTerrains.AddUnique(Terrain);
+	}
+
+	/**
+	 * Remove @p Modifier from its actor (the component only; the body stays). Its terrain rebuilds only the area it shaped:
+	 * the change is queued before the component goes, and the build wait's first UpdateModifierList drops it from the stack.
+	 */
 	void RemoveModifier(UWaterModifier* Modifier)
 	{
+		Modifier->OnChanged(Modifier->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		AActor* Owner = Modifier->GetOwner();
 		Owner->Modify();
 		Modifier->Modify();
@@ -278,25 +279,23 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 
 	/**
 	 * Give @p Body exactly one water modifier, of its kind, bound to @p Terrain and enabled, with Affects Landscape on (the
-	 * modifier does nothing without it). @p OutTerrains gains every terrain whose shape changes (the previous one too). Null
-	 * after Fail.
+	 * modifier does nothing without it). @p OutLeft gains the terrains it was rebound away from: they rebuild whole (the
+	 * modifier's change reaches only its new terrain; an extra modifier removed queues its own area). Null after Fail.
 	 */
-	UWaterModifier* BindModifier(AWaterBody* Body, AMeshPartition* Terrain, TArray<AMeshPartition*>& OutTerrains)
+	UWaterModifier* BindModifier(AWaterBody* Body, AMeshPartition* Terrain, TArray<AMeshPartition*>& OutLeft)
 	{
 		UClass* Class = ModifierClassFor(Body);
 		if (!Class)
 		{
+			const FString Type = WaterType(Body);
 			return UnrealMcpRql::Failed<UWaterModifier*>(FString::Printf(TEXT("%s is %s %s: only lakes and rivers shape a Mesh Terrain (an ocean needs no modifier: its spline only crops the water under the terrain; raise land above it with meshTerrainModifier | call AddPatch)"),
-				*Body->GetActorNameOrLabel(), WaterType(Body) == TEXT("Ocean") ? TEXT("an") : TEXT("a"), *WaterType(Body)));
+				*Body->GetActorNameOrLabel(), Type == TEXT("Ocean") ? TEXT("an") : TEXT("a"), *Type));
 		}
 		UWaterModifier* Kept = MatchingModifier(Body);
 		for (UWaterModifier* Modifier : WaterModifiers(Body))
 		{
-			if (Modifier == Kept)
-				continue;
-			if (AMeshPartition* Previous = Modifier->GetAffectedMeshPartition(); IsValid(Previous))
-				OutTerrains.AddUnique(Previous);
-			RemoveModifier(Modifier);
+			if (Modifier != Kept)
+				RemoveModifier(Modifier);
 		}
 		UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
 		if (!Component->bAffectsLandscape)
@@ -319,19 +318,20 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		{
 			Kept->BP_SetAffectedMegaMesh(Terrain);
 			if (IsValid(Previous))
-				OutTerrains.AddUnique(Previous);
+				OutLeft.AddUnique(Previous);
 		}
-		OutTerrains.AddUnique(Terrain);
 		RebuildBody(Body); // its spline, then the modifier hears the change
 		Kept->OnChanged(Kept->ComputeBounds(), UE::MeshPartition::EChangeType::StateChange);
 		return Kept;
 	}
 
 	/**
-	 * Rebuild the sections of @p Terrains (a removed modifier's area too) and wait for them within @p TimeoutSeconds in all:
-	 * the result's Seconds / State (Ready from the body's Problem: the caller fills it).
+	 * Wait for @p Terrains within @p TimeoutSeconds in all, first rebuilding every section of those also in @p RebuildWhole
+	 * (a terrain a body was rebound away from): the result's Seconds / State (Ready from the body's Problem: the caller
+	 * fills it).
 	 */
-	void WaitTerrains(TConstArrayView<AMeshPartition*> Terrains, double TimeoutSeconds, bool bForceRebuild, FUnrealAIMeshTerrainWaterResult& Out)
+	void WaitTerrains(TConstArrayView<AMeshPartition*> Terrains, double TimeoutSeconds, FUnrealAIMeshTerrainWaterResult& Out,
+		TConstArrayView<AMeshPartition*> RebuildWhole = {})
 	{
 		const double Start = FPlatformTime::Seconds();
 		TArray<FString> Pending;
@@ -340,11 +340,8 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 			UMeshPartitionEditorComponent* Component = IsValid(Terrain) ? EditorComponent(Terrain) : nullptr;
 			if (!Component)
 				continue;
-			if (bForceRebuild)
-			{
-				Component->UpdateModifierList();
-				Component->ForceRebuildAllSections(UE::MeshPartition::EChangeType::StateChange);
-			}
+			if (RebuildWhole.Contains(Terrain))
+				Component->ForceRebuildAllSections(UE::MeshPartition::EChangeType::StateChange); // WaitForBuild updates its modifier list first
 			FString Still;
 			if (!WaitForBuild(Terrain, FMath::Max(MinTimeoutSeconds, TimeoutSeconds - (FPlatformTime::Seconds() - Start)), Still))
 				Pending.Add(Still);
@@ -360,9 +357,10 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		Out.Body = Body;
 		Out.Label = Body->GetActorLabel();
 		Out.Type = WaterType(Body);
-		const AMeshPartition* Terrain = TerrainOf(Body);
-		Out.Terrain = Terrain ? Terrain->GetActorLabel() : FString();
-		Out.Modifier = MatchingModifier(Body);
+		UWaterModifier* Modifier = MatchingModifier(Body);
+		const AMeshPartition* Terrain = Modifier ? Modifier->GetAffectedMeshPartition() : nullptr;
+		Out.Terrain = IsValid(Terrain) ? Terrain->GetActorLabel() : FString();
+		Out.Modifier = Modifier;
 		Out.Location = Body->GetActorLocation();
 		Out.Problem = Problem(Body);
 		Out.Ready = Out.Problem.IsEmpty();
@@ -384,10 +382,11 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 
 	/**
 	 * Spawn a lake or river for @p Terrain at @p Location with its spline through @p Points (world) and bind its modifier;
-	 * the shared part of CreateLake / CreateRiver. @p Shape sets its profile (width, depth) before it is rebuilt.
+	 * the shared part of CreateLake / CreateRiver. @p Depth > 0 is its ChannelDepth; @p Shape sets the rest of its profile
+	 * (a river's width) before it is rebuilt.
 	 */
 	FUnrealAIMeshTerrainWaterResult CreateShaping(UClass* Class, AMeshPartition* Terrain, const FString& Label, const FVector& Location,
-		const TArray<FVector>& Points, TFunctionRef<void(AWaterBody*)> Shape, UMaterialInterface* Material, double TimeoutSeconds)
+		const TArray<FVector>& Points, double Depth, TFunctionRef<void(AWaterBody*)> Shape, UMaterialInterface* Material, double TimeoutSeconds)
 	{
 		FUnrealAIMeshTerrainWaterResult Out;
 		UWorld* World = UnrealMcpRql::EditorWorld();
@@ -399,19 +398,21 @@ namespace UnrealAIMeshTerrainWaterApiLocal
 		if (!Body)
 			return Out;
 		SetSpline(Body, Points);
-		Shape(Body);
-		if (Material)
+		if (Depth > 0.0)
 		{
-			Body->GetWaterBodyComponent()->Modify();
-			Body->GetWaterBodyComponent()->SetWaterMaterial(Material);
+			UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
+			Component->Modify();
+			Component->CurveSettings.ChannelDepth = static_cast<float>(Depth);
 		}
-		TArray<AMeshPartition*> Changed;
-		if (!BindModifier(Body, Terrain, Changed))
+		Shape(Body);
+		SetBodyMaterial(Body, Material);
+		TArray<AMeshPartition*> Left; // stays empty: a new body was bound to no terrain
+		if (!BindModifier(Body, Terrain, Left))
 		{
 			World->EditorDestroyActor(Body, true); // no half-made body
 			return Out;
 		}
-		WaitTerrains(Changed, TimeoutSeconds, /*bForceRebuild*/ false, Out);
+		WaitTerrains({ Terrain }, TimeoutSeconds, Out);
 		Describe(Body, Out);
 		return Out;
 	}
@@ -436,15 +437,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateLake(UE::
 		Shore.Add(Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0));
 	}
 	// The lake's actor sits at its centre, its spline is the shore around it.
-	return CreateShaping(AWaterBodyLake::StaticClass(), Terrain, Label, Center, Shore, [Depth](AWaterBody* Lake)
-	{
-		if (Depth > 0.0)
-		{
-			UWaterBodyComponent* Component = Lake->GetWaterBodyComponent();
-			Component->Modify();
-			Component->CurveSettings.ChannelDepth = static_cast<float>(Depth);
-		}
-	}, Material, TimeoutSeconds);
+	return CreateShaping(AWaterBodyLake::StaticClass(), Terrain, Label, Center, Shore, Depth, [](AWaterBody*) {}, Material, TimeoutSeconds);
 }
 
 FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateRiver(UE::MeshPartition::AMeshPartition* Terrain, const FString& Label,
@@ -461,10 +454,10 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateRiver(UE:
 		return UnrealMcpRql::Failed<FUnrealAIMeshTerrainWaterResult>(TEXT("river points must be finite numbers"));
 	if (!CheckOnTerrain(Terrain, Points, TEXT("every river point")))
 		return {};
-	return CreateShaping(AWaterBodyRiver::StaticClass(), Terrain, Label, Points[0], Points, [Width, Depth](AWaterBody* River)
+	return CreateShaping(AWaterBodyRiver::StaticClass(), Terrain, Label, Points[0], Points, Depth, [Width, Depth](AWaterBody* River)
 	{
-		UWaterBodyComponent* Component = River->GetWaterBodyComponent();
-		if (UWaterSplineMetadata* Metadata = Component ? Component->GetWaterSplineMetadata() : nullptr)
+		// The river's per-point width and depth (the Water metadata curves).
+		if (UWaterSplineMetadata* Metadata = River->GetWaterBodyComponent()->GetWaterSplineMetadata())
 		{
 			Metadata->Modify();
 			for (FInterpCurvePoint<float>& Point : Metadata->RiverWidth.Points)
@@ -474,11 +467,6 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateRiver(UE:
 				for (FInterpCurvePoint<float>& Point : Metadata->Depth.Points)
 					Point.OutVal = static_cast<float>(Depth);
 			}
-		}
-		if (Component && Depth > 0.0)
-		{
-			Component->Modify();
-			Component->CurveSettings.ChannelDepth = static_cast<float>(Depth);
 		}
 	}, Material, TimeoutSeconds);
 }
@@ -506,12 +494,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::CreateOcean(con
 		FVector(Zone->GetActorLocation().X, Zone->GetActorLocation().Y, Height), Label));
 	if (!Ocean)
 		return {};
-	UWaterBodyComponent* Component = Ocean->GetWaterBodyComponent();
-	if (Material)
-	{
-		Component->Modify();
-		Component->SetWaterMaterial(Material);
-	}
+	SetBodyMaterial(Ocean, Material);
 	RebuildBody(Ocean);
 	FUnrealAIMeshTerrainWaterResult Out;
 	Out.State = TEXT("built");
@@ -531,19 +514,22 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::Attach(AWaterBo
 			Points.Add(Spline->GetLocationAtSplinePoint(Index, ESplineCoordinateSpace::World));
 	}
 	Points.Add(Body->GetActorLocation());
-	if (ModifierClassFor(Body) && !CheckOnTerrain(Terrain, Points, *FString::Printf(TEXT("%s"), *Body->GetActorNameOrLabel())))
+	const bool bShapes = ModifierClassFor(Body) != nullptr; // else BindModifier refuses it
+	if (bShapes && !CheckOnTerrain(Terrain, Points, *Body->GetActorNameOrLabel()))
 		return {};
-	if (ModifierClassFor(Body) && Body->GetWaterBodyComponent()->CurveSettings.ChannelDepth <= 0.f)
+	if (bShapes && Body->GetWaterBodyComponent()->CurveSettings.ChannelDepth <= 0.f)
 	{
 		UnrealMcpRql::Warn(FString::Printf(TEXT("%s's ChannelDepth is 0: its bed is not dug below the water surface (set WaterBodyComponent.CurveSettings.ChannelDepth, or SetMaterial(body) for the Water defaults, 500 cm for a lake)"),
 			*Body->GetActorNameOrLabel()));
 	}
 	const FScopedTransaction Transaction(LOCTEXT("AttachWater", "Attach Water Body to Mesh Terrain"));
-	TArray<AMeshPartition*> Changed;
-	if (!BindModifier(Body, Terrain, Changed))
+	TArray<AMeshPartition*> Left;
+	if (!BindModifier(Body, Terrain, Left))
 		return {};
+	TArray<AMeshPartition*> Changed = Left;
+	Changed.AddUnique(Terrain);
 	FUnrealAIMeshTerrainWaterResult Out;
-	WaitTerrains(Changed, TimeoutSeconds, /*bForceRebuild*/ Changed.Num() > 1, Out);
+	WaitTerrains(Changed, TimeoutSeconds, Out, Left);
 	Describe(Body, Out);
 	return Out;
 }
@@ -560,12 +546,11 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::Detach(AWaterBo
 	TArray<AMeshPartition*> Changed;
 	for (UWaterModifier* Modifier : Modifiers)
 	{
-		if (AMeshPartition* Terrain = Modifier->GetAffectedMeshPartition(); IsValid(Terrain))
-			Changed.AddUnique(Terrain);
+		AddAffected(Modifier, Changed);
 		RemoveModifier(Modifier);
 	}
 	FUnrealAIMeshTerrainWaterResult Out;
-	WaitTerrains(Changed, TimeoutSeconds, /*bForceRebuild*/ true, Out);
+	WaitTerrains(Changed, TimeoutSeconds, Out);
 	Describe(Body, Out);
 	return Out;
 }
@@ -579,18 +564,19 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::Delete(AWaterBo
 	Out.Label = Body->GetActorLabel();
 	Out.Type = WaterType(Body);
 	TArray<AMeshPartition*> Changed;
-	for (const UWaterModifier* Modifier : WaterModifiers(Body))
-	{
-		if (AMeshPartition* Terrain = Modifier->GetAffectedMeshPartition(); IsValid(Terrain))
-			Changed.AddUnique(Terrain);
-	}
-	Out.Terrain = Changed.IsEmpty() ? FString() : Changed[0]->GetActorLabel();
 	{
 		const FScopedTransaction Transaction(LOCTEXT("DeleteWater", "Delete Water Body"));
+		// Its modifiers go first, each queuing a rebuild of the area it shaped (as Detach), then the body.
+		for (UWaterModifier* Modifier : WaterModifiers(Body))
+		{
+			AddAffected(Modifier, Changed);
+			RemoveModifier(Modifier);
+		}
 		if (!Body->GetWorld()->EditorDestroyActor(Body, /*bShouldModifyLevel*/ true))
 			return UnrealMcpRql::Failed<FUnrealAIMeshTerrainWaterResult>(FString::Printf(TEXT("could not delete %s"), *Out.Label));
 	}
-	WaitTerrains(Changed, TimeoutSeconds, /*bForceRebuild*/ true, Out);
+	Out.Terrain = Changed.IsEmpty() ? FString() : Changed[0]->GetActorLabel();
+	WaitTerrains(Changed, TimeoutSeconds, Out);
 	Out.Ready = Out.State == TEXT("built");
 	if (!Out.Ready)
 		Out.Problem = Out.State;
@@ -606,7 +592,7 @@ FUnrealAIMeshTerrainWaterResult UUnrealAIMeshTerrainWaterRqlApi::WaitForBuild(AW
 	if (AMeshPartition* Terrain = TerrainOf(Body))
 	{
 		LoadTerrainActors(Terrain);
-		WaitTerrains({ Terrain }, TimeoutSeconds, /*bForceRebuild*/ false, Out);
+		WaitTerrains({ Terrain }, TimeoutSeconds, Out);
 	}
 	else
 	{
@@ -636,8 +622,7 @@ AWaterBody* UUnrealAIMeshTerrainWaterRqlApi::SetMaterial(AWaterBody* Body, UMate
 	UWaterBodyComponent* Component = Body->GetWaterBodyComponent();
 	if (Material)
 	{
-		Component->Modify();
-		Component->SetWaterMaterial(Material);
+		SetBodyMaterial(Body, Material);
 		RebuildBody(Body);
 	}
 	else if (!ApplyWaterDefaults(Body)) // rebuilds it
@@ -650,42 +635,34 @@ AWaterBody* UUnrealAIMeshTerrainWaterRqlApi::SetMaterial(AWaterBody* Body, UMate
 
 FString UUnrealAIMeshTerrainWaterRqlApi::EnableMeshTerrainWater()
 {
-	TArray<FString> Done;
-	TArray<FString> Missing;
-	for (const TCHAR* Name : { TEXT("MeshPartition"), TEXT("MeshPartitionWater"), TEXT("Water") })
+	// Every plugin is checked before the project file changes: nothing is half enabled on an older engine.
+	TArray<FString> Unloaded;
+	for (const TCHAR* Name : UnrealAIMeshTerrainWater::RequiredPlugins)
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Name);
 		if (!Plugin.IsValid())
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("this engine has no %s plugin: water on Mesh Terrain needs Unreal Engine 5.8 or later"), Name));
 		if (!Plugin->IsEnabled())
-			Missing.Add(Name);
+			Unloaded.Add(Name);
 	}
 	const FProjectDescriptor* Project = IProjectManager::Get().GetCurrentProject();
 	TArray<FString> Added;
-	for (const TCHAR* Name : { TEXT("MeshPartition"), TEXT("MeshPartitionWater"), TEXT("Water") })
+	FText Reason;
+	for (const TCHAR* Name : UnrealAIMeshTerrainWater::RequiredPlugins)
 	{
-		const bool bListed = Project && Project->Plugins.ContainsByPredicate([Name](const FPluginReferenceDescriptor& Plugin) { return Plugin.Name == Name && Plugin.bEnabled; });
-		if (bListed)
+		if (Project && Project->Plugins.ContainsByPredicate([Name](const FPluginReferenceDescriptor& Entry) { return Entry.Name == Name && Entry.bEnabled; }))
 			continue;
-		FText Reason;
 		if (!IProjectManager::Get().SetPluginEnabled(Name, true, Reason))
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not enable %s in the project file: %s"), Name, *Reason.ToString()));
 		Added.Add(Name);
 	}
-	if (!Added.IsEmpty())
-	{
-		FText Reason;
-		if (!IProjectManager::Get().SaveCurrentProjectToDisk(Reason))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not save the project file: %s"), *Reason.ToString()));
-		Done.Add(FString::Printf(TEXT("enabled %s in the project file (packaged games and cooks include them)"), *FString::Join(Added, TEXT(", "))));
-	}
-	else
-	{
-		Done.Add(TEXT("MeshPartition, MeshPartitionWater and Water are enabled in the project file"));
-	}
-	Done.Add(Missing.IsEmpty() ? FString(TEXT("loaded now, no restart needed"))
-		: FString::Printf(TEXT("restart the editor to load %s"), *FString::Join(Missing, TEXT(", "))));
-	return FString::Join(Done, TEXT("; "));
+	if (!Added.IsEmpty() && !IProjectManager::Get().SaveCurrentProjectToDisk(Reason))
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("could not save the project file: %s"), *Reason.ToString()));
+	const FString Listed = Added.IsEmpty() ? FString(TEXT("MeshPartition, MeshPartitionWater and Water are enabled in the project file"))
+		: FString::Printf(TEXT("enabled %s in the project file (packaged games and cooks include them)"), *FString::Join(Added, TEXT(", ")));
+	const FString Loaded = Unloaded.IsEmpty() ? FString(TEXT("loaded now, no restart needed"))
+		: FString::Printf(TEXT("restart the editor to load %s"), *FString::Join(Unloaded, TEXT(", ")));
+	return Listed + TEXT("; ") + Loaded;
 }
 
 #undef LOCTEXT_NAMESPACE

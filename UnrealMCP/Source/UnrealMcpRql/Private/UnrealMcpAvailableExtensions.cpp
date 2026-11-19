@@ -44,7 +44,6 @@ namespace
 				TEXT("Control Rig, procedural animation without C++ (look-at, aim, foot IK): controlRigs, controlRigUnits, controlRig | call CreateRig / AddUnit / AddLookAt / AddTwoBoneIK / AddToAnimBlueprint (a rig in the Anim Blueprint) / TrackNearestActor"),
 				{ TEXT("controlrig"), TEXT("rigunit"), TEXT("cr_") }, true },
 #if !UE_VERSION_OLDER_THAN(5, 8, 0) // MeshPartition (Mesh Terrain) exists from UE 5.8: these extensions cannot be installed before
-			// Before Mesh Terrain: its keyword "meshterrain" would also match meshTerrainWater (the first match is the hint).
 			{ TEXT("com.ivanmurzak.unreal-ai-mesh-terrain-water"), TEXT("Mesh Terrain Water Tools (Experimental)"), TEXT("UnrealAIMeshTerrainWater"),
 				TEXT("Water on Mesh Terrain (UE 5.8+ MeshPartitionWater, Experimental): meshTerrainWaterBodies, meshTerrainWater | call "
 					"CreateLake / CreateRiver (their water modifiers carve the terrain) / CreateOcean / Attach / Detach / Delete / WaitForBuild / SetZone"),
@@ -217,7 +216,11 @@ namespace UnrealMcpAvailableExtensions
 
 	const FUnrealMcpMissingExtension* MatchDomain(const FString& Text, const TArray<FUnrealMcpMissingExtension>& Candidates)
 	{
+		// The most specific match wins, whatever the order of the candidates: the longest keyword ("meshterrainwater" over
+		// "meshterrain" for meshTerrainWaterBodies), a whole-word one ("gas$") above any prefix.
 		const TArray<FString> Words = Identifiers(Text);
+		const FUnrealMcpMissingExtension* Best = nullptr;
+		int32 BestScore = 0;
 		for (const FUnrealMcpMissingExtension& Candidate : Candidates)
 		{
 			for (const FString& Keyword : Candidate.Extension.Keywords)
@@ -225,11 +228,16 @@ namespace UnrealMcpAvailableExtensions
 				// A keyword prefixes a word ("niagara" matches niagarasystems); one ending in $ is the whole word ("gas$").
 				const bool bWhole = Keyword.EndsWith(TEXT("$"));
 				const FString Key = bWhole ? Keyword.LeftChop(1) : Keyword;
-				if (Words.ContainsByPredicate([&Key, bWhole](const FString& Word) { return bWhole ? Word == Key : Word.StartsWith(Key, ESearchCase::CaseSensitive); }))
-					return &Candidate;
+				const int32 Score = bWhole ? MAX_int32 : Key.Len();
+				if (Score > BestScore
+					&& Words.ContainsByPredicate([&Key, bWhole](const FString& Word) { return bWhole ? Word == Key : Word.StartsWith(Key, ESearchCase::CaseSensitive); }))
+				{
+					Best = &Candidate;
+					BestScore = Score;
+				}
 			}
 		}
-		return nullptr;
+		return Best;
 	}
 
 	FString Hint(const FUnrealMcpMissingExtension& Missing)

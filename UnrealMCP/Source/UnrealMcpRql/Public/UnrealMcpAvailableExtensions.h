@@ -68,7 +68,10 @@ namespace UnrealMcpAvailableExtensions
 	/** The sentence above such a list: how to install one. */
 	UNREALMCPRQL_API FString InstallNote();
 
-	/** The extension of @p Candidates one of whose keywords prefixes an identifier of @p Text (case-insensitive); nullptr when none. */
+	/**
+	 * The extension of @p Candidates one of whose keywords prefixes an identifier of @p Text (case-insensitive), the most specific
+	 * when several do (the longest keyword; a whole-word one first); nullptr when none.
+	 */
 	UNREALMCPRQL_API const FUnrealMcpMissingExtension* MatchDomain(const FString& Text, const TArray<FUnrealMcpMissingExtension>& Candidates);
 
 	/** The sentence naming @p Missing, what it adds and how to get it: the hint of a query on its domain. */

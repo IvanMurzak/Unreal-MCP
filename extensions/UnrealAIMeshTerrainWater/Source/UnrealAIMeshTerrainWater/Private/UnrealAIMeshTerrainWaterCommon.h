@@ -7,15 +7,14 @@
 
 class AActor;
 class AWaterBody;
-class AWaterZone;
 class UClass;
 class UMaterialInterface;
+class UPrimitiveComponent;
 class UWorld;
 
 namespace UE::MeshPartition
 {
 	class AMeshPartition;
-	class APreviewSection;
 	class UMeshPartitionEditorComponent;
 	class UModifierComponent;
 	class UWaterModifier;
@@ -32,20 +31,23 @@ namespace UE::MeshPartition
  * one and the Problem member reports one.
  *
  * This extension does not depend on the UnrealAIMeshTerrain extension (each builds alone): the few terrain helpers it needs
- * (find, World Partition loading, the build wait) are its own, kept to what the water operations need.
+ * (World Partition loading, the build state and wait) are its own, kept to what the water operations need. They follow
+ * UnrealAIMeshTerrainCommon's (LoadTerrainActors, BuildState, WaitForBuild): a fix to the engine-facing logic of one
+ * belongs in the other too.
  *
  * Functions that can fail report it with UnrealMcpRql::Fail and return false / nullptr: callers return at once.
  */
 namespace UnrealAIMeshTerrainWater
 {
 	using AMeshPartition = UE::MeshPartition::AMeshPartition;
-	using APreviewSection = UE::MeshPartition::APreviewSection;
 	using UMeshPartitionEditorComponent = UE::MeshPartition::UMeshPartitionEditorComponent;
 	using UModifierComponent = UE::MeshPartition::UModifierComponent;
 	using UWaterModifier = UE::MeshPartition::UWaterModifier;
 
-	/** The default time an operation waits for the terrain to build (seconds): below the MCP server's 300 s tool timeout. */
-	constexpr double DefaultBuildTimeoutSeconds = 240.0;
+	/** The engine plugins water on Mesh Terrain needs (the .uplugin's engine entries): the guard and EnableMeshTerrainWater. */
+	inline const TCHAR* const RequiredPlugins[] = { TEXT("MeshPartition"), TEXT("MeshPartitionWater"), TEXT("Water") };
+
+	/** The TimeoutSeconds range the operations accept (their default, 240 s, stays below the MCP server's 300 s tool timeout). */
 	constexpr double MinTimeoutSeconds = 1.0;
 	constexpr double MaxTimeoutSeconds = 600.0;
 	/** Specs only: when above 0, every build wait gives up after this many seconds (a forced timeout). */
@@ -67,9 +69,6 @@ namespace UnrealAIMeshTerrainWater
 
 	// ---- Terrains ----------------------------------------------------------------------------------------------------
 
-	/** Every Mesh Terrain actor of the editor world (loaded ones). */
-	TArray<AMeshPartition*> Terrains();
-
 	/**
 	 * Fail and return false when the operations cannot run (CheckAvailable), or @p Terrain is null or not a terrain of the
 	 * editor world; else load its World Partition base / modifier actors (LoadTerrainActors).
@@ -83,19 +82,31 @@ namespace UnrealAIMeshTerrainWater
 	 */
 	void LoadTerrainActors(const AMeshPartition* Terrain);
 
-	/** Load every water body actor of the editor world (World Partition); nothing to do without World Partition. */
-	void LoadWaterBodies();
+	/**
+	 * Every water body of the editor world; with @p bLoad first loads the unloaded ones (World Partition; only while the
+	 * operations can run: not during Play In Editor).
+	 */
+	TArray<AWaterBody*> WaterBodies(bool bLoad);
 
 	/** The editor component that builds @p Terrain (null outside the editor or before the actor registered). */
 	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain);
 
-	/** The world box of every loaded Mesh Terrain's built mesh (else its base meshes), invalid when there is none. */
+	/** The world box of @p Terrain's built mesh (else of its base meshes: not built yet), invalid when it has neither. */
+	FBox TerrainBounds(const AMeshPartition* Terrain);
+
+	/** TerrainBounds of every loaded Mesh Terrain of @p World together. */
 	FBox TerrainsBounds(UWorld* World);
 
+	/** The colliding components of @p Terrain's built sections (what GroundHeight traces). */
+	TArray<UPrimitiveComponent*> TerrainColliders(const AMeshPartition* Terrain);
+
 	/**
-	 * The ground of @p Terrain's built sections under world @p X, @p Y (a vertical trace against their collision: what traces
-	 * and physics hit); unset off the terrain or before it is built.
+	 * The highest ground of @p Colliders (TerrainColliders) under world @p X, @p Y: a vertical trace against their collision,
+	 * what traces and physics hit; unset off the terrain or before it is built.
 	 */
+	TOptional<double> GroundHeight(TConstArrayView<UPrimitiveComponent*> Colliders, double X, double Y);
+
+	/** GroundHeight of @p Terrain's built sections. */
 	TOptional<double> GroundHeight(const AMeshPartition* Terrain, double X, double Y);
 
 	// ---- Build -------------------------------------------------------------------------------------------------------
@@ -141,8 +152,8 @@ namespace UnrealAIMeshTerrainWater
 	/** The terrain the body's matching modifier shapes (null when none). */
 	AMeshPartition* TerrainOf(const AWaterBody* Body);
 
-	/** Every water body of the editor world whose matching modifier shapes @p Terrain (loaded ones). */
-	TArray<AWaterBody*> BodiesOf(const AMeshPartition* Terrain);
+	/** Every water body of the editor world whose matching modifier shapes @p Terrain (WaterBodies(@p bLoad) filtered). */
+	TArray<AWaterBody*> BodiesOf(const AMeshPartition* Terrain, bool bLoad);
 
 	/** The first actor of class @p Class in @p World (the water zone and the ocean: one per world), or null. */
 	AActor* FindFirst(UWorld* World, UClass* Class);

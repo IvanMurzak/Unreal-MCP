@@ -10,6 +10,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
+#include "IUnrealMcpRqlModule.h"
 #include "UnrealMcpRqlTools.h"
 #include "UnrealAIMeshTerrainWaterCommon.h"
 
@@ -22,8 +23,6 @@
 #include <limits>
 
 #include "MeshPartition.h"
-#include "MeshPartitionEditorComponent.h"
-#include "MeshPartitionModifierComponent.h"
 #include "MeshPartitionRectangleGenerator.h"
 #include "MeshPartitionWaterModifier.h"
 
@@ -92,7 +91,7 @@ BEGIN_DEFINE_SPEC(FUnrealAIMeshTerrainWaterSpec, "UnrealAIMeshTerrainWater",
 
 	static UWorld* WaterSpecWorld()
 	{
-		return GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		return UnrealMcpRql::EditorWorld();
 	}
 
 	/** The actor of class T labelled @p Label in the editor world (null when none). */
@@ -159,11 +158,32 @@ BEGIN_DEFINE_SPEC(FUnrealAIMeshTerrainWaterSpec, "UnrealAIMeshTerrainWater",
 		return Ground.Get(std::numeric_limits<double>::quiet_NaN());
 	}
 
-	/** Whether the editor has a water zone now (a test that made one deletes it). */
+	/** The editor world's water zone (null when none). */
 	static AWaterZone* WaterSpecZone()
 	{
 		return Cast<AWaterZone>(UnrealAIMeshTerrainWater::FindFirst(WaterSpecWorld(), AWaterZone::StaticClass()));
 	}
+
+	/**
+	 * A test's cleanup on exit: its terrain (with its base meshes), the actors labelled @p Labels, and the water zone when the
+	 * test made it (none existed when the scope began).
+	 */
+	struct FWaterSpecScope
+	{
+		FString TerrainLabel;
+		TArray<FString> Labels;
+		bool bHadZone = WaterSpecZone() != nullptr;
+
+		~FWaterSpecScope()
+		{
+			WaterSpecCleanup(TerrainLabel, Labels);
+			if (!bHadZone)
+			{
+				if (AWaterZone* Zone = WaterSpecZone())
+					WaterSpecWorld()->EditorDestroyActor(Zone, true);
+			}
+		}
+	};
 END_DEFINE_SPEC(FUnrealAIMeshTerrainWaterSpec)
 
 void FUnrealAIMeshTerrainWaterSpec::Define()
@@ -209,13 +229,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 		{
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecLakeTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecLake"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(TerrainLabel, { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label } };
 			const FVector Origin(900000.0, -900000.0, 500.0);
 			AMeshPartition* Terrain = WaterSpecTerrain(TerrainLabel, Origin, 200);
 			if (!TestNotNull(TEXT("terrain"), Terrain))
@@ -245,7 +259,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 			TestTrue(*FString::Printf(TEXT("bed about Depth below the surface (%g)"), Centre), FMath::IsNearlyEqual(Centre, 500.0 - 800.0, 60.0));
 			TestTrue(*FString::Printf(TEXT("shore at the surface (%g)"), Shore), FMath::IsNearlyEqual(Shore, 500.0, 30.0));
 			TestTrue(*FString::Printf(TEXT("ground beyond untouched (%g)"), Outside), FMath::IsNearlyEqual(Outside, 500.0, 1.0));
-			TestEqual(TEXT("the terrain lists it"), UnrealAIMeshTerrainWater::BodiesOf(Terrain).Num(), 1);
+			TestEqual(TEXT("the terrain lists it"), UnrealAIMeshTerrainWater::BodiesOf(Terrain, /*bLoad*/ false).Num(), 1);
 		});
 
 		It("refuses bad arguments before placing anything", [this]()
@@ -281,13 +295,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 		{
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecRiverTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecRiver"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(TerrainLabel, { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label } };
 			const FVector Origin(900000.0, -800000.0, 0.0);
 			AMeshPartition* Terrain = WaterSpecTerrain(TerrainLabel, Origin, 200);
 			if (!TestNotNull(TEXT("terrain"), Terrain))
@@ -342,13 +350,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 				return;
 			}
 			const FString Label = WaterSpecLabel(TEXT("SpecOcean"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(FString(TEXT("-")), { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ FString(TEXT("-")), { Label } };
 			// meshTerrainWater | call SetZone(500, [0, 0, 0]): no terrain needed with a size
 			TestTrue(TEXT("SetZone"), UnrealMcpRqlTools::RunPlan(WaterSpecCall(TEXT("SetZone"), WaterSpecNum(500.0)), true));
 			// meshTerrainWater | call CreateOcean("<label>", -250)
@@ -372,13 +374,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 		{
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecAttachTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecHand"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(TerrainLabel, { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label } };
 			const FVector Origin(900000.0, -700000.0, 0.0);
 			AMeshPartition* Terrain = WaterSpecTerrain(TerrainLabel, Origin, 200);
 			if (!TestNotNull(TEXT("terrain"), Terrain))
@@ -428,13 +424,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 		{
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecRepairTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecRepair"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(TerrainLabel, { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label } };
 			const FVector Origin(900000.0, -600000.0, 0.0);
 			AMeshPartition* Terrain = WaterSpecTerrain(TerrainLabel, Origin, 200);
 			if (!TestNotNull(TEXT("terrain"), Terrain))
@@ -479,13 +469,7 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 		{
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecMembersTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecMember"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
-			ON_SCOPE_EXIT
-			{
-				WaterSpecCleanup(TerrainLabel, { Label });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
-			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label } };
 			const FVector Origin(900000.0, -500000.0, 0.0);
 			if (!TestNotNull(TEXT("terrain"), WaterSpecTerrain(TerrainLabel, Origin, 100)))
 				return;
@@ -511,14 +495,11 @@ void FUnrealAIMeshTerrainWaterSpec::Define()
 			const FString TerrainLabel = WaterSpecLabel(TEXT("SpecTimeoutTerrain"));
 			const FString Label = WaterSpecLabel(TEXT("SpecTimeout"));
 			const FString OceanLabel = WaterSpecLabel(TEXT("SpecModOcean"));
-			const bool bHadZone = WaterSpecZone() != nullptr;
 			ON_SCOPE_EXIT
 			{
 				UnrealAIMeshTerrainWater::BuildTimeoutForTests = 0.0;
-				WaterSpecCleanup(TerrainLabel, { Label, OceanLabel });
-				if (!bHadZone && WaterSpecZone())
-					WaterSpecWorld()->EditorDestroyActor(WaterSpecZone(), true);
 			};
+			const FWaterSpecScope Cleanup{ TerrainLabel, { Label, OceanLabel } };
 			const FVector Origin(900000.0, -400000.0, 0.0);
 			if (!TestNotNull(TEXT("terrain"), WaterSpecTerrain(TerrainLabel, Origin, 200)))
 				return;
