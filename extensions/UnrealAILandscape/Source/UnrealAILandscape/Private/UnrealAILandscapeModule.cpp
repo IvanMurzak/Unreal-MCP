@@ -242,8 +242,7 @@ public:
 			{
 				TArray<TSharedPtr<FJsonValue>> Out;
 				const auto Number = [](double Value) { return MakeShared<FJsonValueNumber>(FMath::RoundToDouble(Value * 100.0) / 100.0); };
-				// The log is the landscape actor's: a streaming proxy repeating it made landscapes | select Edits show it once per
-				// proxy (16 times for a 500 m World Partition landscape).
+				// The log belongs to the landscape actor; its streaming proxies show none.
 				if (!Cast<ALandscape>(Object))
 					return MakeShared<FJsonValueArray>(Out);
 				// Newest first (a long list is shown cut after its first items), each with its Index in the log (oldest 0), the

@@ -676,22 +676,27 @@ namespace UnrealAILandscapeRqlApiLocal
 			const double Reach = 0.5 * (Width + Road.Width);
 			if (!Cut.ExpandBy(Reach).Intersect(Box2D(Road.Points)))
 				continue;
-			bool bCrossed = false;
-			for (int32 A = 0; A + 1 < Points.Num() && !bCrossed; ++A)
+			// The first place the cut's centre line comes within Reach of the road's.
+			const TOptional<FVector> Crossing = [&]() -> TOptional<FVector>
 			{
-				for (int32 B = 0; B + 1 < Road.Points.Num() && !bCrossed; ++B)
+				for (int32 A = 0; A + 1 < Points.Num(); ++A)
 				{
-					FVector OnCut, OnRoad;
-					FMath::SegmentDistToSegmentSafe(Flat(Points[A]), Flat(Points[A + 1]), Flat(Road.Points[B]), Flat(Road.Points[B + 1]), OnCut, OnRoad);
-					if (FVector::Dist(OnCut, OnRoad) > Reach)
-						continue;
-					bCrossed = true;
-					const FString Name = Road.Label.IsEmpty() ? FString::Printf(TEXT("the %s road"), *Road.Op) : FString::Printf(TEXT("the road '%s'"), *Road.Label);
-					UnrealMcpRql::Warn(FString::Printf(TEXT("%s cuts %s (%s, edit #%d in LandscapeProxy.Edits) at [%.0f, %.0f]: the road drops into it there. "
-						"Bridge it (a bridge mesh, or Ramp the road over it again), or route the road again with RoadBetween"),
-						What, *Name, *Road.Op, Index, OnRoad.X, OnRoad.Y));
+					for (int32 B = 0; B + 1 < Road.Points.Num(); ++B)
+					{
+						FVector OnCut, OnRoad;
+						FMath::SegmentDistToSegmentSafe(Flat(Points[A]), Flat(Points[A + 1]), Flat(Road.Points[B]), Flat(Road.Points[B + 1]), OnCut, OnRoad);
+						if (FVector::Dist(OnCut, OnRoad) <= Reach)
+							return OnRoad;
+					}
 				}
-			}
+				return {};
+			}();
+			if (!Crossing.IsSet())
+				continue;
+			const FString Name = Road.Label.IsEmpty() ? FString::Printf(TEXT("the %s road"), *Road.Op) : FString::Printf(TEXT("the road '%s'"), *Road.Label);
+			UnrealMcpRql::Warn(FString::Printf(TEXT("%s cuts %s (%s, edit #%d in LandscapeProxy.Edits) at [%.0f, %.0f]: the road drops into it there. "
+				"Bridge it (a bridge mesh, or Ramp the road over it again), or route the road again with RoadBetween"),
+				What, *Name, *Road.Op, Index, Crossing->X, Crossing->Y));
 		}
 	}
 

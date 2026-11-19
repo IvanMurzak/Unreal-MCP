@@ -201,8 +201,7 @@ namespace UnrealMcpRqlSessionLocal
 	/**
 	 * A query over the editor world's actors (actors, levels, world) in a World Partition level sees only the loaded ones:
 	 * while some are not loaded, the answer says how many, names a few and how to list and load them. A mutation that
-	 * reached no actor at all then fails with that note (nothing was changed): it only warned, and agents read the empty
-	 * receipt of a set on an actor that is not loaded as done.
+	 * reached no actor at all fails with that note.
 	 */
 	void AddUnloadedActorsNote(rql::QueryResult& Result, const rql::QueryPlan& Plan, bool bMutation)
 	{
@@ -213,18 +212,15 @@ namespace UnrealMcpRqlSessionLocal
 		const std::string& Name = Source->segments[0].name;
 		if (Name != "actors" && Name != "levels" && Name != "world")
 			return;
+		const bool bReachedNothing = bMutation && (!Result.rows || Result.rows->empty()) && (!Result.items || Result.items->empty()) && Result.unchanged == 0;
 		FString Message;
 		FString Hint;
-		if (!UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint))
+		if (!UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint, bReachedNothing))
 			return;
-		const bool bReachedNothing = (!Result.rows || Result.rows->empty()) && (!Result.items || Result.items->empty()) && Result.unchanged == 0;
-		if (bMutation && bReachedNothing && !Plan.stages.empty())
-		{
-			Result = rql::QueryResult::fail({ rql::Diagnostic::error("world-partition-unloaded", UnrealMcpRqlToStd(TEXT("nothing was changed: no loaded actor matched, and ")
-				+ Message.Replace(TEXT(" (only loaded actors are listed)"), TEXT(" (they were not searched)"))), UnrealMcpRqlToStd(Hint + TEXT("; then run the change again"))) });
-			return;
-		}
-		Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
+		if (bReachedNothing)
+			Result = rql::QueryResult::fail({ rql::Diagnostic::error("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)) });
+		else
+			Result.diagnostics.push_back(rql::Diagnostic::warning("world-partition-unloaded", UnrealMcpRqlToStd(Message), UnrealMcpRqlToStd(Hint)));
 	}
 
 	/**

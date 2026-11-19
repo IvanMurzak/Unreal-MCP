@@ -433,7 +433,7 @@ namespace UnrealAIWaterRqlLocal
 	 * wavelength 12 river widths (at least 6 samples), up to @p Amount x 1.5 widths, fading in and out over half a wavelength
 	 * at both ends (Source and Mouth stay). A point whose moved ground lies more than @p Climb cm above the route's ground
 	 * there swings less (a half, a quarter, not at all): the river stays on the valley floor and never climbs its sides for
-	 * a bend. The lowest route on flat ground is a straight grid line; real rivers on a plain meander.
+	 * a bend.
 	 */
 	TArray<FVector2D> Meander(const FHeightGrid& Grid, const TArray<FVector2D>& Path, double WidthCm, double Amount, double Climb)
 	{
