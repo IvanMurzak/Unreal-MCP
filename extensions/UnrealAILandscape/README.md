@@ -126,7 +126,7 @@ editor opens the landscape, and `Rebuild` fails there.
 `CreateLake` (round, its centre's Z the water surface), `CreateRiver` (through your points, upstream first) and
 `CreateRiverBetween` (along the lowest ground of a landscape from a source to a mouth, the water flowing downhill all the
 way; Depth > 0 carves its bed so it shows across a rise; on flat ground it winds from side to side, `Meander` 0..1, default 1,
-0 for the straight lowest route; when its bed cuts a road of the edit log the answer warns where) place bodies the way the Place Actors panel does (the Water
+0 for the straight lowest route; when its bed, or a `Carve`, cuts a road of the edit log the answer warns where) place bodies the way the Place Actors panel does (the Water
 defaults: material, waves), create the water zone when there is none (`SetZone` resizes it; 0 covers every landscape
 plus 25%) and build the water mesh before returning. Each call is bounded work (a river on a 2 km landscape routes and
 carves in about a second); the first water material then compiles its shaders for a while, and `Water.Ready` /
@@ -152,6 +152,8 @@ defaults of its type on the next tick, its spline kept.
   `1e9`), and it returns `{Vertices, Matched, Ready, State, Seconds}` instead of the number of changed vertices (read
   `.Vertices`).
 - **`LandscapeProxy.Edits`** is the landscape actor's only: a streaming proxy's is empty (it repeated the whole log).
+- **`CreateRiverBetween`** winds from side to side on flat ground by default (`Meander` 1, its new last argument), so
+  the same call routes and carves a different path than before; `Meander` 0 keeps the straight lowest route.
 
 ## Releases and development
 

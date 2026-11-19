@@ -23,6 +23,7 @@
 #include "HAL/FileManager.h"
 #include "Landscape.h"
 #include "LandscapeStreamingProxy.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
@@ -213,14 +214,18 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 		// landscapes | where not IsPrimary and Edits.count() > 0 | count
 		TSharedPtr<FJsonObject> Repeated;
 		UnrealMcpRqlTools::RunPlan(TEXT(R"RQL({"rql":"0.1","source":{"path":["landscapes"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"not","args":[{"path":["IsPrimary"]}]},{"op":">","args":[{"call":"count","on":{"path":["Edits"]},"args":[]},{"lit":0}]}]}},{"op":"count"}]})RQL"), false, &Repeated);
-		TestTrue(*FString::Printf(TEXT("no streaming proxy repeats the edit log (%s)"), *WpJson(Repeated).Left(300)), WpJson(Repeated).Contains(TEXT("\"value\":0")));
+		double RepeatedCount = -1.0;
+		TestTrue(*FString::Printf(TEXT("no streaming proxy repeats the edit log (%s)"), *WpJson(Repeated).Left(300)),
+			Repeated.IsValid() && Repeated->TryGetNumberField(TEXT("value"), RepeatedCount) && RepeatedCount == 0.0);
 
 		// A proxy in a data layer the editor has not loaded: the loader skips it, so an edit of the whole landscape would
 		// change only part of it. The operation fails naming it, and changes nothing (DEV-113).
 		{
 			UDataLayerEditorSubsystem* DataLayers = UDataLayerEditorSubsystem::Get();
-			UPackage* AssetPackage = CreatePackage(*FString::Printf(TEXT("/Game/%s/DL_WpSpec"), Folder));
-			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, TEXT("DL_WpSpec"), RF_Public | RF_Transactional);
+			const FString AssetName = TEXT("DL_WpSpec_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+			UPackage* AssetPackage = CreatePackage(*FString::Printf(TEXT("/Game/%s/%s"), Folder, *AssetName));
+			UDataLayerAsset* Asset = NewObject<UDataLayerAsset>(AssetPackage, *AssetName, RF_Public | RF_Transactional);
+			AssetPackage->MarkPackageDirty();
 			FDataLayerCreationParameters Parameters;
 			Parameters.DataLayerAsset = Asset;
 			UDataLayerInstance* Instance = DataLayers ? DataLayers->CreateDataLayerInstance(Parameters) : nullptr;
@@ -233,9 +238,13 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 			bool bSaved = false;
 			if (TestNotNull(TEXT("a data layer"), Instance) && TestTrue(TEXT("half the proxies are in it"), DataLayers->AddActorsToDataLayer(Half, Instance)))
 			{
-				// World Partition keeps an actor with unsaved changes loaded: save the proxies (and the data layer asset) first.
+				// World Partition keeps an actor with unsaved changes loaded: save the proxies, the level and the data layer
+				// asset first (only those: other specs' unsaved assets stay unsaved).
+				TArray<UPackage*> Packages{ AssetPackage, UnrealMcpRql::EditorWorld()->GetPackage() };
+				for (const AActor* Actor : Half)
+					Packages.AddUnique(Actor->GetExternalPackage());
 				TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
-				bSaved = TestTrue(TEXT("saved"), UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true));
+				bSaved = TestTrue(TEXT("saved"), UEditorLoadingAndSavingUtils::SavePackages(Packages, /*bOnlyDirty*/ false));
 			}
 			if (bSaved && TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, /*bIsFromUserChange*/ true)))
 			{

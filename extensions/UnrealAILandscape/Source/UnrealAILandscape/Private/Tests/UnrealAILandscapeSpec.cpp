@@ -1042,7 +1042,8 @@ void FUnrealAILandscapeSpec::Define()
 			if (!TestNotNull(TEXT("landscape created"), Landscape))
 				return;
 			ON_SCOPE_EXIT { LandscapeSpecDestroy(Landscape); };
-			// Half the Y scale: the landscape now spans Y -1000 .. 0, its vertices half as far apart on Y as on X.
+			// Half the Y scale: the landscape now spans Y -1000 .. 0, its vertices half as far apart on Y as on X (a level
+			// without World Partition: the landscape actor holds every component).
 			const FVector Scale = Landscape->GetActorScale3D();
 			Landscape->SetActorScale3D(FVector(Scale.X, Scale.Y * 0.5, Scale.Z));
 			const double Yc = -500.0;
