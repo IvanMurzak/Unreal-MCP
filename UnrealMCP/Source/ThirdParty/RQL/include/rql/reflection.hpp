@@ -96,6 +96,9 @@ struct MethodDescriptor {
     const TypeDescriptor* result = nullptr;  // nullptr = void
     std::function<Value(void* self, const std::vector<Value>& args)> invoke;
     bool callable = true;  // false: known but not allowlisted (call → permission-denied)
+    /// The host's promise that the method changes nothing (a measurement, a lookup): a `call` whose planned calls are all
+    /// read-only may be followed by read stages over its rows (spec §8 "Reading call results").
+    bool read_only = false;
     std::string description;
     /// Optional (empty = no check). `call` runs it for every target before the first call, on dry runs too:
     /// a rejection (or a throwing check) fails the stage with invalid-value and nothing is called (spec §8).
@@ -807,6 +810,11 @@ public:
     /// Mark the last method as known but not callable (call → permission-denied).
     ClassBuilder& not_callable() {
         if (!d_->methods.empty()) d_->methods.back().callable = false;
+        return *this;
+    }
+    /// Mark the last method read-only: it changes nothing, so a `call` of it may be followed by read stages (spec §8).
+    ClassBuilder& read_only_method() {
+        if (!d_->methods.empty()) d_->methods.back().read_only = true;
         return *this;
     }
 

@@ -377,6 +377,22 @@ private:
     PathPtr base_;
 };
 
+/// The values of a vector filled after the stream is built (the rows of read-only calls, spec §8); it must outlive the stream.
+class ValuesStream final : public Stream {
+public:
+    explicit ValuesStream(std::vector<Value>& values) : values_(values) {}
+
+    bool next(Item& out) override {
+        if (k_ >= values_.size()) return false;
+        out = Item{std::move(values_[k_++]), nullptr, -1};
+        return true;
+    }
+
+private:
+    std::vector<Value>& values_;
+    size_t k_ = 0;
+};
+
 class WhereStream final : public Stream {
 public:
     WhereStream(Exec& x, StreamPtr in, Eval pred) : x_(x), in_(std::move(in)), pred_(std::move(pred)) {}
@@ -1173,7 +1189,7 @@ StreamPtr apply_stage(Exec& x, Compiler& c, StreamPtr in, const Stage& st) {
 bool last_is_rows(const QueryPlan& p) {
     bool rows = false;
     for (auto& st : p.stages) {
-        if (st.kind == StageKind::Select || st.kind == StageKind::GroupBy) rows = true;
+        if (st.kind == StageKind::Select || st.kind == StageKind::GroupBy || st.kind == StageKind::Call) rows = true;
         else if (st.kind == StageKind::Get || st.kind == StageKind::Sum || st.kind == StageKind::Min || st.kind == StageKind::Max ||
                  st.kind == StageKind::Avg || st.kind == StageKind::Recurse || st.kind == StageKind::Generic)
             rows = false;
@@ -1189,6 +1205,7 @@ std::vector<std::string> last_columns(const QueryPlan& p) {
             for (auto& f : st.fields) cols.push_back(f.name);
             return cols;
         }
+        if (st.kind == StageKind::Call) return call_columns();
         if (st.kind == StageKind::GroupBy) {
             if (st.expr) return {"key", "count"};
             std::vector<std::string> cols;
@@ -1354,6 +1371,10 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
                     known.push_back("items");  // group rows have their items (spec §5)
                     break;
                 }
+            // read stages after a call see its rows (spec §8); a call that ends the plan has none
+            if (!x.plan.stages.empty() &&
+                std::any_of(x.plan.stages.begin(), x.plan.stages.end() - 1, [](const Stage& st) { return st.kind == StageKind::Call; }))
+                known.insert(known.end(), call_columns().begin(), call_columns().end());
             for (auto* t : known_types(x))
             {
                 const TypeView view = x.view(t);
@@ -1442,21 +1463,22 @@ std::vector<Diagnostic> add_warnings(Exec& x, QueryResult& r, bool only_general)
 QueryResult run_core(Exec& x) {
     x.check_target_limit();
     // A mutation request never doubles as a query (spec §8).
-    if (x.options.allow_mutation &&
-        (x.plan.stages.empty() || (x.plan.stages.back().kind != StageKind::Set && x.plan.stages.back().kind != StageKind::Call)))
+    if (x.options.allow_mutation && std::none_of(x.plan.stages.begin(), x.plan.stages.end(), [](const Stage& st) { return st.is_mutation(); }))
         throw RqlException("invalid-plan", "a mutation request must end with a set or call stage; nothing was changed",
                            "add '| set Member = value' or '| call Method(...)', or use the query tool to read");
     Compiler c(x);
     // Pre-compile all stages (binding errors surface before any traversal).
     StreamPtr stream = compile_source(x, c, *x.plan.source);
-    const Stage* terminal = nullptr;
-    for (auto& st : x.plan.stages) {
-        if (st.is_terminal()) {
-            terminal = &st;
-            break;
+    // Applies the stages from `from` up to the first terminal one: its index, or the stage count.
+    auto apply_stages = [&](StreamPtr& s, size_t from) {
+        for (size_t i = from; i < x.plan.stages.size(); ++i) {
+            if (x.plan.stages[i].is_terminal()) return i;
+            s = apply_stage(x, c, std::move(s), x.plan.stages[i]);
         }
-        stream = apply_stage(x, c, std::move(stream), st);
-    }
+        return x.plan.stages.size();
+    };
+    const size_t at = apply_stages(stream, 0);
+    const Stage* terminal = at < x.plan.stages.size() ? &x.plan.stages[at] : nullptr;
     Encoder enc(x);
     if (!terminal) return collect(x, *stream, enc);
     switch (terminal->kind) {
@@ -1493,8 +1515,17 @@ QueryResult run_core(Exec& x) {
         }
         case StageKind::Set: return run_set(x, c, enc, *stream, *terminal);
         case StageKind::Call: {
-            if (!terminal->on) return run_call(x, c, enc, *stream, *terminal);
-            return run_call(x, c, enc, *stream, *terminal, [&] { return call_receiver(x, c, *terminal); });
+            std::function<Value()> receiver;
+            if (terminal->on) receiver = [&] { return call_receiver(x, c, *terminal); };
+            if (at + 1 == x.plan.stages.size()) return run_call(x, c, enc, *stream, *terminal, receiver);
+            // Read stages over the rows of read-only calls (spec §8 "Reading call results"), compiled before any call runs.
+            std::vector<Value> rows;
+            StreamPtr read = std::make_unique<ValuesStream>(rows);
+            apply_stages(read, at + 1);
+            rows = call_rows(x, c, *stream, *terminal, receiver);
+            QueryResult r = collect(x, *read, enc);
+            r.dry_run = x.options.dry_run;
+            return r;
         }
         default: throw RqlException("unsupported", "stage '" + terminal->op + "' is not supported");
     }
@@ -1568,7 +1599,9 @@ QueryResult run_pipeline(Exec& x) {
     auto typos = add_warnings(x, result, false);
     // A mutation that reached no target because a misspelt member emptied its stream is an error, not "0 changes"
     // (spec §8): the unknown-member warnings for names no known type declares become errors.
-    if (!typos.empty() && x.options.allow_mutation && !x.plan.stages.empty() && (!result.rows || result.rows->empty()) && result.unchanged == 0) {
+    // Only a receipt: read stages after a call may empty a stream the call did reach.
+    if (!typos.empty() && x.options.allow_mutation && !x.plan.stages.empty() && x.plan.stages.back().is_mutation() &&
+        (!result.rows || result.rows->empty()) && result.unchanged == 0) {
         std::string op = x.plan.stages.back().kind == StageKind::Call ? "call" : "set";
         for (auto& d : typos) {
             d.severity = Severity::Error;

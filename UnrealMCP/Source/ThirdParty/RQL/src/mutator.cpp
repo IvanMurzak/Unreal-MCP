@@ -1255,7 +1255,12 @@ const MethodDescriptor* resolve_overload(Exec& x, const TypeDescriptor& type, co
 
 }  // namespace
 
-QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver) {
+namespace {
+
+/// Plans, checks and runs the calls; one row per invocation ($ref, signature, result). `read_only`: every planned call must
+/// be of a read-only method (read stages follow, spec §8), else the terminal-stage invalid-plan before anything is called.
+std::vector<std::vector<Value>> run_calls(Exec& x, Compiler& c, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver,
+                                          bool read_only) {
     check_policy(x, "call");
     // After the policy check: a read request never evaluates the target.
     std::optional<Value> resolved;
@@ -1351,6 +1356,13 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         }
         planned.push_back({item, chosen, std::move(coerced), target.index});
     }
+    if (read_only) {
+        auto changing = std::find_if(planned.begin(), planned.end(), [](const Planned& p) { return !p.method->read_only; });
+        if (changing != planned.end())
+            throw terminal_not_last(s, changing->item.type()->signature(*changing->method) + " on " + at(changing->item, changing->index) +
+                                           " is not read-only: only calls of read-only methods can be followed by where / sort / first / skip / "
+                                           "select; end the query with the call");
+    }
 
     auto call_records = [&] {
         std::vector<MutationRecord> out;
@@ -1380,9 +1392,27 @@ QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const S
         rows.push_back({Value::string(x.ref_of(created ? result : p.item)), Value::string(p.item.type()->signature(*p.method)), result});
     }
     committed(x, records);
-    QueryResult r = enc.rows({"$ref", "method", "result"}, rows, "calls");
+    return rows;
+}
+
+}  // namespace
+
+const std::vector<std::string>& call_columns() {
+    static const std::vector<std::string> columns{"$ref", "method", "result"};
+    return columns;
+}
+
+QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver) {
+    QueryResult r = enc.rows(call_columns(), run_calls(x, c, stream, s, resolve_receiver, false), "calls");
     r.dry_run = x.options.dry_run;
     return r;
+}
+
+std::vector<Value> call_rows(Exec& x, Compiler& c, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver) {
+    auto columns = std::make_shared<const std::vector<std::string>>(call_columns());
+    std::vector<Value> rows;
+    for (auto& row : run_calls(x, c, stream, s, resolve_receiver, true)) rows.push_back(Value::row(columns, std::move(row)));
+    return rows;
 }
 
 }  // namespace detail

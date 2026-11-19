@@ -927,6 +927,75 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			TestFalse(TEXT("and only it"), Schema.Contains(TEXT("[read-only] add two numbers")));
 		});
 
+		It("reads the rows of a read-only call with skip / first in rql-query; a call that changes something stays last", [this]()
+		{
+			FUnrealMcpRqlAdaptersSpecModule Module;
+			UUnrealMcpRqlSpecFixture* Current = Fixture;
+			Module.Fixture = [Current]() -> UObject* { return Current; };
+			IModularFeatures::Get().RegisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module);
+			ON_SCOPE_EXIT { IModularFeatures::Get().UnregisterModularFeature(IUnrealMcpRqlModule::GetModularFeatureName(), &Module); };
+			UUnrealMcpRqlSpecApi* Api = GetMutableDefault<UUnrealMcpRqlSpecApi>();
+			Api->Probes = 0;
+			Api->Marks = 0;
+
+			// range(0, 5) | call rqlSpecApi.Probe([$ * 10 + 7, 0, 0]) | skip 1 | first 2: rql-query takes the call from its call
+			// stage, not from the last stage, so the read runs every call and returns the rows the read stages keep
+			const TSharedPtr<FJsonObject> Paged = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":5}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"+","args":[{"op":"*","args":[{"path":[]},{"lit":10}]},{"lit":7}]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":1},{"op":"first","n":2}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("rql-query reads after a read-only call (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paged)),
+				UnrealMcpRqlSpecHelpers::IsOk(Paged) && Api->Probes == 5);
+			TestEqual(TEXT("skip 1 | first 2 keeps two rows"), UnrealMcpRqlSpecHelpers::RowCount(Paged), 2);
+			const FString Second = UnrealMcpRqlSpecHelpers::CellText(Paged, 0, 2);
+			const FString Third = UnrealMcpRqlSpecHelpers::CellText(Paged, 1, 2);
+			TestTrue(*FString::Printf(TEXT("the rows of the second and third calls (%s / %s)"), *Second, *Third),
+				Second.Contains(TEXT("17")) && !Second.Contains(TEXT("27")) && Third.Contains(TEXT("27")) && !Third.Contains(TEXT("17")));
+			TestTrue(TEXT("and the answer is marked readOnly"),
+				Paged.IsValid() && Paged->HasTypedField<EJson::Boolean>(TEXT("readOnly")) && Paged->GetBoolField(TEXT("readOnly")));
+
+			// rqlSpecApi | call Add(1) | first 1: not read-only, so rql-query still refuses the call before it runs
+			const TSharedPtr<FJsonObject> Add = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Add","args":[{"lit":1}]},{"op":"first","n":1}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a call of another operation followed by a read is permission-denied in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Add)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Add) && UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("permission-denied")));
+			// rqlSpecFixture | call Probe() | first 1: a same-named operation that changes something (the fixture's button) stays
+			// rql-query's permission-denied, as when the call ends the query, and never runs
+			const TSharedPtr<FJsonObject> Poke = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecFixture"]},"stages":[{"op":"call","method":"Probe","args":[]},{"op":"first","n":1}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a same-named change followed by a read is permission-denied in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Poke)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Poke) && UnrealMcpRqlSpecHelpers::Codes(Poke).Contains(TEXT("permission-denied")));
+			TestEqual(TEXT("and the button never ran"), Fixture->Pokes, 0);
+			// rqlSpecApi | call Mark([5, 0, 0], [[0, 0, 0]]) | first 1: a change must end the query, even in rql-mutate
+			const TSharedPtr<FJsonObject> Mark = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Mark","args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]},{"op":"first","n":1}]})RQL"), true);
+			const FString MarkSaid = UnrealMcpRqlSpecHelpers::Codes(Mark) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Mark);
+			TestTrue(*FString::Printf(TEXT("a mutating call followed by a read is refused as not read-only (%s)"), *MarkSaid),
+				!UnrealMcpRqlSpecHelpers::IsOk(Mark) && MarkSaid.Contains(TEXT("is not read-only")));
+			TestEqual(TEXT("and it never ran"), Api->Marks, 0);
+
+			// range(0, 30) | call rqlSpecApi.ReadSequence(1000) | first 30: thirty rows of 1000 numbers (about 4 KB each) are under
+			// the 50-row page but overflow the 64 KB answer; with read stages after the call the rows shown are not the first
+			// inputs, so the hint pages the end of the query instead of batching the call's input
+			const TSharedPtr<FJsonObject> Cut = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":30}]},"stages":[{"op":"call","method":"ReadSequence","on":{"path":["rqlSpecApi"]},"args":[{"lit":1000}]},{"op":"first","n":30}]})RQL"));
+			const FString CutSaid = UnrealMcpRqlSpecHelpers::Codes(Cut) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Cut);
+			const FString CutShown = FString::FromInt(UnrealMcpRqlSpecHelpers::RowCount(Cut));
+			TestTrue(*FString::Printf(TEXT("a cut read with read stages after the call pages the end of the query (%s)"), *CutSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(Cut) && CutSaid.Contains(TEXT("output-truncated"))
+				&& CutSaid.Contains(TEXT("| call ReadSequence(...) | <the same read stages> | skip ") + CutShown + TEXT(" | first ") + CutShown)
+				&& !CutSaid.Contains(TEXT("read the rest in batches of")));
+
+			// actors | first 1 | call rqlSpecApi.Probe([0, 0, 0]) | skip 100: the read stages left no row, which is not "nothing
+			// found in the level"
+			const TSharedPtr<FJsonObject> Filtered = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"first","n":1},{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]},{"op":"skip","n":100}]})RQL"));
+			const FString FilteredSaid = UnrealMcpRqlSpecHelpers::Codes(Filtered);
+			TestTrue(*FString::Printf(TEXT("rows filtered away after a read-only call get no empty-read note (%s)"), *FilteredSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(Filtered) && UnrealMcpRqlSpecHelpers::RowCount(Filtered) == 0
+				&& !FilteredSaid.Contains(TEXT("open-level-only")) && !FilteredSaid.Contains(TEXT("extension-missing")));
+
+			// rqlSpecApi | call ReadSequence(1500) | select Items: result: the select renames the result column, and the cut list
+			// is still reported (as a list in the call results, not as the whole result)
+			const TSharedPtr<FJsonObject> Renamed = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"ReadSequence","args":[{"lit":1500}]},{"op":"select","fields":[{"name":"Items","expr":{"path":["result"]}}]}]})RQL"));
+			const FString RenamedSaid = UnrealMcpRqlSpecHelpers::Codes(Renamed);
+			TestTrue(*FString::Printf(TEXT("a cut list after a renaming select is reported (%s)"), *RenamedSaid),
+				UnrealMcpRqlSpecHelpers::IsOk(Renamed)
+				&& RenamedSaid.Contains(TEXT("call-result-truncated: 1 list(s) in the call results hold more than 1000 items: the first 1000 of each are shown, 500 item(s) left out")));
+		});
+
 		It("registers sources, members, operations and guides of an IUnrealMcpRqlModule", [this]()
 		{
 			FUnrealMcpRqlAdaptersSpecModule Module;

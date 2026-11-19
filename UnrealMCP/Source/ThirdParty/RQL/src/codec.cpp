@@ -626,9 +626,19 @@ ExprPtr decode_expr(const Json& e) {
 
 void validate_plan_structure(const QueryPlan& plan) {
     for (size_t i = 0; i + 1 < plan.stages.size(); ++i) {
-        if (plan.stages[i].is_terminal())
-            throw RqlException("invalid-plan", "stage '" + plan.stages[i].op + "' is terminal and must be the last stage");
+        const Stage& st = plan.stages[i];
+        if (!st.is_terminal()) continue;
+        // A call may be followed by read stages over its result rows; every planned call must then be of a read-only
+        // method, which only the run can tell (spec §5, §8).
+        if (st.kind == StageKind::Call &&
+            std::all_of(plan.stages.begin() + static_cast<std::ptrdiff_t>(i) + 1, plan.stages.end(), [](const Stage& s) { return s.reads_call_rows(); }))
+            return;
+        throw terminal_not_last(st);
     }
+}
+
+RqlException terminal_not_last(const Stage& st, std::string hint) {
+    return RqlException("invalid-plan", "stage '" + st.op + "' is terminal and must be the last stage", std::move(hint));
 }
 
 QueryPlan decode_plan(const Json& root) {

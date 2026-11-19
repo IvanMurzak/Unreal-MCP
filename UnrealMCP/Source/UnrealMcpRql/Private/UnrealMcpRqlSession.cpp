@@ -34,13 +34,50 @@
 namespace UnrealMcpRqlSessionLocal
 {
 	/**
+	 * The index of the plan's `call` stage, or INDEX_NONE. The call is the last stage, or is followed only by the read stages
+	 * RQL runs over its result rows (where / sort / first / skip / select, RQL spec §8 "Reading call results"; the engine
+	 * allows those only when every planned call is of a read-only method).
+	 */
+	int32 CallStageIndex(const rql::QueryPlan& Plan)
+	{
+		for (int32 Index = static_cast<int32>(Plan.stages.size()) - 1; Index >= 0; --Index)
+		{
+			const rql::Stage& Current = Plan.stages[Index];
+			if (Current.kind == rql::StageKind::Call)
+				return Index;
+			if (!Current.reads_call_rows())
+				return INDEX_NONE;
+		}
+		return INDEX_NONE;
+	}
+
+	/** RQL refused a call followed by read stages because a planned call is not read-only (spec §8; invalid-plan). */
+	bool RefusedAsNotReadOnly(const rql::QueryResult& Result)
+	{
+		for (const rql::Diagnostic& Diagnostic : Result.diagnostics)
+		{
+			if (Diagnostic.severity == rql::Severity::Error && Diagnostic.code == "invalid-plan"
+				&& (Diagnostic.hint.find(" is not read-only") != std::string::npos || Diagnostic.message.find(" is not read-only") != std::string::npos))
+				return true;
+		}
+		return false;
+	}
+
+	/** Read stages follow the plan's call (`... | call Surface(...) | where ... | first 10`). */
+	bool ReadsAfterCall(const rql::QueryPlan& Plan)
+	{
+		const int32 CallIndex = CallStageIndex(Plan);
+		return CallIndex != INDEX_NONE && CallIndex + 1 < static_cast<int32>(Plan.stages.size());
+	}
+
+	/**
 	 * A read that found nothing: no rows or items, a count of 0, or a min / max / avg over nothing (null). A sum or a min
 	 * that is 0 found something; a mutation's empty receipt (a set that kept every value) is not "nothing found" either.
 	 */
 	bool IsEmptyRead(const rql::QueryResult& Result, const rql::QueryPlan& Plan, bool bMutation)
 	{
-		if (bMutation || !Result.ok)
-			return false;
+		if (bMutation || !Result.ok || ReadsAfterCall(Plan))
+			return false; // read stages after a call filter its rows: nothing left is not nothing found
 		if ((Result.rows && Result.rows->empty()) || (Result.items && Result.items->empty()))
 			return true;
 		if (!Result.has_value || Plan.stages.empty())
@@ -212,7 +249,8 @@ namespace UnrealMcpRqlSessionLocal
 		const std::string& Name = Source->segments[0].name;
 		if (Name != "actors" && Name != "levels" && Name != "world")
 			return;
-		const bool bReachedNothing = bMutation && (!Result.rows || Result.rows->empty()) && (!Result.items || Result.items->empty()) && Result.unchanged == 0;
+		const bool bReachedNothing = bMutation && !Plan.stages.empty() && Plan.stages.back().is_mutation()
+			&& (!Result.rows || Result.rows->empty()) && (!Result.items || Result.items->empty()) && Result.unchanged == 0;
 		FString Message;
 		FString Hint;
 		if (!UnrealMcpRqlWorldPartition::UnloadedNote(UnrealMcpRqlUtil::EditorWorld(), Message, Hint, bReachedNothing))
@@ -249,7 +287,7 @@ namespace UnrealMcpRqlSessionLocal
 	 * A read's answer cut by the 64 KB output limit gets RQL's receipt hint ("the receipt is shortened, not the change: all N
 	 * calls were made; do not repeat it"), the opposite of what a read needs: the rest is read in batches of what fitted.
 	 */
-	void RewordReadTruncation(rql::QueryResult& Result, const std::string& Method)
+	void RewordReadTruncation(rql::QueryResult& Result, const std::string& Method, bool bReadsAfterCall)
 	{
 		for (rql::Diagnostic& Diagnostic : Result.diagnostics)
 		{
@@ -261,22 +299,22 @@ namespace UnrealMcpRqlSessionLocal
 			if (Of == std::string::npos || Start == std::string::npos)
 				continue;
 			const std::string Shown = Diagnostic.message.substr(Start + 2, Of - Start - 2);
-			Diagnostic.hint = "a read, not a change: the answer holds only the first " + Shown + " rows; read the rest in batches of " + Shown
-				+ ": ... | skip " + Shown + " | first " + Shown + " | call " + Method + "(...), and so on (fewer outputs per call fit more rows)";
+			if (bReadsAfterCall) // the rows shown are filtered or sorted call rows, not the first inputs: page the end
+				Diagnostic.hint = "a read, not a change: the answer holds only the first " + Shown + " rows; read the rest by ending the query with"
+					+ " ... | call " + Method + "(...) | <the same read stages> | skip " + Shown + " | first " + Shown
+					+ ", and so on (each page runs the calls again; fewer outputs per call fit more rows)";
+			else
+				Diagnostic.hint = "a read, not a change: the answer holds only the first " + Shown + " rows; read the rest in batches of " + Shown
+					+ ": ... | skip " + Shown + " | first " + Shown + " | call " + Method + "(...), and so on (fewer outputs per call fit more rows)";
 		}
 	}
 
 	/**
 	 * Items a list-valued call result shows. RQL encodes at most maxListItems (20) items of a list and appends "…+N", which
-	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and call is terminal, so
-	 * nothing can page them. A plan ending in call encodes up to this many instead; plain queries keep RQL's default.
+	 * suits browsing a member but silently dropped call results (50 sampled heights, 20 seen), and nothing pages a list
+	 * inside one result. A plan with a call encodes up to this many instead; plain queries keep RQL's default.
 	 */
 	constexpr int32 MaxCallResultItems = 1000;
-
-	bool EndsWithCall(const rql::QueryPlan& Plan)
-	{
-		return !Plan.stages.empty() && Plan.stages.back().kind == rql::StageKind::Call;
-	}
 
 	/**
 	 * The lists and maps of one encoded call result that RQL cut at MaxCallResultItems, at any depth: a list ends in
@@ -311,21 +349,29 @@ namespace UnrealMcpRqlSessionLocal
 		if (!Result.ok || !Result.rows || !Result.columns)
 			return;
 		const std::vector<std::string>& Columns = *Result.columns;
+		// The call's own rows carry a "result" column; a select after the call may rename it: then every column is read.
 		const auto Column = std::find(Columns.begin(), Columns.end(), "result");
-		if (Column == Columns.end())
-			return;
-		const size_t Index = static_cast<size_t>(Column - Columns.begin());
+		const bool bResultColumn = Column != Columns.end();
+		std::vector<size_t> Indexes;
+		if (bResultColumn)
+			Indexes.push_back(static_cast<size_t>(Column - Columns.begin()));
+		else
+			for (size_t Index = 0; Index < Columns.size(); ++Index)
+				Indexes.push_back(Index);
 		int64 LeftOut = 0;
 		int32 Lists = 0;
 		bool bWholeResult = false; // the one cut list is the result itself (not a member or an output of it)
 		for (const std::vector<rql::Json>& Row : *Result.rows)
 		{
-			if (Index >= Row.size())
-				continue;
-			const int32 Before = Lists;
-			CountCutLists(Row[Index], Lists, LeftOut);
-			if (Before == 0 && Lists == 1)
-				bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
+			for (const size_t Index : Indexes)
+			{
+				if (Index >= Row.size())
+					continue;
+				const int32 Before = Lists;
+				CountCutLists(Row[Index], Lists, LeftOut);
+				if (bResultColumn && Before == 0 && Lists == 1)
+					bWholeResult = Row[Index].is_array() && Row[Index].size() == static_cast<size_t>(MaxCallResultItems) + 1;
+			}
 		}
 		if (Lists == 0)
 			return;
@@ -976,13 +1022,14 @@ bool FUnrealMcpRqlSession::IsReadOnlyCall(const rql::MutationRecord& Record) con
 
 bool FUnrealMcpRqlSession::CallsReadOnlySource(const rql::QueryPlan& Plan) const
 {
-	if (!EndsWithCall(Plan))
+	const int32 CallIndex = UnrealMcpRqlSessionLocal::CallStageIndex(Plan);
+	if (CallIndex == INDEX_NONE)
 		return false;
-	const rql::Stage& Call = Plan.stages.back();
+	const rql::Stage& Call = Plan.stages[CallIndex];
 	const rql::ExprPtr& Receiver = Call.on ? Call.on : Plan.source;
 	if (!Call.on)
 	{
-		for (size_t Index = 0; Index + 1 < Plan.stages.size(); ++Index)
+		for (int32 Index = 0; Index < CallIndex; ++Index)
 		{
 			const rql::StageKind Kind = Plan.stages[Index].kind;
 			if (Kind != rql::StageKind::Where && Kind != rql::StageKind::First && Kind != rql::StageKind::Skip && Kind != rql::StageKind::Sort
@@ -1133,17 +1180,21 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	rql::QueryPlan Plan;
 	rql::Diagnostic Error;
 	rql::QueryResult Result;
+	std::string CallMethod; // the plan's `call` stage method (it may be followed by read stages), empty without one
 	if (!rql::try_decode_plan(std::string_view(Text), Plan, Error))
 	{
 		Result = rql::QueryResult::fail({ Error });
 	}
 	else if (!FunctionSource(Plan, Result))
 	{
-		const bool bCall = EndsWithCall(Plan);
+		const int32 CallIndex = CallStageIndex(Plan);
+		const bool bCall = CallIndex != INDEX_NONE;
+		if (bCall)
+			CallMethod = Plan.stages[CallIndex].method;
 		// rql-query may call read-only operations (meta = (RqlReadOnly)): the engine allows the call stage, and the batch
 		// check refuses every planned call that is not one (a same-named operation of another type) before any runs. Any
 		// other call keeps the engine's own permission-denied, before its target is evaluated.
-		const bool bReadOnlyName = bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(Plan.stages.back().method));
+		const bool bReadOnlyName = bCall && Types().HasReadOnlyOperation(UnrealMcpRqlFromStd(CallMethod));
 		bReadOnlyCallRequest = !bAllowMutation && bReadOnlyName;
 		rql::QueryOptions Options;
 		Options.allow_mutation = bAllowMutation || bReadOnlyCallRequest;
@@ -1160,7 +1211,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		if (bCall)
 			Budgets.max_list_items = MaxCallResultItems;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
-		if (bRefusedReadOnlyCall)
+		if (bRefusedReadOnlyCall || (bReadOnlyCallRequest && !Result.ok && UnrealMcpRqlSessionLocal::ReadsAfterCall(Plan)
+				&& UnrealMcpRqlSessionLocal::RefusedAsNotReadOnly(Result)))
 			Result = rql::QueryResult::fail({ rql::Diagnostic::error("permission-denied", "'call' requires a mutation request: run it with " + EnginePtr->mutate_hint) });
 		else if (bCall)
 			AddCallResultListNote(Result);
@@ -1169,7 +1221,7 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 		// A limit error comes before any call is planned: reworded as a read only when the receiver is known to be the
 		// read-only operation (a same-named call on other objects that changes something keeps RQL's mutation-limit).
 		if (bReadOnlyLimit && CallsReadOnlySource(Plan))
-			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, Plan.stages.back().method, HardMaxTargets);
+			UnrealMcpRqlSessionLocal::RewordReadLimit(Result, CallMethod, HardMaxTargets);
 	}
 	CloseTransaction();
 	LiteralObjects.Reset(); // written by now (the undo buffer or their owner holds them), or garbage
@@ -1178,8 +1230,8 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 	UnrealMcpRqlSessionLocal::AddUnloadedActorsNote(Result, Plan, bAllowMutation);
 	for (rql::Diagnostic& Warning : Types().TakeWarnings())
 		Result.diagnostics.push_back(std::move(Warning));
-	if (bReadOnlyCalls && !Plan.stages.empty())
-		UnrealMcpRqlSessionLocal::RewordReadTruncation(Result, Plan.stages.back().method);
+	if (bReadOnlyCalls && !CallMethod.empty())
+		UnrealMcpRqlSessionLocal::RewordReadTruncation(Result, CallMethod, UnrealMcpRqlSessionLocal::ReadsAfterCall(Plan));
 	bOutOk = Result.ok;
 	rql::Json Answer = Result.to_json(/*include_stats*/ false);
 	// The sidecar renders an rql-mutate answer as a receipt (its first 50 rows and a count): a read's rows are its answer

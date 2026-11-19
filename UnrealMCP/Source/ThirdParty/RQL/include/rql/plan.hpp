@@ -84,8 +84,14 @@ struct Stage {
     std::vector<ExprPtr> args;          // call / generic positional args
     std::vector<std::pair<std::string, ExprPtr>> named;  // generic named args
 
-    /// Terminal stages must be last: count, describe, sum/min/max/avg, set, call.
+    /// Terminal stages must be last: count, describe, sum/min/max/avg, set, call (a call may be followed by
+    /// reads_call_rows() stages).
     bool is_terminal() const;
+    /// A read stage that may follow a `call` over its result rows: where / sort / first / skip / select (spec §5, §8).
+    bool reads_call_rows() const {
+        return kind == StageKind::Where || kind == StageKind::Sort || kind == StageKind::First || kind == StageKind::Skip ||
+               kind == StageKind::Select;
+    }
     bool is_mutation() const { return kind == StageKind::Set || kind == StageKind::Call; }
 };
 

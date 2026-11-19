@@ -403,6 +403,12 @@ double range_at(double start, double step, int64_t k);
 /// `receiver`: a source-qualified call's object (spec §8), whose method runs once per stream item; null: on each item.
 /// Resolved after the policy check, so a read request never evaluates the target.
 QueryResult run_call(Exec& x, Compiler& c, Encoder& enc, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver = {});
+/// A call followed by read stages (spec §8 "Reading call results"): every planned call must be of a read-only method (else
+/// the terminal-stage invalid-plan, before anything is called); its rows (call_columns(), with the live result) are the
+/// read stages' items.
+std::vector<Value> call_rows(Exec& x, Compiler& c, Stream& stream, const Stage& s, const std::function<Value()>& resolve_receiver = {});
+/// The columns of a call's rows: its receipt, and the items read stages after it see.
+const std::vector<std::string>& call_columns();
 /// Coerce a value to a member/parameter type (spec §8); nullopt + why on failure.
 /// `outer`: the object that will own the value (spec §4.5): instanced literals are built for it.
 std::optional<Value> coerce(Exec& x, const Value& v, const TypeDescriptor* target, bool nullable, std::string& why, const Value& outer = Value::null());
