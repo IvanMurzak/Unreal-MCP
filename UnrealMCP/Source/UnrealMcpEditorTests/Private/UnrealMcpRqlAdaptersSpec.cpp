@@ -938,14 +938,16 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			Api->Probes = 0;
 			Api->Marks = 0;
 
-			// range(0, 5) | call rqlSpecApi.Probe([$, 0, 0]) | skip 1 | first 2: rql-query takes the call from its call stage, not
-			// from the last stage, so the read runs every call and returns the rows the read stages keep
-			const TSharedPtr<FJsonObject> Paged = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":5}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"path":[]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":1},{"op":"first","n":2}]})RQL"));
+			// range(0, 5) | call rqlSpecApi.Probe([$ * 10 + 7, 0, 0]) | skip 1 | first 2: rql-query takes the call from its call
+			// stage, not from the last stage, so the read runs every call and returns the rows the read stages keep
+			const TSharedPtr<FJsonObject> Paged = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"call":"range","args":[{"lit":0},{"lit":5}]},"stages":[{"op":"call","method":"Probe","on":{"path":["rqlSpecApi"]},"args":[{"list":[{"op":"+","args":[{"op":"*","args":[{"path":[]},{"lit":10}]},{"lit":7}]},{"lit":0},{"lit":0}]}]},{"op":"skip","n":1},{"op":"first","n":2}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("rql-query reads after a read-only call (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Paged)),
 				UnrealMcpRqlSpecHelpers::IsOk(Paged) && Api->Probes == 5);
 			TestEqual(TEXT("skip 1 | first 2 keeps two rows"), UnrealMcpRqlSpecHelpers::RowCount(Paged), 2);
-			TestTrue(TEXT("the rows of the second and third calls"), UnrealMcpRqlSpecHelpers::CellText(Paged, 0, 2).Contains(TEXT("1"))
-				&& UnrealMcpRqlSpecHelpers::CellText(Paged, 1, 2).Contains(TEXT("2")));
+			const FString Second = UnrealMcpRqlSpecHelpers::CellText(Paged, 0, 2);
+			const FString Third = UnrealMcpRqlSpecHelpers::CellText(Paged, 1, 2);
+			TestTrue(*FString::Printf(TEXT("the rows of the second and third calls (%s / %s)"), *Second, *Third),
+				Second.Contains(TEXT("17")) && !Second.Contains(TEXT("27")) && Third.Contains(TEXT("27")) && !Third.Contains(TEXT("17")));
 			TestTrue(TEXT("and the answer is marked readOnly"),
 				Paged.IsValid() && Paged->HasTypedField<EJson::Boolean>(TEXT("readOnly")) && Paged->GetBoolField(TEXT("readOnly")));
 
@@ -953,6 +955,12 @@ void FUnrealMcpRqlAdaptersSpec::Define()
 			const TSharedPtr<FJsonObject> Add = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Add","args":[{"lit":1}]},{"op":"first","n":1}]})RQL"));
 			TestTrue(*FString::Printf(TEXT("a call of another operation followed by a read is permission-denied in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Add)),
 				!UnrealMcpRqlSpecHelpers::IsOk(Add) && UnrealMcpRqlSpecHelpers::Codes(Add).Contains(TEXT("permission-denied")));
+			// rqlSpecFixture | call Probe() | first 1: a same-named operation that changes something (the fixture's button) stays
+			// rql-query's permission-denied, as when the call ends the query, and never runs
+			const TSharedPtr<FJsonObject> Poke = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecFixture"]},"stages":[{"op":"call","method":"Probe","args":[]},{"op":"first","n":1}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a same-named change followed by a read is permission-denied in rql-query (%s)"), *UnrealMcpRqlSpecHelpers::Codes(Poke)),
+				!UnrealMcpRqlSpecHelpers::IsOk(Poke) && UnrealMcpRqlSpecHelpers::Codes(Poke).Contains(TEXT("permission-denied")));
+			TestEqual(TEXT("and the button never ran"), Fixture->Pokes, 0);
 			// rqlSpecApi | call Mark([5, 0, 0], [[0, 0, 0]]) | first 1: a change must end the query, even in rql-mutate
 			const TSharedPtr<FJsonObject> Mark = UnrealMcpRqlSpecHelpers::Exec(*this, TEXT(R"RQL({"rql":"0.1","source":{"path":["rqlSpecApi"]},"stages":[{"op":"call","method":"Mark","args":[{"list":[{"lit":5},{"lit":0},{"lit":0}]},{"list":[{"list":[{"lit":0},{"lit":0},{"lit":0}]}]}]},{"op":"first","n":1}]})RQL"), true);
 			const FString MarkSaid = UnrealMcpRqlSpecHelpers::Codes(Mark) + TEXT(" | ") + UnrealMcpRqlSpecHelpers::Hints(Mark);
