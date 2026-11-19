@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -175,6 +176,36 @@ class MonorepoTests(unittest.TestCase):
             (plugins / 'UnrealAIPCG').mkdir()
             with self.assertRaisesRegex(ValueError, 'Unexpected plugin'):
                 suite.prepare(engine, 'isolated/Niagara', ['UnrealAINiagara'], root / 'out', strict=True)
+
+    def test_isolated_core_builds_the_test_module_strict_and_the_core_as_usual(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / 'engine'
+            suite.write_json(engine / 'Engine/Build/Build.version', {'MajorVersion': 5, 'MinorVersion': 8})
+            argv = ['extension_suite.py', '--engine', str(engine), '--output', str(root / 'out'), '--mode', 'isolated',
+                    '--extensions', 'UnrealAINiagara']
+            built = []
+            with patch.object(suite, 'machine_lock'), patch.object(suite, 'build', lambda engine, project: built.append(project)), \
+                    patch.object(suite.sys, 'argv', argv):
+                self.assertEqual(suite.main(), 0)
+            core, niagara = (project.parent / 'Plugins/UnrealMCP' for project in built)
+            source = core / 'Source'
+            self.assertIn(suite.TEST_MODULE, (core / 'UnrealMCP.uplugin').read_text())
+            tests = (source / suite.TEST_MODULE / f'{suite.TEST_MODULE}.Build.cs').read_text()
+            self.assertIn('PCHUsage = PCHUsageMode.NoPCHs;', tests)
+            self.assertIn('bUseUnity = false;', tests)
+            # The core's own modules build strict in BuildPlugin; here they keep their committed rules.
+            editor = 'UnrealMcpEditor/UnrealMcpEditor.Build.cs'
+            self.assertEqual((source / editor).read_text(), (suite.ROOT / 'UnrealMCP/Source' / editor).read_text())
+            self.assertNotIn(suite.TEST_MODULE, (niagara / 'UnrealMCP.uplugin').read_text())
+
+    def test_a_module_the_strict_rewrite_cannot_reach_fails_loud(self):
+        rules = Path('X.Build.cs')
+        for text in ('bUseUnity = true;', 'PCHUsage = A; PCHUsage = B;'):
+            with self.assertRaisesRegex(ValueError, 'PCHUsage'):
+                suite.strict_rules(text, rules)
+        strict = suite.strict_rules('\t\tPCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n\t\tbUseUnity = true;\n', rules)
+        self.assertEqual(re.findall(r'bUseUnity\s*=\s*\w+', strict), ['bUseUnity = false'])
 
     def test_unchanged_profile_does_not_invalidate_ubt_caches(self):
         with tempfile.TemporaryDirectory() as temporary:

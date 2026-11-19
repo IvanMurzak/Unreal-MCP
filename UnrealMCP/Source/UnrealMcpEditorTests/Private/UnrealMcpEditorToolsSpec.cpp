@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"

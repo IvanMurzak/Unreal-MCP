@@ -6,6 +6,8 @@
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "DevControl/UnrealMcpDevControlServer.h"
 #include "UI/UnrealMcpEditorViewModel.h"
 #include "Config/UnrealMcpConfig.h"

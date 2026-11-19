@@ -7,6 +7,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 #include "Misc/Guid.h"
+#include "UObject/Package.h"
 #include "HAL/FileManager.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
