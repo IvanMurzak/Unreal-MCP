@@ -100,7 +100,8 @@ def copy_plugin(source: Path, dest: Path, strict: bool | frozenset[str] = False,
             descriptor = ue_json.loads(data.decode("utf-8-sig"))
             descriptor["Modules"].append({"Name": TEST_MODULE, "Type": "Editor", "LoadingPhase": "Default"})
             data = (json.dumps(descriptor, indent=2) + "\n").encode("utf-8")
-        if file.name.endswith(".Build.cs") and (strict is True or (strict and file.name[:-len(".Build.cs")] in strict)):
+        module = file.name.removesuffix(".Build.cs")
+        if module != file.name and (strict is True or (strict and module in strict)):
             data = strict_rules(data.decode("utf-8-sig"), file).encode("utf-8")
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
