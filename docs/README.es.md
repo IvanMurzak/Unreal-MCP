@@ -264,6 +264,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects, Blueprints de habilidades y conjuntos de atributos | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | Paisajes, océanos, lagos y ríos | `Water`, UE 5.7+ |
 | [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain (experimental): creación de terrenos, modificadores, esculpido y pintura, altura de la superficie, reconstrucción | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
+| [AI&nbsp;MeshTerrainWater](../extensions/UnrealAIMeshTerrainWater/README.md) | Agua sobre Mesh Terrain (experimental): lagos y ríos que excavan el terreno, océano, estado y problemas | `MeshPartitionWater`, `Water`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Sistemas, emisores, módulos y colisión de Niagara | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | Grafos PCG, volúmenes y dispersiones generadas | `PCG`, UE 5.7+ |
 
@@ -290,7 +291,7 @@ Las extensiones se compilan desde el código fuente en tu proyecto (la próxima 
 | [`UnrealMCP/`](../UnrealMCP/) | El plugin de Unreal (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`, el sidecar de .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, el paquete npm |
-| [`extensions/`](../extensions/) | Siete extensiones de motor opcionales con sus propias releases |
+| [`extensions/`](../extensions/) | Ocho extensiones de motor opcionales con sus propias releases |
 | [`samples/`](../samples/) | Una plantilla de extensión de editor y un ejemplo de herramienta en runtime (dentro del juego) |
 
 ## Enlaces

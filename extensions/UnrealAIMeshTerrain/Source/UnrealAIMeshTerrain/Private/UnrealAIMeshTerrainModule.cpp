@@ -524,7 +524,9 @@ actors | where Label == "Sea" | get StaticMeshComponent | set BodyInstance.Colli
 A Patch's Radius is its flat part and its Falloff the slope beyond (both cm): centred on the terrain, keep Radius + Falloff
 under half its shorter side (90000 + 15000 < 120000 cm), so a ring of seabed stays all around. The plane is only a flat
 surface at sea level (a Water plugin ocean looks better where the project has one); turn its collision off as above, or it
-blocks traces and walking at Z 0. Read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
+blocks traces and walking at Z 0. With the Mesh Terrain Water extension (`meshTerrainWater`, UE 5.8+) make real water
+instead of the plane: `meshTerrainWater | call CreateOcean("Sea", 0)`, and lakes and rivers that carve the terrain
+(`rql-schema {"guide": "mesh-terrain-water"}`). Read the ground with `Surface`. Tell the user the sea level and what the sea is.)MD"));
 	}
 
 private:

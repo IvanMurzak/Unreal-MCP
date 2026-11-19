@@ -154,7 +154,7 @@
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-扩展需要 Unreal Engine 5.7+（Mesh Terrain 需 5.8+）、同一项目中的 Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+、MeshTerrain 0.31.3+） 以及 C++ 工具链：发布包以源码形式提供，并为你的项目编译（在下次打开编辑器时，或使用 `--build` 立即编译）。安装 id 为 `com.ivanmurzak.unreal-ai-<id>`，其中 id 取自下表。安装选项（`--version`、`--build`、离线 `--source`）：[Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
+扩展需要 Unreal Engine 5.7+（Mesh Terrain 与 Mesh Terrain Water 需 5.8+）、同一项目中的 Unreal MCP 0.26.0+（ControlRig 0.28.0+、EnhancedInput 0.29.0+、MeshTerrain、MeshTerrainWater 0.31.3+） 以及 C++ 工具链：发布包以源码形式提供，并为你的项目编译（在下次打开编辑器时，或使用 `--build` 立即编译）。安装 id 为 `com.ivanmurzak.unreal-ai-<id>`，其中 id 取自下表。安装选项（`--version`、`--build`、离线 `--source`）：[Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)。
 
 | 扩展（id） | 说明 |
 | --- | --- |
@@ -163,6 +163,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | 无需 C++ 即可编写 Gameplay Ability System：效果（消耗、冷却、伤害、恢复）、技能 Blueprint、带现成 Health / Mana / Stamina 属性集的技能系统组件、输入绑定、Play In Editor 检查 |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape 与 Water：创建、雕刻和绘制地形；创建海洋、湖泊和河流；查询地形、水体和水域区域 |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | 实验性，UE 5.8+：Mesh Terrain（Mesh Partition）：创建地形（平面或来自高度图）；查询、添加、编辑、重排和删除修改器；雕刻和绘制；地表高度、坡度和绘制通道；重建并等待构建完成 |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | 实验性，UE 5.8+：Mesh Terrain 上的 Water 插件水体（MeshPartitionWater）：其水修改器挖掘地形的湖泊和河流、海洋；附加、分离和删除；水区域；每个水体的就绪状态与问题 |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara 视觉特效：查询系统及其发射器，把系统放置到关卡中 |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | 程序化内容生成：编写 PCG 图表（节点、连接、设置、参数），把它们放到体积上，生成散布（森林、岩石、道具）并读取数量 |
 

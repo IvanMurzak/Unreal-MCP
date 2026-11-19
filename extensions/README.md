@@ -14,6 +14,7 @@ editor's `rql-query` / `rql-mutate` / `rql-schema` tools instead of tools of its
 | UnrealAILandscape | Landscape / Water |
 | UnrealAIControlRig | Control Rig |
 | UnrealAIMeshTerrain | Mesh Terrain / Mesh Partition (Experimental, UE 5.8+) |
+| UnrealAIMeshTerrainWater | Water bodies on Mesh Terrain / MeshPartitionWater (Experimental, UE 5.8+) |
 
 Version and dependency metadata live in each `extension.json` (`minEngineVersion`: the oldest engine it builds on); the RQL module itself (sources, operations, members) is listed by `rql-schema` and each README.
 See [the monorepo guide](../docs/EXTENSION-MONOREPO.md) for the shared test runner, independent

@@ -1,0 +1,11 @@
+{
+  "description": "Attach of a water body that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainWater | call Attach(unreal.find(\"NoSuchWaterBodyE2E\"), unreal.find(\"NoSuchMeshTerrainE2E\"))"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Body'.*not-found"
+  }
+}

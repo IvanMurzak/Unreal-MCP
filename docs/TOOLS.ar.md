@@ -160,7 +160,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 
 <div dir="rtl">
 
-تحتاج الامتدادات إلى Unreal Engine 5.7+ (Mesh Terrain 5.8+)، وUnreal MCP 0.26.0+ (ControlRig 0.28.0+، EnhancedInput 0.29.0+، MeshTerrain 0.31.3+) في المشروع نفسه، وأدوات بناء C++: تُنشر الإصدارات كمصدر وتُجمَّع لمشروعك (عند فتح المحرر التالي، أو فورًا مع `--build`). معرّف التثبيت هو `com.ivanmurzak.unreal-ai-<id>` حيث يأتي `<id>` من الجدول أدناه. خيارات التثبيت (`--version`، `--build`، و`--source` دون اتصال): [تثبيت امتداد في مشروع](EXTENSIONS.md#installing-an-extension-into-a-project).
+تحتاج الامتدادات إلى Unreal Engine 5.7+ (Mesh Terrain, Mesh Terrain Water 5.8+)، وUnreal MCP 0.26.0+ (ControlRig 0.28.0+، EnhancedInput 0.29.0+، MeshTerrain, MeshTerrainWater 0.31.3+) في المشروع نفسه، وأدوات بناء C++: تُنشر الإصدارات كمصدر وتُجمَّع لمشروعك (عند فتح المحرر التالي، أو فورًا مع `--build`). معرّف التثبيت هو `com.ivanmurzak.unreal-ai-<id>` حيث يأتي `<id>` من الجدول أدناه. خيارات التثبيت (`--version`، `--build`، و`--source` دون اتصال): [تثبيت امتداد في مشروع](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | الامتداد (المعرّف) | الوصف |
 | --- | --- |
@@ -169,6 +169,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | بناء Gameplay Ability System دون C++: التأثيرات (التكلفة، وفترة التهدئة، والضرر، والتجدد)، وBlueprints للقدرات، ومكوّنات ability system مع attribute set جاهز لـ Health / Mana / Stamina، وربط الإدخال، وفحوص Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape وWater: إنشاء التضاريس ونحتها وطلاؤها؛ وإنشاء المحيطات والبحيرات والأنهار؛ والاستعلام عن التضاريس وwater bodies وwater zones |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | تجريبي، UE 5.8+‎: Mesh Terrain (Mesh Partition): إنشاء التضاريس (مسطحة أو من خريطة ارتفاع)؛ الاستعلام عن المعدِّلات وإضافتها وتعديلها وإعادة ترتيبها وإزالتها؛ النحت والطلاء؛ ارتفاع السطح وميله وقنوات الطلاء؛ إعادة البناء وانتظار اكتماله |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | تجريبي، UE 5.8+‎: أجسام مائية من إضافة Water على Mesh Terrain ‏(MeshPartitionWater): بحيرات وأنهار تحفر معدِّلاتُها المائية التضاريس، والمحيط؛ الربط والفصل والحذف؛ منطقة الماء؛ جاهزية كل جسم ومشكلاته |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | مؤثرات Niagara البصرية: الاستعلام عن الأنظمة وبواعثها (emitters)، ووضع الأنظمة في المستوى |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: إنشاء مخططات PCG (العقد، والتوصيلات، والإعدادات، والمعاملات)، ووضعها على volumes، وتوليد التوزيعات (غابات، وصخور، وعناصر) وقراءة أعدادها |
 

@@ -1,0 +1,10 @@
+{
+  "description": "EnableMeshTerrainWater keeps MeshPartition, MeshPartitionWater and Water in the project file",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainWater | call EnableMeshTerrainWater()"
+  },
+  "assert": {
+    "pattern": "(MeshPartition, MeshPartitionWater and Water are enabled in the project file|enabled [A-Za-z, ]*in the project file)"
+  }
+}

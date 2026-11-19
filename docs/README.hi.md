@@ -264,6 +264,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects, ability Blueprints और attribute sets | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | Landscapes, oceans, lakes और rivers | `Water`, UE 5.7+ |
 | [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain (experimental): terrains बनाना, modifiers, sculpt और paint, सतह की ऊँचाई, rebuild | `MeshTerrainMode`, `MeshPartition`, UE 5.8+ |
+| [AI&nbsp;MeshTerrainWater](../extensions/UnrealAIMeshTerrainWater/README.md) | Mesh Terrain पर पानी (experimental): terrain को काटने वाली झीलें और नदियाँ, ocean, तैयारी और समस्याएँ | `MeshPartitionWater`, `Water`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | Niagara systems, emitters, modules और collision | `Niagara`, `ChaosNiagara`, UE 5.7+ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | PCG graphs, volumes और generated scatters | `PCG`, UE 5.7+ |
 
@@ -290,7 +291,7 @@ Extensions आपके project में source से compile होते ह
 | [`UnrealMCP/`](../UnrealMCP/) | Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`, .NET 10 sidecar |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, npm package |
-| [`extensions/`](../extensions/) | सात वैकल्पिक engine extensions, जिनकी अपनी releases हैं |
+| [`extensions/`](../extensions/) | आठ वैकल्पिक engine extensions, जिनकी अपनी releases हैं |
 | [`samples/`](../samples/) | एक editor extension template और एक runtime (game के अंदर) tool sample |
 
 ## Links

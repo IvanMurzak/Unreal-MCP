@@ -154,7 +154,7 @@ Captures base64 **PNG को MCP image content के रूप में** ल�
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Extensions को Unreal Engine 5.7+ (Mesh Terrain 5.8+), उसी project में Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+, MeshTerrain 0.31.3+) और C++ toolchain चाहिए: releases source के रूप में आती हैं और आपके project के लिए compile होती हैं (अगली बार editor खोलने पर, या `--build` से तुरंत)। Install id `com.ivanmurzak.unreal-ai-<id>` है, जिसमें id नीचे की table से है। Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)।
+Extensions को Unreal Engine 5.7+ (Mesh Terrain, Mesh Terrain Water 5.8+), उसी project में Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+, MeshTerrain, MeshTerrainWater 0.31.3+) और C++ toolchain चाहिए: releases source के रूप में आती हैं और आपके project के लिए compile होती हैं (अगली बार editor खोलने पर, या `--build` से तुरंत)। Install id `com.ivanmurzak.unreal-ai-<id>` है, जिसमें id नीचे की table से है। Install options (`--version`, `--build`, offline `--source`): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project)।
 
 | Extension (id) | विवरण |
 | --- | --- |
@@ -163,6 +163,7 @@ Extensions को Unreal Engine 5.7+ (Mesh Terrain 5.8+), उसी project म�
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | C++ के बिना Gameplay Ability System authoring: effects (cost, cooldown, damage, regeneration), ability Blueprints, तैयार Health / Mana / Stamina attribute set के साथ ability system components, input bindings, Play In Editor checks |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape और Water: landscapes बनाएँ, sculpt और paint करें; oceans, lakes और rivers बनाएँ; landscapes, water bodies और water zones को query करें |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | Experimental, UE 5.8+: Mesh Terrain (Mesh Partition): terrains बनाएँ (flat या heightmap से); modifiers query करें, जोड़ें, बदलें, क्रम बदलें और हटाएँ; sculpt और paint करें; सतह की ऊँचाई, slope और paint channels; rebuild करें और build पूरा होने तक प्रतीक्षा करें |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | Experimental, UE 5.8+: Mesh Terrain पर Water plugin के bodies (MeshPartitionWater): झीलें और नदियाँ जिनके water modifiers terrain को काटते हैं, ocean; attach, detach और delete; water zone; हर body की तैयारी और समस्याएँ |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara VFX: systems और उनके emitters को query करें, systems को level में रखें |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: PCG graphs बनाएँ (nodes, connections, settings, parameters), उन्हें volumes पर रखें, scatters generate करें (forests, rocks, props) और counts पढ़ें |
 

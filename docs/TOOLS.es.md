@@ -154,7 +154,7 @@ Instala una extensión cuando tu proyecto use uno de los sistemas del motor de a
 unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 ```
 
-Las extensiones requieren Unreal Engine 5.7+ (Mesh Terrain 5.8+), Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+, MeshTerrain 0.31.3+) en el mismo proyecto y una toolchain de C++: las releases se distribuyen como código fuente y se compilan para tu proyecto (al abrir el editor la próxima vez, o en el momento con `--build`). El id de instalación es `com.ivanmurzak.unreal-ai-<id>` con el id de la tabla de abajo. Opciones de instalación (`--version`, `--build`, `--source` offline): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
+Las extensiones requieren Unreal Engine 5.7+ (Mesh Terrain, Mesh Terrain Water 5.8+), Unreal MCP 0.26.0+ (ControlRig 0.28.0+, EnhancedInput 0.29.0+, MeshTerrain, MeshTerrainWater 0.31.3+) en el mismo proyecto y una toolchain de C++: las releases se distribuyen como código fuente y se compilan para tu proyecto (al abrir el editor la próxima vez, o en el momento con `--build`). El id de instalación es `com.ivanmurzak.unreal-ai-<id>` con el id de la tabla de abajo. Opciones de instalación (`--version`, `--build`, `--source` offline): [Installing an extension into a project](EXTENSIONS.md#installing-an-extension-into-a-project).
 
 | Extensión (id) | Descripción |
 | --- | --- |
@@ -163,6 +163,7 @@ Las extensiones requieren Unreal Engine 5.7+ (Mesh Terrain 5.8+), Unreal MCP 0.2
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | Creación con Gameplay Ability System sin C++: efectos (coste, cooldown, daño, regeneración), Blueprints de habilidades, componentes de sistema de habilidades con un attribute set listo de Health / Mana / Stamina, bindings de input, comprobaciones en Play In Editor |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape y Water: crea, esculpe y pinta landscapes; crea océanos, lagos y ríos; consulta landscapes, water bodies y water zones |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | Experimental, UE 5.8+: Mesh Terrain (Mesh Partition): crea terrenos (planos o desde un heightmap); consulta, añade, edita, reordena y elimina modificadores; esculpe y pinta; altura, pendiente y canales de pintura de la superficie; reconstruye y espera la compilación |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | Experimental, UE 5.8+: cuerpos de agua del plugin Water sobre un Mesh Terrain (MeshPartitionWater): lagos y ríos cuyos modificadores de agua excavan el terreno, el océano; adjuntar, separar y eliminar; la zona de agua; el estado y los problemas de cada cuerpo |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | VFX de Niagara: consulta sistemas y sus emisores, coloca sistemas en el nivel |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | Procedural Content Generation: crea grafos PCG (nodos, conexiones, ajustes, parámetros), colócalos en volúmenes, genera dispersiones (bosques, rocas, props) y lee los recuentos |
 

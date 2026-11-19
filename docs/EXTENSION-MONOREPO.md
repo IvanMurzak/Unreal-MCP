@@ -18,7 +18,7 @@ py -3 scripts/extension_suite.py --engine 'C:/Program Files/Epic Games/UE_5.8' -
 ```
 
 `full` compiles core alone and core + each extension with no sibling plugin present. An extension whose
-`extension.json` sets `minEngineVersion` (`"5.8"` for UnrealAIMeshTerrain: its engine plugin MeshPartition does not
+`extension.json` sets `minEngineVersion` (`"5.8"` for UnrealAIMeshTerrain and UnrealAIMeshTerrainWater: their engine plugins MeshPartition and MeshPartitionWater do not
 exist before) is left out of every build, Automation and E2E run on an older engine, with a printed note, whether
 `--extensions` names it or not; the CI (`ue_ci.py suite`) relies on the same field for UE 5.5 / 5.6 (core only). Extension
 modules and the core's test module (`UnrealMcpEditorTests`, in the core-alone copy) use non-unity

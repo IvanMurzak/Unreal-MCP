@@ -318,6 +318,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [AI&nbsp;GAS](../extensions/UnrealAIGAS/README.md) | Gameplay Effects وBlueprints القدرات ومجموعات السمات | `GameplayAbilities`, `EnhancedInput`, `GameplayTagsEditor`, UE 5.7+‎ |
 | [AI&nbsp;Landscape](../extensions/UnrealAILandscape/README.md) | التضاريس والمحيطات والبحيرات والأنهار | `Water`, UE 5.7+‎ |
 | [AI&nbsp;MeshTerrain](../extensions/UnrealAIMeshTerrain/README.md) | Mesh Terrain (تجريبي): إنشاء التضاريس والمعدِّلات والنحت والطلاء وارتفاع السطح وإعادة البناء | `MeshTerrainMode`, `MeshPartition`, UE 5.8+‎ |
+| [AI&nbsp;MeshTerrainWater](../extensions/UnrealAIMeshTerrainWater/README.md) | الماء على Mesh Terrain (تجريبي): بحيرات وأنهار تحفر التضاريس، ومحيط، والجاهزية والمشكلات | `MeshPartitionWater`, `Water`, `MeshPartition`, UE 5.8+ |
 | [AI&nbsp;Niagara](../extensions/UnrealAINiagara/README.md) | أنظمة Niagara وبواعثها ووحداتها والتصادم | `Niagara`, `ChaosNiagara`, UE 5.7+‎ |
 | [AI&nbsp;PCG](../extensions/UnrealAIPCG/README.md) | رسوم PCG البيانية والأحجام والتوزيعات المولَّدة | `PCG`, UE 5.7+‎ |
 
@@ -344,7 +345,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 | [`UnrealMCP/`](../UnrealMCP/) | إضافة Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`، العملية المرافقة المبنية على .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، حزمة npm |
-| [`extensions/`](../extensions/) | سبعة امتدادات اختيارية للمحرك بإصدارات مستقلة |
+| [`extensions/`](../extensions/) | ثمانية امتدادات اختيارية للمحرك بإصدارات مستقلة |
 | [`samples/`](../samples/) | قالب امتداد للمحرر ومثال لأداة Runtime (داخل اللعبة) |
 
 ## روابط

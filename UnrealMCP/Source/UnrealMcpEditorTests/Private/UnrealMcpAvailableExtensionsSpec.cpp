@@ -80,6 +80,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 			TEXT("com.ivanmurzak.unreal-ai-control-rig"),
 #if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), // Mesh Partition exists from UE 5.8
+			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain-water"), // and MeshPartitionWater
 #endif
 		};
 		int32 Bundled = 0;
@@ -122,6 +123,16 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 		TestEqual(TEXT("a part between underscores"), MatchedId(TEXT(R"(unreal.asset("/Game/BP_PCGVolume"))"), All), FString(PcgId));
 		TestEqual(TEXT("the GAS operations source"), MatchedId(TEXT("gas | call GrantAbility"), All), FString(TEXT("com.ivanmurzak.unreal-ai-gas")));
 		TestEqual(TEXT("ready extensions are not candidates"), MatchedId(TEXT("niagaraSystems"), {}), FString());
+		// The longest matching keyword wins, in either order of the candidates.
+		const FUnrealMcpMissingExtension Short{ { TEXT("x.short"), TEXT("Short"), TEXT("UnrealAIShort"), TEXT("short"), { TEXT("foo") }, true }, EUnrealMcpExtensionState::NotInstalled };
+		const FUnrealMcpMissingExtension Long{ { TEXT("x.long"), TEXT("Long"), TEXT("UnrealAILong"), TEXT("long"), { TEXT("foobar") }, true }, EUnrealMcpExtensionState::NotInstalled };
+		TestEqual(TEXT("longest keyword, shorter first"), MatchedId(TEXT("fooBarBaz | count"), { Short, Long }), FString(TEXT("x.long")));
+		TestEqual(TEXT("longest keyword, longer first"), MatchedId(TEXT("fooBarBaz | count"), { Long, Short }), FString(TEXT("x.long")));
+		TestEqual(TEXT("the shorter keyword still matches its own words"), MatchedId(TEXT("fooQux"), { Long, Short }), FString(TEXT("x.short")));
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+		TestEqual(TEXT("water on Mesh Terrain, not Mesh Terrain"), MatchedId(TEXT("meshTerrainWaterBodies | count"), All), FString(TEXT("com.ivanmurzak.unreal-ai-mesh-terrain-water")));
+		TestEqual(TEXT("Mesh Terrain"), MatchedId(TEXT("meshTerrains | count"), All), FString(TEXT("com.ivanmurzak.unreal-ai-mesh-terrain")));
+#endif
 	});
 
 	It("says what to do in each state", [this]()

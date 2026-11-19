@@ -1,0 +1,10 @@
+{
+  "description": "the guide says lakes and rivers carry a water modifier, the ocean needs none, and where to put the surface",
+  "tool": "rql-schema",
+  "input": {
+    "guide": "mesh-terrain-water"
+  },
+  "assert": {
+    "pattern": "Water on Mesh Terrain[\\s\\S]*LakeModifier[\\s\\S]*CreateLake\\(unreal\\.find\\(.{1,3}Island[\\s\\S]*ocean needs no modifier[\\s\\S]*OceanModifier"
+  }
+}
