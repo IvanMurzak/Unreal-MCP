@@ -132,9 +132,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                     .Apply(new ToolManifestMessage { Revision = 1, Tools = { new ToolDescriptor { Name = "slow" } } });
 
                 var link = new FakePluginLink(listener, ipc, manager.ToolHub!);
-                await link.AcceptAsync();
-                await accepted.Task.WaitAsync(Wait);
-                return link;
+                try
+                {
+                    await link.AcceptAsync();
+                    await accepted.Task.WaitAsync(Wait);
+                    return link;
+                }
+                catch
+                {
+                    await link.DisposeAsync(); // stop the client's reconnect loop
+                    throw;
+                }
             }
 
             async Task AcceptAsync()
