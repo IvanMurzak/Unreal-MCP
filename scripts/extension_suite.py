@@ -70,8 +70,25 @@ def write_json(path: Path, value: object) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: bool = False) -> None:
-    """Incremental source sync, preserving ONLY this profile's own build cache."""
+TEST_MODULE = "UnrealMcpEditorTests"
+
+
+def strict_rules(text: str, rules: Path) -> str:
+    """The module's own no-PCH, no-unity build (BuildPlugin -StrictIncludes, scoped to one module).
+
+    Module-scoped overrides keep installed engine build settings untouched."""
+    text, count = re.subn(r"PCHUsage\s*=\s*[^;]+;", "PCHUsage = PCHUsageMode.NoPCHs;\n\t\tbUseUnity = false;", text)
+    if count != 1:
+        # Without the rewrite the module would build with PCH and unity and pass blind.
+        raise ValueError(f"{rules}: expected exactly one PCHUsage assignment to build the module strict, found {count}")
+    return text
+
+
+def copy_plugin(source: Path, dest: Path, strict: bool | frozenset[str] = False, *, core_tests: bool = False) -> None:
+    """Incremental source sync, preserving ONLY this profile's own build cache.
+
+    strict builds every module (True) or the named modules (a set) without PCH and unity.
+    """
     expected: set[Path] = set()
     for file in source.rglob("*"):
         rel = file.relative_to(source)
@@ -81,14 +98,10 @@ def copy_plugin(source: Path, dest: Path, strict: bool = False, *, core_tests: b
         data = file.read_bytes()
         if core_tests and file.name == "UnrealMCP.uplugin":
             descriptor = ue_json.loads(data.decode("utf-8-sig"))
-            descriptor["Modules"].append({"Name": "UnrealMcpEditorTests", "Type": "Editor", "LoadingPhase": "Default"})
+            descriptor["Modules"].append({"Name": TEST_MODULE, "Type": "Editor", "LoadingPhase": "Default"})
             data = (json.dumps(descriptor, indent=2) + "\n").encode("utf-8")
-        if strict and file.suffix == ".cs" and file.name.endswith(".Build.cs"):
-            text = data.decode("utf-8-sig")
-            text = re.sub(r"PCHUsage\s*=\s*[^;]+;", "PCHUsage = PCHUsageMode.NoPCHs;", text)
-            # Module-scoped overrides keep installed engine build settings untouched.
-            text = re.sub(r"(PCHUsage = PCHUsageMode.NoPCHs;)", r"\1\n\t\tbUseUnity = false;", text)
-            data = text.encode("utf-8")
+        if file.name.endswith(".Build.cs") and (strict is True or (strict and file.name[:-len(".Build.cs")] in strict)):
+            data = strict_rules(data.decode("utf-8-sig"), file).encode("utf-8")
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_bytes() != data:
@@ -130,7 +143,9 @@ def prepare(engine: Path, profile: str, selected: list[str], output: Path, *, st
     allowed = {"UnrealMCP", *selected}
     if plugins.exists() and any(p.name not in allowed for p in plugins.iterdir()):
         raise ValueError(f"Unexpected plugin in isolated profile {plugins}; use a fresh output directory")
-    copy_plugin(ROOT / "UnrealMCP", plugins / "UnrealMCP", core_tests=core_tests)
+    # The core's own modules build strict in ue_ci.py build-plugin-dist; its test module only here.
+    core_strict = frozenset({TEST_MODULE}) if strict and core_tests else False
+    copy_plugin(ROOT / "UnrealMCP", plugins / "UnrealMCP", core_strict, core_tests=core_tests)
     for name in selected:
         copy_plugin(extensions()[name], plugins / name, strict)
     sync_template(ROOT / "tests/host-project", base)
@@ -318,9 +333,11 @@ def main() -> int:
             from suite_dependencies import resolve
             args.server, args.bridge = resolve(output, args.server, args.bridge)
         if args.mode in ("full", "verification", "isolated"):
-            # No siblings are present in these copies, including their headers and DLLs.
+            # No siblings are present in these copies, including their headers and DLLs. Every extension module
+            # and the core's test module build strict (no PCH, no unity), so a missing include fails here.
             for name in [None, *selected]:
-                project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True)
+                project = prepare(engine, "isolated/" + (name or "core"), [name] if name else [], output, strict=True,
+                                  core_tests=name is None)
                 build(engine, project)
         if args.mode != "isolated":
             # The plugin set is in the name: a runner's cache shared by branches with other extension sets never collides.
