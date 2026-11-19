@@ -298,7 +298,8 @@ loading them, so the core module (`UnrealMcpRqlWorldPartition.cpp`) makes the re
 - A change (`rql-mutate`) over `actors`, `levels` or `world` that reached no actor while some are not loaded fails
   with that note as the error `world-partition-unloaded` ("nothing was changed: no loaded actor matched, and N World
   Partition actor(s) are not loaded (they were not searched)"): its empty receipt used to come with only the warning, and
-  agents took a `set` on an unloaded actor for done. A change that reaches a loaded actor keeps the warning.
+  agents took a `set` on an unloaded actor for done. It fails whatever the reason no actor matched (a misspelled label
+  too), since the actors that are not loaded were not searched. A change that reaches a loaded actor keeps the warning.
 - `unloadedActors` lists them from the level's actor descriptors (`FUnrealMcpUnloadedActor`): `Label`, `Name`, `Class`
   (the outliner's: `BP_Door_C` for a Blueprint), `Guid`, `Package` (its external actor package), `Folder`, `Location`,
   `Bounds` (editor bounds: `Bounds.Min`, `Bounds.Max`), `SpatiallyLoaded`, `DataLayers`. Runtime-only descriptors (HLODs)

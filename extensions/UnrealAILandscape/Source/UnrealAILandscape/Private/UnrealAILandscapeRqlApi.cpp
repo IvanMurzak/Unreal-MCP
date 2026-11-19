@@ -108,14 +108,15 @@ namespace UnrealAILandscapeRqlApiLocal
 	bool LoadDescs(UClass* Class, TFunctionRef<bool(const FWorldPartitionActorDescInstance*)> Wanted)
 	{
 		UWorld* World = UnrealMcpRql::EditorWorld();
-		UWorldPartition* Partition = World ? World->GetWorldPartition() : nullptr;
+		// The loader loads into the editor world only: a Play In Editor world streams by itself.
+		UWorldPartition* Partition = World && World->WorldType == EWorldType::Editor ? World->GetWorldPartition() : nullptr;
 		if (!Partition)
 			return true;
 		TArray<FGuid> ToLoad;
 		FWorldPartitionHelpers::ForEachActorDescInstance(Partition, Class, [&](const FWorldPartitionActorDescInstance* Instance)
 		{
 			const UPackage* Package = FindObject<UPackage>(nullptr, *Instance->GetActorPackage().ToString());
-			if (!Instance->IsLoaded() && !(Package && Package->IsDirty()) && Wanted(Instance))
+			if (!Instance->IsLoaded() && !Instance->GetActorIsRuntimeOnly() && !(Package && Package->IsDirty()) && Wanted(Instance))
 				ToLoad.Add(Instance->GetGuid());
 			return true;
 		});
@@ -134,7 +135,7 @@ namespace UnrealAILandscapeRqlApiLocal
 		const int32 Named = Left.Num();
 		if (Left.Num() > 5)
 			Left.SetNum(5);
-		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%d World Partition actor(s) could not be loaded (%s%s): they are in a data layer that is not loaded in the editor, so the "
+		return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%d World Partition actor(s) could not be loaded (%s%s), e.g. in a data layer that is not loaded in the editor, so the "
 			"operation would see only part of the landscape; nothing was done. Load that data layer in the editor first (Data Layers outliner: Load)"),
 			Named, *FString::Join(Left, TEXT(", ")), Named > Left.Num() ? *FString::Printf(TEXT(", +%d more"), Named - Left.Num()) : TEXT("")));
 	}
@@ -437,7 +438,7 @@ namespace UnrealAILandscapeRqlApiLocal
 	 * accessor writes one layer only (UE 5.7+ normalises weights only at the final merge, which then mixed Rock painted at
 	 * full strength half and half with the Grass under it). With @p Before (the layer's weights before the edit), where the
 	 * layer lost weight the other layers there get it back, in proportion (as Landscape mode's erase does): an erased layer
-	 * leaves the ground under it, not a hole.
+	 * leaves the ground under it, not a hole (where no other layer is painted there is nothing to give it to).
 	 */
 	void TakeWeightFromOthers(ULandscapeInfo* Info, const ULandscapeLayerInfoObject* Painted, const FGuid& EditLayer, const FIntRect& R, const TArray<uint8>& Weights,
 		const TArray<uint8>* Before = nullptr)
@@ -987,6 +988,15 @@ FUnrealAILandscapePaintWhere UUnrealAILandscapeRqlApi::PaintWhere(ALandscapeProx
 		if (R.Min.X > R.Max.X || R.Min.Y > R.Max.Y)
 			return UnrealMcpRql::Failed<FResult>(FString::Printf(TEXT("Within is off the landscape %s"), *Landscape->GetActorNameOrLabel()));
 	}
+	// Erasing a layer the landscape does not have changes nothing (and must not add it: a misspelled name).
+	if (Strength <= 0.0 && !Area.Info->GetLayerInfoByName(FName(*Name)))
+	{
+		FResult Nothing;
+		Nothing.Ready = true;
+		Nothing.State = TEXT("merged");
+		Nothing.Seconds = FPlatformTime::Seconds() - Start;
+		return Nothing;
+	}
 	ULandscapeLayerInfoObject* LayerInfo = LayerInfoFor(Landscape, Area.Info, FName(*Name));
 	if (!LayerInfo)
 		return FResult();
@@ -1070,9 +1080,11 @@ int32 UUnrealAILandscapeRqlApi::Smooth(ALandscapeProxy* Landscape, FVector Cente
 		return UnrealMcpRql::Failed<int32>(TEXT("Strength must be within 0 (exclusive) .. 1"));
 	// The circle plus a ring of 3 vertices around it: the ground the new surface is fitted to.
 	const double Quad = FMath::Max(Landscape ? FMath::Abs(Landscape->LandscapeActorToWorld().GetScale3D().X) : 1.0, UE_KINDA_SMALL_NUMBER);
+	// The cap counts the denser axis: a landscape scaled down on Y has more vertices across the circle there.
+	const double Densest = FMath::Max(Landscape ? FVector2D(Landscape->LandscapeActorToWorld().GetScale3D().GetAbs()).GetMin() : 1.0, UE_KINDA_SMALL_NUMBER);
 	constexpr double MaxInner = 512.0; // vertices: the fill converges within the time limit up to here
-	if (Radius / Quad > MaxInner)
-		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Quad, MaxInner, MaxInner * Quad));
+	if (Radius / Densest > MaxInner)
+		return UnrealMcpRql::Failed<int32>(FString::Printf(TEXT("Radius %.0f cm is %.0f vertices on this landscape, more than Smooth handles (%.0f, %.0f cm): smooth smaller places one by one"), Radius, Radius / Densest, MaxInner, MaxInner * Densest));
 	FCircle Area;
 	if (!Circle(Landscape, Center, Radius + 3.0 * Quad, Area))
 		return 0;

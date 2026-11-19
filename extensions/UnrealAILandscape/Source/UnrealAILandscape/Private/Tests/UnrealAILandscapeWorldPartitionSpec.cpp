@@ -237,7 +237,7 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 				TGuardValue<bool> UnattendedScriptGuard(GIsRunningUnattendedScript, true);
 				bSaved = TestTrue(TEXT("saved"), UEditorLoadingAndSavingUtils::SaveDirtyPackages(/*bSaveMapPackages*/ true, /*bSaveContentPackages*/ true));
 			}
-			if (bSaved && TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, false)))
+			if (bSaved && TestTrue(TEXT("and it is unloaded in the editor"), DataLayers->SetDataLayerIsLoadedInEditor(Instance, false, /*bIsFromUserChange*/ true)))
 			{
 				TestEqual(TEXT("its proxies are unloaded"), WpProxies(Guid), AllProxies - Half.Num());
 				// landscape | call Paint(unreal.find("WpSpecLand"), "Grass", [500000, 500000, 0], 0)
@@ -247,7 +247,7 @@ void FUnrealAILandscapeWorldPartitionSpec::Define()
 				TestTrue(*FString::Printf(TEXT("painting the whole landscape fails and names the data layer (%s)"), *WpJson(Painted).Left(600)),
 					!bPainted && WpJson(Painted).Contains(TEXT("data layer that is not loaded")));
 				TestFalse(TEXT("and paints nothing"), Landscape->GetLandscapeInfo() && Landscape->GetLandscapeInfo()->GetLayerInfoByName(TEXT("Grass")) != nullptr);
-				DataLayers->SetDataLayerIsLoadedInEditor(Instance, true, false);
+				DataLayers->SetDataLayerIsLoadedInEditor(Instance, true, /*bIsFromUserChange*/ true);
 				TestEqual(TEXT("loaded again with the data layer"), WpProxies(Guid), AllProxies);
 			}
 		}

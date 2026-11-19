@@ -431,9 +431,11 @@ namespace UnrealAIWaterRqlLocal
 	/**
 	 * @p Path (vertex space, resampled) winding from side to side: each point moved across the path's direction by a sine of
 	 * wavelength 12 river widths (at least 6 samples), up to @p Amount x 1.5 widths, fading in and out over half a wavelength
-	 * at both ends (Source and Mouth stay). A point whose moved ground lies more than @p Climb cm above the route's ground
-	 * there swings less (a half, a quarter, not at all): the river stays on the valley floor and never climbs its sides for
-	 * a bend.
+	 * at both ends (Source and Mouth stay). A point whose moved ground lies more than @p Climb cm above the water's ground
+	 * there (the lowest ground upstream on the route) or more than @p Climb below the route's swings less (a half, a
+	 * quarter, not at all): the river stays on the valley floor, never climbs its sides for a bend and never drops into a
+	 * side gully (which would lower its whole bed downstream). Where the route turns sharply it does not swing (the bend
+	 * would fold the spline back on itself).
 	 */
 	TArray<FVector2D> Meander(const FHeightGrid& Grid, const TArray<FVector2D>& Path, double WidthCm, double Amount, double Climb)
 	{
@@ -453,8 +455,14 @@ namespace UnrealAIWaterRqlLocal
 			return Grid.Valid(X, Y) ? TOptional<double>(Grid.At(X, Y)) : TOptional<double>();
 		};
 		TArray<FVector2D> Out = Path;
+		double Running = TNumericLimits<double>::Max(); // the lowest route ground so far: where the water sits
 		for (int32 Index = 1; Index + 1 < Path.Num(); ++Index)
 		{
+			if (const TOptional<double> Before = Ground(Path[Index - 1]))
+				Running = FMath::Min(Running, Before.GetValue());
+			const FVector2D In = (Path[Index] - Path[Index - 1]).GetSafeNormal(), Onward = (Path[Index + 1] - Path[Index]).GetSafeNormal();
+			if (FVector2D::DotProduct(In, Onward) < 0.7) // a turn sharper than about 45 degrees
+				continue;
 			const FVector2D Direction = (Path[Index + 1] - Path[Index - 1]).GetSafeNormal();
 			const FVector2D Across(-Direction.Y, Direction.X);
 			const double Fade = FMath::Clamp(FMath::Min(Along[Index], Length - Along[Index]) / (0.5 * Wave), 0.0, 1.0);
@@ -462,11 +470,12 @@ namespace UnrealAIWaterRqlLocal
 			const TOptional<double> Here = Ground(Path[Index]);
 			if (!Here.IsSet())
 				continue;
+			const double Water = FMath::Min(Running, Here.GetValue());
 			for (const double Part : { 1.0, 0.5, 0.25 })
 			{
 				const FVector2D Moved = Path[Index] + Across * Offset * Part;
 				const TOptional<double> There = Ground(Moved);
-				if (There.IsSet() && There.GetValue() <= Here.GetValue() + Climb)
+				if (There.IsSet() && There.GetValue() <= Water + Climb && There.GetValue() >= Here.GetValue() - Climb)
 				{
 					Out[Index] = Moved;
 					break;
