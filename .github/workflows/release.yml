@@ -1319,7 +1319,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-version.outputs.tag }}
           VERSION: ${{ needs.check-version.outputs.version }}
-          # One name per FAB_ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
+          # One name per ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
           FAB_ENGINE_ZIPS: ${{ needs.build-plugin-zip.outputs.fab_engine_zips }}
           # The supported engines (ue_ci.py ENGINES): one prebuilt Win64 plugin each.
           ENGINES: ${{ needs.build-plugin-zip.outputs.engines }}
@@ -1334,6 +1334,10 @@ jobs:
           for zip in ${FAB_ENGINE_ZIPS}; do
             fab_engine_assets="${fab_engine_assets} ${zip} ${zip}.minisig"
           done
+          if [ "$(jq -r 'length' <<<"${ENGINES:-[]}")" = "0" ]; then
+            echo "::error::build-plugin-zip reported no supported engines."
+            exit 1
+          fi
           prebuilt_assets=""
           for ue in $(jq -r '.[]' <<<"${ENGINES}"); do
             zip="unreal-mcp-plugin-${VERSION}-ue${ue}-win64.zip"

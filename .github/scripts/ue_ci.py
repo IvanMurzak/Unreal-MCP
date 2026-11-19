@@ -545,8 +545,8 @@ def write_pinned_descriptor(descriptor_path: Path, descriptor: dict, engine: str
 def fab_engine_zips(args) -> None:
     """One Fab project file per engine: unreal-mcp-plugin-fab-<version>-ue<engine>.zip, from dist/'s Fab zip.
 
-    Epic's Fab review requires EngineVersion in the .uplugin of what it compiles, while every other asset must stay
-    unpinned (UE treats the key as an exact match), so only these zips carry it. The release builds and attaches
+    Epic's Fab review requires EngineVersion in the .uplugin of what it compiles, while every engine-independent asset must stay
+    unpinned (UE flags a plugin pinned to another engine version as incompatible), so only these zips carry it. The release builds and attaches
     them; they take the checkout's ThirdPartyNotices.txt and Description, so rerunning this on a released version's
     Fab zip corrects that text without a release. In CI the zip names go to the step output `fab_engine_zips`.
     """

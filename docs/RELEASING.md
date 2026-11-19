@@ -297,9 +297,9 @@ a manual operator step in the Fab portal (no CI job submits — see the checklis
 - **C1c — copyright comment in every code file.** `fab-zip` stamps the vendored RQL and Code-Exec sources (the repo
   keeps them verbatim) and fails on any other code file without one.
 - **C5 — one project file per engine, `EngineVersion` set.** Epic's review requires the key in what it compiles,
-  while every other asset must stay unpinned (UE treats it as an exact match). The release builds them
+  while every engine-independent asset (source, Fab) must stay unpinned (UE flags a plugin pinned to another engine version as incompatible). The release builds them
   (`ue_ci.py fab-engine-zips` in `build-plugin-zip`) and attaches `unreal-mcp-plugin-fab-<version>-ue<engine>.zip`
-  for every engine in `FAB_ENGINES`; `verify-release` checks each one. They also take the checkout's
+  for every engine in `ENGINES`; `verify-release` checks each one. They also take the checkout's
   `ThirdPartyNotices.txt` and descriptor `Description`. To correct that text for an already released version, download
   the release's `-fab-` zip into `dist/`, run `python .github/scripts/ue_ci.py fab-engine-zips --version <version>`
   (outside CI, set `RUNNER_TEMP` to a scratch folder) and replace the release assets. Keep the listing's third-party box ticked and
