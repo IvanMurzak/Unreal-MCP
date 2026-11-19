@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -203,7 +204,8 @@ class MonorepoTests(unittest.TestCase):
         for text in ('bUseUnity = true;', 'PCHUsage = A; PCHUsage = B;'):
             with self.assertRaisesRegex(ValueError, 'PCHUsage'):
                 suite.strict_rules(text, rules)
-        self.assertIn('bUseUnity = false;', suite.strict_rules('\t\tPCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;', rules))
+        strict = suite.strict_rules('\t\tPCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n\t\tbUseUnity = true;\n', rules)
+        self.assertEqual(re.findall(r'bUseUnity\s*=\s*\w+', strict), ['bUseUnity = false'])
 
     def test_unchanged_profile_does_not_invalidate_ubt_caches(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -77,6 +77,8 @@ def strict_rules(text: str, rules: Path) -> str:
     """The module's own no-PCH, no-unity build (BuildPlugin -StrictIncludes, scoped to one module).
 
     Module-scoped overrides keep installed engine build settings untouched."""
+    # A committed bUseUnity assignment after ours would switch unity back on.
+    text = re.sub(r"[ \t]*bUseUnity\s*=\s*[^;]+;[ \t]*\r?\n?", "", text)
     text, count = re.subn(r"PCHUsage\s*=\s*[^;]+;", "PCHUsage = PCHUsageMode.NoPCHs;\n\t\tbUseUnity = false;", text)
     if count != 1:
         # Without the rewrite the module would build with PCH and unity and pass blind.
