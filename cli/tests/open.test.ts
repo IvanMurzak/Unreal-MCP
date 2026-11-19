@@ -318,18 +318,19 @@ describe('openProject', () => {
     const dir = tmp();
     writeBlueprintProject(dir, 'MyGame', '5.7');
     writeInstalledPlugin(dir);
-    let buildCount = 0;
+    const targets: string[][] = [];
     const r = await openProject({
       projectDir: dir,
       autoDismissStartupDialogs: false,
       enginesImpl: () => [fakeEngine('5.7')],
-      buildImpl: async () => {
-        buildCount += 1;
+      buildImpl: async (step) => {
+        targets.push([step.editorTarget, step.args[0]]);
       },
       spawnImpl: () => ({ pid: 8 }),
     });
     expect(r.kind).toBe('success');
-    expect(buildCount).toBe(expectsDesktopBuild ? 1 : 0);
+    // No MyGameEditor target exists in a Blueprint-only project: UBT would exit 8 on it.
+    expect(targets).toEqual(expectsDesktopBuild ? [['UnrealEditor', 'UnrealEditor']] : []);
   });
 
   it('skips the pre-launch build when disabled explicitly', async () => {

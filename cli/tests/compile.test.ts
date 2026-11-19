@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
 import * as path from 'path';
 import { compileProject } from '../src/lib/compile.js';
 import type { UbtBuildStep } from '../src/lib/types.js';
@@ -11,11 +12,16 @@ afterEach(() => {
 
 const os = process.platform as NodeJS.Platform;
 
-function fixture(): { projectDir: string; engineRoot: string } {
+/** A C++ project (its `GameEditor` target rules exist) unless `contentOnly`. */
+function fixture(contentOnly = false): { projectDir: string; engineRoot: string } {
   const projectDir = makeTempDir();
   const engineRoot = writeFakeEngine(makeTempDir('unreal-mcp-cli-engine-'));
   dirs.push(projectDir, engineRoot);
   writeUProject(projectDir, 'Game');
+  if (!contentOnly) {
+    fs.mkdirSync(path.join(projectDir, 'Source'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'Source', 'GameEditor.Target.cs'), '// target', 'utf-8');
+  }
   return { projectDir, engineRoot };
 }
 
@@ -40,6 +46,16 @@ describe('compileProject', () => {
     expect(r.target).toBe('GameEditor');
     expect(r.warnings).toHaveLength(1);
     expect(ubt.steps[0]!.args).toContain('GameEditor');
+  });
+
+  it('builds a content-only project with the engine UnrealEditor target', async () => {
+    const { projectDir, engineRoot } = fixture(true);
+    const ubt = build(['Result: Succeeded']);
+    const r = await compileProject({ ...base, projectDir, engineRoot, buildImpl: ubt.impl });
+    expect(r.kind).toBe('success');
+    expect(r.target).toBe('UnrealEditor');
+    expect(ubt.steps[0]!.args[0]).toBe('UnrealEditor');
+    expect(ubt.steps[0]!.args).toContain(`-project=${path.join(projectDir, 'Game.uproject')}`);
   });
 
   it('fails with the errors and their locations', async () => {

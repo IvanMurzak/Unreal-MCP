@@ -9,21 +9,33 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 describe('unreal-build', () => {
-  it('resolves the Windows desktop build step', () => {
-    const step = resolveDesktopBuildStep({
-      platform: 'win32',
-      engineRoot: 'C:/UE',
-      projectName: 'MyGame',
-      uprojectPath: 'C:/Proj/MyGame.uproject',
-    });
-    expect(step.ubtPath.replace(/\\/g, '/')).toContain('C:/UE/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe');
-    expect(step.args).toEqual([
-      'MyGameEditor',
-      'Win64',
-      'Development',
-      '-project=C:/Proj/MyGame.uproject',
-      '-WaitMutex',
-    ]);
+  it('resolves the Windows desktop build step of a C++ project to its <Project>Editor target', () => {
+    const dir = makeTempDir();
+    try {
+      fs.mkdirSync(path.join(dir, 'Source'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'Source', 'MyGameEditor.Target.cs'), '// target', 'utf-8');
+      const uprojectPath = path.join(dir, 'MyGame.uproject');
+      const step = resolveDesktopBuildStep({ platform: 'win32', engineRoot: 'C:/UE', projectName: 'MyGame', uprojectPath });
+      expect(step.ubtPath.replace(/\\/g, '/')).toContain('C:/UE/Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe');
+      expect(step.editorTarget).toBe('MyGameEditor');
+      expect(step.args).toEqual(['MyGameEditor', 'Win64', 'Development', `-project=${uprojectPath}`, '-WaitMutex']);
+    } finally {
+      rmTempDir(dir);
+    }
+  });
+
+  it('builds a content-only (Blueprint-only) project with the engine UnrealEditor target and -project=', () => {
+    const dir = makeTempDir();
+    try {
+      // A Source/ folder without target rules (e.g. leftovers) is still content-only.
+      fs.mkdirSync(path.join(dir, 'Source'), { recursive: true });
+      const uprojectPath = path.join(dir, 'MyGame.uproject');
+      const step = resolveDesktopBuildStep({ platform: 'win32', engineRoot: 'C:/UE', projectName: 'MyGame', uprojectPath });
+      expect(step.editorTarget).toBe('UnrealEditor');
+      expect(step.args).toEqual(['UnrealEditor', 'Win64', 'Development', `-project=${uprojectPath}`, '-WaitMutex']);
+    } finally {
+      rmTempDir(dir);
+    }
   });
 
   it('resolves the macOS desktop build step', () => {

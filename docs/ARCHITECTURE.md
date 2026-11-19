@@ -1200,7 +1200,8 @@ happens in each tool-family task against `Unreal-Test-Project` (Godot tool-wave 
 - `release.yml` (Godot `release.yml` skeleton: version-from-source job → gate compute → test fan-out
   → artifact build → gated publish): artifacts = dedicated source plugin zip
   (`unreal-mcp-plugin-source-<version>.zip`, CLI install asset), the Fab asset (`unreal-mcp-plugin-fab-<version>.zip`, §6.8), packaged plugin zip
-  (`unreal-mcp-plugin-<version>.zip`, BuildPlugin output with the staged bundle),
+  (`unreal-mcp-plugin-<version>.zip`, BuildPlugin output with the staged bundle), prebuilt Win64 plugin per
+  supported engine (`unreal-mcp-plugin-<version>-ue<engine>-win64.zip`, RELEASING.md "Prebuilt Win64 plugins"),
   `unreal-mcp-bridge-<rid>.zip` ×4, npm publish, GitHub Release (server zips are
   released from the shared GameDev-MCP-Server repo, not here — §6).
   **Tag/release firing is Ivan-GATED**; full-rerun-only policy for artifact-passing

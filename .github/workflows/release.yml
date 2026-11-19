@@ -33,6 +33,9 @@
 #                        (RuntimeDependencies stage Source/ThirdParty/UnrealMcpBridge/ ->
 #                        Binaries/ThirdParty/UnrealMcpBridge/<rid>/), zips the PACKAGED
 #                        plugin with the latest supported UE as unreal-mcp-plugin-<version>.zip ->
+#   build-prebuilt-plugins (matrix: one Windows leg per supported UE) BuildPlugins the source
+#                        asset per engine into unreal-mcp-plugin-<version>-ue<engine>-win64.zip
+#                        (Blueprint-only projects load it without a build) ->
 #                        publish-release attaches the plugin zips + the 4 signed bridge zips.
 # Signing is GRACEFULLY DEGRADING: every sign/notarize step is `if: env.X != ''`
 # guarded, so a run with NO secrets produces UNSIGNED-but-green artifacts. The
@@ -592,6 +595,8 @@ jobs:
     runs-on: [self-hosted, windows, unreal-5-8]
     outputs:
       fab_engine_zips: ${{ steps.fab_engine_zips.outputs.fab_engine_zips }}
+      # The supported engines (ue_ci.py ENGINES, JSON list): the build-prebuilt-plugins matrix and verify-release.
+      engines: ${{ steps.engines.outputs.engines }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -669,6 +674,9 @@ jobs:
       - name: Build per-engine Fab zips
         id: fab_engine_zips
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py fab-engine-zips --version ${{ needs.check-version.outputs.version }}
+      - name: Supported engines
+        id: engines
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py engines
       # Machine-wide UE serialization (#293) — see the plugin job. The source zip above runs no UE.
       - name: Acquire machine-wide UE lock
         run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 180
@@ -708,11 +716,62 @@ jobs:
         if: always() && env.CHAIN_PY != ''
         run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
 
+  # Prebuilt Win64 editor plugins, one per supported engine minor:
+  # unreal-mcp-plugin-<version>-ue<engine>-win64.zip. A Blueprint-only project has no C++ target to build the
+  # source asset with (and building it costs minutes and ~1 GB of intermediates), so the App installs the zip
+  # matching the project's EngineAssociation and falls back to the source asset + build (docs/RELEASING.md
+  # "Prebuilt Win64 plugins"). Each leg BuildPlugins the exact source asset build-plugin-zip cut (signed
+  # bridge inside) on a Windows runner carrying that engine's label, like the plugin matrix. Fail-closed
+  # like every other asset: the release needs every leg.
+  build-prebuilt-plugins:
+    name: prebuilt Win64 plugin (UE ${{ matrix.ue }})
+    needs: [check-version, build-plugin-zip]
+    if: vars.UNREAL_RUNNER_READY == 'true'
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ fromJSON('{"5.5":"unreal-5-5","5.6":"unreal-5-6","5.7":"unreal-5-7","5.8":"unreal-5-8","5.9":"unreal-5-9"}')[matrix.ue] || format('unreal-{0}', matrix.ue) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ue: ${{ fromJSON(needs.build-plugin-zip.outputs.engines) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          clean: false
+      - name: Resolve UE install + chain python
+        uses: ./.github/actions/ue-env
+        with:
+          version: ${{ matrix.ue }}
+      - name: Download source plugin zip
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-source-zip
+          path: ./dist
+      # Machine-wide UE serialization (#293) — see the plugin job.
+      - name: Acquire machine-wide UE lock
+        run: ${{ env.CHAIN_PY }} scripts/ue_machine_lock.py acquire --wait-minutes 180
+      - name: BuildPlugin + zip (prebuilt)
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py prebuilt-zip --version ${{ needs.check-version.outputs.version }} --ue ${{ matrix.ue }}
+      - name: Upload prebuilt plugin zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-prebuilt-ue${{ matrix.ue }}
+          path: ./dist/unreal-mcp-plugin-${{ needs.check-version.outputs.version }}-ue${{ matrix.ue }}-win64.zip
+          if-no-files-found: error
+          retention-days: 7
+      # Always the last step: cleanup, the lock release and the chain python link (`teardown` in ue_ci.py).
+      - name: Teardown (cleanup, release the machine-wide UE lock)
+        if: always() && env.CHAIN_PY != ''
+        run: ${{ env.CHAIN_PY }} .github/scripts/ue_ci.py teardown
+
   # ── SIGN (no external side effect — runs on dry runs too, so a missing
   #    MINISIGN_SECRET_KEY is caught by the rehearsal and BEFORE any publish). ─
   sign-plugin-source:
     name: sign plugin-source zip (minisign)
-    needs: [check-version, build-plugin-zip]
+    needs: [check-version, build-plugin-zip, build-prebuilt-plugins]
     runs-on: ubuntu-latest
     steps:
       - name: Download source plugin zip
@@ -729,6 +788,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: unreal-mcp-plugin-fab-engine-zips
+          path: ./assets
+      - name: Download prebuilt Win64 plugin zips
+        uses: actions/download-artifact@v8
+        with:
+          pattern: unreal-mcp-plugin-prebuilt-ue*
+          merge-multiple: true
           path: ./assets
       # Sign the plugin-SOURCE zip (and the Fab zips, the same source minus executables) with the pinned publisher key so the CLI can
       # VERIFY it before install (zero-config-engine-connect D12). A same-origin
@@ -767,7 +832,8 @@ jobs:
           # The key is passwordless (minted with `minisign -G -W`), so signing does
           # not prompt; `< /dev/null` guards against any interactive read on a CI
           # runner with no tty. `-x` names the detached signature output.
-          # Every plugin zip here: the source and Fab zips plus the per-engine Fab zips (the Fab File Links).
+          # Every plugin zip here: the source and Fab zips, the per-engine Fab zips (the Fab File Links) and the
+          # prebuilt Win64 plugins (the App verifies them like the source zip).
           for zip in ./assets/unreal-mcp-plugin-*.zip; do
             minisign -S -s "$keyfile" -m "$zip" -x "${zip}.minisig" \
               -t "$(basename "$zip") signed by AI Game Dev release CI" < /dev/null
@@ -796,6 +862,13 @@ jobs:
           path: ./assets/unreal-mcp-plugin-fab-${{ needs.check-version.outputs.version }}-ue*.zip.minisig
           if-no-files-found: error
           retention-days: 7
+      - name: Upload prebuilt plugin signatures
+        uses: actions/upload-artifact@v7
+        with:
+          name: unreal-mcp-plugin-prebuilt-minisig
+          path: ./assets/unreal-mcp-plugin-${{ needs.check-version.outputs.version }}-ue*-win64.zip.minisig
+          if-no-files-found: error
+          retention-days: 7
 
   # ── PUBLISH (real runs only: every job below carries a job-level
   #    `needs.check-version.outputs.dry_run != 'true'` guard, so a dry run shows
@@ -818,6 +891,7 @@ jobs:
         build-bridge-macos,
         build-bridge-windows,
         build-plugin-zip,
+        build-prebuilt-plugins,
         sign-plugin-source,
         publish-npm,
       ]
@@ -838,6 +912,7 @@ jobs:
       #   * unreal-mcp-plugin-<version>.zip         -> packaged BuildPlugin artifact
       #   * unreal-mcp-plugin-fab-<version>.zip     -> input of the per-engine Fab zips (source, no executable; §6.8)
       #   * unreal-mcp-plugin-fab-<version>-ue<engine>.zip -> the Fab listing's per-engine File Links (RELEASING.md C5)
+      #   * unreal-mcp-plugin-<version>-ue<engine>-win64.zip -> prebuilt Win64 plugin per engine (the App's no-build install)
       # The per-RID signed bridge zips are also attached for debugging /
       # UNREAL_MCP_BRIDGE_PATH users.
       - name: Download bridge release zips (osx + linux)
@@ -885,6 +960,17 @@ jobs:
         with:
           name: unreal-mcp-plugin-fab-engine-minisig
           path: ./assets
+      - name: Download prebuilt Win64 plugin zips
+        uses: actions/download-artifact@v8
+        with:
+          pattern: unreal-mcp-plugin-prebuilt-ue*
+          merge-multiple: true
+          path: ./assets
+      - name: Download prebuilt plugin signatures
+        uses: actions/download-artifact@v8
+        with:
+          name: unreal-mcp-plugin-prebuilt-minisig
+          path: ./assets
       - name: List assembled release assets
         run: ls -la ./assets
       - name: Create GitHub Release
@@ -897,7 +983,7 @@ jobs:
           shopt -s nullglob
           # Fail-closed: the CLI rejects an unsigned source zip (D12); the signatures
           # are produced by sign-plugin-source.
-          for zip in ./assets/unreal-mcp-plugin-source-*.zip ./assets/unreal-mcp-plugin-fab-*.zip; do
+          for zip in ./assets/unreal-mcp-plugin-source-*.zip ./assets/unreal-mcp-plugin-fab-*.zip ./assets/unreal-mcp-plugin-*-win64.zip; do
             if [ ! -f "${zip}.minisig" ]; then
               echo "::error::Plugin signature ${zip}.minisig is missing — refusing to create the Release."
               exit 1
@@ -1130,6 +1216,7 @@ jobs:
         build-bridge-macos,
         build-bridge-windows,
         build-plugin-zip,
+        build-prebuilt-plugins,
         sign-plugin-source,
       ]
     if: inputs.dry_run != true && needs.check-version.outputs.dry_run != 'true' && github.ref == 'refs/heads/main'
@@ -1232,8 +1319,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-version.outputs.tag }}
           VERSION: ${{ needs.check-version.outputs.version }}
-          # One name per FAB_ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
+          # One name per ENGINES entry (ue_ci.py), so this check follows the engine list without a copy of it.
           FAB_ENGINE_ZIPS: ${{ needs.build-plugin-zip.outputs.fab_engine_zips }}
+          # The supported engines (ue_ci.py ENGINES): one prebuilt Win64 plugin each.
+          ENGINES: ${{ needs.build-plugin-zip.outputs.engines }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1244,6 +1333,15 @@ jobs:
           fab_engine_assets=""
           for zip in ${FAB_ENGINE_ZIPS}; do
             fab_engine_assets="${fab_engine_assets} ${zip} ${zip}.minisig"
+          done
+          if [ "$(jq -r 'length' <<<"${ENGINES:-[]}")" = "0" ]; then
+            echo "::error::build-plugin-zip reported no supported engines."
+            exit 1
+          fi
+          prebuilt_assets=""
+          for ue in $(jq -r '.[]' <<<"${ENGINES}"); do
+            zip="unreal-mcp-plugin-${VERSION}-ue${ue}-win64.zip"
+            prebuilt_assets="${prebuilt_assets} ${zip} ${zip}.minisig"
           done
           release_json="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,assets)"
           tag_name="$(jq -r '.tagName' <<<"$release_json")"
@@ -1265,6 +1363,7 @@ jobs:
             "unreal-mcp-plugin-fab-${VERSION}.zip" \
             "unreal-mcp-plugin-fab-${VERSION}.zip.minisig" \
             ${fab_engine_assets} \
+            ${prebuilt_assets} \
             "unreal-mcp-bridge-win-x64.zip" \
             "unreal-mcp-bridge-osx-arm64.zip" \
             "unreal-mcp-bridge-osx-x64.zip" \
