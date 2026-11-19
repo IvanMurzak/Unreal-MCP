@@ -71,6 +71,26 @@ namespace UnrealMcpRqlSessionLocal
 	}
 
 	/**
+	 * The rows an explicit `first N` after the plan's call lets through (the smallest N of the read stages after it), or
+	 * INDEX_NONE without one. RQL shows 50 rows of a read (EngineDefaults::max_rows); an agent asking for more of a read-only
+	 * call's rows (`... | call Surface(...) | first 120`) gets them, within the 64 KB answer, as a call that ends the query
+	 * shows every row. The rows cannot exceed N, so N is the exact row budget.
+	 */
+	int32 FirstAfterCall(const rql::QueryPlan& Plan)
+	{
+		const int32 CallIndex = CallStageIndex(Plan);
+		if (CallIndex == INDEX_NONE)
+			return INDEX_NONE;
+		int32 First = INDEX_NONE;
+		for (int32 Index = CallIndex + 1; Index < static_cast<int32>(Plan.stages.size()); ++Index)
+		{
+			if (Plan.stages[Index].kind == rql::StageKind::First)
+				First = First == INDEX_NONE ? Plan.stages[Index].n : FMath::Min(First, Plan.stages[Index].n);
+		}
+		return First;
+	}
+
+	/**
 	 * A read that found nothing: no rows or items, a count of 0, or a min / max / avg over nothing (null). A sum or a min
 	 * that is 0 found something; a mutation's empty receipt (a set that kept every value) is not "nothing found" either.
 	 */
@@ -1210,6 +1230,10 @@ FString FUnrealMcpRqlSession::Execute(const FString& PlanJson, bool bAllowMutati
 			Budgets.max_mutation_targets = HardMaxTargets;
 		if (bCall)
 			Budgets.max_list_items = MaxCallResultItems;
+		// An explicit first N after a read-only call shows up to N rows (the engine caps it at its hard_max_rows; the 64 KB
+		// answer may cut it, with RewordReadTruncation's paging hint). Without one a read keeps RQL's 50-row page.
+		if (const int32 First = UnrealMcpRqlSessionLocal::FirstAfterCall(Plan); First > 0)
+			Budgets.max_rows = First;
 		Result = EnginePtr->execute(Plan, Budgets, Options);
 		if (bRefusedReadOnlyCall || (bReadOnlyCallRequest && !Result.ok && UnrealMcpRqlSessionLocal::ReadsAfterCall(Plan)
 				&& UnrealMcpRqlSessionLocal::RefusedAsNotReadOnly(Result)))
