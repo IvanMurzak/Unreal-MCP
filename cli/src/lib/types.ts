@@ -841,7 +841,7 @@ export type { InstallSourceKind };
 export interface UbtBuildStep {
   /** Absolute path to the build entrypoint (`UnrealBuildTool.exe` or platform `Build.sh`). */
   ubtPath: string;
-  /** Editor target name, e.g. `MyProjectEditor`. */
+  /** Editor target name: `MyProjectEditor`, or `UnrealEditor` for a content-only project (no C++ target rules). */
   editorTarget: string;
   /** Absolute path to the `.uproject`. */
   uprojectPath: string;

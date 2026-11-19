@@ -39,6 +39,12 @@ export function isDesktopBuildPlatform(value: string): value is DesktopBuildPlat
   return value === 'win32' || value === 'darwin' || value === 'linux';
 }
 
+/**
+ * The UBT step that builds the project's editor binaries. A project with C++ builds its own `<Project>Editor` target;
+ * a content-only (Blueprint-only) project has no target rules, so UBT fails at once on `<Project>Editor` ("Couldn't
+ * find target rules file", exit 8). It builds the engine's `UnrealEditor` target in the project's context
+ * (`-project=`) instead, as the editor's own "rebuild the missing modules" does, which builds its project plugins.
+ */
 export function resolveDesktopBuildStep(input: {
   platform: DesktopBuildPlatform;
   engineRoot: string;
@@ -47,7 +53,9 @@ export function resolveDesktopBuildStep(input: {
 }): UbtBuildStep {
   const config = BUILD_CONFIG[input.platform];
   const pathApi = input.platform === 'win32' ? path.win32 : path.posix;
-  const editorTarget = `${input.projectName}Editor`;
+  const editorTarget = projectHasNativeCode(path.dirname(input.uprojectPath))
+    ? `${input.projectName}Editor`
+    : 'UnrealEditor';
   return {
     ubtPath: pathApi.join(input.engineRoot, ...config.buildEntrySegments),
     editorTarget,

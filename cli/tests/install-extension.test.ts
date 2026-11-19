@@ -759,7 +759,9 @@ describe('installExtension (--build)', () => {
     expect(r.built).toBe(true);
     expect(r.rebuildRequired).toBe(false);
     expect(steps).toHaveLength(1);
-    expect(steps[0].editorTarget).toBe('MyGameEditor');
+    // A content-only project has no MyGameEditor target: the engine's UnrealEditor target builds its plugins.
+    expect(steps[0].editorTarget).toBe('UnrealEditor');
+    expect(steps[0].args[0]).toBe('UnrealEditor');
     expect(steps[0].args).toContain('-WaitMutex');
     const normalized = steps[0].ubtPath.replace(/\\/g, '/');
     if (process.platform === 'darwin') {
