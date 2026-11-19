@@ -235,6 +235,17 @@ class MonorepoTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Missing Automation coverage'):
                 suite.check_report(report, ['UnrealAINiagara', 'UnrealAIPCG'], core_tests=False)
 
+    def test_report_gate_requires_only_the_selected_plugins_not_ones_sharing_their_prefix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / 'index.json'
+            inventory = release.read(release.ROOT / 'tests/automation-inventory.json')
+            terrain = {k: v for k, v in inventory.items() if k == 'UnrealAIMeshTerrain' or k.startswith('UnrealAIMeshTerrain.')}
+            tests = [{'fullTestPath': f'{prefix}.case{i}', 'state': 'Success'} for prefix, count in terrain.items() for i in range(count)]
+            suite.write_json(report, {'failed': 0, 'tests': tests})
+            # UnrealAIMeshTerrainWater (inventory too) is not selected: its tests are not required.
+            self.assertIn('UnrealAIMeshTerrainWater', inventory)
+            self.assertEqual(suite.check_report(report, ['UnrealAIMeshTerrain'], core_tests=False)['prefixes'], len(terrain))
+
     def test_missing_report_and_nonpassing_tests_are_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
             report = Path(temporary) / 'index.json'
@@ -363,15 +374,17 @@ class MonorepoTests(unittest.TestCase):
 
     def test_every_extension_declares_the_engines_it_builds_on(self):
         # The data that replaced the CI's hard-coded "extensions need UE 5.7+": no extension on UE 5.5 / 5.6, Mesh Terrain
-        # (MeshPartition) only from UE 5.8.
+        # (MeshPartition) and its water (MeshPartitionWater) only from UE 5.8.
         for plugin in release.components():
             self.assertIsNotNone(release.min_engine(plugin), plugin)
             self.assertFalse(release.supports_engine(plugin, (5, 6)), plugin)
-        self.assertEqual(release.min_engine('UnrealAIMeshTerrain'), (5, 8))
+        ue58 = {'UnrealAIMeshTerrain', 'UnrealAIMeshTerrainWater'}
+        for plugin in ue58:
+            self.assertEqual(release.min_engine(plugin), (5, 8))
+            self.assertNotIn(plugin, suite.for_engine((5, 7), None))
+            self.assertIn(plugin, suite.for_engine((5, 8), None))
         self.assertEqual(suite.for_engine((5, 6), None), [])
-        self.assertNotIn('UnrealAIMeshTerrain', suite.for_engine((5, 7), None))
-        self.assertEqual(sorted(suite.for_engine((5, 7), None)), sorted(set(release.components()) - {'UnrealAIMeshTerrain'}))
-        self.assertIn('UnrealAIMeshTerrain', suite.for_engine((5, 8), None))
+        self.assertEqual(sorted(suite.for_engine((5, 7), None)), sorted(set(release.components()) - ue58))
         self.assertEqual(suite.for_engine((5, 7), ['UnrealAIMeshTerrain', 'UnrealAIPCG']), ['UnrealAIPCG'])
 
     def test_suite_on_an_older_engine_neither_prepares_nor_builds_a_newer_extension(self):

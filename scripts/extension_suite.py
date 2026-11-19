@@ -196,7 +196,8 @@ def check_report(report: Path, selected: list[str], core_tests: bool = True) -> 
         paths.append(test["fullTestPath"])
     inventory = json.loads((ROOT / "tests/automation-inventory.json").read_text())
     required = {prefix: minimum for prefix, minimum in inventory.items()
-                if (core_tests and prefix.startswith("UnrealMcp.")) or any(prefix.startswith(n) for n in selected)}
+                # A whole plugin name: UnrealAIMeshTerrain does not require UnrealAIMeshTerrainWater's tests.
+                if (core_tests and prefix.startswith("UnrealMcp.")) or any(prefix == n or prefix.startswith(n + ".") for n in selected)}
     if any(not any(p == name or p.startswith(name + ".") for p in required) for name in selected):
         raise ValueError("A selected extension is missing from tests/automation-inventory.json")
     for prefix, minimum in required.items():

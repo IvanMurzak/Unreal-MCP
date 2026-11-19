@@ -1,0 +1,537 @@
+// Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
+// See the LICENSE file in the repository root for more information.
+
+#include "UnrealAIMeshTerrainWaterCommon.h"
+
+#include "IUnrealMcpRqlModule.h"
+#include "UnrealMcpRqlPlay.h"
+
+#include "Algo/AnyOf.h"
+#include "AssetCompilingManager.h"
+#include "Async/TaskGraphInterfaces.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Editor.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Interfaces/IPluginManager.h"
+#include "MaterialDomain.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
+#include "Misc/App.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionActorDesc.h"
+#include "WorldPartition/WorldPartitionActorDescInstance.h"
+#include "WorldPartition/WorldPartitionHelpers.h"
+
+#include "MeshPartition.h"
+#include "MeshPartitionDefinition.h"
+#include "MeshPartitionEditorComponent.h"
+#include "MeshPartitionEditorSubsystem.h"
+#include "MeshPartitionMeshData.h"
+#include "MeshPartitionModifierComponent.h"
+#include "MeshPartitionModifierComponentDesc.h"
+#include "MeshPartitionPreviewComponents.h"
+#include "MeshPartitionPreviewSection.h"
+#include "MeshPartitionTransformerPipeline.h"
+#include "MeshPartitionWaterModifier.h"
+
+#include "WaterBodyActor.h"
+#include "WaterBodyComponent.h"
+#include "WaterBodyTypes.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIMeshTerrainWater, Log, All);
+
+namespace UnrealAIMeshTerrainWater
+{
+	double BuildTimeoutForTests = 0.0;
+
+	namespace
+	{
+		FString NameOf(const AActor* Actor)
+		{
+			return Actor ? Actor->GetActorNameOrLabel() : FString(TEXT("null"));
+		}
+
+		FString Find(const AActor* Actor)
+		{
+			return FString::Printf(TEXT("unreal.find(\"%s\")"), *NameOf(Actor));
+		}
+
+		bool PluginEnabled(const TCHAR* Name)
+		{
+			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Name);
+			return Plugin.IsValid() && Plugin->IsEnabled();
+		}
+	}
+
+	bool CheckTimeout(double TimeoutSeconds)
+	{
+		return (TimeoutSeconds >= MinTimeoutSeconds && TimeoutSeconds <= MaxTimeoutSeconds)
+			|| UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("TimeoutSeconds %g is outside %g .. %g"), TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+	}
+
+	double SecondsSince(double Start)
+	{
+		return FMath::RoundToDouble((FPlatformTime::Seconds() - Start) * 100.0) / 100.0;
+	}
+
+	FString UnavailableReason()
+	{
+		for (const TCHAR* Name : { TEXT("MeshPartition"), TEXT("MeshPartitionWater"), TEXT("Water") })
+		{
+			if (!PluginEnabled(Name))
+			{
+				return FString::Printf(TEXT("the %s plugin is not enabled in this project: enable it (Edit > Plugins) and restart the editor, or call meshTerrainWater | call EnableMeshTerrainWater()"), Name);
+			}
+		}
+		if (!GEditor || !UE::MeshPartition::UMeshPartitionEditorSubsystem::Get())
+			return TEXT("the Mesh Partition editor subsystem is not running (water on Mesh Terrain needs the Unreal Editor)");
+		if (UnrealMcpRql::PlayWorld())
+			return TEXT("a Play In Editor session is running: stop it first (editor | call StopPlay()): water on Mesh Terrain edits the editor world");
+		if (!UnrealMcpRql::EditorWorld())
+			return TEXT("no editor world is open");
+		return FString();
+	}
+
+	bool CheckAvailable()
+	{
+		const FString Reason = UnavailableReason();
+		return Reason.IsEmpty() || UnrealMcpRql::Failed<bool>(Reason);
+	}
+
+	TArray<AMeshPartition*> Terrains()
+	{
+		TArray<AMeshPartition*> Out;
+		if (UWorld* World = UnrealMcpRql::EditorWorld())
+		{
+			for (TActorIterator<AMeshPartition> It(World); It; ++It)
+			{
+				if (IsValid(*It))
+					Out.Add(*It);
+			}
+		}
+		return Out;
+	}
+
+	bool CheckTerrain(const AMeshPartition* Terrain)
+	{
+		if (!CheckAvailable())
+			return false;
+		if (!Terrain)
+		{
+			TArray<FString> Labels;
+			for (const AMeshPartition* Each : Terrains())
+				Labels.Add(Each->GetActorLabel());
+			return UnrealMcpRql::Failed<bool>(Labels.IsEmpty()
+				? FString(TEXT("Terrain is null and the level has no Mesh Terrain: create one first (meshTerrainCreate | call Create(...), the Mesh Terrain extension, or Mesh Terrain Mode)"))
+				: FString::Printf(TEXT("Terrain is null: pass unreal.find(\"<label>\") of a Mesh Terrain (the level has %s)"), *FString::Join(Labels, TEXT(", "))));
+		}
+		if (!IsValid(Terrain) || Terrain->GetWorld() != UnrealMcpRql::EditorWorld())
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s is not a Mesh Terrain of the open level"), *NameOf(Terrain)));
+		if (!EditorComponent(Terrain))
+			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component (not registered yet)"), *NameOf(Terrain)));
+		LoadTerrainActors(Terrain);
+		return true;
+	}
+
+	namespace
+	{
+		/** The unloaded World Partition actors of @p World that @p Match accepts (by their descriptor). */
+		TArray<FGuid> UnloadedActors(UWorld* World, TFunctionRef<bool(const FWorldPartitionActorDesc&)> Match)
+		{
+			TArray<FGuid> Out;
+			UWorldPartition* WorldPartition = World ? World->GetWorldPartition() : nullptr;
+			if (!WorldPartition)
+				return Out;
+			FWorldPartitionHelpers::ForEachActorDescInstance(WorldPartition, [&](const FWorldPartitionActorDescInstance* Instance)
+			{
+				const FWorldPartitionActorDesc* Desc = Instance ? Instance->GetActorDesc() : nullptr;
+				if (Desc && !Instance->IsLoaded() && Match(*Desc))
+					Out.Add(Instance->GetGuid());
+				return true;
+			});
+			return Out;
+		}
+	}
+
+	void LoadTerrainActors(const AMeshPartition* Terrain)
+	{
+		UWorld* World = Terrain ? Terrain->GetWorld() : nullptr;
+		const FGuid TerrainGuid = Terrain ? Terrain->GetActorGuid() : FGuid();
+		const TArray<FGuid> Unloaded = UnloadedActors(World, [&TerrainGuid](const FWorldPartitionActorDesc& Desc)
+		{
+			for (const TUniquePtr<FWorldPartitionComponentDesc>& Component : Desc.GetComponentDescs())
+			{
+				const UClass* Class = Component.IsValid() ? Component->GetComponentNativeClass() : nullptr;
+				// The modifier components describe themselves with MeshPartition's FWorldPartitionModifierComponentDesc.
+				if (Class && Class->IsChildOf(UModifierComponent::StaticClass())
+					&& static_cast<const UE::MeshPartition::FWorldPartitionModifierComponentDesc*>(Component.Get())->MegaMeshGuid == TerrainGuid)
+				{
+					return true;
+				}
+			}
+			return false;
+		});
+		// The core loader skips the actors deleted in this session (their descriptors stay until the level is saved).
+		if (!Unloaded.IsEmpty() && UnrealMcpRql::LoadWorldPartitionActors(Unloaded))
+		{
+			if (UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
+				Component->UpdateModifierList();
+		}
+	}
+
+	void LoadWaterBodies()
+	{
+		const TArray<FGuid> Unloaded = UnloadedActors(UnrealMcpRql::EditorWorld(), [](const FWorldPartitionActorDesc& Desc)
+		{
+			const UClass* Class = Desc.GetActorNativeClass();
+			return Class && Class->IsChildOf(AWaterBody::StaticClass());
+		});
+		if (!Unloaded.IsEmpty())
+			UnrealMcpRql::LoadWorldPartitionActors(Unloaded);
+	}
+
+	UMeshPartitionEditorComponent* EditorComponent(const AMeshPartition* Terrain)
+	{
+		return Terrain ? Cast<UMeshPartitionEditorComponent>(Terrain->GetMeshPartitionComponent()) : nullptr;
+	}
+
+	namespace
+	{
+		TArray<APreviewSection*> PreviewSections(const AMeshPartition* Terrain)
+		{
+			TArray<APreviewSection*> Out;
+			if (const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain))
+			{
+				Component->ForAllPreviewSections([&Out](APreviewSection* Section)
+				{
+					if (IsValid(Section))
+						Out.Add(Section);
+					return true;
+				});
+			}
+			return Out;
+		}
+	}
+
+	FBox TerrainsBounds(UWorld* World)
+	{
+		FBox Bounds(ForceInit);
+		for (TActorIterator<AMeshPartition> It(World); It; ++It)
+		{
+			if (!IsValid(*It))
+				continue;
+			FBox Built(ForceInit);
+			for (const APreviewSection* Section : PreviewSections(*It))
+				Built += Section->GetPreviewMeshBounds();
+			if (!Built.IsValid)
+			{
+				// Not built yet: its base meshes' extent.
+				if (const UMeshPartitionEditorComponent* Component = EditorComponent(*It))
+				{
+					for (const UModifierComponent* Base : Component->GetModifiersFiltered([](const UModifierComponent* M) { return IsValid(M) && M->IsBase(); }))
+						Built += Base->ComputeCombinedBounds();
+				}
+			}
+			Bounds += Built;
+		}
+		return Bounds;
+	}
+
+	TOptional<double> GroundHeight(const AMeshPartition* Terrain, double X, double Y)
+	{
+		TOptional<double> Best;
+		const FVector Start(X, Y, 1.0e7), End(X, Y, -1.0e7);
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(UnrealAIMeshTerrainWaterGround), /*bTraceComplex*/ true);
+		TArray<UPrimitiveComponent*> Components;
+		for (const APreviewSection* Section : PreviewSections(Terrain))
+		{
+			Section->GetComponents(Components);
+			for (UPrimitiveComponent* Component : Components)
+			{
+				FHitResult Hit;
+				if (Component && Component->IsCollisionEnabled() && Component->LineTraceComponent(Hit, Start, End, Params)
+					&& (!Best.IsSet() || Hit.ImpactPoint.Z > Best.GetValue()))
+				{
+					Best = Hit.ImpactPoint.Z;
+				}
+			}
+		}
+		return Best;
+	}
+
+	FString FBuildState::Describe() const
+	{
+		if (bNoBase)
+			return TEXT("built (the terrain has no base mesh)");
+		TArray<FString> Parts;
+		if (bBuilding)
+			Parts.Add(TEXT("sections are being built"));
+		else if (Sections == 0)
+			Parts.Add(TEXT("no section is built yet"));
+		if (Cooking > 0)
+			Parts.Add(FString::Printf(TEXT("%d section collision(s) cooking"), Cooking));
+		if (Finishing > 0)
+			Parts.Add(FString::Printf(TEXT("%d section(s) waiting for their final mesh"), Finishing));
+		if (CompilingMeshes > 0)
+			Parts.Add(FString::Printf(TEXT("%d section mesh(es) compiling"), CompilingMeshes));
+		return Parts.IsEmpty() ? FString(TEXT("built")) : FString::Join(Parts, TEXT(", "));
+	}
+
+	namespace
+	{
+		bool HasCollision(const UPrimitiveComponent* Component)
+		{
+			const FBodyInstance* Body = Component->GetBodyInstance();
+			return Component->GetCollisionEnabled() == ECollisionEnabled::NoCollision || (Body && Body->IsValidBodyInstance());
+		}
+
+		bool IsPreviewShown(const APreviewSection* Section)
+		{
+			const TSharedPtr<const UE::MeshPartition::FMeshData> Preview = Section->GetPreviewMesh();
+			return Preview.IsValid() && Preview->TriangleCount() > 0;
+		}
+
+		/** Whether @p Terrain's preview transformer pipeline turns a built section into a static mesh (the default one does). */
+		bool MakesStaticMeshes(const AMeshPartition* Terrain)
+		{
+			const UE::MeshPartition::UMeshPartitionDefinition* Definition = Terrain ? Terrain->GetMeshPartitionDefinition() : nullptr;
+			const UE::MeshPartition::UTransformerPipeline* Pipeline = Definition ? Definition->GetPreviewSectionBuildVariant().TransformerPipeline.Get() : nullptr;
+			if (!Pipeline)
+				return false;
+			for (const TInstancedStruct<UE::MeshPartition::FTransformer>& Transformer : Pipeline->GetTransformers())
+			{
+				for (const UStruct* Struct = Transformer.GetScriptStruct(); Struct; Struct = Struct->GetSuperStruct())
+				{
+					if (Struct->GetFName() == TEXT("StaticMeshTransformer"))
+						return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	FBuildState BuildState(const AMeshPartition* Terrain)
+	{
+		FBuildState State;
+		const UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
+		if (!Component)
+			return State;
+		State.bNoBase = !Algo::AnyOf(Component->GetModifiersFiltered([](const UModifierComponent* Modifier) { return IsValid(Modifier); }),
+			[](const UModifierComponent* Modifier) { return Modifier->IsBase() && !Modifier->IsDisabled(); });
+		State.bBuilding = Component->IsAnyPreviewSectionBuildActive();
+		const bool bStaticMeshes = MakesStaticMeshes(Terrain);
+		for (const APreviewSection* Section : PreviewSections(Terrain))
+		{
+			++State.Sections;
+			const bool bPreviewShown = IsPreviewShown(Section);
+			bool bStaticMesh = false;
+			for (const UStaticMeshComponent* Mesh : Section->GetMeshComponents())
+			{
+				const UStaticMesh* Static = Mesh ? Mesh->GetStaticMesh() : nullptr;
+				if (!Static)
+					continue;
+				bStaticMesh = true;
+				if (Static->IsCompiling())
+					++State.CompilingMeshes;
+				else if (!bPreviewShown)
+					State.Cooking += HasCollision(Mesh) ? 0 : 1;
+			}
+			if (bPreviewShown)
+			{
+				TArray<UE::MeshPartition::UPreviewMeshComponent*> PreviewComponents;
+				Section->GetComponents(PreviewComponents);
+				for (const UE::MeshPartition::UPreviewMeshComponent* PreviewComponent : PreviewComponents)
+					State.Cooking += HasCollision(PreviewComponent) ? 0 : 1;
+				State.Finishing += bStaticMeshes && !Section->IsTransformerPipelinedPaused() && !bStaticMesh ? 1 : 0;
+			}
+		}
+		return State;
+	}
+
+	bool WaitForBuild(AMeshPartition* Terrain, double TimeoutSeconds, FString& OutPending)
+	{
+		OutPending.Reset();
+		UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
+		if (!Component)
+		{
+			OutPending = FString::Printf(TEXT("%s has no Mesh Partition editor component"), *NameOf(Terrain));
+			return false;
+		}
+		const double Start = FPlatformTime::Seconds();
+		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
+		FBuildState State;
+		int32 Rounds = 0;
+		while (true)
+		{
+			// A water body spawned or changed in this call joins the terrain's modifier list here (first round), then queued
+			// modifier changes start their section builds and finished builds are applied.
+			if (Rounds == 0)
+				Component->UpdateModifierList();
+			Component->Update();
+			// Collision cooking and the transformer pipeline finish through game-thread tasks.
+			FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			FAssetCompilingManager::Get().ProcessAsyncTasks(true);
+			State = BuildState(Terrain);
+			++Rounds;
+			if (State.IsReady())
+				break;
+			if (FPlatformTime::Seconds() > Deadline)
+			{
+				OutPending = FString::Printf(TEXT("%s still building after %.0f s (%s)"), *NameOf(Terrain), FPlatformTime::Seconds() - Start, *State.Describe());
+				return false;
+			}
+			FPlatformProcess::Sleep(0.01f);
+		}
+		UE_LOG(LogUnrealAIMeshTerrainWater, Log, TEXT("%s built in %.2f s (%d rounds)"), *NameOf(Terrain), FPlatformTime::Seconds() - Start, Rounds);
+		return true;
+	}
+
+	FString WaterType(const AWaterBody* Body)
+	{
+		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+		if (!Component)
+			return TEXT("Unknown");
+		switch (Component->GetWaterBodyType())
+		{
+		case EWaterBodyType::River:      return TEXT("River");
+		case EWaterBodyType::Lake:       return TEXT("Lake");
+		case EWaterBodyType::Ocean:      return TEXT("Ocean");
+		case EWaterBodyType::Transition: return TEXT("Custom");
+		default:                         return TEXT("Unknown");
+		}
+	}
+
+	UClass* ModifierClassFor(const AWaterBody* Body)
+	{
+		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+		if (!Component)
+			return nullptr;
+		// The Lake / River modifier headers are private to MeshPartitionWater: their classes by script path (the module is
+		// loaded: this one depends on it).
+		switch (Component->GetWaterBodyType())
+		{
+		case EWaterBodyType::River: return FindObject<UClass>(nullptr, TEXT("/Script/MeshPartitionWater.RiverModifier"));
+		case EWaterBodyType::Lake:  return FindObject<UClass>(nullptr, TEXT("/Script/MeshPartitionWater.LakeModifier"));
+		default:                    return nullptr;
+		}
+	}
+
+	TArray<UWaterModifier*> WaterModifiers(const AWaterBody* Body)
+	{
+		TArray<UWaterModifier*> Out;
+		if (Body)
+			Body->GetComponents(Out);
+		Out.RemoveAll([](const UWaterModifier* Modifier) { return !IsValid(Modifier); });
+		return Out;
+	}
+
+	UWaterModifier* MatchingModifier(const AWaterBody* Body)
+	{
+		const UClass* Class = ModifierClassFor(Body);
+		for (UWaterModifier* Modifier : WaterModifiers(Body))
+		{
+			if (Class && Modifier->GetClass() == Class)
+				return Modifier;
+		}
+		return nullptr;
+	}
+
+	AMeshPartition* TerrainOf(const AWaterBody* Body)
+	{
+		const UWaterModifier* Modifier = MatchingModifier(Body);
+		AMeshPartition* Terrain = Modifier ? Modifier->GetAffectedMeshPartition() : nullptr;
+		return IsValid(Terrain) ? Terrain : nullptr;
+	}
+
+	TArray<AWaterBody*> BodiesOf(const AMeshPartition* Terrain)
+	{
+		TArray<AWaterBody*> Out;
+		UWorld* World = Terrain ? Terrain->GetWorld() : nullptr;
+		for (TActorIterator<AWaterBody> It(World); World && It; ++It)
+		{
+			if (IsValid(*It) && TerrainOf(*It) == Terrain)
+				Out.Add(*It);
+		}
+		return Out;
+	}
+
+	AActor* FindFirst(UWorld* World, UClass* Class)
+	{
+		for (TActorIterator<AActor> It(World, Class); World && It; ++It)
+		{
+			if (IsValid(*It))
+				return *It;
+		}
+		return nullptr;
+	}
+
+	bool IsWaterMaterial(const UMaterialInterface* Material)
+	{
+		const UMaterial* Base = Material ? Material->GetMaterial() : nullptr;
+		return Base && Base->MaterialDomain == MD_Surface && Base->GetUsageByFlag(MATUSAGE_Water);
+	}
+
+	FString Problem(const AWaterBody* Body)
+	{
+		const UWaterBodyComponent* Component = Body ? Body->GetWaterBodyComponent() : nullptr;
+		if (!Component)
+			return TEXT("it has no water body component");
+		const FString Unavailable = UnavailableReason();
+		if (!Unavailable.IsEmpty())
+			return Unavailable;
+		const FString Me = Find(Body);
+		const TArray<UWaterModifier*> Modifiers = WaterModifiers(Body);
+		const UClass* Wanted = ModifierClassFor(Body);
+		if (Component->GetWaterBodyType() == EWaterBodyType::Ocean)
+		{
+			if (Modifiers.Num() > 0)
+			{
+				return FString::Printf(TEXT("it carries %d Mesh Partition water modifier(s) (%s): an ocean needs none on a Mesh Terrain (its spline only crops the water under the ground), and the experimental OceanModifier can override the ground other modifiers shaped under it (lakes, rivers, hills): meshTerrainWater | call Detach(%s)"),
+					Modifiers.Num(), *Modifiers[0]->GetClass()->GetName(), *Me);
+			}
+		}
+		else if (Wanted)
+		{
+			const UWaterModifier* Modifier = MatchingModifier(Body);
+			if (!Modifier)
+				return FString::Printf(TEXT("it does not shape any Mesh Terrain (no %s): meshTerrainWater | call Attach(%s, unreal.find(\"<terrain>\"))"), *Wanted->GetName(), *Me);
+			if (Modifiers.Num() > 1)
+				return FString::Printf(TEXT("it carries %d water modifiers, one is enough (a second shapes the terrain twice or undoes the first): meshTerrainWater | call Attach(%s, unreal.find(\"<terrain>\")) keeps one"), Modifiers.Num(), *Me);
+			const AMeshPartition* Terrain = TerrainOf(Body);
+			if (!Terrain)
+				return FString::Printf(TEXT("its %s is bound to no Mesh Terrain: meshTerrainWater | call Attach(%s, unreal.find(\"<terrain>\"))"), *Wanted->GetName(), *Me);
+			if (Modifier->GetIsDisabledFlag())
+				return FString::Printf(TEXT("its %s is disabled, so it does not shape %s: meshTerrainWater | call Attach(%s, %s) enables it"), *Wanted->GetName(), *NameOf(Terrain), *Me, *Find(Terrain));
+			if (!Component->bAffectsLandscape)
+				return FString::Printf(TEXT("its Affects Landscape (bAffectsLandscape) is off, so its %s does not shape %s: meshTerrainWater | call Attach(%s, %s) turns it on"), *Wanted->GetName(), *NameOf(Terrain), *Me, *Find(Terrain));
+		}
+		const UMaterialInterface* Material = Component->GetWaterMaterial();
+		if (!Material)
+			return FString::Printf(TEXT("no water material, so it is invisible: meshTerrainWater | call SetMaterial(%s) gives it the Water defaults"), *Me);
+		if (!IsWaterMaterial(Material))
+			return FString::Printf(TEXT("its WaterMaterial %s is not a water material: meshTerrainWater | call SetMaterial(%s)"), *Material->GetName(), *Me);
+		if (Component->GetWaterBodyType() != EWaterBodyType::Transition && !Component->GetWaterZone())
+			return TEXT("no water zone renders it: meshTerrainWater | call SetZone()");
+		if (const AMeshPartition* Terrain = TerrainOf(Body))
+		{
+			const FBuildState State = BuildState(Terrain);
+			if (!State.IsReady())
+				return FString::Printf(TEXT("%s is still building (%s): meshTerrainWater | call WaitForBuild(%s)"), *NameOf(Terrain), *State.Describe(), *Me);
+		}
+		if (!FApp::CanEverRender())
+			return TEXT("this editor does not render (-nullrhi): the water mesh is built in a rendering editor");
+		bool bMesh = false;
+		TArray<UStaticMeshComponent*> Meshes;
+		Body->GetComponents(Meshes);
+		for (const UStaticMeshComponent* Mesh : Meshes)
+			bMesh |= Mesh->GetFName() == TEXT("WaterInfoMeshComponent") && Mesh->GetStaticMesh() != nullptr;
+		if (!bMesh && Component->ShouldGenerateWaterMeshTile())
+			return FString::Printf(TEXT("its water mesh is not built: meshTerrainWater | call SetMaterial(%s, \"%s\") rebuilds it"), *Me, *Material->GetPathName());
+		if (Material->IsCompiling())
+			return TEXT("its material's shaders are still compiling: it shows when they finish (read MeshTerrainWater again)");
+		return FString();
+	}
+}

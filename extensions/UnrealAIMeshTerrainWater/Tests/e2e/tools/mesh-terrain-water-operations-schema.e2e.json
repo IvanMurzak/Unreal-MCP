@@ -1,0 +1,10 @@
+{
+  "description": "meshTerrainWater lists CreateLake, CreateRiver, CreateOcean, Attach, Detach and Delete with their parameters",
+  "tool": "rql-schema",
+  "input": {
+    "type": "MeshTerrainWaterOperations"
+  },
+  "assert": {
+    "pattern": "Attach[(]WaterBody Body, MeshPartition Terrain, double TimeoutSeconds[)].*CreateLake[(]MeshPartition Terrain, string Label, Vector Center, double Radius, double Depth.*CreateOcean[(]string Label, double Height.*CreateRiver[(]MeshPartition Terrain, string Label, List<Vector> Points, double Width, double Depth.*Delete[(]WaterBody Body.*Detach[(]WaterBody Body"
+  }
+}

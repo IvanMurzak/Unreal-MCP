@@ -46,7 +46,7 @@ Consumers exclude the plugin from packaged games with a `TargetDenyList: ["Game"
 | Path | What lives there / where new files go |
 | --- | --- |
 | `UnrealMCP/` | The UE plugin (modules, conventions, UE build/test: [`UnrealMCP/AGENTS.md`](UnrealMCP/AGENTS.md)) |
-| `extensions/` | Optional first-party plugins (seven), independent versions/releases ([guide](docs/EXTENSION-MONOREPO.md)) |
+| `extensions/` | Optional first-party plugins (eight), independent versions/releases ([guide](docs/EXTENSION-MONOREPO.md)) |
 | `bridge/` | .NET 10 sidecar + xUnit tests ([`bridge/AGENTS.md`](bridge/AGENTS.md)) |
 | `cli/` | `unreal-mcp-cli` npm package (TypeScript, commander, vitest): commands in `cli/src/commands/`, logic in `cli/src/lib/`, tests in `cli/tests/`. Published on npm; CI owns releases |
 | `samples/` | Example extension plugins: `UnrealAITemplate/` (editor RQL module, docs/rql.md) and `UnrealAIRuntimeSample/` (runtime tools, §12.9) |

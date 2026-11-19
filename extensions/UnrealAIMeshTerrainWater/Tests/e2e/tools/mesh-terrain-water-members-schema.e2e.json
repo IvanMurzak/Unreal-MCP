@@ -1,0 +1,10 @@
+{
+  "description": "the MeshTerrainWater and TerrainModifier members of a water body",
+  "tool": "rql-schema",
+  "input": {
+    "type": "WaterBody"
+  },
+  "assert": {
+    "pattern": "MeshTerrainWater.*TerrainModifier|TerrainModifier.*MeshTerrainWater"
+  }
+}

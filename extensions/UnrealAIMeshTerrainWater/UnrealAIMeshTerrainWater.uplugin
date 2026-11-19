@@ -1,0 +1,42 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Unreal AI Mesh Terrain Water (Experimental)",
+  "Description": "Experimental, UE 5.8+ only. RQL module for Water bodies on Unreal's experimental Mesh Terrain (Mesh Partition Water): create oceans, lakes and rivers that carve their bed into a Mesh Terrain, read their readiness and problems, size the water zone. An AI Game Developer (Unreal-MCP) extension: an IUnrealMcpRqlModule that agents use through rql-query / rql-mutate / rql-schema.",
+  "Category": "AI",
+  "CreatedBy": "Ivan Murzak",
+  "CreatedByURL": "https://github.com/IvanMurzak/Unreal-MCP",
+  "DocsURL": "https://github.com/IvanMurzak/Unreal-MCP/blob/main/docs/EXTENSIONS.md",
+  "MarketplaceURL": "",
+  "SupportURL": "https://github.com/IvanMurzak/Unreal-MCP/issues",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "UnrealAIMeshTerrainWater",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "UnrealMCP",
+      "Enabled": true
+    },
+    {
+      "Name": "MeshPartition",
+      "Enabled": true
+    },
+    {
+      "Name": "MeshPartitionWater",
+      "Enabled": true
+    },
+    {
+      "Name": "Water",
+      "Enabled": true
+    }
+  ]
+}

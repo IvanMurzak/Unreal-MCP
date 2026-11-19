@@ -533,13 +533,48 @@ AUTHORING.update({
         text_result(STRUCTURE.format('where Terrain == null')), text_result(STRUCTURE.format('where Terrain != null'))),
 })
 
+# Water on Mesh Terrain (UE 5.8+): per check, the answer the live UE 5.8 editor gives and one that must not pass.
+MESH_WATER = 'MeshTerrainWaterOperations#981970491841'
+MESH_WATER_GUIDE = ('## Water on Mesh Terrain (Experimental, UE 5.8+)\nOceans, lakes and rivers ... carries a Mesh Partition water modifier of '
+                    'its kind (`LakeModifier`, `RiverModifier`) ...\nmeshTerrainWater | call CreateLake(unreal.find("Island"), "Lake", '
+                    '[12000, -8000, 300], 3000)\n...\nThe {0} needs no modifier: ... the engine\'s experimental OceanModifier can override ...')
+AUTHORING.update({
+    'mesh-terrain-water-operations-schema.e2e.json': (
+        text_result('MeshTerrainWaterOperations : Object {} +methods: Attach(WaterBody Body, MeshPartition Terrain, double TimeoutSeconds) '
+                    '— make an existing lake ... | CreateLake(MeshPartition Terrain, string Label, Vector Center, double Radius, double Depth, '
+                    'MaterialInterface Material, double TimeoutSeconds) — create a round lake ... | CreateOcean(string Label, double Height, '
+                    'MaterialInterface Material) — create the ocean ... | CreateRiver(MeshPartition Terrain, string Label, List<Vector> Points, '
+                    'double Width, double Depth, MaterialInterface Material, double TimeoutSeconds) — create a river ... | Delete(WaterBody Body, '
+                    'double TimeoutSeconds) — delete ... | Detach(WaterBody Body, double TimeoutSeconds) — remove ...'),
+        text_result('MeshTerrainWaterOperations : Object {} +methods: CreateLake(MeshPartition Terrain, string Label, Vector Center, double Radius)')),
+    'mesh-terrain-water-guide.e2e.json': (text_result(MESH_WATER_GUIDE.format('ocean')), text_result(MESH_WATER_GUIDE.format('sea'))),
+    'mesh-terrain-water-lake-missing-terrain.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call CreateLake on {MESH_WATER}: argument 'Terrain': "
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': "error call-threw: CreateLake threw: Radius 50 is outside 100 .. 200000 cm"}], 'isError': True}),
+    'mesh-terrain-water-attach-missing-body.e2e.json': (
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Attach on {MESH_WATER}: argument 'Body': "
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True},
+        {'content': [{'type': 'text', 'text': f"error coercion-failed: cannot call Attach on {MESH_WATER}: argument 'Terrain': "
+                                              'value is error(not-found: no actor with the label, name or path …)'}], 'isError': True}),
+    'mesh-terrain-water-zone-limits.e2e.json': (
+        {'content': [{'type': 'text', 'text': 'error call-threw: SetZone threw: SizeMeters 5 is outside 10 .. 100000 (0 covers the Mesh Terrains)'}],
+         'isError': True},
+        {'content': [{'type': 'text', 'text': 'error call-threw: SetZone threw: there is no Mesh Terrain to cover'}], 'isError': True}),
+    'mesh-terrain-water-enable.e2e.json': (
+        pcg_receipt(f'{MESH_WATER}|EnableMeshTerrainWater()|MeshPartition, MeshPartitionWater and Water are enabled in the project file; '
+                    'loaded now, no restart needed'),
+        {'content': [{'type': 'text', 'text': 'error call-threw: EnableMeshTerrainWater threw: this engine has no MeshPartitionWater plugin'}],
+         'isError': True}),
+})
+
 
 class CheckFileTests(unittest.TestCase):
     def test_every_plugin_has_valid_checks_and_no_powershell_left(self):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 171)
+        self.assertEqual(len(all_checks()), 180)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

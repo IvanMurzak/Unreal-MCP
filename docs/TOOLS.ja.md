@@ -163,6 +163,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | C++ なしで Gameplay Ability System を作成: エフェクト（コスト、クールダウン、ダメージ、回復）、アビリティの Blueprint、Health / Mana / Stamina のアトリビュートセットを備えたアビリティシステムコンポーネント、入力バインディング、Play In Editor での確認 |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape と Water: ランドスケープの作成、スカルプト、ペイント。海、湖、川の作成。ランドスケープ、ウォーターボディ、ウォーターゾーンの検索 |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | 実験的、UE 5.8+: Mesh Terrain（Mesh Partition）: テレインの作成（平面またはハイトマップから）、モディファイアの照会・追加・編集・並べ替え・削除、スカルプトとペイント、地表の高さ・傾斜・ペイントチャンネル、再ビルドとビルド完了の待機 |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | 実験的、UE 5.8+: Mesh Terrain 上の Water プラグインのボディ（MeshPartitionWater）: ウォーターモディファイアが地形を掘る湖と川、海、アタッチ・デタッチ・削除、ウォーターゾーン、各ボディの準備状態と問題 |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara VFX: システムとそのエミッターを検索、システムをレベルに配置 |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | プロシージャルコンテンツ生成: PCG グラフ（ノード、接続、設定、パラメーター）を作成し、ボリュームに配置し、散布（森、岩、小物）を生成して数を読み取る |
 

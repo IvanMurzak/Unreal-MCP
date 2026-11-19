@@ -80,6 +80,7 @@ void FUnrealMcpAvailableExtensionsSpec::Define()
 			TEXT("com.ivanmurzak.unreal-ai-control-rig"),
 #if !UE_VERSION_OLDER_THAN(5, 8, 0)
 			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain"), // Mesh Partition exists from UE 5.8
+			TEXT("com.ivanmurzak.unreal-ai-mesh-terrain-water"), // and MeshPartitionWater
 #endif
 		};
 		int32 Bundled = 0;

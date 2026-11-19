@@ -1,0 +1,11 @@
+{
+  "description": "CreateLake on a terrain that does not exist fails naming the argument",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainWater | call CreateLake(unreal.find(\"NoSuchMeshTerrainE2E\"), \"Lake\", [0, 0, 0], 1000)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "argument 'Terrain'.*not-found"
+  }
+}

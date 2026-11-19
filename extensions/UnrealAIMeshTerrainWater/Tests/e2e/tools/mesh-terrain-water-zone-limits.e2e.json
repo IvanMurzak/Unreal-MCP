@@ -1,0 +1,11 @@
+{
+  "description": "SetZone refuses a size below 10 m",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "meshTerrainWater | call SetZone(5)"
+  },
+  "expectError": true,
+  "assert": {
+    "pattern": "SizeMeters 5 is outside 10 \\.\\. 100000"
+  }
+}

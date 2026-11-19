@@ -163,6 +163,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas "<UEProject>"
 | **[AI GAS](../extensions/UnrealAIGAS/README.md)**<br>`gas` | 无需 C++ 即可编写 Gameplay Ability System：效果（消耗、冷却、伤害、恢复）、技能 Blueprint、带现成 Health / Mana / Stamina 属性集的技能系统组件、输入绑定、Play In Editor 检查 |
 | **[AI Landscape](../extensions/UnrealAILandscape/README.md)**<br>`landscape` | Landscape 与 Water：创建、雕刻和绘制地形；创建海洋、湖泊和河流；查询地形、水体和水域区域 |
 | **[AI Mesh&nbsp;Terrain](../extensions/UnrealAIMeshTerrain/README.md)**<br>`mesh-terrain` | 实验性，UE 5.8+：Mesh Terrain（Mesh Partition）：创建地形（平面或来自高度图）；查询、添加、编辑、重排和删除修改器；雕刻和绘制；地表高度、坡度和绘制通道；重建并等待构建完成 |
+| **[AI Mesh&nbsp;Terrain&nbsp;Water](../extensions/UnrealAIMeshTerrainWater/README.md)**<br>`mesh-terrain-water` | 实验性，UE 5.8+：Mesh Terrain 上的 Water 插件水体（MeshPartitionWater）：其水修改器挖掘地形的湖泊和河流、海洋；附加、分离和删除；水区域；每个水体的就绪状态与问题 |
 | **[AI Niagara](../extensions/UnrealAINiagara/README.md)**<br>`niagara` | Niagara 视觉特效：查询系统及其发射器，把系统放置到关卡中 |
 | **[AI PCG](../extensions/UnrealAIPCG/README.md)**<br>`pcg` | 程序化内容生成：编写 PCG 图表（节点、连接、设置、参数），把它们放到体积上，生成散布（森林、岩石、道具）并读取数量 |
 
