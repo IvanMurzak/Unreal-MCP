@@ -89,6 +89,8 @@ namespace UnrealMcpRqlCollisionLocal
 			return Channel.Name.ToString().Equals(Wanted, ESearchCase::IgnoreCase) || EnumName.Equals(Wanted, ESearchCase::IgnoreCase);
 		});
 	}
+	/** The result points into the list: keep the list alive (a temporary Channels() would leave it dangling). */
+	const FChannel* FindChannel(TArray<FChannel>&& All, const FString& Text) = delete;
 
 	FChannel ResolveChannel(const FString& Text, bool bObjectOnly)
 	{
@@ -228,7 +230,8 @@ namespace UnrealMcpRqlCollisionLocal
 		{
 			if (!Key.is_string())
 				return rql::MapLookup::BadKey;
-			const FChannel* Channel = FindChannel(Channels(), TextArg(Key));
+			const TArray<FChannel> All = Channels(); // FindChannel points into it
+			const FChannel* Channel = FindChannel(All, TextArg(Key));
 			if (!Channel)
 				return rql::MapLookup::NotFound;
 			Out = Str(ResponseName(LivePrimitive(*Types, Self).BodyInstance.GetResponseToChannel(Channel->Channel)));

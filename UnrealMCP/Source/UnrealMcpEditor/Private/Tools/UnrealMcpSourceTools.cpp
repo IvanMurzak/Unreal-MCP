@@ -980,6 +980,12 @@ namespace UnrealMcpSourceTools
 				for (const FString& File : ReflectionChanges)
 					ReflectionJson.Add(MakeShared<FJsonValueString>(File));
 
+				bool bThisEditorRunsLiveCoding = false;
+#if WITH_UNREAL_MCP_LIVE_CODING
+				if (const ILiveCodingModule* Session = FModuleManager::GetModulePtr<ILiveCodingModule>(FName(LIVE_CODING_MODULE_NAME)))
+					bThisEditorRunsLiveCoding = Session->IsEnabledForSession() && Session->HasStarted();
+#endif
+
 #if WITH_UNREAL_MCP_LIVE_CODING
 				// Live Coding patches the RUNNING editor in place — the only way to apply C++ changes
 				// without relinking the locked module DLL. Only viable interactively (the console must be
@@ -1096,6 +1102,11 @@ namespace UnrealMcpSourceTools
 					const int32 Suffix = FMath::RandRange(1000, 9999);
 					for (const FString& Module : SuffixedModules)
 						Params += FString::Printf(TEXT(" -ModuleWithSuffix=%s,%d"), *Module, Suffix);
+					// UBT refuses an Editor target while ANY editor of this engine runs Live Coding (its guard keys on the
+					// engine's UnrealEditor executable), so another project's open editor would block this one. The suffixed
+					// outputs touch nothing that editor uses: skip the guard unless this editor itself runs Live Coding.
+					if (SuffixedModules.Num() > 0 && !bThisEditorRunsLiveCoding)
+						Params += TEXT(" -NoHotReloadFromIDE");
 				}
 
 				int32 ReturnCode = -1;
