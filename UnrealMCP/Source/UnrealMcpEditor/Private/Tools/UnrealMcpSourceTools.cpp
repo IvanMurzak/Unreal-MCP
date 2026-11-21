@@ -15,6 +15,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "Interfaces/IPluginManager.h"
 #include "Interfaces/IProjectManager.h"
 #include "Modules/ModuleManager.h"
 #include "ProjectDescriptor.h"
@@ -109,21 +110,31 @@ namespace UnrealMcpSourceTools
 	}
 
 	/**
-	 * The project's own modules this editor has loaded: their DLLs are locked, so a plain UBT build of the Editor target
-	 * compiles them and then fails to link. Built with a hot-reload suffix (UnrealEditor-<Module>-<n>.dll, UBT's
-	 * -ModuleWithSuffix) they link beside the locked DLL: the compile check completes in one call, and the next normal
-	 * build cleans the suffixed files up (UBT deletes hot-reload leftovers).
+	 * The modules of the project's own code this editor has loaded: the .uproject's modules and those of the project's
+	 * code plugins, without Unreal-MCP's (UnrealMCP and its UnrealAI* extensions are not the user's code). Their DLLs are
+	 * locked, so a plain UBT build of the Editor target compiles them and then fails to link. Built with a hot-reload suffix
+	 * (UnrealEditor-<Module>-<n>.dll, -ModuleWithSuffix) they link beside the locked DLLs, so the check (compile and link)
+	 * completes in one call; the next normal build cleans the suffixed files up (UBT deletes hot-reload leftovers).
+	 * Not -Module: with a suffix UBT then finds the module's unsuffixed outputs up to date and compiles nothing.
 	 */
 	TArray<FString> LoadedProjectModules()
 	{
 		TArray<FString> Out;
-		if (const FProjectDescriptor* Project = IProjectManager::Get().GetCurrentProject())
+		auto AddLoaded = [&Out](const TArray<FModuleDescriptor>& Modules)
 		{
-			for (const FModuleDescriptor& Module : Project->Modules)
+			for (const FModuleDescriptor& Module : Modules)
 			{
 				if (FModuleManager::Get().IsModuleLoaded(Module.Name))
-					Out.Add(Module.Name.ToString());
+					Out.AddUnique(Module.Name.ToString());
 			}
+		};
+		if (const FProjectDescriptor* Project = IProjectManager::Get().GetCurrentProject())
+			AddLoaded(Project->Modules);
+		for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetEnabledPlugins())
+		{
+			const FString& Name = Plugin->GetName();
+			if (Plugin->GetLoadedFrom() == EPluginLoadedFrom::Project && Name != TEXT("UnrealMCP") && !Name.StartsWith(TEXT("UnrealAI")))
+				AddLoaded(Plugin->GetDescriptor().Modules);
 		}
 		return Out;
 	}
