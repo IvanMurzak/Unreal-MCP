@@ -15,6 +15,9 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+#include "Interfaces/IProjectManager.h"
+#include "Modules/ModuleManager.h"
+#include "ProjectDescriptor.h"
 
 #if WITH_UNREAL_MCP_LIVE_CODING
 #include "ILiveCodingModule.h"
@@ -103,6 +106,26 @@ namespace UnrealMcpSourceTools
 			Text += TEXT(" Nothing new is loaded: this running editor holds its module DLL, so new or changed C++ is NOT live "
 				"(a Blueprint is live after blueprint-compile). ") + SourceRestartAdvice(Target);
 		return Text;
+	}
+
+	/**
+	 * The project's own modules this editor has loaded: their DLLs are locked, so a plain UBT build of the Editor target
+	 * compiles them and then fails to link. Built with a hot-reload suffix (UnrealEditor-<Module>-<n>.dll, UBT's
+	 * -ModuleWithSuffix) they link beside the locked DLL: the compile check completes in one call, and the next normal
+	 * build cleans the suffixed files up (UBT deletes hot-reload leftovers).
+	 */
+	TArray<FString> LoadedProjectModules()
+	{
+		TArray<FString> Out;
+		if (const FProjectDescriptor* Project = IProjectManager::Get().GetCurrentProject())
+		{
+			for (const FModuleDescriptor& Module : Project->Modules)
+			{
+				if (FModuleManager::Get().IsModuleLoaded(Module.Name))
+					Out.Add(Module.Name.ToString());
+			}
+		}
+		return Out;
 	}
 
 	FString DescribeReflectionChanges(const FString& Target, const TArray<FString>& Files, bool bAdviceGiven)
@@ -1050,8 +1073,18 @@ namespace UnrealMcpSourceTools
 					return FUnrealMcpToolResult::Error(FString::Printf(TEXT("UnrealBuildTool not found at '%s'."), *Ubt));
 				}
 
-				const FString Params = FString::Printf(TEXT("%s %s %s -project=\"%s\" -WaitMutex"),
+				FString Params = FString::Printf(TEXT("%s %s %s -project=\"%s\" -WaitMutex"),
 					*TargetName, *Platform, *Configuration, *UProject);
+				// The default Editor target in a running editor: link the loaded project modules under a suffix (see
+				// LoadedProjectModules) instead of failing on their locked DLLs. Other targets (the game) are not locked.
+				TArray<FString> SuffixedModules;
+				if (TargetName == ProjectName + TEXT("Editor"))
+				{
+					SuffixedModules = LoadedProjectModules();
+					const int32 Suffix = FMath::RandRange(1000, 9999);
+					for (const FString& Module : SuffixedModules)
+						Params += FString::Printf(TEXT(" -ModuleWithSuffix=%s,%d"), *Module, Suffix);
+				}
 
 				int32 ReturnCode = -1;
 				FString StdOut;
@@ -1103,12 +1136,17 @@ namespace UnrealMcpSourceTools
 				Structured->SetNumberField(TEXT("durationSeconds"), Elapsed);
 				Structured->SetArrayField(TEXT("diagnostics"), DiagJson);
 				// A bounded tail of the raw output aids debugging when no diagnostic matched (e.g. a link
-				// failure, or a UBT configuration error) without flooding the response.
-				Structured->SetStringField(TEXT("outputTail"), Combined.Right(4000));
+				// failure, or a UBT configuration error) without flooding the response; a success needs none.
+				if (!bSuccess && Diagnostics.Num() == 0)
+					Structured->SetStringField(TEXT("outputTail"), Combined.Right(2000));
+				if (SuffixedModules.Num() > 0)
+					Structured->SetBoolField(TEXT("linkedBesideRunningEditor"), true);
 
 				// The diagnostics are in the text. Past the cap the structured report (with the raw output tail) is appended
 				// too, so a client that reads only the text still sees every row.
 				FString Summary = DescribeUbtResult(TargetName, ErrorCount, WarningCount, ReturnCode, Elapsed, Combined, ReflectionChanges.Num() > 0);
+				if (bSuccess && SuffixedModules.Num() > 0)
+					Summary += TEXT(" The project builds; this editor keeps running the code it started with (the new build loads when the editor restarts).");
 				// The summary already carries SourceRestartAdvice for a Live Coding refusal or a locked module DLL.
 				const bool bUbtAdvisedRestart = Summary.Contains(TEXT("restart required"));
 				const bool bRestartRequired = ReflectionChanges.Num() > 0 || bUbtAdvisedRestart;

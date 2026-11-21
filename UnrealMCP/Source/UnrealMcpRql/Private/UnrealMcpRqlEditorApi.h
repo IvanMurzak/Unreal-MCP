@@ -13,6 +13,7 @@ class AActor;
 class AVolume;
 class ULevel;
 class UDataTable;
+class UBlueprint;
 class UMaterialInstanceConstant;
 class UMaterialInterface;
 class UWorld;
@@ -135,6 +136,14 @@ public:
 	/** create an asset of a class ("InputAction", "Material", "DataAsset subclass", ...) at Path ("/Game/Input/IA_Jump") with the class's editor factory when it has one; returns it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
 	UObject* CreateAsset(const FString& Path, const FString& ClassName);
+
+	/** create a Blueprint class at Path ("/Game/BP_Door") deriving from ParentClass ("Actor", "Character", a C++ class, a Blueprint path); a Widget Blueprint when the parent is a User Widget class ("UserWidget", "MyHUDWidget"); returns it, unsaved */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	UBlueprint* CreateBlueprint(const FString& Path, const FString& ParentClass = TEXT("Actor"));
+
+	/** Project Settings > Collision: add a project collision channel Name, an object type (or a trace channel when bTraceChannel) whose default response is DefaultResponse (Block, Overlap, Ignore); saved to DefaultEngine.ini at once, not undoable; returns its engine channel ("ECC_GameTraceChannel1"). Components then use the name: set ObjectType = "Debris", Responses["Debris"] = "Ignore" */
+	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))
+	FString AddCollisionChannel(const FString& Name, const FString& DefaultResponse = TEXT("Block"), bool bTraceChannel = false);
 
 	/** create a material instance at Path from a parent material (unreal.asset(path) or its path); returns it */
 	UFUNCTION(BlueprintCallable, Category = "Unreal MCP|RQL", meta = (BlueprintInternalUseOnly = "true"))

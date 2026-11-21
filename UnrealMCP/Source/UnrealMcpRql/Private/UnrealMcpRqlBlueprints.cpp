@@ -19,6 +19,7 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Components/ActorComponent.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_DynamicCast.h"
 #include "K2Node_Event.h"
@@ -405,6 +406,128 @@ namespace UnrealMcpRqlBlueprintsLocal
 		if (GraphKind(Graph) != TEXT("EventGraph"))
 			Throw(FString::Printf(TEXT("events go into an event graph (Blueprint EventGraph), not the %s graph '%s'"),
 				*GraphKind(Graph).ToLower(), *Graph->GetName()));
+	}
+
+	/** The object property @p Name of the Blueprint's (skeleton) class: a component or widget variable once compiled. */
+	FObjectProperty* FindObjectVariable(const UBlueprint* Blueprint, const FName Name)
+	{
+		for (UClass* Class : { Blueprint->SkeletonGeneratedClass.Get(), Blueprint->GeneratedClass.Get() })
+		{
+			if (FObjectProperty* Property = Class ? FindFProperty<FObjectProperty>(Class, Name) : nullptr)
+				return Property;
+		}
+		return nullptr;
+	}
+
+	/**
+	 * The component (Components panel) or widget (Designer) of @p Blueprint named @p Name, as the variable a bound event
+	 * listens on. A widget that is not a variable yet becomes one, as the Designer's event buttons do.
+	 */
+	FObjectProperty* RequireComponentVariable(UBlueprint* Blueprint, const FString& Name)
+	{
+		const FName Wanted(*Name);
+		FObjectProperty* Property = FindObjectVariable(Blueprint, Wanted);
+		if (!Property)
+		{
+			bool bKnown = false;
+			TArray<FString> Candidates;
+			if (UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint))
+			{
+				TArray<UWidget*> Widgets;
+				if (Designer->WidgetTree)
+					Designer->WidgetTree->GetAllWidgets(Widgets);
+				for (UWidget* Widget : Widgets)
+				{
+					Candidates.Add(Widget->GetName());
+					if (Widget->GetFName() == Wanted)
+					{
+						bKnown = true;
+						if (!Widget->bIsVariable)
+						{
+							Widget->Modify();
+							Widget->bIsVariable = true;
+						}
+					}
+				}
+			}
+			if (Blueprint->SimpleConstructionScript)
+			{
+				for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+				{
+					if (!Node)
+						continue;
+					Candidates.Add(Node->GetVariableName().ToString());
+					bKnown |= Node->GetVariableName() == Wanted;
+				}
+			}
+			if (bKnown)
+			{
+				// Regenerates the skeleton class, which then has the variable.
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+				Property = FindObjectVariable(Blueprint, Wanted);
+			}
+			if (!Property)
+				Throw(FString::Printf(TEXT("%s has no component or widget named '%s'%s"), *Blueprint->GetName(), *Name,
+					Candidates.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (it has: %s)"), *FString::Join(Candidates, TEXT(", ")))));
+		}
+		if (!Property->PropertyClass)
+			Throw(FString::Printf(TEXT("'%s' is not a component or widget"), *Name));
+		return Property;
+	}
+
+	/**
+	 * A component's or widget's event node (the editor's "+" next to OnClicked / OnComponentBeginOverlap in the Details
+	 * panel): fires when @p Component's multicast delegate @p Event broadcasts.
+	 */
+	UEdGraphNode* AddComponentBoundEvent(UEdGraph* Graph, const FString& Component, const FString& Event, const FVector2D& At)
+	{
+		RequireEventGraph(Graph);
+		UBlueprint* Blueprint = RequireBlueprint(Graph);
+		FObjectProperty* Variable = RequireComponentVariable(Blueprint, Component.TrimStartAndEnd());
+		const FString EventName = Event.TrimStartAndEnd();
+		FMulticastDelegateProperty* Delegate = nullptr;
+		for (const FString& Candidate : { EventName, FString(TEXT("On")) + EventName })
+		{
+			Delegate = FindFProperty<FMulticastDelegateProperty>(Variable->PropertyClass, FName(*Candidate, FNAME_Find));
+			if (Delegate && Delegate->HasAnyPropertyFlags(CPF_BlueprintAssignable))
+				break;
+			Delegate = nullptr;
+		}
+		if (!Delegate)
+		{
+			TArray<FString> Events;
+			for (TFieldIterator<FMulticastDelegateProperty> It(Variable->PropertyClass); It; ++It)
+			{
+				if (It->HasAnyPropertyFlags(CPF_BlueprintAssignable))
+					Events.Add(It->GetName());
+			}
+			Throw(FString::Printf(TEXT("%s (%s) has no event '%s'; its events: %s"), *Component, *Variable->PropertyClass->GetName(), *EventName,
+				Events.IsEmpty() ? TEXT("none") : *FString::Join(Events, TEXT(", "))));
+		}
+		if (const UK2Node_ComponentBoundEvent* Existing = FKismetEditorUtilities::FindBoundEventForComponent(Blueprint, Delegate->GetFName(), Variable->GetFName()))
+			Throw(FString::Printf(TEXT("%s already has the event %s of %s (%s#%lld)"), *Blueprint->GetName(), *Delegate->GetName(), *Variable->GetName(),
+				*Existing->GetClass()->GetName(), static_cast<long long>(FUnrealMcpRqlTypes::IdOf(Existing))));
+		return CreateNode<UK2Node_ComponentBoundEvent>(Graph, At,
+			[Variable, Delegate](UK2Node_ComponentBoundEvent* Node) { Node->InitializeComponentBoundEventParams(Variable, Delegate); });
+	}
+
+	/** "StartButton.OnClicked" or "OnClicked (StartButton)" (the editor's title): component and event; false for other names. */
+	bool SplitComponentEvent(const FString& Name, FString& OutComponent, FString& OutEvent)
+	{
+		FString Left, Right;
+		if (Name.Split(TEXT("."), &Left, &Right) && !Left.IsEmpty() && !Right.IsEmpty())
+		{
+			OutComponent = Left.TrimStartAndEnd();
+			OutEvent = Right.TrimStartAndEnd();
+			return true;
+		}
+		if (Name.EndsWith(TEXT(")")) && Name.Split(TEXT("("), &Left, &Right) && !Left.TrimEnd().IsEmpty())
+		{
+			OutEvent = Left.TrimStartAndEnd();
+			OutComponent = Right.LeftChop(1).TrimStartAndEnd();
+			return !OutComponent.IsEmpty();
+		}
+		return false;
 	}
 
 	/** Classes a bare function name is looked up in after the Blueprint itself (the editor's most used libraries). */
@@ -884,8 +1007,12 @@ namespace UnrealMcpRqlBlueprintsLocal
 						break;
 					}
 				}
+				FString Component, ComponentEvent;
+				if (!Event && SplitComponentEvent(Name, Component, ComponentEvent))
+					return Types->WrapObject(AddComponentBoundEvent(Target, Component, ComponentEvent, Place(Target, Args[1], Args[2])));
 				if (!Event)
-					Throw(FString::Printf(TEXT("'%s' is not an overridable event of %s (e.g. BeginPlay, Tick, ActorBeginOverlap); for your own event use AddCustomEvent%s"),
+					Throw(FString::Printf(TEXT("'%s' is not an overridable event of %s (e.g. BeginPlay, Tick, ActorBeginOverlap); for your own event use "
+						"AddCustomEvent; a component's or widget's event (OnClicked, OnComponentBeginOverlap): AddComponentEvent(\"StartButton\", \"OnClicked\")%s"),
 						*Name, Blueprint->ParentClass ? *Blueprint->ParentClass->GetName() : TEXT("the parent class"), *EnhancedInputHint(Name)));
 				// An actor Blueprint starts with disabled placeholder nodes for the common events: enabling one is adding it.
 				UK2Node_Event* Node = FBlueprintEditorUtils::FindOverrideForFunction(Blueprint, Event->GetOwnerClass(), Event->GetFName());
@@ -921,6 +1048,14 @@ namespace UnrealMcpRqlBlueprintsLocal
 						Created->bOverrideFunction = true;
 					}));
 			}, "add (or enable) an overridable event of the parent class: \"BeginPlay\", \"Tick\", \"ActorBeginOverlap\"; returns the node"));
+		FUnrealMcpRqlTypes::AddMethod(D, Method("AddComponentEvent",
+			WithPlace({ FUnrealMcpRqlTypes::Param("Component", String), FUnrealMcpRqlTypes::Param("Event", String) }), NodeType,
+			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
+			{
+				UEdGraph* Target = Graph(Self);
+				return Types->WrapObject(AddComponentBoundEvent(Target, TextArg(Args[0]), TextArg(Args[1]), Place(Target, Args[2], Args[3])));
+			}, "add an event of a component or widget variable (\"StartButton\", \"OnClicked\"; \"Trigger\", \"OnComponentBeginOverlap\"), as the "
+			"Details panel's + button does (a widget becomes a variable); returns the node (exec pin \"then\")"));
 		FUnrealMcpRqlTypes::AddMethod(D, Method("AddInputKey", WithPlace({ FUnrealMcpRqlTypes::Param("Key", String) }), NodeType,
 			[Types, Graph](void* Self, const std::vector<rql::Value>& Args) -> rql::Value
 			{
@@ -974,7 +1109,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 					return Types->WrapObject(CreateNode<UK2Node_Self>(Target, At, [](UK2Node_Self*) {}));
 				if (UEdGraph* Macro = FindMacro(Kind))
 					return Types->WrapObject(CreateNode<UK2Node_MacroInstance>(Target, At, [Macro](UK2Node_MacroInstance* Node) { Node->SetMacroGraph(Macro); }));
-				Throw(FString::Printf(TEXT("unknown node kind '%s' (Branch, Sequence, Self, or a standard macro: %s); calls: AddCallFunction%s"),
+				Throw(FString::Printf(TEXT("unknown node kind '%s' (Branch, Sequence, Self, or a standard macro: %s); calls: AddCallFunction; "
+					"a component's or widget's event: AddComponentEvent(\"StartButton\", \"OnClicked\")%s"),
 					*TextArg(Args[0]), *MacroNames(), *EnhancedInputHint(TextArg(Args[0]))));
 			}, "add a flow node: Branch, Sequence, Self, or a standard macro (ForLoop, ForEachLoop, WhileLoop, DoOnce, Gate, FlipFlop, IsValid, ...); returns the node"));
 	}

@@ -1105,6 +1105,53 @@ void FUnrealMcpRqlDataModelsSpec::Define()
 		});
 	});
 
+	Describe("widget events", [this]()
+	{
+		It("adds a widget's event (OnClicked) by AddComponentEvent and by AddEvent names, wires it and compiles", [this]()
+		{
+			UWidgetBlueprint* Made = MakeWidgetBlueprint();
+			if (!TestNotNull(TEXT("widget blueprint"), Made))
+				return;
+			const FString Root = ResultRef(Must(TEXT("root"), /* unreal.asset("@WBP@") | call AddWidget("CanvasPanel", "Root") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"AddWidget","args":[{"lit":"CanvasPanel"},{"lit":"Root"}]}]})RQL")));
+			Must(TEXT("a button"), /* ref("@R@") | call AddChild("Button", "Play") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@R@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Button"},{"lit":"Play"}]}]})RQL"), { { TEXT("R"), Root } });
+			Must(TEXT("a second button"), /* ref("@R@") | call AddChild("Button", "Quit") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@R@"}]},"stages":[{"op":"call","method":"AddChild","args":[{"lit":"Button"},{"lit":"Quit"}]}]})RQL"), { { TEXT("R"), Root } });
+			Must(TEXT("not a variable"), /* unreal.asset("@WBP@").Widgets | where Name == "Quit" | set IsVariable = false */ TEXT(R"RQL({"rql":"0.1","source":{"path":["Widgets"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Name"]},{"lit":"Quit"}]}},{"op":"set","assign":[{"target":{"path":["IsVariable"]},"value":{"lit":false}}]}]})RQL"));
+
+			const FString Clicked = ResultRef(Must(TEXT("OnClicked"), /* unreal.asset("@WBP@").EventGraph | call AddComponentEvent("Play", "OnClicked") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddComponentEvent","args":[{"lit":"Play"},{"lit":"OnClicked"}]}]})RQL")));
+			TestTrue(*FString::Printf(TEXT("a component bound event (%s)"), *Clicked), Clicked.StartsWith(TEXT("K2Node_ComponentBoundEvent#")));
+			const FString Hovered = ResultRef(Must(TEXT("AddEvent with Widget.Event"), /* unreal.asset("@WBP@").EventGraph | call AddEvent("Play.OnHovered") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddEvent","args":[{"lit":"Play.OnHovered"}]}]})RQL")));
+			TestTrue(TEXT("Widget.Event adds the bound event"), Hovered.StartsWith(TEXT("K2Node_ComponentBoundEvent#")));
+			const FString Pressed = ResultRef(Must(TEXT("AddEvent with the editor's title"), /* unreal.asset("@WBP@").EventGraph | call AddEvent("OnPressed (Play)") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddEvent","args":[{"lit":"OnPressed (Play)"}]}]})RQL")));
+			TestTrue(TEXT("Event (Widget) adds the bound event"), Pressed.StartsWith(TEXT("K2Node_ComponentBoundEvent#")));
+			Refuses(TEXT("the same event again"), /* unreal.asset("@WBP@").EventGraph | call AddComponentEvent("Play", "OnClicked") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddComponentEvent","args":[{"lit":"Play"},{"lit":"OnClicked"}]}]})RQL"), TEXT("already has the event OnClicked of Play"));
+			Refuses(TEXT("an unknown event"), /* unreal.asset("@WBP@").EventGraph | call AddComponentEvent("Play", "Clickd") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddComponentEvent","args":[{"lit":"Play"},{"lit":"Clickd"}]}]})RQL"), TEXT("its events: OnClicked"));
+			Refuses(TEXT("an unknown widget"), /* unreal.asset("@WBP@").EventGraph | call AddComponentEvent("Ghost", "OnClicked") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddComponentEvent","args":[{"lit":"Ghost"},{"lit":"OnClicked"}]}]})RQL"), TEXT("has no component or widget named 'Ghost'"));
+
+			Must(TEXT("a widget that is no variable"), /* unreal.asset("@WBP@").EventGraph | call AddComponentEvent("Quit", "OnClicked") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddComponentEvent","args":[{"lit":"Quit"},{"lit":"OnClicked"}]}]})RQL"));
+			const UWidget* Quit = Made->WidgetTree->FindWidget(TEXT("Quit"));
+			TestTrue(TEXT("becomes a variable, as the Designer's event button does"), Quit && Quit->bIsVariable);
+
+			const FString Print = ResultRef(Must(TEXT("a call"), /* unreal.asset("@WBP@").EventGraph | call AddCallFunction("PrintString") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["EventGraph"],"on":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]}},"stages":[{"op":"call","method":"AddCallFunction","args":[{"lit":"PrintString"}]}]})RQL")));
+			Must(TEXT("wired"), /* ref("@E@") | call Connect("then", ref("@P@"), "execute") */ TEXT(R"RQL({"rql":"0.1","source":{"call":"ref","args":[{"lit":"@E@"}]},"stages":[{"op":"call","method":"Connect","args":[{"lit":"then"},{"call":"ref","args":[{"lit":"@P@"}]},{"lit":"execute"}]}]})RQL"), { { TEXT("E"), Clicked }, { TEXT("P"), Print } });
+			const TSharedPtr<FJsonObject> Compiled = Must(TEXT("compile"), /* unreal.asset("@WBP@") | call Compile() */ TEXT(R"RQL({"rql":"0.1","source":{"call":"asset","on":{"path":["unreal"]},"args":[{"lit":"@WBP@"}]},"stages":[{"op":"call","method":"Compile","args":[]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("compiles (%s)"), *UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2)), UnrealMcpRqlSpecHelpers::CellText(Compiled, 0, 2).Contains(TEXT("\"Succeeded\":true")));
+		});
+
+		It("creates a Widget Blueprint from a User Widget parent and an actor Blueprint from Actor", [this]()
+		{
+			const FString Widget = WidgetBlueprintPath;
+			const TSharedPtr<FJsonObject> Made = Must(TEXT("widget blueprint"), /* editor | call CreateBlueprint("@WBP@", "UserWidget") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateBlueprint","args":[{"lit":"@WBP@"},{"lit":"UserWidget"}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("a Widget Blueprint (%s)"), *ResultRef(Made)), ResultRef(Made).StartsWith(TEXT("WidgetBlueprint#")));
+			if (UWidgetBlueprint* Found = FindObject<UWidgetBlueprint>(nullptr, *(Widget + TEXT(".") + FPackageName::GetShortName(Widget))))
+				Created.Add(Found);
+			const TSharedPtr<FJsonObject> Actor = Must(TEXT("actor blueprint"), /* editor | call CreateBlueprint("@BP@", "Actor") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateBlueprint","args":[{"lit":"@BP@"},{"lit":"Actor"}]}]})RQL"));
+			TestTrue(TEXT("a Blueprint"), ResultRef(Actor).StartsWith(TEXT("Blueprint#")));
+			if (UBlueprint* Found = FindBlueprint())
+				Created.Add(Found);
+			Refuses(TEXT("not a parent class"), /* editor | call CreateBlueprint("/Game/RqlSpecData/BP_Never", "NoSuchRqlClass") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"CreateBlueprint","args":[{"lit":"/Game/RqlSpecData/BP_Never"},{"lit":"NoSuchRqlClass"}]}]})RQL"), TEXT("not a class a Blueprint can derive from"));
+		});
+	});
+
 	Describe("widget slots", [this]()
 	{
 		It("counts a same-value write of nested slot structs (Anchors) as unchanged", [this]()

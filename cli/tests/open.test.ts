@@ -397,6 +397,28 @@ describe('openProject', () => {
     }
   });
 
+  it('suggests --no-build when a failed build leaves earlier editor binaries to open on', async () => {
+    const dir = tmp();
+    writeUProject(dir, 'MyGame', '5.7');
+    writeNativeSourceLayout(dir, 'MyGame');
+    const [folder, ext] = process.platform === 'win32' ? ['Win64', '.dll'] : process.platform === 'darwin' ? ['Mac', '.dylib'] : ['Linux', '.so'];
+    fs.mkdirSync(path.join(dir, 'Binaries', folder), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'Binaries', folder, `UnrealEditor-MyGame${ext}`), '');
+    const r = await openProject({
+      projectDir: dir,
+      autoDismissStartupDialogs: false,
+      enginesImpl: () => [fakeEngine('5.7')],
+      buildImpl: async () => {
+        throw new Error('compile broke');
+      },
+      spawnImpl: () => ({ pid: 35 }),
+    });
+    if (expectsDesktopBuild) {
+      expect(r.kind).toBe('failure');
+      if (r.kind === 'failure') expect(r.errorMessage).toContain('run again with --no-build');
+    }
+  });
+
   it('warns that connection options are ignored under --no-connect', async () => {
     const dir = tmp();
     writeUProject(dir, 'MyGame', '5.7');

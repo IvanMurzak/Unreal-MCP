@@ -289,7 +289,20 @@ export async function maybeBuildBeforeOpen(
       message: `Build succeeded for ${step.editorTarget}`,
     });
   } catch (err: unknown) {
-    throw new PreLaunchBuildError(`Pre-launch build failed: ${asError(err).message}`);
+    const lastGood = hasEditorBinaries(opts.projectDir, hostPlatform)
+      ? '\nThe editor can still open on the last successful build (for example to fix the code with the MCP tools): run again with --no-build.'
+      : '';
+    throw new PreLaunchBuildError(`Pre-launch build failed: ${asError(err).message}${lastGood}`);
+  }
+}
+
+/** The project has editor module binaries from an earlier build (what `--no-build` opens on). */
+function hasEditorBinaries(projectDir: string, hostPlatform: NodeJS.Platform): boolean {
+  const [folder, ext] = hostPlatform === 'win32' ? ['Win64', '.dll'] : hostPlatform === 'darwin' ? ['Mac', '.dylib'] : ['Linux', '.so'];
+  try {
+    return fs.readdirSync(path.join(projectDir, 'Binaries', folder)).some((f) => f.startsWith('UnrealEditor-') && f.endsWith(ext));
+  } catch {
+    return false;
   }
 }
 

@@ -1268,6 +1268,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	UnrealMcpRqlAddSettings(Session);
 	UnrealMcpRqlAddBlueprints(Session);
 	UnrealMcpRqlAddWidgets(Session);
+	UnrealMcpRqlAddCollision(Session);
 	UnrealMcpRqlAddSequences(Session);
 	UnrealMcpRqlAddDiagnostics(Session);
 	UnrealMcpRqlAddWorldPartition(Session);
@@ -1360,9 +1361,9 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	});
 	Session.AddSource(TEXT("editor"), T.ForClass(UUnrealMcpRqlEditorApi::StaticClass()), /*bList*/ false,
 		TEXT("editor state (IsPlaying, IsPaused, PlayState, Selection, World, CurrentLevel, NextUndo / UndoHistory / RedoHistory) and operations: play test with call StartPlay / AdvancePlay(seconds, frames, keys) / StopPlay; call SpawnActor / SpawnActorFromAsset / OpenLevel / NewLevel / "
-			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
+			"SaveLevel / SaveAll / AddSublevel / UnloadSublevel / CreateAsset / CreateBlueprint / CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / "
 			"CreateMaterialInstance / ImportAsset / SaveAsset / ClearConsole / CreateDataTable / AddGameplayTag / RemoveGameplayTag / "
-			"RenameGameplayTag / Undo(steps) / Redo(steps); World Partition: LoadActors / LoadRegion"), [Types]()
+			"RenameGameplayTag / AddCollisionChannel / Undo(steps) / Redo(steps); World Partition: LoadActors / LoadRegion"), [Types]()
 	{
 		return Types->WrapObject(GetMutableDefault<UUnrealMcpRqlEditorApi>());
 	});
