@@ -7,7 +7,9 @@
 #include "UnrealMcpProcessUtil.h"   // shared ResolveDotNetRid + MakeExecutable
 
 #include "Async/Async.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
+#include "Interfaces/IPluginManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
@@ -201,8 +203,26 @@ FString FUnrealMcpServerManager::ResolveBinaryPath() const
 	return FString();
 }
 
+/**
+ * The MCP instructions the local server returns from initialize (GameDev-MCP-Server reads the file MCP_INSTRUCTIONS_FILE names;
+ * older servers ignore it): how to use these tools, shown to the model even before it loads any tool. The child inherits
+ * the editor's environment; a value the user set stays.
+ */
+static void UnrealMcpPointServerAtInstructions()
+{
+	static const TCHAR* EnvVar = TEXT("MCP_INSTRUCTIONS_FILE");
+	if (!FPlatformMisc::GetEnvironmentVariable(EnvVar).IsEmpty())
+		return;
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	const FString File = Plugin.IsValid()
+		? FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Resources/McpInstructions.md")) : FString();
+	if (!File.IsEmpty() && FPaths::FileExists(File))
+		FPlatformMisc::SetEnvironmentVar(EnvVar, *File);
+}
+
 bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 {
+	UnrealMcpPointServerAtInstructions();
 	uint32 NewProcId = 0;
 	FProcHandle NewHandle = FPlatformProcess::CreateProc(
 		*InBinaryPath,
