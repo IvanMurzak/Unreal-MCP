@@ -21,6 +21,7 @@ import {
 import {
   corePluginNeedsBuild,
   isDesktopBuildPlatform,
+  projectHasEditorBinaries,
   projectHasNativeCode,
   resolveDesktopBuildStep,
   runUnrealBuildStep,
@@ -289,9 +290,13 @@ export async function maybeBuildBeforeOpen(
       message: `Build succeeded for ${step.editorTarget}`,
     });
   } catch (err: unknown) {
-    throw new PreLaunchBuildError(`Pre-launch build failed: ${asError(err).message}`);
+    const lastGood = projectHasEditorBinaries(opts.projectDir, hostPlatform)
+      ? '\nThe editor can still open on the last successful build (for example to fix the code with the MCP tools): run again with --no-build.'
+      : '';
+    throw new PreLaunchBuildError(`Pre-launch build failed: ${asError(err).message}${lastGood}`);
   }
 }
+
 
 /** The native modules did not compile, so no editor was started (the message carries the errors and the build log). */
 export class PreLaunchBuildError extends Error {

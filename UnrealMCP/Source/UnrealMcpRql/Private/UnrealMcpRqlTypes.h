@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+struct FBodyInstance;
+class UPrimitiveComponent;
 class FProperty;
 class UClass;
 class UEnum;
@@ -122,6 +124,18 @@ public:
 	 * (the engine reports the replacement through FCoreUObjectDelegates::OnObjectsReplaced).
 	 */
 	UObject* LiveObject(UObject* Object) const;
+	/**
+	 * The collision members (UnrealMcpRqlCollision.cpp) write a primitive's BodyInstance through its setters, so they share the
+	 * snapshot of BodyInstance writes (ApplyStructSetters): the body as it was before this call's first collision write of
+	 * @p Component (SnapshotCollision takes it on the first). After a setter, SettleCollision checks whether the collision is
+	 * back where it was (the rollback of a failed mutation): the setters leave the profile at Custom and the static mesh's
+	 * default collision off, so both are put back too.
+	 */
+	void SnapshotCollision(UPrimitiveComponent* Component);
+	bool HasCollisionSnapshot(const UPrimitiveComponent* Component);
+	void SettleCollision(UPrimitiveComponent* Component);
+	/** Same effective collision: own CollisionEnabled, ObjectType and the response to every channel (not the profile name). */
+	static bool SameCollision(const FBodyInstance& A, const FBodyInstance& B);
 	/** Whether this call may change the editor (rql-mutate): read-only conveniences that widen a query stay off then. */
 	bool IsMutationRequest() const { return bMutationRequest; }
 	void SetMutationRequest(bool bMutation) { bMutationRequest = bMutation; }

@@ -7,7 +7,9 @@
 #include "UnrealMcpProcessUtil.h"   // shared ResolveDotNetRid + MakeExecutable
 
 #include "Async/Async.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
+#include "Interfaces/IPluginManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
@@ -201,6 +203,23 @@ FString FUnrealMcpServerManager::ResolveBinaryPath() const
 	return FString();
 }
 
+/**
+ * The MCP instructions the local server returns from initialize (GameDev-MCP-Server reads the file MCP_INSTRUCTIONS_FILE names;
+ * older servers ignore it): how to use these tools, shown to the model even before it loads any tool. The child inherits
+ * the editor's environment; a value the user set stays.
+ */
+static void UnrealMcpPointServerAtInstructions()
+{
+	static const TCHAR* EnvVar = TEXT("MCP_INSTRUCTIONS_FILE");
+	if (!FPlatformMisc::GetEnvironmentVariable(EnvVar).IsEmpty())
+		return;
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+	const FString File = Plugin.IsValid()
+		? FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Resources/McpInstructions.md")) : FString();
+	if (!File.IsEmpty() && FPaths::FileExists(File))
+		FPlatformMisc::SetEnvironmentVar(EnvVar, *File);
+}
+
 bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 {
 	uint32 NewProcId = 0;
@@ -293,6 +312,8 @@ bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 	// mcp-authorize g5/g6: LaunchArgs are pre-composed by the .NET sidecar's shared ServerLaunchArguments builder
 	// and passed in — this manager never assembles the none/oauth/token arg string.
 	LaunchArgs = InLaunchArgs;
+	// Here on the game thread, before the first spawn: the watchdog's respawns inherit it.
+	UnrealMcpPointServerAtInstructions();
 
 	// Resolve the binary (override → cache); download on a miss.
 	BinaryPath = ResolveBinaryPath();
@@ -358,6 +379,7 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, const FString& InLau
 
 	ListenPort = Port;
 	LaunchArgs = InLaunchArgs; // pre-composed by the sidecar (g5/g6) — used by the watchdog's respawn closure.
+	UnrealMcpPointServerAtInstructions(); // for the watchdog's respawns of the adopted server
 	BinaryPath = ResolveBinaryPath();
 	{
 		FScopeLock Lock(&ProcessMutex);

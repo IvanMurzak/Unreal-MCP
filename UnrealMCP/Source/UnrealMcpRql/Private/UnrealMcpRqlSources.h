@@ -75,6 +75,9 @@ void UnrealMcpRqlAddSettings(FUnrealMcpRqlSession& Session);
 /** Blueprint graphs: Graphs / Nodes / Pins, node creation, pin connections, Compile; the `blueprints` source. */
 void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session);
 
+/** Collision: PrimitiveComponent CollisionProfile / CollisionEnabled / ObjectType / Responses by channel name (UnrealMcpRqlCollision.cpp). */
+void UnrealMcpRqlAddCollision(FUnrealMcpRqlSession& Session);
+
 /** UMG: Widget Blueprint widget trees (RootWidget, Widgets, AddWidget), panel Children, widget Parent / Destroy. */
 void UnrealMcpRqlAddWidgets(FUnrealMcpRqlSession& Session);
 

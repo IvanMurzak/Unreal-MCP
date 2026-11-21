@@ -19,6 +19,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/CollisionProfile.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
@@ -1534,6 +1535,76 @@ void FUnrealMcpRqlSpec::Define()
 			}
 			const FUnrealMcpRegisteredTool* Mutate = Registry.Find(TEXT("rql-mutate"));
 			TestTrue(TEXT("rql-mutate: the target limit is per statement"), Mutate && Mutate->Description.Contains(TEXT("At most 200 targets per statement")));
+		});
+	});
+
+	Describe("collision", [this]()
+	{
+		It("reads and writes a component's collision by channel name, as the Details panel's Collision section", [this]()
+		{
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
+				return;
+			UStaticMeshComponent* Mesh = nullptr;
+			for (AActor* Actor : Lamps())
+				Mesh = Mesh ? Mesh : Actor->FindComponentByClass<UStaticMeshComponent>();
+			if (!TestNotNull(TEXT("its mesh component"), Mesh))
+				return;
+			Mesh->bUseDefaultCollision = true;
+
+			const TSharedPtr<FJsonObject> Before = Exec(/* actors | where Label == "RqlSpecLampMesh" | get Components | where $ is PrimitiveComponent | select CollisionProfile ObjectType Pawn = Responses["Pawn"] */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"select","fields":[{"name":"CollisionProfile","expr":{"path":["CollisionProfile"]}},{"name":"ObjectType","expr":{"path":["ObjectType"]}},{"name":"Pawn","expr":{"path":["Responses",{"key":"Pawn"}]}}]}]})RQL"));
+			TestTrue(*FString::Printf(TEXT("read (%s)"), *Codes(Before)), IsOk(Before));
+			TestEqual(TEXT("object type by name"), CellText(Before, 0, 1), FString(TEXT("WorldStatic")));
+
+			const TSharedPtr<FJsonObject> Written = Exec(/* ... | set ObjectType = "WorldDynamic", Responses["Pawn"] = "Overlap" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["ObjectType"]},"value":{"lit":"WorldDynamic"}},{"target":{"path":["Responses",{"key":"Pawn"}]},"value":{"lit":"Overlap"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("written (%s)"), *Codes(Written)), IsOk(Written));
+			TestEqual(TEXT("object type"), (int32)Mesh->GetCollisionObjectType(), (int32)ECC_WorldDynamic);
+			TestEqual(TEXT("response"), (int32)Mesh->GetCollisionResponseToChannel(ECC_Pawn), (int32)ECR_Overlap);
+			TestEqual(TEXT("the profile becomes Custom"), Mesh->GetCollisionProfileName(), UCollisionProfile::CustomCollisionProfileName);
+			TestFalse(TEXT("the mesh's default collision is off, so the game keeps it"), (bool)Mesh->bUseDefaultCollision);
+
+			const TSharedPtr<FJsonObject> Trace = Exec(/* ... | set ObjectType = "Visibility" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["ObjectType"]},"value":{"lit":"Visibility"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a trace channel is no object type (%s)"), *Codes(Trace)), !IsOk(Trace) && Codes(Trace).Contains(TEXT("is a trace channel")));
+			const TSharedPtr<FJsonObject> Unknown = Exec(/* ... | set ObjectType = "NoSuchRqlChannel" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["ObjectType"]},"value":{"lit":"NoSuchRqlChannel"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an unknown channel names the channels (%s)"), *Codes(Unknown)), !IsOk(Unknown) && Codes(Unknown).Contains(TEXT("WorldDynamic")));
+			const TSharedPtr<FJsonObject> BadResponse = Exec(/* ... | set Responses["Pawn"] = "Bounce" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["Responses",{"key":"Pawn"}]},"value":{"lit":"Bounce"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a response is Ignore, Overlap or Block (%s)"), *Codes(BadResponse)), !IsOk(BadResponse) && Codes(BadResponse).Contains(TEXT("Ignore, Overlap, Block")));
+			TestEqual(TEXT("refused writes changed nothing"), (int32)Mesh->GetCollisionResponseToChannel(ECC_Pawn), (int32)ECR_Overlap);
+
+			const TSharedPtr<FJsonObject> Profile = Exec(/* ... | set CollisionProfile = "OverlapAll", CollisionEnabled = "QueryOnly" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["CollisionProfile"]},"value":{"lit":"OverlapAll"}},{"target":{"path":["CollisionEnabled"]},"value":{"lit":"QueryOnly"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("a preset (%s)"), *Codes(Profile)), IsOk(Profile));
+			TestEqual(TEXT("preset applied"), Mesh->GetCollisionProfileName(), FName(TEXT("OverlapAll")));
+			TestEqual(TEXT("mode"), (int32)Mesh->GetCollisionEnabled(), (int32)ECollisionEnabled::QueryOnly);
+			const TSharedPtr<FJsonObject> NoProfile = Exec(/* ... | set CollisionProfile = "NoSuchRqlProfile" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["CollisionProfile"]},"value":{"lit":"NoSuchRqlProfile"}}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("an unknown preset lists the presets (%s)"), *Codes(NoProfile)), !IsOk(NoProfile) && Codes(NoProfile).Contains(TEXT("BlockAll")));
+		});
+
+		It("rolls a refused collision mutation back whole: profile, object type and the mesh's default collision", [this]()
+		{
+			if (!TestTrue(TEXT("mesh actor"), SpawnMesh()))
+				return;
+			UStaticMeshComponent* Mesh = nullptr;
+			for (AActor* Actor : Lamps())
+				Mesh = Mesh ? Mesh : Actor->FindComponentByClass<UStaticMeshComponent>();
+			if (!TestNotNull(TEXT("its mesh component"), Mesh))
+				return;
+			Mesh->bUseDefaultCollision = true;
+			const FName Profile = Mesh->GetCollisionProfileName();
+			const ECollisionChannel ObjectType = Mesh->GetCollisionObjectType();
+			const TSharedPtr<FJsonObject> Refused = Exec(/* ... | set ObjectType = "WorldDynamic", Responses["Pawn"] = "Bounce" */ TEXT(R"RQL({"rql":"0.1","source":{"path":["actors"]},"stages":[{"op":"where","pred":{"op":"==","args":[{"path":["Label"]},{"lit":"RqlSpecLampMesh"}]}},{"op":"get","expr":{"path":["Components"]}},{"op":"where","pred":{"op":"is","args":[{"path":[]},{"lit":"PrimitiveComponent"}]}},{"op":"set","assign":[{"target":{"path":["ObjectType"]},"value":{"lit":"WorldDynamic"}},{"target":{"path":["Responses",{"key":"Pawn"}]},"value":{"lit":"Bounce"}}]}]})RQL"), true);
+			TestFalse(*FString::Printf(TEXT("refused (%s)"), *Codes(Refused)), IsOk(Refused));
+			TestEqual(TEXT("object type back"), (int32)Mesh->GetCollisionObjectType(), (int32)ObjectType);
+			TestEqual(TEXT("profile back, not Custom"), Mesh->GetCollisionProfileName(), Profile);
+			TestTrue(TEXT("the mesh's default collision back on"), (bool)Mesh->bUseDefaultCollision);
+		});
+
+		It("refuses a collision channel whose name is taken or invalid, without touching the ini", [this]()
+		{
+			const TSharedPtr<FJsonObject> Taken = Exec(/* editor | call AddCollisionChannel("Pawn") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddCollisionChannel","args":[{"lit":"Pawn"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("taken (%s)"), *Codes(Taken)), !IsOk(Taken) && Codes(Taken).Contains(TEXT("already has a collision channel 'Pawn'")));
+			const TSharedPtr<FJsonObject> Invalid = Exec(/* editor | call AddCollisionChannel("Two Words") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddCollisionChannel","args":[{"lit":"Two Words"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("invalid (%s)"), *Codes(Invalid)), !IsOk(Invalid) && Codes(Invalid).Contains(TEXT("not a valid channel name")));
+			const TSharedPtr<FJsonObject> Response = Exec(/* editor | call AddCollisionChannel("RqlSpecChannel", "Bounce") */ TEXT(R"RQL({"rql":"0.1","source":{"path":["editor"]},"stages":[{"op":"call","method":"AddCollisionChannel","args":[{"lit":"RqlSpecChannel"},{"lit":"Bounce"}]}]})RQL"), true);
+			TestTrue(*FString::Printf(TEXT("bad default response (%s)"), *Codes(Response)), !IsOk(Response) && Codes(Response).Contains(TEXT("Ignore, Overlap, Block")));
 		});
 	});
 

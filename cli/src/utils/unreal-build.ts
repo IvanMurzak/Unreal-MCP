@@ -82,6 +82,11 @@ export function corePluginNeedsBuild(
   return !treeHasFileMatching(binariesDir, (name) => config.moduleLibraryPattern.test(name));
 }
 
+/** The project has editor module binaries from an earlier build (what `open --no-build` starts on). */
+export function projectHasEditorBinaries(projectDir: string, platform: DesktopBuildPlatform): boolean {
+  return fs.existsSync(path.join(projectDir, 'Binaries', BUILD_CONFIG[platform].pluginBinariesDir, 'UnrealEditor.modules'));
+}
+
 export function projectHasNativeCode(projectDir: string): boolean {
   const sourceRoot = path.join(projectDir, 'Source');
   return treeHasFileMatching(

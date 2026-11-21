@@ -32,6 +32,8 @@
 #include "Builders/CubeBuilder.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataTable.h"
+#include "Blueprint/UserWidget.h"
+#include "Factories/BlueprintFactory.h"
 #include "Factories/DataTableFactory.h"
 #include "Factories/Factory.h"
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
@@ -40,6 +42,7 @@
 #include "GameFramework/Volume.h"
 #include "HAL/IConsoleManager.h"
 #include "IAssetTools.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/ITransaction.h"
@@ -50,6 +53,8 @@
 #include "ObjectTools.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "UObject/Package.h"
+#include "WidgetBlueprint.h"
+#include "WidgetBlueprintFactory.h"
 
 
 namespace UnrealMcpRqlEditorApiLocal
@@ -667,6 +672,35 @@ UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString&
 	if (!Class)
 		return Failed<UObject*>(FString::Printf(TEXT("'%s' is not an asset class (actors are spawned: SpawnActor)"), *ClassName));
 	return UnrealMcpRql::CreateAsset(Class, Path);
+}
+
+UBlueprint* UUnrealMcpRqlEditorApi::CreateBlueprint(const FString& Path, const FString& ParentClass)
+{
+	UClass* Parent = FUnrealMcpObjectRef::ResolveClass(ParentClass); // a class name or path, or a Blueprint asset path
+	if (!Parent || !FKismetEditorUtilities::CanCreateBlueprintOfClass(Parent))
+		return Failed<UBlueprint*>(FString::Printf(TEXT("'%s' is not a class a Blueprint can derive from (e.g. \"Actor\", \"Character\", \"UserWidget\", a Blueprint path)"),
+			*ParentClass));
+	FString Folder, Name;
+	if (!ValidateNewAssetPath(Path, Folder, Name))
+		return nullptr;
+	UObject* Created = nullptr;
+	if (Parent->IsChildOf(UUserWidget::StaticClass()))
+	{
+		// The Content Browser's User Interface > Widget Blueprint with this parent: a Widget Blueprint (Designer + graph).
+		UWidgetBlueprintFactory* Factory = NewObject<UWidgetBlueprintFactory>(GetTransientPackage());
+		FGCObjectScopeGuard FactoryGuard(Factory);
+		Factory->ParentClass = Parent;
+		Created = AssetTools().CreateAsset(Name, Folder, UWidgetBlueprint::StaticClass(), Factory);
+	}
+	else
+	{
+		UBlueprintFactory* Factory = NewObject<UBlueprintFactory>(GetTransientPackage());
+		FGCObjectScopeGuard FactoryGuard(Factory);
+		Factory->ParentClass = Parent;
+		Created = AssetTools().CreateAsset(Name, Folder, UBlueprint::StaticClass(), Factory);
+	}
+	UBlueprint* Blueprint = Cast<UBlueprint>(Created);
+	return Blueprint ? Blueprint : Failed<UBlueprint*>(FString::Printf(TEXT("could not create a Blueprint of %s at '%s'"), *Parent->GetName(), *Path));
 }
 
 UMaterialInstanceConstant* UUnrealMcpRqlEditorApi::CreateMaterialInstance(const FString& Path, UMaterialInterface* Parent)

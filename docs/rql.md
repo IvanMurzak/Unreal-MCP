@@ -215,7 +215,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
 | `unloadedActors` | the World Partition actors of the open level that are not loaded (see [World Partition](#world-partition)) |
 | `selection` | the selected actors (`editor | set Selection = [...]` writes it) |
 | `playActors` | every actor of the running Play In Editor world (empty when not playing) |
-| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole`, `Undo(Steps = 1)` / `Redo(Steps = 1)` (as Ctrl+Z / Ctrl+Y: return the titles of the steps they took, refuse with nothing done when fewer steps exist, add no undo step of their own: `meta = (RqlOwnUndo)` keeps the session's transaction out), `LoadActors` / `LoadRegion` ([World Partition](#world-partition)) |
+| `editor` | editor state (`IsPlaying`, `IsPaused` — writable, `PlayState` (see Play testing), `Selection`, `World`, `CurrentLevel`; the transaction buffer: `NextUndo`, `NextRedo`, `UndoHistory`, `RedoHistory` — titles, next first — `UndoCount`, `RedoCount`) and operations: `SpawnActor` (a class, Blueprint name or path, or an asset to place: a StaticMesh path gives a StaticMeshActor; a volume class gets the editor's 200 cm box brush, sized with `Scale`; label, location, rotation, parent and scale are optional), `SpawnActorFromAsset` (an asset path only, placed as drag and drop does), `OpenLevel`, `NewLevel`, `SaveLevel`, `SaveAll`, `AddSublevel` (a saved map as a streaming sublevel; not undoable, the current level stays; refused in World Partition worlds), `UnloadSublevel` (a level by its map name), `CreateAsset`, `CreateBlueprint` (Widget Blueprints too, [Widget Blueprints](#widget-blueprints)), `CopyAsset`, `MoveAsset`, `DeleteAsset`, `CreateFolder`, `RefreshAssets`, `CreateMaterialInstance`, `ImportAsset` (returns every asset the import created: the mesh, then its materials, textures, skeleton), `SaveAsset`, `ClearConsole`, `AddCollisionChannel` ([Collision](#collision)), `Undo(Steps = 1)` / `Redo(Steps = 1)` (as Ctrl+Z / Ctrl+Y: return the titles of the steps they took, refuse with nothing done when fewer steps exist, add no undo step of their own: `meta = (RqlOwnUndo)` keeps the session's transaction out), `LoadActors` / `LoadRegion` ([World Partition](#world-partition)) |
 | `console` | editor log entries (`Sequence`, `Time`, `Verbosity`, `Category`, `Message`) |
 | `diagnostics` | the editor's current warnings and errors (`Sequence`, `Source`, `Severity`, `Message`, `Count`, `FirstSeen`, `LastSeen`; see [Editor diagnostics](#editor-diagnostics)) |
 | `unreal.find(label)` | an actor by label, name or path (see [Finding actors](#finding-actors)) |
@@ -443,7 +443,10 @@ writable).
   functions)`, `AddVariableGet(name)`, `AddVariableSet(name)` (another class's variable as `"BP_Player.Score"`: the node
   takes the object on its Target pin), `AddInputKey("SpaceBar")` (a key event: `Pressed` / `Released`),
   `AddEvent("BeginPlay")` (overridable events of the parent class; enables the editor's placeholder node when there is
-  one), `AddCustomEvent(name)`, `AddCast(class)`, `AddNode("Branch" | "Sequence" | "Self" | a standard macro such as
+  one; `"StartButton.OnClicked"` or the editor's title `"OnClicked (StartButton)"` adds that component's event),
+  `AddComponentEvent(component, event)` (an event of a component or widget variable, as the Details panel's `+` next to
+  `OnClicked` / `OnComponentBeginOverlap` adds it: a `UK2Node_ComponentBoundEvent`; a widget that is not a variable yet
+  becomes one), `AddCustomEvent(name)`, `AddCast(class)`, `AddNode("Branch" | "Sequence" | "Self" | a standard macro such as
   "ForLoop", "ForEachLoop", "DoOnce", "Gate")`.
 - `UEdGraphNode`: `Title`, `X`, `Y`, `Comment`, `Enabled` (writable), `Error` (the last compile's message), `Graph`,
   `Pins`; calls `Connect(pin, target, targetPin)`, `Disconnect(…)`, `BreakLinks(pin?)`, `SetPinDefault(pin, value)`,
@@ -472,6 +475,23 @@ New widgets are registered with the Blueprint (a variable only while `IsVariable
 changes mark the Blueprint structurally modified and property edits mark it modified (compile to apply them). The
 widgets of a Widget Blueprint are templates of its generated class but its design data: writable here, unlike other
 class defaults.
+
+`editor | call CreateBlueprint(path, parentClass)` creates a Blueprint class (`"Actor"`, `"Character"`, a C++ class, a
+Blueprint path); a User Widget parent class (`"UserWidget"` or a C++ subclass) makes a Widget Blueprint, as the Content
+Browser's Widget Blueprint with that parent does.
+
+### Collision
+
+`UPrimitiveComponent` gets the Details panel's Collision section under the channel names Project Settings shows
+(`WorldStatic`, `Pawn`, `Visibility`, a project channel such as `Debris`; `ECC_*` enum names are accepted too):
+`CollisionProfile` (a preset: `BlockAll`, `Pawn`, `Custom`, a project profile), `CollisionEnabled` (`NoCollision`,
+`QueryOnly`, `PhysicsOnly`, `QueryAndPhysics`), `ObjectType` (object channels only) and `Responses` (channel name →
+`Ignore` / `Overlap` / `Block`, writable per channel: `set Responses["Debris"] = "Ignore"`). Writing `ObjectType` or a
+response makes the profile `Custom` and, on a static mesh component, turns off `bUseDefaultCollision` (otherwise the
+game applies the mesh's collision again on load), as the panel does. `editor | call AddCollisionChannel(name,
+defaultResponse = "Block", bTraceChannel = false)` adds a project channel in the first free `ECC_GameTraceChannelN` (the
+New Object Channel / New Trace Channel buttons), saves `DefaultEngine.ini` at once (not undoable) and reloads the
+profiles so the name resolves; it returns the engine channel.
 
 ### User-defined structs
 
