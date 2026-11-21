@@ -39,8 +39,12 @@ namespace UnrealMcpRqlCollisionLocal
 	/** The project's custom channels (Project Settings > Collision): UCollisionProfile keeps them private, reflection reads them. */
 	TArray<FCustomChannelSetup>& CustomChannelSetups()
 	{
-		FArrayProperty* Property = FindFProperty<FArrayProperty>(UCollisionProfile::StaticClass(), TEXT("DefaultChannelResponses"));
-		if (!Property || Property->Inner->GetCPPType() != TEXT("FCustomChannelSetup"))
+		static FArrayProperty* const Property = []() -> FArrayProperty*
+		{
+			FArrayProperty* Found = FindFProperty<FArrayProperty>(UCollisionProfile::StaticClass(), TEXT("DefaultChannelResponses"));
+			return Found && Found->Inner->GetCPPType() == TEXT("FCustomChannelSetup") ? Found : nullptr;
+		}();
+		if (!Property)
 			Throw(TEXT("this engine version keeps its collision channels where Unreal-MCP cannot read them"));
 		return *Property->ContainerPtrToValuePtr<TArray<FCustomChannelSetup>>(UCollisionProfile::Get());
 	}
@@ -59,10 +63,10 @@ namespace UnrealMcpRqlCollisionLocal
 		return Out;
 	}
 
-	FString ChannelNames(bool bObjectOnly)
+	FString ChannelNames(const TArray<FChannel>& All, bool bObjectOnly)
 	{
 		TArray<FString> Names;
-		for (const FChannel& Channel : Channels())
+		for (const FChannel& Channel : All)
 		{
 			if (!bObjectOnly || !Channel.bTrace)
 				Names.Add(Channel.Name.ToString());
@@ -70,43 +74,35 @@ namespace UnrealMcpRqlCollisionLocal
 		return FString::Join(Names, TEXT(", "));
 	}
 
-	/** "Debris", "WorldStatic", "ECC_WorldStatic" or "ECC_GameTraceChannel1" (the enum name of a custom channel). */
-	FChannel ResolveChannel(const FString& Text, bool bObjectOnly)
+	/** The channel of @p All named "Debris", "WorldStatic", "ECC_WorldStatic" or "ECC_GameTraceChannel1" (a custom channel's enum name). */
+	const FChannel* FindChannel(const TArray<FChannel>& All, const FString& Text)
 	{
 		FString Wanted = Text.TrimStartAndEnd();
 		Wanted.RemoveFromStart(TEXT("ECC_"));
 		const UEnum* Enum = StaticEnum<ECollisionChannel>();
-		for (const FChannel& Channel : Channels())
+		return All.FindByPredicate([&Wanted, Enum](const FChannel& Channel)
 		{
 			FString EnumName = Enum ? Enum->GetNameStringByValue(Channel.Channel) : FString();
 			EnumName.RemoveFromStart(TEXT("ECC_"));
-			if (Channel.Name.ToString().Equals(Wanted, ESearchCase::IgnoreCase) || EnumName.Equals(Wanted, ESearchCase::IgnoreCase))
-			{
-				if (bObjectOnly && Channel.bTrace)
-					Throw(FString::Printf(TEXT("'%s' is a trace channel, not an object type (object types: %s)"), *Text, *ChannelNames(true)));
-				return Channel;
-			}
-		}
-		Throw(FString::Printf(TEXT("no collision channel '%s' (channels: %s; add one with editor | call AddCollisionChannel(\"%s\"))"),
-			*Text, *ChannelNames(bObjectOnly), *Wanted));
+			return Channel.Name.ToString().Equals(Wanted, ESearchCase::IgnoreCase) || EnumName.Equals(Wanted, ESearchCase::IgnoreCase);
+		});
+	}
+
+	FChannel ResolveChannel(const FString& Text, bool bObjectOnly)
+	{
+		const TArray<FChannel> All = Channels();
+		const FChannel* Found = FindChannel(All, Text);
+		if (!Found)
+			Throw(FString::Printf(TEXT("no collision channel '%s' (channels: %s; add one with editor | call AddCollisionChannel(\"%s\"))"),
+				*Text, *ChannelNames(All, bObjectOnly), *Text.TrimStartAndEnd()));
+		if (bObjectOnly && Found->bTrace)
+			Throw(FString::Printf(TEXT("'%s' is a trace channel, not an object type (object types: %s)"), *Text, *ChannelNames(All, true)));
+		return *Found;
 	}
 
 	FString ChannelName(ECollisionChannel Channel)
 	{
 		return UCollisionProfile::Get()->ReturnChannelNameFromContainerIndex(Channel).ToString();
-	}
-
-	ECollisionResponse ResolveResponse(const rql::Value& Value)
-	{
-		FString Text = TextArg(Value).TrimStartAndEnd();
-		Text.RemoveFromStart(TEXT("ECR_"));
-		if (Text.Equals(TEXT("Ignore"), ESearchCase::IgnoreCase))
-			return ECR_Ignore;
-		if (Text.Equals(TEXT("Overlap"), ESearchCase::IgnoreCase))
-			return ECR_Overlap;
-		if (Text.Equals(TEXT("Block"), ESearchCase::IgnoreCase))
-			return ECR_Block;
-		Throw(FString::Printf(TEXT("'%s' is not a collision response (Ignore, Overlap, Block)"), *TextArg(Value)));
 	}
 
 	const TCHAR* ResponseName(ECollisionResponse Response)
@@ -117,6 +113,31 @@ namespace UnrealMcpRqlCollisionLocal
 		case ECR_Overlap: return TEXT("Overlap");
 		default: return TEXT("Block");
 		}
+	}
+
+	const TCHAR* const ResponseNames = TEXT("Ignore, Overlap, Block");
+
+	bool TryParseResponse(const FString& Text, ECollisionResponse& Out)
+	{
+		FString Name = Text.TrimStartAndEnd();
+		Name.RemoveFromStart(TEXT("ECR_"));
+		for (const ECollisionResponse Response : { ECR_Ignore, ECR_Overlap, ECR_Block })
+		{
+			if (Name.Equals(ResponseName(Response), ESearchCase::IgnoreCase))
+			{
+				Out = Response;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	ECollisionResponse ResolveResponse(const rql::Value& Value)
+	{
+		ECollisionResponse Response = ECR_Block;
+		if (!TryParseResponse(TextArg(Value), Response))
+			Throw(FString::Printf(TEXT("'%s' is not a collision response (%s)"), *TextArg(Value), ResponseNames));
+		return Response;
 	}
 
 	/**
@@ -149,15 +170,11 @@ namespace UnrealMcpRqlCollisionLocal
 		{
 			if (!Key.is_string())
 				return rql::MapLookup::BadKey;
-			for (const FChannel& Channel : Channels())
-			{
-				if (Channel.Name.ToString().Equals(TextArg(Key), ESearchCase::IgnoreCase))
-				{
-					Out = Str(ResponseName(Component->GetCollisionResponseToChannel(Channel.Channel)));
-					return rql::MapLookup::Found;
-				}
-			}
-			return rql::MapLookup::NotFound;
+			const FChannel* Channel = FindChannel(Channels(), TextArg(Key));
+			if (!Channel)
+				return rql::MapLookup::NotFound;
+			Out = Str(ResponseName(Component->GetCollisionResponseToChannel(Channel->Channel)));
+			return rql::MapLookup::Found;
 		}
 		const rql::TypeDescriptor* type() const override { return Type; }
 		const void* identity() const override { return this; }
@@ -248,8 +265,8 @@ namespace UnrealMcpRqlCollisionLocal
 						return;
 					}
 				}
-				Throw(FString::Printf(TEXT("'%s' is not a collision mode (NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics)"), *Text));
-			}, "NoCollision, QueryOnly, PhysicsOnly or QueryAndPhysics"));
+				Throw(FString::Printf(TEXT("'%s' is not a collision mode (NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics, ProbeOnly, QueryAndProbe)"), *Text));
+			}, "NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics, ProbeOnly or QueryAndProbe"));
 		const rql::TypeDescriptor* MapType = T.Registry().map_type(String, String, false);
 		FUnrealMcpRqlTypes::SetMember(D, Member("Responses", MapType, [Primitive, MapType](void* Self)
 		{
@@ -263,23 +280,22 @@ FString UUnrealMcpRqlEditorApi::AddCollisionChannel(const FString& Name, const F
 	using namespace UnrealMcpRqlCollisionLocal;
 	using UnrealMcpRql::Failed;
 	const FString Trimmed = Name.TrimStartAndEnd();
-	if (Trimmed.IsEmpty() || !FName::IsValidXName(Trimmed, INVALID_OBJECTNAME_CHARACTERS) || Trimmed.Contains(TEXT(" ")))
+	if (Trimmed.IsEmpty() || !FName::IsValidXName(Trimmed, INVALID_OBJECTNAME_CHARACTERS))
 		return Failed<FString>(FString::Printf(TEXT("'%s' is not a valid channel name"), *Name));
 	ECollisionResponse Response = ECR_Block;
-	FString ResponseError;
+	if (!TryParseResponse(DefaultResponse, Response))
+		return Failed<FString>(FString::Printf(TEXT("'%s' is not a collision response (%s)"), *DefaultResponse, ResponseNames));
+	TArray<FChannel> All;
 	try
 	{
-		Response = ResolveResponse(rql::Value::string(UnrealMcpRqlToStd(DefaultResponse)));
-		for (const FChannel& Channel : Channels())
-		{
-			if (Channel.Name.ToString().Equals(Trimmed, ESearchCase::IgnoreCase))
-				return Failed<FString>(FString::Printf(TEXT("the project already has a collision channel '%s'"), *Channel.Name.ToString()));
-		}
+		All = Channels();
 	}
 	catch (const std::exception& Error)
 	{
 		return Failed<FString>(UnrealMcpRqlFromStd(Error.what()));
 	}
+	if (const FChannel* Taken = FindChannel(All, Trimmed))
+		return Failed<FString>(FString::Printf(TEXT("the project already has a collision channel '%s'"), *Taken->Name.ToString()));
 	TArray<FCustomChannelSetup>& Setups = CustomChannelSetups();
 	ECollisionChannel Free = ECC_MAX;
 	for (int32 Index = ECC_GameTraceChannel1; Index <= ECC_GameTraceChannel18 && Free == ECC_MAX; ++Index)

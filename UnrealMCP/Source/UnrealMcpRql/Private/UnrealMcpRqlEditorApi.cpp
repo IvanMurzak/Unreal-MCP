@@ -676,12 +676,7 @@ UObject* UUnrealMcpRqlEditorApi::CreateAsset(const FString& Path, const FString&
 
 UBlueprint* UUnrealMcpRqlEditorApi::CreateBlueprint(const FString& Path, const FString& ParentClass)
 {
-	UClass* Parent = FUnrealMcpObjectRef::ResolveClass(ParentClass);
-	if (!Parent)
-	{
-		if (const UBlueprint* ParentBlueprint = LoadObject<UBlueprint>(nullptr, *ParentClass, nullptr, LOAD_NoWarn | LOAD_Quiet))
-			Parent = ParentBlueprint->GeneratedClass;
-	}
+	UClass* Parent = FUnrealMcpObjectRef::ResolveClass(ParentClass); // a class name or path, or a Blueprint asset path
 	if (!Parent || !FKismetEditorUtilities::CanCreateBlueprintOfClass(Parent))
 		return Failed<UBlueprint*>(FString::Printf(TEXT("'%s' is not a class a Blueprint can derive from (e.g. \"Actor\", \"Character\", \"UserWidget\", a Blueprint path)"),
 			*ParentClass));

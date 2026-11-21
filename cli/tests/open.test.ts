@@ -401,9 +401,9 @@ describe('openProject', () => {
     const dir = tmp();
     writeUProject(dir, 'MyGame', '5.7');
     writeNativeSourceLayout(dir, 'MyGame');
-    const [folder, ext] = process.platform === 'win32' ? ['Win64', '.dll'] : process.platform === 'darwin' ? ['Mac', '.dylib'] : ['Linux', '.so'];
+    const folder = process.platform === 'win32' ? 'Win64' : process.platform === 'darwin' ? 'Mac' : 'Linux';
     fs.mkdirSync(path.join(dir, 'Binaries', folder), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'Binaries', folder, `UnrealEditor-MyGame${ext}`), '');
+    fs.writeFileSync(path.join(dir, 'Binaries', folder, 'UnrealEditor.modules'), '{}');
     const r = await openProject({
       projectDir: dir,
       autoDismissStartupDialogs: false,

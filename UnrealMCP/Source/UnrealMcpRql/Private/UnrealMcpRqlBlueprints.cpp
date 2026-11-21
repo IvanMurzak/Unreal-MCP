@@ -41,6 +41,7 @@
 #include "Misc/ITransaction.h"
 #include "UObject/UObjectHash.h"
 #include "UObject/UnrealType.h"
+#include "BaseWidgetBlueprint.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
@@ -429,46 +430,38 @@ namespace UnrealMcpRqlBlueprintsLocal
 		FObjectProperty* Property = FindObjectVariable(Blueprint, Wanted);
 		if (!Property)
 		{
-			bool bKnown = false;
-			TArray<FString> Candidates;
-			if (UWidgetBlueprint* Designer = Cast<UWidgetBlueprint>(Blueprint))
+			const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint);
+			UWidget* Widget = Designer && Designer->WidgetTree ? Designer->WidgetTree->FindWidget(Wanted) : nullptr;
+			const bool bComponent = Blueprint->SimpleConstructionScript && Blueprint->SimpleConstructionScript->FindSCSNode(Wanted);
+			if (Widget && !Widget->bIsVariable)
 			{
-				TArray<UWidget*> Widgets;
-				if (Designer->WidgetTree)
-					Designer->WidgetTree->GetAllWidgets(Widgets);
-				for (UWidget* Widget : Widgets)
-				{
-					Candidates.Add(Widget->GetName());
-					if (Widget->GetFName() == Wanted)
-					{
-						bKnown = true;
-						if (!Widget->bIsVariable)
-						{
-							Widget->Modify();
-							Widget->bIsVariable = true;
-						}
-					}
-				}
+				Widget->Modify();
+				Widget->bIsVariable = true;
 			}
-			if (Blueprint->SimpleConstructionScript)
-			{
-				for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
-				{
-					if (!Node)
-						continue;
-					Candidates.Add(Node->GetVariableName().ToString());
-					bKnown |= Node->GetVariableName() == Wanted;
-				}
-			}
-			if (bKnown)
+			if (Widget || bComponent)
 			{
 				// Regenerates the skeleton class, which then has the variable.
 				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 				Property = FindObjectVariable(Blueprint, Wanted);
 			}
-			if (!Property)
-				Throw(FString::Printf(TEXT("%s has no component or widget named '%s'%s"), *Blueprint->GetName(), *Name,
-					Candidates.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (it has: %s)"), *FString::Join(Candidates, TEXT(", ")))));
+		}
+		if (!Property)
+		{
+			TArray<FString> Candidates;
+			if (const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint); Designer && Designer->WidgetTree)
+			{
+				Designer->WidgetTree->ForEachWidget([&Candidates](UWidget* Widget) { Candidates.Add(Widget->GetName()); });
+			}
+			if (Blueprint->SimpleConstructionScript)
+			{
+				for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+				{
+					if (Node)
+						Candidates.Add(Node->GetVariableName().ToString());
+				}
+			}
+			const FString Has = Candidates.IsEmpty() ? FString() : FString::Printf(TEXT(" (it has: %s)"), *FString::Join(Candidates, TEXT(", ")));
+			Throw(FString::Printf(TEXT("%s has no component or widget named '%s'%s"), *Blueprint->GetName(), *Name, *Has));
 		}
 		if (!Property->PropertyClass)
 			Throw(FString::Printf(TEXT("'%s' is not a component or widget"), *Name));

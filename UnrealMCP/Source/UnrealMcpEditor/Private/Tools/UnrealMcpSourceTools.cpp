@@ -962,10 +962,11 @@ namespace UnrealMcpSourceTools
 				const bool bUseLiveCoding = Call.GetBool(TEXT("useLiveCoding"), true);
 
 				const FString ProjectName = FApp::GetProjectName();
+				const FString DefaultEditorTarget = ProjectName + TEXT("Editor");
 				FString TargetName = Call.GetString(TEXT("target"));
 				if (TargetName.IsEmpty())
 				{
-					TargetName = ProjectName + TEXT("Editor");
+					TargetName = DefaultEditorTarget;
 				}
 
 				// Reflected headers changed since the editor started (a new UCLASS, a UPROPERTY added): Live Coding cannot
@@ -1089,7 +1090,7 @@ namespace UnrealMcpSourceTools
 				// The default Editor target in a running editor: link the loaded project modules under a suffix (see
 				// LoadedProjectModules) instead of failing on their locked DLLs. Other targets (the game) are not locked.
 				TArray<FString> SuffixedModules;
-				if (TargetName == ProjectName + TEXT("Editor"))
+				if (TargetName == DefaultEditorTarget)
 				{
 					SuffixedModules = LoadedProjectModules();
 					const int32 Suffix = FMath::RandRange(1000, 9999);
