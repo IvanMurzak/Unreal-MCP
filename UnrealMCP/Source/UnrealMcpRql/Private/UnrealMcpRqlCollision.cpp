@@ -169,10 +169,10 @@ namespace UnrealMcpRqlCollisionLocal
 	}
 
 	/**
-	 * One collision member write through the engine setters (@p Apply), with the BodyInstance write path's rules: a value that
-	 * is already there changes nothing; a value the body had before this call's first collision write (the rollback of a
-	 * failed mutation) restores that whole state, profile and default collision included (FUnrealMcpRqlTypes::FirstCollision);
-	 * a Blueprint's component template passes the change on to the placed components that still hold its old value.
+	 * One collision member write through the engine setters (@p Apply), as the BodyInstance write path does: a value that is
+	 * already there changes nothing; afterwards a body back at its collision before this call's first collision write (the
+	 * rollback of a failed mutation) gets its profile and default collision back (FUnrealMcpRqlTypes::SettleCollision); a
+	 * Blueprint's component template passes the change on to the placed components that do not override its collision.
 	 * @p Read gives the member's value of a body, as the member reads it.
 	 */
 	void WriteCollision(FUnrealMcpRqlTypes& T, void* Self, const FString& Wanted, TFunctionRef<FString(const FBodyInstance&)> Read,
@@ -190,23 +190,23 @@ namespace UnrealMcpRqlCollisionLocal
 			for (UObject* Instance : Instances)
 			{
 				UPrimitiveComponent* Placed = Cast<UPrimitiveComponent>(Instance);
-				if (IsValid(Placed) && Placed->GetArchetype() == &Component && !(Placed->GetWorld() && Placed->GetWorld()->IsGameWorld())
-					&& Read(Placed->BodyInstance) == Old)
+				if (!IsValid(Placed) || Placed->GetArchetype() != &Component || (Placed->GetWorld() && Placed->GetWorld()->IsGameWorld()))
+					continue;
+				// One that followed an earlier write of this call follows this one; any other only when it holds the
+				// template's collision (no override of its own).
+				const bool bFollows = T.HasCollisionSnapshot(Placed)
+					? Read(Placed->BodyInstance) == Old
+					: FUnrealMcpRqlTypes::SameCollision(Placed->BodyInstance, Component.BodyInstance);
+				if (bFollows)
 					Targets.Add(Placed);
 			}
 		}
-		const bool bRestore = Read(T.FirstCollision(&Component)) == Wanted;
 		for (UPrimitiveComponent* Target : Targets)
 		{
-			if (bRestore)
-			{
-				T.RestoreFirstCollision(Target);
-				if (Read(Target->BodyInstance) == Wanted)
-					continue;
-			}
-			T.FirstCollision(Target);
+			T.SnapshotCollision(Target);
 			BeginCollisionEdit(*Target);
 			Apply(*Target);
+			T.SettleCollision(Target);
 		}
 	}
 

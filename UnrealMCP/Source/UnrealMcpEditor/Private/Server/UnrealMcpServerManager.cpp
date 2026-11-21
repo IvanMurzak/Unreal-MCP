@@ -379,6 +379,7 @@ bool FUnrealMcpServerManager::ReattachIfRunning(int32 Port, const FString& InLau
 
 	ListenPort = Port;
 	LaunchArgs = InLaunchArgs; // pre-composed by the sidecar (g5/g6) — used by the watchdog's respawn closure.
+	UnrealMcpPointServerAtInstructions(); // for the watchdog's respawns of the adopted server
 	BinaryPath = ResolveBinaryPath();
 	{
 		FScopeLock Lock(&ProcessMutex);

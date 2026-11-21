@@ -1535,47 +1535,53 @@ bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Pro
 	return bDefaultCollisionOff;
 }
 
-bool FUnrealMcpRqlTypes::CopyCollisionMembers(void* To, const void* From)
+static SIZE_T UnrealMcpRqlBodyOffset(const UPrimitiveComponent* Component)
 {
-	static const FName Names[] = { TEXT("CollisionProfileName"), TEXT("CollisionEnabled"), TEXT("ObjectType"), TEXT("CollisionResponses") };
-	bool bAll = true;
-	for (const FName& Name : Names)
-	{
-		if (const FProperty* Member = FBodyInstance::StaticStruct()->FindPropertyByName(Name))
-			Member->CopyCompleteValue_InContainer(To, From);
-		else
-			bAll = false;
-	}
-	return bAll;
+	return reinterpret_cast<const uint8*>(&Component->BodyInstance) - reinterpret_cast<const uint8*>(Component);
 }
 
-const FBodyInstance& FUnrealMcpRqlTypes::FirstCollision(UPrimitiveComponent* Component)
+void FUnrealMcpRqlTypes::SnapshotCollision(UPrimitiveComponent* Component)
 {
-	const SIZE_T Offset = reinterpret_cast<const uint8*>(&Component->BodyInstance) - reinterpret_cast<const uint8*>(Component);
-	FBodySnapshot* Snapshot = FindBodySnapshot(Component, Offset);
-	if (!Snapshot)
-	{
-		Snapshot = &BodySnapshots.Add({ Component, Offset });
-		Snapshot->Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
-		FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot->Body->GetStructMemory(), &Component->BodyInstance);
-		const UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component);
-		Snapshot->bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
-	}
-	return *reinterpret_cast<const FBodyInstance*>(Snapshot->Body->GetStructMemory());
+	const SIZE_T Offset = UnrealMcpRqlBodyOffset(Component);
+	if (FindBodySnapshot(Component, Offset))
+		return;
+	FBodySnapshot& Snapshot = BodySnapshots.Add({ Component, Offset });
+	Snapshot.Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
+	FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot.Body->GetStructMemory(), &Component->BodyInstance);
+	const UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component);
+	Snapshot.bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
 }
 
-void FUnrealMcpRqlTypes::RestoreFirstCollision(UPrimitiveComponent* Component)
+bool FUnrealMcpRqlTypes::HasCollisionSnapshot(const UPrimitiveComponent* Component)
 {
-	const SIZE_T Offset = reinterpret_cast<const uint8*>(&Component->BodyInstance) - reinterpret_cast<const uint8*>(Component);
-	const FBodySnapshot* Snapshot = FindBodySnapshot(Component, Offset);
+	return FindBodySnapshot(Component, UnrealMcpRqlBodyOffset(Component)) != nullptr;
+}
+
+bool FUnrealMcpRqlTypes::SameCollision(const FBodyInstance& A, const FBodyInstance& B)
+{
+	if (A.GetCollisionEnabled(/*bCheckOwner*/ false) != B.GetCollisionEnabled(/*bCheckOwner*/ false) || A.GetObjectType() != B.GetObjectType())
+		return false;
+	for (int32 Channel = 0; Channel < ECC_MAX; ++Channel)
+	{
+		if (A.GetResponseToChannel(static_cast<ECollisionChannel>(Channel)) != B.GetResponseToChannel(static_cast<ECollisionChannel>(Channel)))
+			return false;
+	}
+	return true;
+}
+
+void FUnrealMcpRqlTypes::SettleCollision(UPrimitiveComponent* Component)
+{
+	const FBodySnapshot* Snapshot = FindBodySnapshot(Component, UnrealMcpRqlBodyOffset(Component));
 	if (!Snapshot)
 		return;
-	Component->Modify();
-	CopyCollisionMembers(&Component->BodyInstance, Snapshot->Body->GetStructMemory());
+	const FBodyInstance& First = *reinterpret_cast<const FBodyInstance*>(Snapshot->Body->GetStructMemory());
+	if (!SameCollision(Component->BodyInstance, First))
+		return;
+	static const FName ProfileName(TEXT("CollisionProfileName"));
+	if (const FProperty* Profile = FBodyInstance::StaticStruct()->FindPropertyByName(ProfileName))
+		Profile->CopyCompleteValue_InContainer(&Component->BodyInstance, &First);
 	if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component))
 		Mesh->bUseDefaultCollision = Snapshot->bUseDefaultCollision;
-	if (Component->IsRegistered())
-		Component->RecreatePhysicsState();
 }
 
 FUnrealMcpRqlTypes::FBodySnapshot* FUnrealMcpRqlTypes::FindBodySnapshot(const UObject* Owner, SIZE_T Offset)

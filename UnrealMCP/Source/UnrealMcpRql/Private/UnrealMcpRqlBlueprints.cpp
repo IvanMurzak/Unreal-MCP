@@ -432,6 +432,8 @@ namespace UnrealMcpRqlBlueprintsLocal
 	 */
 	UClass* ComponentClassOf(const UBlueprint* Blueprint, const FName Name)
 	{
+		if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name) != INDEX_NONE)
+			return nullptr; // a variable of the Blueprint (a reference to a component elsewhere), not one of its components
 		if (const FObjectProperty* Property = FindObjectVariable(Blueprint, Name); Property && IsComponentOrWidget(Property->PropertyClass))
 			return Property->PropertyClass;
 		if (const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint); Designer && Designer->WidgetTree)
