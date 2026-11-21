@@ -222,7 +222,6 @@ static void UnrealMcpPointServerAtInstructions()
 
 bool FUnrealMcpServerManager::SpawnProcess(const FString& InBinaryPath)
 {
-	UnrealMcpPointServerAtInstructions();
 	uint32 NewProcId = 0;
 	FProcHandle NewHandle = FPlatformProcess::CreateProc(
 		*InBinaryPath,
@@ -313,6 +312,8 @@ bool FUnrealMcpServerManager::Start(int32 Port, const FString& InLaunchArgs)
 	// mcp-authorize g5/g6: LaunchArgs are pre-composed by the .NET sidecar's shared ServerLaunchArguments builder
 	// and passed in — this manager never assembles the none/oauth/token arg string.
 	LaunchArgs = InLaunchArgs;
+	// Here on the game thread, before the first spawn: the watchdog's respawns inherit it.
+	UnrealMcpPointServerAtInstructions();
 
 	// Resolve the binary (override → cache); download on a miss.
 	BinaryPath = ResolveBinaryPath();

@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+struct FBodyInstance;
+class UPrimitiveComponent;
 class FProperty;
 class UClass;
 class UEnum;
@@ -122,6 +124,14 @@ public:
 	 * (the engine reports the replacement through FCoreUObjectDelegates::OnObjectsReplaced).
 	 */
 	UObject* LiveObject(UObject* Object) const;
+	/**
+	 * The collision members (UnrealMcpRqlCollision.cpp) write a primitive's BodyInstance through its setters, so they share the
+	 * snapshot of BodyInstance writes (ApplyStructSetters): the body as it was before this call's first collision write of
+	 * @p Component, taken now on the first. A write that puts a member back to its value there (the rollback of a failed
+	 * mutation) restores it whole with RestoreFirstCollision, as the setters alone would leave the profile at Custom.
+	 */
+	const FBodyInstance& FirstCollision(UPrimitiveComponent* Component);
+	void RestoreFirstCollision(UPrimitiveComponent* Component);
 	/** Whether this call may change the editor (rql-mutate): read-only conveniences that widen a query stay off then. */
 	bool IsMutationRequest() const { return bMutationRequest; }
 	void SetMutationRequest(bool bMutation) { bMutationRequest = bMutation; }
@@ -219,6 +229,8 @@ private:
 	TMap<TPair<const UObject*, SIZE_T>, FBodySnapshot> BodySnapshots;
 	FBodySnapshot* FindBodySnapshot(const UObject* Owner, SIZE_T Offset);
 	bool ApplyStructSetters(UObject* Owner, const FProperty* Property, void* Live, const void* Before);
+	/** Copy the collision members of FBodyInstance (profile, enabled, object type, responses) from @p From to @p To. */
+	static bool CopyCollisionMembers(void* To, const void* From);
 	FDelegateHandle ObjectsReplacedHandle;
 	bool bMutationRequest = false;
 	std::vector<rql::Diagnostic> RequestWarnings;

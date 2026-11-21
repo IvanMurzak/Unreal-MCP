@@ -1535,6 +1535,49 @@ bool FUnrealMcpRqlTypes::ApplyStructSetters(UObject* Owner, const FProperty* Pro
 	return bDefaultCollisionOff;
 }
 
+bool FUnrealMcpRqlTypes::CopyCollisionMembers(void* To, const void* From)
+{
+	static const FName Names[] = { TEXT("CollisionProfileName"), TEXT("CollisionEnabled"), TEXT("ObjectType"), TEXT("CollisionResponses") };
+	bool bAll = true;
+	for (const FName& Name : Names)
+	{
+		if (const FProperty* Member = FBodyInstance::StaticStruct()->FindPropertyByName(Name))
+			Member->CopyCompleteValue_InContainer(To, From);
+		else
+			bAll = false;
+	}
+	return bAll;
+}
+
+const FBodyInstance& FUnrealMcpRqlTypes::FirstCollision(UPrimitiveComponent* Component)
+{
+	const SIZE_T Offset = reinterpret_cast<const uint8*>(&Component->BodyInstance) - reinterpret_cast<const uint8*>(Component);
+	FBodySnapshot* Snapshot = FindBodySnapshot(Component, Offset);
+	if (!Snapshot)
+	{
+		Snapshot = &BodySnapshots.Add({ Component, Offset });
+		Snapshot->Body = MakeShared<FStructOnScope>(FBodyInstance::StaticStruct());
+		FBodyInstance::StaticStruct()->CopyScriptStruct(Snapshot->Body->GetStructMemory(), &Component->BodyInstance);
+		const UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component);
+		Snapshot->bUseDefaultCollision = Mesh && Mesh->bUseDefaultCollision;
+	}
+	return *reinterpret_cast<const FBodyInstance*>(Snapshot->Body->GetStructMemory());
+}
+
+void FUnrealMcpRqlTypes::RestoreFirstCollision(UPrimitiveComponent* Component)
+{
+	const SIZE_T Offset = reinterpret_cast<const uint8*>(&Component->BodyInstance) - reinterpret_cast<const uint8*>(Component);
+	const FBodySnapshot* Snapshot = FindBodySnapshot(Component, Offset);
+	if (!Snapshot)
+		return;
+	Component->Modify();
+	CopyCollisionMembers(&Component->BodyInstance, Snapshot->Body->GetStructMemory());
+	if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component))
+		Mesh->bUseDefaultCollision = Snapshot->bUseDefaultCollision;
+	if (Component->IsRegistered())
+		Component->RecreatePhysicsState();
+}
+
 FUnrealMcpRqlTypes::FBodySnapshot* FUnrealMcpRqlTypes::FindBodySnapshot(const UObject* Owner, SIZE_T Offset)
 {
 	if (FBodySnapshot* Found = BodySnapshots.Find({ Owner, Offset }))

@@ -1147,9 +1147,9 @@ namespace UnrealMcpSourceTools
 				Structured->SetNumberField(TEXT("warningCount"), WarningCount);
 				Structured->SetNumberField(TEXT("durationSeconds"), Elapsed);
 				Structured->SetArrayField(TEXT("diagnostics"), DiagJson);
-				// A bounded tail of the raw output aids debugging when no diagnostic matched (e.g. a link
-				// failure, or a UBT configuration error) without flooding the response; a success needs none.
-				if (!bSuccess && Diagnostics.Num() == 0)
+				// A bounded tail of the raw output aids debugging a failure the diagnostics may not cover (a link error, a UBT
+				// configuration error) without flooding the response; a success needs none.
+				if (!bSuccess)
 					Structured->SetStringField(TEXT("outputTail"), Combined.Right(2000));
 				if (SuffixedModules.Num() > 0)
 					Structured->SetBoolField(TEXT("linkedBesideRunningEditor"), true);
@@ -1161,7 +1161,8 @@ namespace UnrealMcpSourceTools
 					Summary += TEXT(" The project builds; this editor keeps running the code it started with (the new build loads when the editor restarts).");
 				// The summary already carries SourceRestartAdvice for a Live Coding refusal or a locked module DLL.
 				const bool bUbtAdvisedRestart = Summary.Contains(TEXT("restart required"));
-				const bool bRestartRequired = ReflectionChanges.Num() > 0 || bUbtAdvisedRestart;
+				// A build linked beside the running editor is not loaded by it either.
+				const bool bRestartRequired = ReflectionChanges.Num() > 0 || bUbtAdvisedRestart || (bSuccess && SuffixedModules.Num() > 0);
 				Structured->SetBoolField(TEXT("restartRequired"), bRestartRequired);
 				Structured->SetArrayField(TEXT("reflectionChanges"), ReflectionJson);
 				if (ReflectionChanges.Num() > 0)

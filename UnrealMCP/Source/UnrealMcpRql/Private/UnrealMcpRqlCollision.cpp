@@ -12,6 +12,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
@@ -141,28 +143,84 @@ namespace UnrealMcpRqlCollisionLocal
 	}
 
 	/**
-	 * Before a collision edit: undoable, and a static mesh component stops using its mesh's default collision, as the Details
-	 * panel's Collision section does on any edit (otherwise the game applies the mesh's collision again on load).
+	 * Before a collision edit: undoable (a construction-script component through its actor, as the editor records it), and a
+	 * static mesh component stops using its mesh's default collision, as the Details panel's Collision section does on any
+	 * edit (otherwise the game applies the mesh's collision again on load).
 	 */
-	void BeginCollisionEdit(UPrimitiveComponent* Component)
+	void BeginCollisionEdit(UPrimitiveComponent& Component)
 	{
-		Component->Modify();
-		if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(Component))
+		AActor* Owner = Component.GetOwner();
+		if (Owner && Component.IsCreatedByConstructionScript())
+			Owner->Modify();
+		Component.Modify();
+		if (UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(&Component))
 			Mesh->bUseDefaultCollision = false;
+	}
+
+	/** The component a member reads or writes: the one that replaced it during this call when a construction rerun did. */
+	UPrimitiveComponent& LivePrimitive(FUnrealMcpRqlTypes& T, void* Self)
+	{
+		UPrimitiveComponent* Component = Cast<UPrimitiveComponent>(T.LiveObject(static_cast<UObject*>(Self)));
+		if (!IsValid(Component))
+			Throw(TEXT("the component is gone"));
+		return *Component;
+	}
+
+	/**
+	 * One collision member write through the engine setters (@p Apply), with the BodyInstance write path's rules: a value that
+	 * is already there changes nothing; a value the body had before this call's first collision write (the rollback of a
+	 * failed mutation) restores that whole state, profile and default collision included (FUnrealMcpRqlTypes::FirstCollision);
+	 * a Blueprint's component template passes the change on to the placed components that still hold its old value.
+	 * @p Read gives the member's value of a body, as the member reads it.
+	 */
+	void WriteCollision(FUnrealMcpRqlTypes& T, void* Self, const FString& Wanted, TFunctionRef<FString(const FBodyInstance&)> Read,
+		TFunctionRef<void(UPrimitiveComponent&)> Apply)
+	{
+		UPrimitiveComponent& Component = LivePrimitive(T, Self);
+		const FString Old = Read(Component.BodyInstance);
+		if (Old == Wanted)
+			return;
+		TArray<UPrimitiveComponent*> Targets{ &Component };
+		if (Component.HasAnyFlags(RF_ArchetypeObject) && !Component.HasAnyFlags(RF_ClassDefaultObject))
+		{
+			TArray<UObject*> Instances;
+			Component.GetArchetypeInstances(Instances);
+			for (UObject* Instance : Instances)
+			{
+				UPrimitiveComponent* Placed = Cast<UPrimitiveComponent>(Instance);
+				if (IsValid(Placed) && Placed->GetArchetype() == &Component && !(Placed->GetWorld() && Placed->GetWorld()->IsGameWorld())
+					&& Read(Placed->BodyInstance) == Old)
+					Targets.Add(Placed);
+			}
+		}
+		const bool bRestore = Read(T.FirstCollision(&Component)) == Wanted;
+		for (UPrimitiveComponent* Target : Targets)
+		{
+			if (bRestore)
+			{
+				T.RestoreFirstCollision(Target);
+				if (Read(Target->BodyInstance) == Wanted)
+					continue;
+			}
+			T.FirstCollision(Target);
+			BeginCollisionEdit(*Target);
+			Apply(*Target);
+		}
 	}
 
 	/** Responses: channel name -> Ignore / Overlap / Block, writable per channel (the panel's Collision Responses grid). */
 	class FResponses final : public rql::IMapAdapter
 	{
 	public:
-		FResponses(UPrimitiveComponent* InComponent, const rql::TypeDescriptor* InType) : Component(InComponent), Type(InType) {}
+		FResponses(FUnrealMcpRqlTypes* InTypes, void* InSelf, const rql::TypeDescriptor* InType) : Types(InTypes), Self(InSelf), Type(InType) {}
 
 		size_t size() const override { return static_cast<size_t>(Channels().Num()); }
 		void for_each(const std::function<bool(const rql::Value&, const rql::Value&)>& Fn) const override
 		{
+			const FBodyInstance& Body = LivePrimitive(*Types, Self).BodyInstance;
 			for (const FChannel& Channel : Channels())
 			{
-				if (!Fn(Str(Channel.Name.ToString()), Str(ResponseName(Component->GetCollisionResponseToChannel(Channel.Channel)))))
+				if (!Fn(Str(Channel.Name.ToString()), Str(ResponseName(Body.GetResponseToChannel(Channel.Channel)))))
 					return;
 			}
 		}
@@ -173,7 +231,7 @@ namespace UnrealMcpRqlCollisionLocal
 			const FChannel* Channel = FindChannel(Channels(), TextArg(Key));
 			if (!Channel)
 				return rql::MapLookup::NotFound;
-			Out = Str(ResponseName(Component->GetCollisionResponseToChannel(Channel->Channel)));
+			Out = Str(ResponseName(LivePrimitive(*Types, Self).BodyInstance.GetResponseToChannel(Channel->Channel)));
 			return rql::MapLookup::Found;
 		}
 		const rql::TypeDescriptor* type() const override { return Type; }
@@ -183,16 +241,16 @@ namespace UnrealMcpRqlCollisionLocal
 		bool accepts_key(const rql::Value& Key) const override { return Key.is_string(); }
 		void set(const rql::Value& Key, const rql::Value& Value) override
 		{
-			const FChannel Channel = ResolveChannel(TextArg(Key), /*bObjectOnly*/ false);
+			const ECollisionChannel Channel = ResolveChannel(TextArg(Key), /*bObjectOnly*/ false).Channel;
 			const ECollisionResponse Response = ResolveResponse(Value);
-			if (Component->GetCollisionResponseToChannel(Channel.Channel) == Response)
-				return;
-			BeginCollisionEdit(Component);
-			Component->SetCollisionResponseToChannel(Channel.Channel, Response);
+			WriteCollision(*Types, Self, ResponseName(Response),
+				[Channel](const FBodyInstance& Body) { return FString(ResponseName(Body.GetResponseToChannel(Channel))); },
+				[Channel, Response](UPrimitiveComponent& Component) { Component.SetCollisionResponseToChannel(Channel, Response); });
 		}
 
 	private:
-		UPrimitiveComponent* Component;
+		FUnrealMcpRqlTypes* Types;
+		void* Self;
 		const rql::TypeDescriptor* Type;
 	};
 
@@ -210,67 +268,73 @@ namespace UnrealMcpRqlCollisionLocal
 		}
 	}
 
+	/** The component's own collision mode, not the one its actor's collision switch overrides (what the panel shows). */
+	FString OwnEnabled(const FBodyInstance& Body)
+	{
+		return EnabledName(Body.GetCollisionEnabled(/*bCheckOwner*/ false));
+	}
+
+	FString ProfileOf(const FBodyInstance& Body)
+	{
+		return Body.GetCollisionProfileName().ToString();
+	}
+
+	FString ObjectTypeOf(const FBodyInstance& Body)
+	{
+		return ChannelName(Body.GetObjectType());
+	}
+
 	void PrimitiveMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
 	{
+		FUnrealMcpRqlTypes* Types = &T;
 		const rql::TypeDescriptor* String = rql::builtin::string_type();
-		auto Primitive = [](void* Self) { return static_cast<UPrimitiveComponent*>(Self); };
 		FUnrealMcpRqlTypes::SetMember(D, Member("CollisionProfile", String,
-			[Primitive](void* Self) { return Str(Primitive(Self)->GetCollisionProfileName().ToString()); },
-			[Primitive](void* Self, const rql::Value& Value)
+			[Types](void* Self) { return Str(ProfileOf(LivePrimitive(*Types, Self).BodyInstance)); },
+			[Types](void* Self, const rql::Value& Value)
 			{
-				UPrimitiveComponent* Component = Primitive(Self);
 				const FName Name(*TextArg(Value).TrimStartAndEnd());
-				if (Component->GetCollisionProfileName() == Name)
-					return;
 				FCollisionResponseTemplate Template;
 				if (Name != UCollisionProfile::CustomCollisionProfileName && !UCollisionProfile::Get()->GetProfileTemplate(Name, Template))
 				{
 					TArray<TSharedPtr<FName>> Names;
 					UCollisionProfile::GetProfileNames(Names);
 					TArray<FString> Shown;
-					for (const TSharedPtr<FName>& Profile : Names)
-						Shown.Add(Profile->ToString());
+					for (const TSharedPtr<FName>& Known : Names)
+						Shown.Add(Known->ToString());
 					Throw(FString::Printf(TEXT("no collision profile '%s' (profiles: %s)"), *Name.ToString(), *FString::Join(Shown, TEXT(", "))));
 				}
-				BeginCollisionEdit(Component);
-				Component->SetCollisionProfileName(Name);
+				WriteCollision(*Types, Self, Name.ToString(), &ProfileOf,
+					[Name](UPrimitiveComponent& Component) { Component.SetCollisionProfileName(Name); });
 			}, "the collision preset (BlockAll, OverlapAllDynamic, Pawn, NoCollision, a project profile; Custom after an ObjectType / Responses edit)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("ObjectType", String,
-			[Primitive](void* Self) { return Str(ChannelName(Primitive(Self)->GetCollisionObjectType())); },
-			[Primitive](void* Self, const rql::Value& Value)
+			[Types](void* Self) { return Str(ObjectTypeOf(LivePrimitive(*Types, Self).BodyInstance)); },
+			[Types](void* Self, const rql::Value& Value)
 			{
-				UPrimitiveComponent* Component = Primitive(Self);
-				const FChannel Channel = ResolveChannel(TextArg(Value), /*bObjectOnly*/ true);
-				if (Component->GetCollisionObjectType() == Channel.Channel)
-					return;
-				BeginCollisionEdit(Component);
-				Component->SetCollisionObjectType(Channel.Channel);
+				const ECollisionChannel Wanted = ResolveChannel(TextArg(Value), /*bObjectOnly*/ true).Channel;
+				WriteCollision(*Types, Self, ChannelName(Wanted), &ObjectTypeOf,
+					[Wanted](UPrimitiveComponent& Component) { Component.SetCollisionObjectType(Wanted); });
 			}, "the collision object type by channel name (WorldStatic, WorldDynamic, Pawn, PhysicsBody, a project channel such as \"Debris\"); writing it makes the profile Custom"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("CollisionEnabled", String,
-			[Primitive](void* Self) { return Str(EnabledName(Primitive(Self)->GetCollisionEnabled())); },
-			[Primitive](void* Self, const rql::Value& Value)
+			[Types](void* Self) { return Str(OwnEnabled(LivePrimitive(*Types, Self).BodyInstance)); },
+			[Types](void* Self, const rql::Value& Value)
 			{
-				UPrimitiveComponent* Component = Primitive(Self);
 				const FString Text = TextArg(Value).TrimStartAndEnd();
 				for (const ECollisionEnabled::Type Enabled : { ECollisionEnabled::NoCollision, ECollisionEnabled::QueryOnly, ECollisionEnabled::PhysicsOnly,
 					ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::ProbeOnly, ECollisionEnabled::QueryAndProbe })
 				{
 					if (Text.Equals(EnabledName(Enabled), ESearchCase::IgnoreCase))
 					{
-						if (Component->GetCollisionEnabled() != Enabled)
-						{
-							BeginCollisionEdit(Component);
-							Component->SetCollisionEnabled(Enabled);
-						}
+						WriteCollision(*Types, Self, EnabledName(Enabled), &OwnEnabled,
+							[Enabled](UPrimitiveComponent& Component) { Component.SetCollisionEnabled(Enabled); });
 						return;
 					}
 				}
 				Throw(FString::Printf(TEXT("'%s' is not a collision mode (NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics, ProbeOnly, QueryAndProbe)"), *Text));
-			}, "NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics, ProbeOnly or QueryAndProbe"));
+			}, "NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics, ProbeOnly or QueryAndProbe (the component's own; its actor's collision switch can override it)"));
 		const rql::TypeDescriptor* MapType = T.Registry().map_type(String, String, false);
-		FUnrealMcpRqlTypes::SetMember(D, Member("Responses", MapType, [Primitive, MapType](void* Self)
+		FUnrealMcpRqlTypes::SetMember(D, Member("Responses", MapType, [Types, MapType](void* Self)
 		{
-			return rql::Value::map(std::make_shared<FResponses>(Primitive(Self), MapType));
+			return rql::Value::map(std::make_shared<FResponses>(Types, Self, MapType));
 		}, {}, "response to each collision channel by name: Responses[\"Debris\"] = \"Ignore\" (Ignore, Overlap, Block); writing one makes the profile Custom"));
 	}
 }
@@ -280,7 +344,7 @@ FString UUnrealMcpRqlEditorApi::AddCollisionChannel(const FString& Name, const F
 	using namespace UnrealMcpRqlCollisionLocal;
 	using UnrealMcpRql::Failed;
 	const FString Trimmed = Name.TrimStartAndEnd();
-	if (Trimmed.IsEmpty() || !FName::IsValidXName(Trimmed, INVALID_OBJECTNAME_CHARACTERS))
+	if (Trimmed.IsEmpty() || FName(*Trimmed).IsNone() || !FName::IsValidXName(Trimmed, INVALID_OBJECTNAME_CHARACTERS))
 		return Failed<FString>(FString::Printf(TEXT("'%s' is not a valid channel name"), *Name));
 	ECollisionResponse Response = ECR_Block;
 	if (!TryParseResponse(DefaultResponse, Response))
@@ -319,7 +383,11 @@ FString UUnrealMcpRqlEditorApi::AddCollisionChannel(const FString& Name, const F
 	IPlatformFile& File = FPlatformFileManager::Get().GetPlatformFile();
 	if (File.FileExists(*Ini) && File.IsReadOnly(*Ini))
 		File.SetReadOnly(*Ini, false);
-	Profile->TryUpdateDefaultConfigFile();
+	if (!Profile->TryUpdateDefaultConfigFile())
+	{
+		Setups.Pop();
+		return Failed<FString>(FString::Printf(TEXT("could not write %s; the channel was not added"), *Ini));
+	}
 	Profile->LoadProfileConfig(/*bForceInit*/ true);
 	const UEnum* Enum = StaticEnum<ECollisionChannel>();
 	return Enum ? Enum->GetNameStringByValue(Free) : FString::FromInt(Free);

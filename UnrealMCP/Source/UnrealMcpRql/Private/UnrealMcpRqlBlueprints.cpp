@@ -420,68 +420,91 @@ namespace UnrealMcpRqlBlueprintsLocal
 		return nullptr;
 	}
 
+	bool IsComponentOrWidget(const UClass* Class)
+	{
+		return Class && (Class->IsChildOf(UActorComponent::StaticClass()) || Class->IsChildOf(UWidget::StaticClass()));
+	}
+
 	/**
-	 * The component (Components panel) or widget (Designer) of @p Blueprint named @p Name, as the variable a bound event
-	 * listens on. A widget that is not a variable yet becomes one, as the Designer's event buttons do.
+	 * The class of @p Blueprint's component (Components panel, or inherited) or widget (Designer) named @p Name; null when it
+	 * has none. Changes nothing (a widget may not be a variable yet). Other object variables (an Actor reference) are no
+	 * components: an event bound to them would never fire, as nothing binds it once they are set.
+	 */
+	UClass* ComponentClassOf(const UBlueprint* Blueprint, const FName Name)
+	{
+		if (const FObjectProperty* Property = FindObjectVariable(Blueprint, Name); Property && IsComponentOrWidget(Property->PropertyClass))
+			return Property->PropertyClass;
+		if (const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint); Designer && Designer->WidgetTree)
+		{
+			if (const UWidget* Widget = Designer->WidgetTree->FindWidget(Name))
+				return Widget->GetClass();
+		}
+		if (const USCS_Node* Node = Blueprint->SimpleConstructionScript ? Blueprint->SimpleConstructionScript->FindSCSNode(Name) : nullptr)
+			return Node->ComponentClass;
+		return nullptr;
+	}
+
+	[[noreturn]] void ThrowNoComponent(const UBlueprint* Blueprint, const FString& Name)
+	{
+		TArray<FString> Candidates;
+		if (const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint); Designer && Designer->WidgetTree)
+			Designer->WidgetTree->ForEachWidget([&Candidates](UWidget* Widget) { Candidates.Add(Widget->GetName()); });
+		if (Blueprint->SimpleConstructionScript)
+		{
+			for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+			{
+				if (Node)
+					Candidates.Add(Node->GetVariableName().ToString());
+			}
+		}
+		const FString Has = Candidates.IsEmpty() ? FString() : FString::Printf(TEXT(" (it has: %s)"), *FString::Join(Candidates, TEXT(", ")));
+		Throw(FString::Printf(TEXT("%s has no component or widget named '%s'%s"), *Blueprint->GetName(), *Name, *Has));
+	}
+
+	/**
+	 * The variable a bound event of @p Blueprint's component or widget @p Name listens on. A widget that is not a variable yet
+	 * becomes one, as the Designer's event buttons do; the skeleton class is regenerated to have it.
 	 */
 	FObjectProperty* RequireComponentVariable(UBlueprint* Blueprint, const FString& Name)
 	{
 		const FName Wanted(*Name);
 		FObjectProperty* Property = FindObjectVariable(Blueprint, Wanted);
-		if (!Property)
+		if (!Property || !IsComponentOrWidget(Property->PropertyClass))
 		{
+			if (!ComponentClassOf(Blueprint, Wanted))
+				ThrowNoComponent(Blueprint, Name);
 			const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint);
-			UWidget* Widget = Designer && Designer->WidgetTree ? Designer->WidgetTree->FindWidget(Wanted) : nullptr;
-			const bool bComponent = Blueprint->SimpleConstructionScript && Blueprint->SimpleConstructionScript->FindSCSNode(Wanted);
-			if (Widget && !Widget->bIsVariable)
+			if (UWidget* Widget = Designer && Designer->WidgetTree ? Designer->WidgetTree->FindWidget(Wanted) : nullptr; Widget && !Widget->bIsVariable)
 			{
 				Widget->Modify();
 				Widget->bIsVariable = true;
 			}
-			if (Widget || bComponent)
-			{
-				// Regenerates the skeleton class, which then has the variable.
-				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
-				Property = FindObjectVariable(Blueprint, Wanted);
-			}
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			Property = FindObjectVariable(Blueprint, Wanted);
+			if (!Property || !IsComponentOrWidget(Property->PropertyClass))
+				ThrowNoComponent(Blueprint, Name);
 		}
-		if (!Property)
-		{
-			TArray<FString> Candidates;
-			if (const UBaseWidgetBlueprint* Designer = Cast<UBaseWidgetBlueprint>(Blueprint); Designer && Designer->WidgetTree)
-			{
-				Designer->WidgetTree->ForEachWidget([&Candidates](UWidget* Widget) { Candidates.Add(Widget->GetName()); });
-			}
-			if (Blueprint->SimpleConstructionScript)
-			{
-				for (const USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
-				{
-					if (Node)
-						Candidates.Add(Node->GetVariableName().ToString());
-				}
-			}
-			const FString Has = Candidates.IsEmpty() ? FString() : FString::Printf(TEXT(" (it has: %s)"), *FString::Join(Candidates, TEXT(", ")));
-			Throw(FString::Printf(TEXT("%s has no component or widget named '%s'%s"), *Blueprint->GetName(), *Name, *Has));
-		}
-		if (!Property->PropertyClass)
-			Throw(FString::Printf(TEXT("'%s' is not a component or widget"), *Name));
 		return Property;
 	}
 
 	/**
 	 * A component's or widget's event node (the editor's "+" next to OnClicked / OnComponentBeginOverlap in the Details
-	 * panel): fires when @p Component's multicast delegate @p Event broadcasts.
+	 * panel): fires when @p Component's multicast delegate @p Event broadcasts. Everything is checked before the Blueprint
+	 * changes (a widget made a variable).
 	 */
 	UEdGraphNode* AddComponentBoundEvent(UEdGraph* Graph, const FString& Component, const FString& Event, const FVector2D& At)
 	{
 		RequireEventGraph(Graph);
 		UBlueprint* Blueprint = RequireBlueprint(Graph);
-		FObjectProperty* Variable = RequireComponentVariable(Blueprint, Component.TrimStartAndEnd());
+		const FString Name = Component.TrimStartAndEnd();
+		UClass* Class = ComponentClassOf(Blueprint, FName(*Name));
+		if (!Class)
+			ThrowNoComponent(Blueprint, Name);
 		const FString EventName = Event.TrimStartAndEnd();
 		FMulticastDelegateProperty* Delegate = nullptr;
 		for (const FString& Candidate : { EventName, FString(TEXT("On")) + EventName })
 		{
-			Delegate = FindFProperty<FMulticastDelegateProperty>(Variable->PropertyClass, FName(*Candidate, FNAME_Find));
+			Delegate = FindFProperty<FMulticastDelegateProperty>(Class, FName(*Candidate, FNAME_Find));
 			if (Delegate && Delegate->HasAnyPropertyFlags(CPF_BlueprintAssignable))
 				break;
 			Delegate = nullptr;
@@ -489,14 +512,15 @@ namespace UnrealMcpRqlBlueprintsLocal
 		if (!Delegate)
 		{
 			TArray<FString> Events;
-			for (TFieldIterator<FMulticastDelegateProperty> It(Variable->PropertyClass); It; ++It)
+			for (TFieldIterator<FMulticastDelegateProperty> It(Class); It; ++It)
 			{
 				if (It->HasAnyPropertyFlags(CPF_BlueprintAssignable))
 					Events.Add(It->GetName());
 			}
-			Throw(FString::Printf(TEXT("%s (%s) has no event '%s'; its events: %s"), *Component, *Variable->PropertyClass->GetName(), *EventName,
+			Throw(FString::Printf(TEXT("%s (%s) has no event '%s'; its events: %s"), *Name, *Class->GetName(), *EventName,
 				Events.IsEmpty() ? TEXT("none") : *FString::Join(Events, TEXT(", "))));
 		}
+		FObjectProperty* Variable = RequireComponentVariable(Blueprint, Name);
 		if (const UK2Node_ComponentBoundEvent* Existing = FKismetEditorUtilities::FindBoundEventForComponent(Blueprint, Delegate->GetFName(), Variable->GetFName()))
 			Throw(FString::Printf(TEXT("%s already has the event %s of %s (%s#%lld)"), *Blueprint->GetName(), *Delegate->GetName(), *Variable->GetName(),
 				*Existing->GetClass()->GetName(), static_cast<long long>(FUnrealMcpRqlTypes::IdOf(Existing))));
@@ -1001,7 +1025,7 @@ namespace UnrealMcpRqlBlueprintsLocal
 					}
 				}
 				FString Component, ComponentEvent;
-				if (!Event && SplitComponentEvent(Name, Component, ComponentEvent))
+				if (!Event && SplitComponentEvent(Name, Component, ComponentEvent) && ComponentClassOf(Blueprint, FName(*Component)))
 					return Types->WrapObject(AddComponentBoundEvent(Target, Component, ComponentEvent, Place(Target, Args[1], Args[2])));
 				if (!Event)
 					Throw(FString::Printf(TEXT("'%s' is not an overridable event of %s (e.g. BeginPlay, Tick, ActorBeginOverlap); for your own event use "
