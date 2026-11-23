@@ -120,7 +120,7 @@ licensor's products.
 --------------------------------------------------------------------------
 9. Code-Exec: the code_exec Python runtime
 --------------------------------------------------------------------------
-Version   : 0.5.0, vendored from commit 6b871c4
+Version   : 0.5.1, vendored from commit 8dfd146
 Publisher : Ivan Murzak
 License   : PolyForm Shield License 1.0.0 (NOT Apache-2.0)
 Source    : https://github.com/IvanMurzak/Code-Exec
