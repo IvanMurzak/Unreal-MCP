@@ -20,6 +20,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
+#include "Misc/MTAccessDetector.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDesc.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -44,6 +45,31 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIMeshTerrainWater, Log, All);
 
+#if ENABLE_MT_DETECTOR
+/**
+ * Core's own switch for the multithread access detector's check failures (Core/Private/Misc/MTAccessDetector.cpp, the friend
+ * FMTAccessDetectorOptions names in Misc/MTAccessDetector.h). Core defines it in a private file and does not export it, so
+ * this module carries the same definition. FBuildTasksScope is its only user.
+ */
+class UE::Private::FMTAccessDetectorSuppressCheckFailuresForUnitTests
+{
+public:
+	FMTAccessDetectorSuppressCheckFailuresForUnitTests()
+		: bOriginalValue(UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure)
+	{
+		UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure = true;
+	}
+
+	~FMTAccessDetectorSuppressCheckFailuresForUnitTests()
+	{
+		UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure = bOriginalValue;
+	}
+
+private:
+	bool bOriginalValue = false;
+};
+#endif
+
 namespace UnrealAIMeshTerrainWater
 {
 	using APreviewSection = UE::MeshPartition::APreviewSection;
@@ -56,6 +82,20 @@ namespace UnrealAIMeshTerrainWater
 		{
 			return Actor ? Actor->GetActorNameOrLabel() : FString(TEXT("null"));
 		}
+
+		/**
+		 * Keep on the stack while this (game) thread drives Mesh Partition builds (WaitForBuild): it stops an engine race
+		 * from killing the editor (the same guard as UnrealAIMeshTerrain's, which explains the race: an FSharedPipe of the
+		 * modifier task graph, UE 5.8, ends a shared task's read-access scope after an exclusive task may already start,
+		 * so the detector's write-access check fails though nothing touches the mesh concurrently). Suppresses the
+		 * detector's check failures while the build runs; nothing to do where the detector is compiled out.
+		 */
+		struct FBuildTasksScope
+		{
+#if ENABLE_MT_DETECTOR
+			UE::Private::FMTAccessDetectorSuppressCheckFailuresForUnitTests SuppressDetectorChecks;
+#endif
+		};
 
 		FString Find(const AActor* Actor)
 		{
@@ -396,6 +436,7 @@ namespace UnrealAIMeshTerrainWater
 			OutPending = FString::Printf(TEXT("%s has no Mesh Partition editor component"), *NameOf(Terrain));
 			return false;
 		}
+		const FBuildTasksScope BuildTasks;
 		const double Start = FPlatformTime::Seconds();
 		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests : FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds));
 		const bool bStaticMeshes = MakesStaticMeshes(Terrain);

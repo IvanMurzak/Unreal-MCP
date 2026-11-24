@@ -24,6 +24,7 @@
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "Async/TaskGraphInterfaces.h"
 #include "Distance/DistPoint3Triangle3.h"
+#include "Misc/MTAccessDetector.h"
 
 #include "MeshPartition.h"
 #include "MeshPartitionMeshBuilder.h"
@@ -41,6 +42,31 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealAIMeshTerrain, Log, All);
 
+#if ENABLE_MT_DETECTOR
+/**
+ * Core's own switch for the multithread access detector's check failures (Core/Private/Misc/MTAccessDetector.cpp, the friend
+ * FMTAccessDetectorOptions names in Misc/MTAccessDetector.h). Core defines it in a private file and does not export it, so
+ * this module carries the same definition. FBuildTasksScope is its only user.
+ */
+class UE::Private::FMTAccessDetectorSuppressCheckFailuresForUnitTests
+{
+public:
+	FMTAccessDetectorSuppressCheckFailuresForUnitTests()
+		: bOriginalValue(UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure)
+	{
+		UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure = true;
+	}
+
+	~FMTAccessDetectorSuppressCheckFailuresForUnitTests()
+	{
+		UE::Private::FMTAccessDetectorOptions::bSuppressCheckFailure = bOriginalValue;
+	}
+
+private:
+	bool bOriginalValue = false;
+};
+#endif
+
 namespace UnrealAIMeshTerrain
 {
 	namespace
@@ -50,6 +76,24 @@ namespace UnrealAIMeshTerrain
 			return Actor ? Actor->GetActorNameOrLabel() : FString(TEXT("null"));
 		}
 
+		/**
+		 * Keep on the stack while this (game) thread drives Mesh Partition builds (WaitForBuild, BuildRegion): it stops an
+		 * engine race from killing the editor. A build evaluates the modifier stack in a UE::MeshPartition::FModifierTaskGraph
+		 * whose tasks share the mesh through an FSharedPipe (MeshPartitionEditor/Private/SharedPipe.h, UE 5.8). A shared
+		 * task unlocks the pipe and leaves its ActiveSharedTasks list before its UE_MT_SCOPED_READ_ACCESS ends, so an
+		 * exclusive task (the writeback of a modifier that changes the topology: Spline, Boolean, Remesh, Lattice, Texture
+		 * Patch, Weight utility) launched in that gap starts at once and its UE_MT_SCOPED_WRITE_ACCESS fails the check
+		 * "Acquiring a write access while there are ongoing read or write access", fatal in editors built with checks
+		 * (DO_CHECK). The shared task's work is already done then: nothing touches the mesh concurrently, only the
+		 * detector's bookkeeping overlaps, so its check failures are suppressed (the detector reports instead of
+		 * asserting) while the build runs. Nothing to do where the detector is compiled out.
+		 */
+		struct FBuildTasksScope
+		{
+#if ENABLE_MT_DETECTOR
+			UE::Private::FMTAccessDetectorSuppressCheckFailuresForUnitTests SuppressDetectorChecks;
+#endif
+		};
 	}
 
 	FString UnavailableReason()
@@ -553,6 +597,7 @@ namespace UnrealAIMeshTerrain
 		UMeshPartitionEditorComponent* Component = EditorComponent(Terrain);
 		if (!Component)
 			return UnrealMcpRql::Failed<bool>(FString::Printf(TEXT("%s has no Mesh Partition editor component"), *TerrainName(Terrain)));
+		const FBuildTasksScope BuildTasks;
 		const double Start = FPlatformTime::Seconds();
 		const double Deadline = Start + (BuildTimeoutForTests > 0.0 ? BuildTimeoutForTests
 			: FCallBudget::Left(FMath::Clamp(TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds)));
@@ -638,6 +683,7 @@ namespace UnrealAIMeshTerrain
 		Settings.bBuildSpatial = true;
 		Settings.bCacheResult = true;
 		Settings.bAllowDDCRead = true;
+		const FBuildTasksScope BuildTasks;
 		TArray<UE::MeshPartition::FBuildTaskHandle> Handles = UE::MeshPartition::Build::LaunchBuilds(Settings);
 		const double Budget = FCallBudget::Left(TimeoutSeconds);
 		const double Deadline = FPlatformTime::Seconds() + Budget;
