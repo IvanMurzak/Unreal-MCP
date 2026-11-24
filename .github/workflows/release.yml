@@ -492,15 +492,9 @@ jobs:
           # pipefail).
           IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
           printf '%s\n' "$IDENTITIES"
-          SIGN_HASH=""
-          while IFS= read -r line; do
-            case "$line" in
-              *"$MAC_SIGN_IDENTITY"*)
-                SIGN_HASH="$(printf '%s\n' "$line" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) .*/\1/p')"
-                break
-                ;;
-            esac
-          done <<< "$IDENTITIES"
+          SIGN_HASH="$(printf '%s\n' "$IDENTITIES" | grep -F -- "$MAC_SIGN_IDENTITY" \
+            | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) .*/\1/p' || true)"
+          SIGN_HASH="${SIGN_HASH%%$'\n'*}"
           if [ -z "$SIGN_HASH" ]; then
             echo "::error::MAC_SIGN_IDENTITY matches no valid code-signing identity in the imported certificate"
             exit 1
