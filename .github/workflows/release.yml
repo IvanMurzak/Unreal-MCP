@@ -371,7 +371,17 @@ jobs:
   build-bridge-macos:
     name: build bridge (macos + linux, signed)
     needs: [check-version]
-    runs-on: macos-latest
+    # The owner's own Mac, placed by runner-manager's coordinator (the label set
+    # AI-Game-Dev-App's macOS jobs use). GitHub-hosted `macos-latest` failed to
+    # be acquired ("capacity constraints"). This runner is PERSISTENT and is the
+    # owner's daily machine, shared by several runner slots and repositories, so
+    # every step below must leave it as it found it: nothing outside
+    # $RUNNER_TEMP / the workspace, no sudo, no brew, and the user keychain
+    # search list restored by the always() cleanup step.
+    runs-on: [self-hosted, macOS, ARM64]
+    # Bounds how long a hang holds the Mac (GitHub's default is 360 minutes).
+    # Generous because notarytool --wait depends on Apple's queue.
+    timeout-minutes: 180
     # Job-level env so the signing/notarization guards (`if: env.X != ''`) can
     # read these. A step's own `env:` is NOT visible to that same step's `if:` —
     # the condition is evaluated before step env is applied — so the
@@ -386,42 +396,119 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # Persistent self-hosted runner: don't leave this job's GITHUB_TOKEN
+          # in the workspace's .git config.
+          persist-credentials: false
+      # Installed under $RUNNER_TEMP, not setup-dotnet's default ~/.dotnet: the
+      # home directory is shared by every runner slot on this Mac, so concurrent
+      # jobs would race on one SDK install.
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
       # --no-zip: sign the raw apphost BEFORE zipping. Cross-build linux-x64
       # here too (no native linux toolchain needed for a portable self-contained
       # apphost); it ships unsigned (no Linux code-signing standard — matches
-      # GameDev-MCP-Server).
+      # GameDev-MCP-Server). python3 is the Xcode / Command Line Tools one, which
+      # codesign and notarytool below need anyway.
       - name: Build self-contained bridge (osx + linux, no zip)
         run: python3 bridge/publish.py --configuration Release --platforms osx-arm64 osx-x64 linux-x64 --no-zip
 
       # Import the Developer ID Application certificate into a temporary
-      # keychain. Guarded on ALL THREE mac signing secrets so a partial-secrets
-      # dispatch skips the whole sign+notarize path cleanly rather than dying
-      # under `set -e` and taking the unsigned-upload fallback down with it.
+      # keychain (the safe pattern of AI-Game-Dev-App's "Prepare signing
+      # keychain"). Guarded on ALL THREE mac signing secrets so a
+      # partial-secrets dispatch skips the whole sign+notarize path cleanly
+      # rather than dying under `set -e` and taking the unsigned-upload fallback
+      # down with it.
+      #
+      # `-A` grants every application access to the key AT IMPORT TIME, so no
+      # `security set-key-partition-list` is needed — macOS 26 refuses that call
+      # from a runner's non-interactive context. The broader grant is bounded by
+      # the keychain's lifetime: the cleanup step right after code-signing
+      # removes it from the search list and deletes it.
       - name: Import macOS signing certificate
         if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
         run: |
           set -euo pipefail
+          # The decoded .p12 and the keychain must not be world-readable on the
+          # owner's machine.
+          umask 077
+          # Must match the literal in "Clean up signing keychain".
           KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          # Random per run: nothing outlives the job, so no secret is needed.
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
 
-          echo "$MAC_CSC_LINK" | base64 --decode > "$CERT_PATH"
+          printf '%s' "$MAC_CSC_LINK" | base64 --decode > "$CERT_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          # Lock after 6h idle as a backstop; deliberately not `-l` (lock on
+          # sleep), which would lock it if the Mac sleeps mid-job.
+          security set-keychain-settings -u -t 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$MAC_CSC_KEY_PASSWORD" \
             -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple: \
-            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
-
           rm -f "$CERT_PATH"
+
+          # Prepend our keychain to the USER search list while PRESERVING the
+          # entries already there. `list-keychains -s` REPLACES the list, so
+          # naming only login.keychain-db would permanently drop anything else
+          # the owner has. It must be on the list (not only named by
+          # `codesign --keychain`): codesign resolves the certificate chain from
+          # the search list. Our own path is filtered out of the saved copy so a
+          # dangling entry from a killed run cannot be baked back in.
+          { security list-keychains -d user \
+              | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//' \
+              | grep -vxF "$KEYCHAIN_PATH" || true
+          } > "$RUNNER_TEMP/original-keychains.txt"
+          # An array, not an unquoted $(cat …): paths may contain spaces.
+          # /bin/bash on macOS is 3.2 (no mapfile; an empty array is "unbound"
+          # under set -u), hence the explicit counter.
+          ORIGINAL_KEYCHAINS=()
+          ORIGINAL_KEYCHAIN_COUNT=0
+          while IFS= read -r kc; do
+            [ -n "$kc" ] || continue
+            ORIGINAL_KEYCHAINS+=("$kc")
+            ORIGINAL_KEYCHAIN_COUNT=$((ORIGINAL_KEYCHAIN_COUNT + 1))
+          done < "$RUNNER_TEMP/original-keychains.txt"
+          # Refuse to touch a list we could not read: setting a one-entry list
+          # is persistent damage that `security` reports as success. (A runner
+          # running as root has no user search list and lands here.)
+          if [ "$ORIGINAL_KEYCHAIN_COUNT" -eq 0 ]; then
+            echo "::error::Could not read the user keychain search list — refusing to modify it"
+            exit 1
+          fi
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${ORIGINAL_KEYCHAINS[@]}"
+
+          # Resolve MAC_SIGN_IDENTITY (a name or a SHA-1) to the SHA-1 of the
+          # identity in OUR keychain. The owner's login keychain stays on the
+          # search list and can hold a different certificate under the same
+          # display name, which makes `codesign --sign <name>` fail as
+          # "ambiguous". Signing with `--keychain` + the hash pins this job's
+          # certificate. Capture once, no `| grep -q` / `| head` (SIGPIPE under
+          # pipefail).
+          IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
+          printf '%s\n' "$IDENTITIES"
+          SIGN_HASH=""
+          while IFS= read -r line; do
+            case "$line" in
+              *"$MAC_SIGN_IDENTITY"*)
+                SIGN_HASH="$(printf '%s\n' "$line" | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) .*/\1/p')"
+                break
+                ;;
+            esac
+          done <<< "$IDENTITIES"
+          if [ -z "$SIGN_HASH" ]; then
+            echo "::error::MAC_SIGN_IDENTITY matches no valid code-signing identity in the imported certificate"
+            exit 1
+          fi
+          echo "signing identity hash: $SIGN_HASH"
+
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "SIGN_HASH=$SIGN_HASH" >> "$GITHUB_ENV"
 
       # Code-sign each osx apphost with the hardened runtime + the bridge
       # entitlements (allow-jit + disable-library-validation — the .NET
@@ -439,9 +526,64 @@ jobs:
             echo "Signing ${BIN}..."
             codesign --force --options runtime --timestamp \
               --entitlements "$ENTITLEMENTS" \
-              --sign "$MAC_SIGN_IDENTITY" "$BIN"
+              --keychain "$KEYCHAIN_PATH" \
+              --sign "$SIGN_HASH" "$BIN"
             codesign --verify --strict --verbose=2 "$BIN"
           done
+
+      # Runs right after signing (and on failure or cancel) rather than at the
+      # end of the job, so the -A-imported key leaves the search list before the
+      # minutes-long notarization. Removes ONLY our entry from the CURRENT list
+      # instead of writing back the snapshot: several runner slots share this
+      # user's search list, and a snapshot would drop a concurrent job's
+      # keychain or re-add a deleted one. Entries whose file no longer exists
+      # (keychains of killed runs) are dropped too.
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          SAVED="$RUNNER_TEMP/original-keychains.txt"
+          if [ ! -e "$KEYCHAIN_PATH" ] && [ ! -e "$SAVED" ]; then
+            echo "No signing keychain was created — nothing to clean up."
+            exit 0
+          fi
+
+          KEEP=()
+          KEEP_COUNT=0
+          while IFS= read -r kc; do
+            [ -n "$kc" ] || continue
+            [ "$kc" != "$KEYCHAIN_PATH" ] || continue
+            [ -e "$kc" ] || continue
+            KEEP+=("$kc")
+            KEEP_COUNT=$((KEEP_COUNT + 1))
+          done < <(security list-keychains -d user \
+                     | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//' || true)
+          # Never set an EMPTY list (`security` reports that as success): fall
+          # back to the snapshot taken before our change. `-s`, not `-f`: the
+          # snapshot file exists, empty, if the import died while writing it.
+          if [ "$KEEP_COUNT" -eq 0 ] && [ -s "$SAVED" ]; then
+            while IFS= read -r kc; do
+              [ -n "$kc" ] || continue
+              KEEP+=("$kc")
+              KEEP_COUNT=$((KEEP_COUNT + 1))
+            done < "$SAVED"
+          fi
+          if [ "$KEEP_COUNT" -eq 0 ]; then
+            echo "::warning::no keychain search list to restore"
+          else
+            security list-keychains -d user -s "${KEEP[@]}" \
+              || echo "::warning::failed to restore the user keychain search list"
+          fi
+
+          if [ -e "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || echo "::warning::failed to delete $KEYCHAIN_PATH"
+          fi
+          rm -f "$SAVED" "$RUNNER_TEMP/certificate.p12" || true
+
+          # Printing the result is what turns a green cleanup step into evidence.
+          echo "user keychain search list after cleanup:"
+          security list-keychains -d user || true
 
       # Notarize the two macOS apphosts. notarytool submits a ZIP, so zip each
       # signed osx dir to a throwaway notarization zip, submit, and require
@@ -457,8 +599,12 @@ jobs:
         if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' && env.APPLE_API_KEY_B64 != '' }}
         run: |
           set -euo pipefail
+          umask 077
           KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
-          echo "$APPLE_API_KEY_B64" | base64 --decode > "$KEY_PATH"
+          # Removed on every exit, failure included: $RUNNER_TEMP is on the
+          # owner's persistent Mac.
+          trap 'rm -f "$KEY_PATH"' EXIT
+          printf '%s' "$APPLE_API_KEY_B64" | base64 --decode > "$KEY_PATH"
 
           for rid in osx-arm64 osx-x64; do
             NOTARIZE_ZIP="$RUNNER_TEMP/unreal-mcp-bridge-${rid}-notarize.zip"
@@ -479,8 +625,6 @@ jobs:
             echo "Notarization for ${rid} accepted."
             rm -f "$NOTARIZE_ZIP"
           done
-
-          rm -f "$KEY_PATH"
 
       # Upload the RAW signed per-RID publish dirs (staging input for the plugin
       # zip job) AND the per-RID release zips (kept as debugging /
