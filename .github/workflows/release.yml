@@ -375,9 +375,10 @@ jobs:
     # AI-Game-Dev-App's macOS jobs use). GitHub-hosted `macos-latest` failed to
     # be acquired ("capacity constraints"). This runner is PERSISTENT and is the
     # owner's daily machine, shared by several runner slots and repositories, so
-    # every step below must leave it as it found it: nothing outside
-    # $RUNNER_TEMP / the workspace, no sudo, no brew, and the user keychain
-    # search list restored by the always() cleanup step.
+    # every step below must leave it as it found it: no sudo, no brew, signing
+    # material only under $RUNNER_TEMP, and the user keychain search list
+    # restored by the always() cleanup step. (dotnet still uses the user's
+    # shared NuGet cache under ~/.nuget, which NuGet locks for concurrent use.)
     runs-on: [self-hosted, macOS, ARM64]
     # Bounds how long a hang holds the Mac (GitHub's default is 360 minutes).
     # Generous because notarytool --wait depends on Apple's queue.
@@ -492,7 +493,7 @@ jobs:
           # pipefail).
           IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
           printf '%s\n' "$IDENTITIES"
-          SIGN_HASH="$(printf '%s\n' "$IDENTITIES" | grep -F -- "$MAC_SIGN_IDENTITY" \
+          SIGN_HASH="$(printf '%s\n' "$IDENTITIES" | grep -iF -- "$MAC_SIGN_IDENTITY" \
             | sed -n 's/^ *[0-9][0-9]*) \([0-9A-F]\{40\}\) .*/\1/p' || true)"
           SIGN_HASH="${SIGN_HASH%%$'\n'*}"
           if [ -z "$SIGN_HASH" ]; then
@@ -514,6 +515,22 @@ jobs:
         if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
         run: |
           set -euo pipefail
+          # Another job on this Mac may have rewritten the shared search list
+          # since the import (e.g. restored its own snapshot). Without our
+          # keychain on it codesign cannot build the chain, so re-prepend it.
+          LIST="$(security list-keychains -d user)"
+          case "$LIST" in
+            *"\"$KEYCHAIN_PATH\""*) ;;
+            *)
+              echo "::warning::signing keychain fell off the search list; re-adding it"
+              CURRENT=()
+              while IFS= read -r kc; do
+                [ -n "$kc" ] || continue
+                CURRENT+=("$kc")
+              done < <(printf '%s\n' "$LIST" | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
+              security list-keychains -d user -s "$KEYCHAIN_PATH" ${CURRENT[@]+"${CURRENT[@]}"}
+              ;;
+          esac
           ENTITLEMENTS="build/entitlements.mac.plist"
           for rid in osx-arm64 osx-x64; do
             BIN="bridge/publish/${rid}/unreal-mcp-bridge"
@@ -530,8 +547,9 @@ jobs:
       # minutes-long notarization. Removes ONLY our entry from the CURRENT list
       # instead of writing back the snapshot: several runner slots share this
       # user's search list, and a snapshot would drop a concurrent job's
-      # keychain or re-add a deleted one. Entries whose file no longer exists
-      # (keychains of killed runs) are dropped too.
+      # keychain or re-add a deleted one. Signing keychains of killed runs
+      # (a */signing.keychain-db whose file is gone) are dropped too; any
+      # other entry is kept even if missing (e.g. an unmounted volume).
       - name: Clean up signing keychain
         if: always()
         run: |
@@ -548,7 +566,9 @@ jobs:
           while IFS= read -r kc; do
             [ -n "$kc" ] || continue
             [ "$kc" != "$KEYCHAIN_PATH" ] || continue
-            [ -e "$kc" ] || continue
+            case "$kc" in
+              */signing.keychain-db) [ -e "$kc" ] || continue ;;
+            esac
             KEEP+=("$kc")
             KEEP_COUNT=$((KEEP_COUNT + 1))
           done < <(security list-keychains -d user \
@@ -642,6 +662,11 @@ jobs:
           path: ./bridge/publish/*.zip
           if-no-files-found: error
           retention-days: 7
+      # The notarize step's EXIT trap does not run when a cancel stops it, so
+      # scrub the decoded App Store Connect key here too.
+      - name: Remove notarization key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP"/unreal-mcp-bridge-*-notarize.zip
 
   # Windows: win-x64, signed via Azure Trusted Signing (signtool is
   # Windows-only). Built on windows-latest. Uploads the raw signed publish dir
