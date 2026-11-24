@@ -85,8 +85,10 @@ namespace UnrealAIMeshTerrain
 		 * Patch, Weight utility) launched in that gap starts at once and its UE_MT_SCOPED_WRITE_ACCESS fails the check
 		 * "Acquiring a write access while there are ongoing read or write access", fatal in editors built with checks
 		 * (DO_CHECK). The shared task's work is already done then: nothing touches the mesh concurrently, only the
-		 * detector's bookkeeping overlaps, so its check failures are suppressed (the detector reports instead of
-		 * asserting) while the build runs. Nothing to do where the detector is compiled out.
+		 * detector's bookkeeping overlaps. So while the build runs every access detector's check failures are suppressed,
+		 * silently and process-wide (the engine's one switch): a real race elsewhere in the editor goes unreported for that
+		 * time. Builds the editor's own tick starts (an edit followed by an editor frame before WaitForBuild) and builds a
+		 * timed-out wait leaves running are not covered. Nothing to do where the detector is compiled out.
 		 */
 		struct FBuildTasksScope
 		{
@@ -693,6 +695,14 @@ namespace UnrealAIMeshTerrain
 			{
 				for (UE::MeshPartition::FBuildTaskHandle& Handle : Handles)
 					Handle.Cancel();
+				// Cancelled tasks still pass through the task graph's pipe (they return early inside it): keep BuildTasks
+				// until they are done, for a few seconds at most.
+				const double CancelDeadline = FPlatformTime::Seconds() + 5.0;
+				while (!UE::MeshPartition::Build::AreAllTasksComplete(Handles) && FPlatformTime::Seconds() < CancelDeadline)
+				{
+					FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+					FPlatformProcess::Sleep(0.005f);
+				}
 				if (bFailOnTimeout)
 					UnrealMcpRql::Fail(FString::Printf(TEXT("evaluating %s's modifiers took longer than %.0f s"), *TerrainName(Terrain), Budget));
 				return {};
