@@ -87,8 +87,10 @@ namespace UnrealAIMeshTerrainWater
 		 * Keep on the stack while this (game) thread drives Mesh Partition builds (WaitForBuild): it stops an engine race
 		 * from killing the editor (the same guard as UnrealAIMeshTerrain's, which explains the race: an FSharedPipe of the
 		 * modifier task graph, UE 5.8, ends a shared task's read-access scope after an exclusive task may already start,
-		 * so the detector's write-access check fails though nothing touches the mesh concurrently). Suppresses the
-		 * detector's check failures while the build runs; nothing to do where the detector is compiled out.
+		 * so the detector's write-access check fails though nothing touches the mesh concurrently). Suppresses every
+		 * access detector's check failures while the build runs, silently and process-wide (the engine's one switch), so a
+		 * real race elsewhere goes unreported for that time; builds started by an editor frame or left running by a
+		 * timed-out wait are not covered. Nothing to do where the detector is compiled out.
 		 */
 		struct FBuildTasksScope
 		{
