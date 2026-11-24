@@ -64,7 +64,7 @@ installs no .NET and performs no first-run download — the plugin is
 self-bootstrapping out of the box (`docs/ARCHITECTURE.md` §6 BUNDLE model). The
 artifact jobs in `release.yml`:
 
-- **`build-bridge-macos`** (`macos-latest`) — publishes osx-arm64 / osx-x64 /
+- **`build-bridge-macos`** (self-hosted `[self-hosted, macOS, ARM64]`, the owner's Mac) — publishes osx-arm64 / osx-x64 /
   linux-x64 self-contained, **codesigns** the two osx apphosts (hardened runtime
   + `build/entitlements.mac.plist`) and **notarizes** them, then uploads the raw
   signed dirs (staging input) + the per-RID release zips. linux-x64 ships
