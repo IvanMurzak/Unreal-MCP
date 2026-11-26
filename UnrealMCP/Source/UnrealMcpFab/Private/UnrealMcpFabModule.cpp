@@ -2,7 +2,6 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "CoreGlobals.h"
-#include "HAL/PlatformTime.h"
 #include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
 #include "UnrealMcpFabSignIn.h"
@@ -22,36 +21,36 @@
  * the tokens from the platform for the Fab tools, since the Fab plugin's own GetAuthToken knows only sign-ins it started.
  *
  * Fab's platform is the one EOS platform that was created from options rather than from a named config: the Fab plugin
- * creates it that way, the engine's online subsystems use named configs. With none, Epic's sign-in service never started.
- * With more than one, this module cannot tell which is Fab's and does nothing (the tools then behave as without it).
+ * creates it that way, the engine's online subsystems use named configs. Without an EOS SDK, Epic's sign-in service never
+ * started. With no such platform or more than one, this module cannot tell (the tools then behave as without it).
  */
 namespace UnrealMcpFabLocal
 {
-	/** The longest a restore counts as running: a call that waits on it never waits longer. */
-	static constexpr double RestoreWaitSeconds = 30.0;
-	static double RestoreStartedAt = -1.0e9;
-
 #if WITH_EOS_SDK
-	/** The platforms that could be Fab's: those without a config name. */
-	static TArray<EOS_HPlatform> FabCandidatePlatforms(IEOSSDKManager& Sdk)
-	{
-		TArray<EOS_HPlatform> Candidates;
-		for (const IEOSPlatformHandlePtr& Platform : Sdk.GetActivePlatforms())
-		{
-			if (Platform.IsValid() && Platform->GetConfigName().IsEmpty())
-				Candidates.Add(*Platform);
-		}
-		return Candidates;
-	}
+	/** A persistent-auth login this module started is in flight. */
+	static bool bRestoring = false;
+	/** The restore is tried once per editor session: on editor start, or on first use when Fab's platform came later. */
+	static bool bRestoreTried = false;
 
-	/** Fab's EOS platform, or null (no SDK, no platform, or more than one candidate). */
-	static EOS_HPlatform FabPlatform()
+	/** Where Fab's EOS platform stands: no SDK, no candidate, exactly one (returned) or more than one. */
+	enum class EFabPlatform : uint8 { NoSdk, None, Found, Ambiguous };
+
+	/** Fab's platform: the one active platform without a config name (the Fab plugin creates it from options). */
+	static EFabPlatform FabFindPlatform(EOS_HPlatform& OutPlatform)
 	{
+		OutPlatform = nullptr;
 		IEOSSDKManager* Sdk = IEOSSDKManager::Get();
 		if (!Sdk || !Sdk->IsInitialized())
-			return nullptr;
-		const TArray<EOS_HPlatform> Candidates = FabCandidatePlatforms(*Sdk);
-		return Candidates.Num() == 1 ? Candidates[0] : nullptr;
+			return EFabPlatform::NoSdk;
+		int32 Count = 0;
+		for (const IEOSPlatformHandlePtr& Platform : Sdk->GetActivePlatforms())
+		{
+			if (Platform.IsValid() && Platform->GetConfigName().IsEmpty() && ++Count == 1)
+				OutPlatform = *Platform;
+		}
+		if (Count > 1)
+			OutPlatform = nullptr;
+		return Count == 0 ? EFabPlatform::None : Count == 1 ? EFabPlatform::Found : EFabPlatform::Ambiguous;
 	}
 
 	/** The account signed in on @p Auth, or null. */
@@ -67,18 +66,78 @@ namespace UnrealMcpFabLocal
 		return nullptr;
 	}
 
+	static void EOS_CALL FabRestoreDone(const EOS_Auth_LoginCallbackInfo* Data)
+	{
+		bRestoring = false;
+		if (Data->ResultCode == EOS_EResult::EOS_Success)
+		{
+			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: restored the Epic sign-in remembered on this computer (no browser)."));
+		}
+		else
+		{
+			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: no remembered Epic sign-in was restored (%s); fab-sign-in signs the user in."),
+				UTF8_TO_TCHAR(EOS_EResult_ToString(Data->ResultCode)));
+		}
+	}
+
+	/** Sign in on Fab's platform from the remembered sign-in, once, unless someone is signed in there already. */
+	static void FabRestoreOnce(EOS_HPlatform Platform)
+	{
+		if (bRestoreTried)
+			return;
+		bRestoreTried = true;
+		const EOS_HAuth Auth = EOS_Platform_GetAuthInterface(Platform);
+		if (!Auth || FabSignedInAccount(Auth))
+			return;
+		EOS_Auth_Credentials Credentials = {};
+		Credentials.ApiVersion = EOS_AUTH_CREDENTIALS_API_LATEST;
+		Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_PersistentAuth;
+		EOS_Auth_LoginOptions Options = {};
+		Options.ApiVersion = EOS_AUTH_LOGIN_API_LATEST;
+		Options.Credentials = &Credentials;
+		bRestoring = true;
+		EOS_Auth_Login(Auth, &Options, nullptr, &FabRestoreDone);
+	}
+
+	/** Fab's platform, or null; the first lookup that finds it starts the restore (FabRestoreOnce). */
+	static EOS_HPlatform FabPlatform()
+	{
+		EOS_HPlatform Platform;
+		if (FabFindPlatform(Platform) == EFabPlatform::Found)
+			FabRestoreOnce(Platform);
+		return Platform;
+	}
+
+	/** On editor start: restore now if Fab's platform exists, else on first use (FabPlatform). */
+	static void FabRestoreOnStart()
+	{
+		EOS_HPlatform Platform;
+		const EFabPlatform Found = FabFindPlatform(Platform);
+		if (Found == EFabPlatform::Found)
+		{
+			FabRestoreOnce(Platform);
+			return;
+		}
+		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: %s; the remembered Fab sign-in is not restored now."),
+			Found == EFabPlatform::NoSdk ? TEXT("Epic's sign-in service did not start in this editor (no EOS SDK)")
+			: Found == EFabPlatform::None ? TEXT("the Fab plugin started no EOS platform (yet)")
+			: TEXT("more than one EOS platform could be the Fab plugin's"));
+	}
+
 	static EUnrealMcpFabSignInService FabService()
 	{
-		IEOSSDKManager* Sdk = IEOSSDKManager::Get();
-		if (!Sdk || !Sdk->IsInitialized())
+		EOS_HPlatform Platform;
+		switch (FabFindPlatform(Platform))
+		{
+		case EFabPlatform::NoSdk:
 			return EUnrealMcpFabSignInService::NotStarted;
-		const int32 Candidates = FabCandidatePlatforms(*Sdk).Num();
-		if (Candidates == 0)
-			return EUnrealMcpFabSignInService::NotStarted;
-		if (Candidates > 1)
+		case EFabPlatform::Found:
+			FabRestoreOnce(Platform);
+			return bRestoring ? EUnrealMcpFabSignInService::Restoring : EUnrealMcpFabSignInService::Running;
+		default:
+			// No candidate yet, or several: not known here (fab-sign-in's own check of the Fab plugin's Login decides).
 			return EUnrealMcpFabSignInService::Unknown;
-		return FPlatformTime::Seconds() < RestoreStartedAt + RestoreWaitSeconds ? EUnrealMcpFabSignInService::Restoring
-			: EUnrealMcpFabSignInService::Running;
+		}
 	}
 
 	static bool FabTokens(FString& OutAccessToken, FString& OutRefreshToken)
@@ -98,49 +157,6 @@ namespace UnrealMcpFabLocal
 		EOS_Auth_Token_Release(Token);
 		return !OutAccessToken.IsEmpty();
 	}
-
-	static void EOS_CALL FabRestoreDone(const EOS_Auth_LoginCallbackInfo* Data)
-	{
-		RestoreStartedAt = -1.0e9;
-		if (Data->ResultCode == EOS_EResult::EOS_Success)
-		{
-			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: restored the Epic sign-in remembered on this computer (no browser)."));
-		}
-		else
-		{
-			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: no remembered Epic sign-in was restored (%s); fab-sign-in signs the user in."),
-				UTF8_TO_TCHAR(EOS_EResult_ToString(Data->ResultCode)));
-		}
-	}
-
-	/** On editor start: sign in on Fab's platform from the remembered sign-in, unless someone is signed in there already. */
-	static void FabRestoreSignIn()
-	{
-		IEOSSDKManager* Sdk = IEOSSDKManager::Get();
-		if (!Sdk || !Sdk->IsInitialized())
-		{
-			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: Epic's sign-in service did not start in this editor (no EOS SDK); fab-sign-in cannot sign in."));
-			return;
-		}
-		const TArray<EOS_HPlatform> Candidates = FabCandidatePlatforms(*Sdk);
-		if (Candidates.Num() != 1)
-		{
-			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: %s, so the remembered Fab sign-in is not restored."),
-				Candidates.IsEmpty() ? TEXT("the Fab plugin started no EOS platform") : TEXT("more than one EOS platform could be the Fab plugin's"));
-			return;
-		}
-		const EOS_HAuth Auth = EOS_Platform_GetAuthInterface(Candidates[0]);
-		if (!Auth || FabSignedInAccount(Auth))
-			return;
-		EOS_Auth_Credentials Credentials = {};
-		Credentials.ApiVersion = EOS_AUTH_CREDENTIALS_API_LATEST;
-		Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_PersistentAuth;
-		EOS_Auth_LoginOptions Options = {};
-		Options.ApiVersion = EOS_AUTH_LOGIN_API_LATEST;
-		Options.Credentials = &Credentials;
-		RestoreStartedAt = FPlatformTime::Seconds();
-		EOS_Auth_Login(Auth, &Options, nullptr, &FabRestoreDone);
-	}
 #endif
 }
 
@@ -157,9 +173,9 @@ public:
 		SignIn.Service = &UnrealMcpFabLocal::FabService;
 		SignIn.Tokens = &UnrealMcpFabLocal::FabTokens;
 		if (GIsRunning)
-			UnrealMcpFabLocal::FabRestoreSignIn();
+			UnrealMcpFabLocal::FabRestoreOnStart();
 		else
-			PostEngineInit = FCoreDelegates::OnPostEngineInit.AddStatic(&UnrealMcpFabLocal::FabRestoreSignIn);
+			PostEngineInit = FCoreDelegates::OnPostEngineInit.AddStatic(&UnrealMcpFabLocal::FabRestoreOnStart);
 #endif
 	}
 

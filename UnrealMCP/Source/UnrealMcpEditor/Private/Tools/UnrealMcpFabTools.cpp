@@ -384,9 +384,12 @@ namespace UnrealMcpFabToolsLocal
 			"-NoEOS); the editor log's LogFab lines say why the service did not start."), *ToolName);
 	}
 
-	/** fab-search's last line: what adding a listing needs, given whether this editor is signed in to Fab. */
-	static FString FabSearchFooterText(bool bSignedIn)
+	/** fab-search's last line: what adding a listing needs, given whether this editor is signed in to Fab and can sign in. */
+	static FString FabSearchFooterText(bool bSignedIn, bool bServiceDown = false)
 	{
+		if (!bSignedIn && bServiceDown)
+			return TEXT("\nEpic's sign-in service did not start in this editor (e.g. it was started with -NoEOS), so fab-add and "
+			            "fab-library cannot run in it: plan without Fab assets.");
 		if (bSignedIn)
 			return TEXT("\nfab-add imports a listing the user owns (fab-library lists them); a free listing must first be added to the "
 			            "user's library on fab.com.");
@@ -752,10 +755,8 @@ namespace UnrealMcpFabToolsLocal
 		const bool bSignedIn = FabPluginLoaded(PluginError) && !FabReadToken(State).IsEmpty();
 		FUnrealMcpToolResult Result = FabPageResult(Call, Rows, Lines, FabNextCursor(*Json),
 			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):"), Rows.Num()),
-			!PluginError.IsEmpty() ? TEXT("\n") + PluginError
-			: !bSignedIn && FabService() == EUnrealMcpFabSignInService::NotStarted ? FString(TEXT("\nEpic's sign-in service did not "
-				"start in this editor (e.g. it was started with -NoEOS), so fab-add and fab-library cannot run in it: plan without Fab assets."))
-			: FabSearchFooterText(bSignedIn));
+			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn, FabService() == EUnrealMcpFabSignInService::NotStarted)
+			: TEXT("\n") + PluginError);
 		Result.Structured->SetBoolField(TEXT("signedIn"), bSignedIn);
 		return Result;
 	}
@@ -1243,9 +1244,10 @@ namespace UnrealMcpFabToolsLocal
 					return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("This engine's Fab plugin has no UFabBrowserApi::Login this tool can "
 						"call. The user signs in by opening Fab from the editor's toolbar.")));
 				// Login returns nothing; without an EOS platform it only logs so (FabAuthentication::LoginUsingAccountPortal).
+				static const FName LogFab(TEXT("LogFab"));
 				for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(Before))
 				{
-					if (Entry.Category == TEXT("LogFab") && Entry.Message.Contains(TEXT("Invalid EOS platform handle")))
+					if (Entry.Category == LogFab && Entry.Message.Contains(TEXT("Invalid EOS platform handle")))
 						return FabFinish(Call, FUnrealMcpToolResult::Error(FabServiceDownText(TEXT("fab-sign-in"))));
 				}
 				FabPortalOpenedAt() = State.StageStarted;
