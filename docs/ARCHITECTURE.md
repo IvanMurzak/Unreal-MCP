@@ -1094,6 +1094,18 @@ the connection-config task).
   `explicitToken` (else the sidecar's `UNREAL_MCP_TOKEN`), or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
   UNREAL_MCP_TOKEN or use a localhost server" (McpPlugin's shared `CustomOAuthCredentialPolicy` / `HostScope`, bound to
   the dial host in `SidecarHost.SetHost`).
+- **Whose rejection refreshes the machine credential (DEV-272).** The credential is stamped with the server that
+  issued it (`serverTarget`, compared by origin: scheme, host, non-default port). In Cloud mode it is presented only to
+  that server; a Cloud host it is foreign to gets neither it nor the slot's account token (the plugin's `CloudToken`
+  came from the same sign-in), only an explicit `UNREAL_MCP_TOKEN`. Custom + `oauth` keeps the shared loopback rule
+  above. Either way, an authorization rejection (McpPlugin's 3-strike signal) refreshes, i.e. rotates, the shared
+  family only when the rejected dial presented it to the server that issued it and mode, auth option and host have not
+  changed since: a dev stand rejecting a production sign-in, or production rejecting a stand's, never rotates it (the
+  proactive pre-expiry refresh still keeps it fresh). The on-401 `ConnectionCredentialCoordinator` lives for the host
+  lifetime behind `CredentialRejectionGate` and is disposed only at shutdown, so a config push never cancels a refresh
+  POST in flight (a rotation committed by the server but lost here would make the next refresh present the old token,
+  and reuse detection would revoke the family for every editor on the machine); after such a push the gate leaves the
+  re-dial to the config transition. A dead-family verdict stops only a link that presents the machine credential.
 - **Port-less loopback Custom host.** The default `http://localhost` (or a saved `http://localhost/mcp`) names no
   port. The sidecar dials it on the project's local-server port (`SidecarHost.RepairLocalHost`, McpPlugin
   `AgentConfiguratorSettings.NormalizeLocalHost`: marker `portOverride`, else the v1 derived port), and once the

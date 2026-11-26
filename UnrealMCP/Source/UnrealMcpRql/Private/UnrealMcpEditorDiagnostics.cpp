@@ -53,14 +53,22 @@ namespace UnrealMcpEditorDiagnosticsLocal
 	}
 
 	/**
-	 * Log errors that say nothing about the project: the Fab tools read the user's Fab sign-in token
-	 * (UnrealMcpFabTools.cpp), and while nobody is signed in every read logs these two lines (the Fab plugin's and the EOS
-	 * SDK's). Reported, they would send the agent after a problem that does not exist (DEV-273).
+	 * The two lines a Fab token read logs while nobody is signed in to Fab (the Fab plugin's and the EOS SDK's). They say
+	 * nothing about the project, so they are left out, but only when logged during such a read
+	 * (FUnrealMcpEditorDiagnostics::IgnoreFabTokenReadLog): the same EOS error from a project's own login is reported.
 	 */
-	bool IsKnownNoise(const FName& Category, const FString& Message)
+	bool IsFabTokenReadNoise(const FUnrealMcpLogEntry& Entry, const TArray<TPair<int64, int64>>& Reads)
 	{
-		return (Category == TEXT("LogFab") && Message.Contains(TEXT("unable to get auth token")))
-			|| (Category == TEXT("LogEOSSDK") && Message.Contains(TEXT("EOS_Auth_CopyUserAuthToken")));
+		const bool bFabLine = (Entry.Category == TEXT("LogFab") && Entry.Message.Contains(TEXT("unable to get auth token")))
+			|| (Entry.Category == TEXT("LogEOSSDK") && Entry.Message.Contains(TEXT("EOS_Auth_CopyUserAuthToken")));
+		if (!bFabLine)
+			return false;
+		for (const TPair<int64, int64>& Read : Reads)
+		{
+			if (Entry.Sequence > Read.Key && Entry.Sequence <= Read.Value)
+				return true;
+		}
+		return false;
 	}
 
 	FAutoConsoleVariable* GPushVariable = nullptr;
@@ -257,6 +265,13 @@ FUnrealMcpEditorDiagnostics::FRow& FUnrealMcpEditorDiagnostics::Upsert(const FGa
 	return Added;
 }
 
+void FUnrealMcpEditorDiagnostics::IgnoreFabTokenReadLog(int64 AfterSequence, int64 ThroughSequence)
+{
+	check(IsInGameThread());
+	if (ThroughSequence > AfterSequence)
+		Get().FabTokenReads.Emplace(AfterSequence, ThroughSequence);
+}
+
 void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 {
 	FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
@@ -267,7 +282,7 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 		LogCursor = FMath::Max(LogCursor, Entry.Sequence);
 		const ELogVerbosity::Type Verbosity = static_cast<ELogVerbosity::Type>(Entry.Verbosity & ELogVerbosity::VerbosityMask);
 		if (Verbosity > ELogVerbosity::Warning || Verbosity == ELogVerbosity::NoLogging || Entry.Category == TEXT("LogUnrealMcp")
-			|| IsMessageLogPage(Entry.Category) || IsKnownNoise(Entry.Category, Entry.Message))
+			|| IsMessageLogPage(Entry.Category) || IsFabTokenReadNoise(Entry, FabTokenReads))
 			continue;
 		bool bAdded = false;
 		FRow& Row = Upsert({ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError,
@@ -277,6 +292,8 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 		else
 			++Row.Count;
 	}
+	// A read whose lines are all ingested is done with.
+	FabTokenReads.RemoveAll([this](const TPair<int64, int64>& Read) { return Read.Value <= LogCursor; });
 
 	// Keep the most recent MaxLogItems distinct log lines.
 	if (LogItems > MaxLogItems)

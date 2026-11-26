@@ -458,7 +458,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.Dispose(); // disposes the coordinator + subscription + provider without throwing
         }
 
-        // --- DEV-272: a credential another server issued is never presented or refreshed --------------------------
+        // --- DEV-272: a credential is presented only to the server that issued it, and only that server's rejection
+        // refreshes it; an in-flight refresh is never cancelled except at host shutdown ----------------------------
 
         private static string SeedStore(string serverTarget)
         {
@@ -472,6 +473,52 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 ServerTarget = serverTarget,
             });
             return dir;
+        }
+
+        // The plugin-plane refresh token on disk (a v1 seed is adopted as families.legacy).
+        private static string? StoredRefreshToken(string dir)
+        {
+            var credentials = new MachineCredentialStore(dir).TryRead().Credentials;
+            return credentials?.Families?.Plugin?.RefreshToken ?? credentials?.Families?.Legacy?.RefreshToken;
+        }
+
+        private static async Task WaitUntil(Func<bool> condition, string what)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!condition())
+            {
+                if (DateTime.UtcNow > deadline)
+                    throw new TimeoutException(what);
+                await Task.Delay(10);
+            }
+        }
+
+        /// <summary>Counts refresh attempts; succeeds with a rotated pair.</summary>
+        internal sealed class CountingRefresher : ITokenRefresher
+        {
+            private int _calls;
+            public int Calls => Volatile.Read(ref _calls);
+            public Task<TokenRefreshResult> RefreshAsync(string refreshToken, string? serverTarget, CancellationToken cancellationToken = default)
+            {
+                Interlocked.Increment(ref _calls);
+                return Task.FromResult(TokenRefreshResult.Success("rotated-jwt", "rotated-refresh", DateTimeOffset.UtcNow.AddHours(1)));
+            }
+        }
+
+        /// <summary>Blocks inside the refresh POST until released, so a test can act while it is in flight.</summary>
+        internal sealed class BlockingRefresher : ITokenRefresher
+        {
+            public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public CancellationToken Token { get; private set; }
+            public async Task<TokenRefreshResult> RefreshAsync(string refreshToken, string? serverTarget, CancellationToken cancellationToken = default)
+            {
+                Token = cancellationToken;
+                Entered.TrySetResult();
+                await Release.Task; // the server has rotated; only the answer is still on its way
+                cancellationToken.ThrowIfCancellationRequested();
+                return TokenRefreshResult.Success("rotated-jwt", "rotated-refresh", DateTimeOffset.UtcNow.AddHours(1));
+            }
         }
 
         [Theory]
@@ -496,30 +543,62 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.Build();
 
             Assert.True(host.CredentialProvider!.IsSignedIn);
-            Assert.Null(host.CurrentBearer);              // not presented to the host that did not issue it
-            Assert.False(host.HasCredentialCoordinator);  // so a rejection cannot rotate it
+            Assert.Null(host.CurrentBearer);                  // not presented to the host that did not issue it
+            Assert.False(host.RejectionRefreshesCredential);  // so a rejection cannot rotate it
+            Assert.False(host.SignInRequiredStopsConnection);
+            Assert.True(host.HasCredentialCoordinator);       // wired for the host lifetime, gated
         }
 
         [Fact]
-        public void CloudMode_OwnCredential_KeepsTheCoordinator()
+        public void CloudMode_ForeignCredential_SlotAccountTokenIsNotPresentedEither()
+        {
+            // Review U1: signed in on a development stand (cloudUrl = the stand), cloudUrl switched back to production.
+            // The plugin still pushes that sign-in's account token as its CloudToken; it must not reach production.
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
+            host.Build();
+            var config = CloudConfig();
+            config["token"] = "stand-account-jwt";
+            host.ApplyConnectionConfig(config);
+
+            Assert.Null(host.CurrentBearer);
+        }
+
+        [Fact]
+        public void CloudMode_ForeignCredential_ExplicitEnvTokenIsStillPresented()
+        {
+            // UNREAL_MCP_TOKEN is the user's own choice for this sidecar, not a sign-in's token.
+            using var host = new SidecarHost(NewIpc(), "0.1.0", fallbackToken: "env-token",
+                credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
+            host.Build();
+            host.ApplyConnectionConfig(CloudConfig());
+
+            Assert.Equal("env-token", host.CurrentBearer);
+            Assert.False(host.RejectionRefreshesCredential);
+        }
+
+        [Fact]
+        public void CloudMode_OwnCredential_IsPresentedAndItsRejectionRefreshes()
         {
             using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("https://ai-game.dev")));
             host.ApplyConnectionConfig(CloudConfig());
             host.Build();
 
-            Assert.Equal("machine-jwt", host.CurrentBearer);
-            Assert.True(host.HasCredentialCoordinator);
+            Assert.False(host.RejectionRefreshesCredential); // nothing presented yet
+            Assert.Equal("machine-jwt", host.CurrentBearer); // the dial
+            Assert.True(host.RejectionRefreshesCredential);
+            Assert.True(host.SignInRequiredStopsConnection);
         }
 
         [Fact]
-        public void Coordinator_FollowsAnAdoptedCredentialWithoutAnAuthStateEdge()
+        public void RejectionRefreshes_FollowsAnAdoptedCredentialWithoutAnAuthStateEdge()
         {
-            // A sign-in (or a peer's store write) swaps the credential while the provider stays SignedIn: the next dial
-            // decides again whether a rejection may refresh it.
+            // A sign-in (or a peer's store write) swaps the credential while the provider stays SignedIn: what the next
+            // dial presents decides whether a rejection may refresh it.
             using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
             host.ApplyConnectionConfig(CloudConfig());
             host.Build();
-            Assert.False(host.HasCredentialCoordinator);
+            Assert.Null(host.CurrentBearer);
+            Assert.False(host.RejectionRefreshesCredential);
 
             host.CredentialProvider!.Adopt(new MachineCredentials
             {
@@ -527,29 +606,119 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
                 ExpiresAt = DateTimeOffset.UtcNow.AddHours(1), ServerTarget = "https://ai-game.dev",
             });
             Assert.Equal("cloud-jwt", host.CurrentBearer); // the dial
-            Assert.True(host.HasCredentialCoordinator);
+            Assert.True(host.RejectionRefreshesCredential);
         }
 
         [Fact]
-        public void Coordinator_FollowsTheModeAndHost()
+        public void RejectionRefreshes_FollowsTheModeAndHost()
         {
             using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
             host.Build();
-            Assert.False(host.HasCredentialCoordinator); // no config yet: nothing presents the credential
+            Assert.False(host.RejectionRefreshesCredential); // no config yet: nothing presents the credential
 
-            // The App's development stand: Custom + oauth on the loopback relay presents the account credential.
+            // The App's development stand: Custom + oauth on the loopback server that issued the credential.
             host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:80/mcp", ["authOption"] = "oauth" });
-            Assert.True(host.HasCredentialCoordinator);
+            Assert.Equal("machine-jwt", host.CurrentBearer);
+            Assert.True(host.RejectionRefreshesCredential);
+            Assert.True(host.SignInRequiredStopsConnection);
 
-            // Custom with a static token presents that token: a rejection must not refresh the machine credential.
+            // Custom with a static token presents that token: a rejection must not refresh the machine credential, and
+            // a dead machine sign-in does not stop this link.
             host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:80/mcp", ["authOption"] = "token", ["token"] = "local-tok" });
-            Assert.False(host.HasCredentialCoordinator);
+            Assert.False(host.RejectionRefreshesCredential); // the host is unchanged, but the auth option is not
+            Assert.Equal("local-tok", host.CurrentBearer);
+            Assert.False(host.RejectionRefreshesCredential);
+            Assert.False(host.SignInRequiredStopsConnection);
 
             // Cloud mode on the server that issued it, then on one that did not.
             host.ApplyConnectionConfig(CloudConfig("http://127.0.0.1"));
-            Assert.True(host.HasCredentialCoordinator);
+            Assert.Equal("machine-jwt", host.CurrentBearer);
+            Assert.True(host.RejectionRefreshesCredential);
             host.ApplyConnectionConfig(CloudConfig());
-            Assert.False(host.HasCredentialCoordinator);
+            Assert.False(host.RejectionRefreshesCredential); // the last dial went to another host
+            Assert.Null(host.CurrentBearer);
+            Assert.False(host.RejectionRefreshesCredential);
+        }
+
+        [Fact]
+        public async Task CustomOAuth_LoopbackServerThatDidNotIssueTheCredential_RejectionNeverRotatesIt()
+        {
+            // Review U2: a production sign-in presented to a localhost dev stand (the shared Custom + oauth policy sends
+            // the account token to any loopback host). The stand rejects it; rotating the production family for that
+            // would end in reuse detection revoking it machine-wide.
+            var refresher = new CountingRefresher();
+            var dir = SeedStore("https://ai-game.dev");
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir), tokenRefresher: refresher);
+            host.Build();
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:5200", ["authOption"] = "oauth" });
+
+            Assert.Equal("machine-jwt", host.CurrentBearer); // presented per the shared policy
+            Assert.False(host.RejectionRefreshesCredential);
+            host.RejectionGate!.InjectRejectionForTest();
+            host.RejectionGate!.InjectRejectionForTest();
+            await Task.Delay(200);
+            Assert.Equal(0, refresher.Calls);
+            Assert.Equal("machine-refresh", StoredRefreshToken(dir));
+        }
+
+        [Fact]
+        public async Task CloudMode_ForeignCredential_RejectionNeverReachesTheRefresher()
+        {
+            var refresher = new CountingRefresher();
+            using var host = new SidecarHost(NewIpc(), "0.1.0",
+                credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")), tokenRefresher: refresher);
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+
+            Assert.Null(host.CurrentBearer);
+            host.RejectionGate!.InjectRejectionForTest();
+            await Task.Delay(200);
+            Assert.Equal(0, refresher.Calls);
+        }
+
+        [Fact]
+        public async Task InFlightRefresh_IsNotCancelledByAModeSwitch_AndItsRotationIsStored()
+        {
+            // Review U3: the refresh POST is in flight when the user switches Cloud -> Custom. Cancelling it after the
+            // server rotated would drop the new refresh token, and the next refresh would present the old one (reuse
+            // detection -> machine-wide revocation). The refresh completes; only the reconnect is left to the config
+            // transition.
+            var dir = SeedStore("https://ai-game.dev");
+            var refresher = new BlockingRefresher();
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(dir), tokenRefresher: refresher);
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+            Assert.Equal("machine-jwt", host.CurrentBearer);
+
+            host.RejectionGate!.InjectRejectionForTest();
+            await refresher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:5200", ["authOption"] = "token", ["token"] = "local-tok" });
+            host.ApplyConnectionConfig(CloudConfig("http://127.0.0.1:5300")); // and a foreign Cloud host
+            Assert.False(refresher.Token.IsCancellationRequested);
+            Assert.True(host.HasCredentialCoordinator);
+
+            refresher.Release.SetResult();
+            await WaitUntil(() => StoredRefreshToken(dir) == "rotated-refresh", "the rotated refresh token was never stored");
+            Assert.False(refresher.Token.IsCancellationRequested);
+            await Task.Delay(100);
+            Assert.False(host.Plugin!.KeepConnected.CurrentValue); // the recovery did not dial the old target
+        }
+
+        [Fact]
+        public async Task HostDispose_IsTheOnlyThingThatCancelsAnInFlightRefresh()
+        {
+            var refresher = new BlockingRefresher();
+            var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("https://ai-game.dev")), tokenRefresher: refresher);
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+            Assert.Equal("machine-jwt", host.CurrentBearer);
+            host.RejectionGate!.InjectRejectionForTest();
+            await refresher.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            host.Dispose();
+            Assert.True(refresher.Token.IsCancellationRequested);
+            refresher.Release.SetResult();
         }
 
         // --- oauth-client-error-hygiene d1: dead-family verdict → "SignInRequired" on the status feed ----------

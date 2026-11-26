@@ -7,6 +7,7 @@
 #include "Config/UnrealMcpConfig.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"
+#include "UnrealMcpEditorDiagnostics.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -288,7 +289,14 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/** The signed-in user's EOS access token, or empty when nobody is signed in to Fab in this editor. */
-	static FString FabAuthToken() { return FabApiString(TEXT("GetAuthToken")); }
+	static FString FabAuthToken()
+	{
+		// Signed out, the read logs a LogFab and a LogEOSSDK error; the diagnostics leave out exactly those (DEV-273).
+		const int64 Before = FUnrealMcpLogCollector::Get().GetLastSequence();
+		FString Token = FabApiString(TEXT("GetAuthToken"));
+		FUnrealMcpEditorDiagnostics::IgnoreFabTokenReadLog(Before, FUnrealMcpLogCollector::Get().GetLastSequence());
+		return Token;
+	}
 
 	/** The account id inside an EOS access token ("eg1~<jwt>": the JWT's `sub`). */
 	static FString FabAccountIdFromToken(const FString& Token)

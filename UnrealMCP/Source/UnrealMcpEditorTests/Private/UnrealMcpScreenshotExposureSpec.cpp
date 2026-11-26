@@ -17,6 +17,8 @@
 #include "ImageUtils.h"
 #include "ImageCore.h"
 #include "Engine/World.h"
+#include "Engine/Level.h"
+#include "UObject/Package.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/DirectionalLight.h"
@@ -38,6 +40,9 @@
 BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotExposureSpec, "UnrealMcp.Tools.Screenshot.Exposure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 	TArray<TWeakObjectPtr<AActor>> SceneActors;
+	/** The open level's package and whether it was dirty before the scene was built (AfterEach checks it stays so). */
+	TWeakObjectPtr<UPackage> ScenePackage;
+	bool bScenePackageWasDirty = false;
 	FTSTicker::FDelegateHandle TickerHandle;
 
 	/** The level viewport the spec pilots, and its view before, restored in AfterEach (it is saved with the layout). */
@@ -74,10 +79,19 @@ BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotExposureSpec, "UnrealMcp.Tools.Screenshot.
 	template <typename T>
 	T* SpawnSceneActor(UWorld* World, const FTransform& Transform)
 	{
+		// The scene goes into the user's open level and must leave it clean: a transient actor never dirties a package
+		// (MarkPackageDirty skips RF_Transient), none gets an external actor package, and DestroyScene does not
+		// Modify() the level.
+		if (!ScenePackage.IsValid() && World->PersistentLevel)
+		{
+			ScenePackage = World->PersistentLevel->GetOutermost();
+			bScenePackageWasDirty = ScenePackage->IsDirty();
+		}
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.ObjectFlags |= RF_Transient;
 		SpawnParams.bTemporaryEditorActor = true;
 		SpawnParams.bHideFromSceneOutliner = true;
+		SpawnParams.bCreateActorPackage = false; // never an external actor package in a World Partition level
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		T* Actor = World->SpawnActor<T>(T::StaticClass(), Transform, SpawnParams);
 		if (Actor)
@@ -100,7 +114,7 @@ BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotExposureSpec, "UnrealMcp.Tools.Screenshot.
 		for (const TWeakObjectPtr<AActor>& Actor : SceneActors)
 		{
 			if (Actor.IsValid())
-				Actor->Destroy();
+				Actor->GetWorld()->DestroyActor(Actor.Get(), /*bNetForce*/ false, /*bShouldModifyLevel*/ false);
 		}
 		SceneActors.Reset();
 	}
@@ -135,6 +149,9 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 		TickerHandle.Reset();
 		DestroyScene();
 		RestoreViewport();
+		if (ScenePackage.IsValid() && !bScenePackageWasDirty)
+			TestFalse(TEXT("the user's open level is left without unsaved changes"), ScenePackage->IsDirty());
+		ScenePackage.Reset();
 	});
 
 	LatentIt("screenshot-camera of a golden-hour Lumen scene is exposed like screenshot-viewport of the same view",

@@ -224,6 +224,28 @@ void FUnrealMcpEditorDiagnosticsSpec::Define()
 		TestFalse(TEXT("a line the tool returned is not repeated"), Run(TEXT("diag-spec-echo")).Notes.Contains(TEXT("DiagSpec echoed")));
 	});
 
+	It("leaves out the Fab sign-in errors of a Fab token read only, not the same errors at other times", [this]()
+	{
+		// Feed the collector as GLog would (an Error UE_LOG in a test goes to the automation framework).
+		FUnrealMcpLogCollector& Collector = FUnrealMcpLogCollector::Get();
+		Collector.Serialize(TEXT("EOS_Auth_CopyUserAuthToken failed: DiagSpec project login"), ELogVerbosity::Error, TEXT("LogEOSSDK"));
+		TestTrue(TEXT("a project's own EOS login error is reported"),
+			Run(TEXT("diag-spec-write")).Notes.Contains(TEXT("DiagSpec project login")));
+
+		const int64 Before = Collector.GetLastSequence();
+		Collector.Serialize(TEXT("unable to get auth token DiagSpec fab read"), ELogVerbosity::Error, TEXT("LogFab"));
+		Collector.Serialize(TEXT("EOS_Auth_CopyUserAuthToken failed: DiagSpec fab read"), ELogVerbosity::Error, TEXT("LogEOSSDK"));
+		Collector.Serialize(TEXT("DiagSpec other error during the read"), ELogVerbosity::Error, TEXT("LogEOSSDK"));
+		FUnrealMcpEditorDiagnostics::IgnoreFabTokenReadLog(Before, Collector.GetLastSequence());
+		const FString Notes = Run(TEXT("diag-spec-write")).Notes;
+		TestFalse(TEXT("the token read's two lines are left out"), Notes.Contains(TEXT("DiagSpec fab read")));
+		TestTrue(TEXT("any other line logged during the read is reported"), Notes.Contains(TEXT("DiagSpec other error during the read")));
+
+		Collector.Serialize(TEXT("EOS_Auth_CopyUserAuthToken failed: DiagSpec after the read"), ELogVerbosity::Error, TEXT("LogEOSSDK"));
+		TestTrue(TEXT("the same line after the read is reported"),
+			Run(TEXT("diag-spec-write")).Notes.Contains(TEXT("DiagSpec after the read")));
+	});
+
 	It("reports a Blueprint that fails to compile while it does", [this]()
 	{
 		UPackage* Package = CreatePackage(TEXT("/Temp/DiagSpec_BrokenBlueprint"));
