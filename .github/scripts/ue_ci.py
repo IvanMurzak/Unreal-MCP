@@ -56,7 +56,7 @@ FAB_VENDORED_CODE = ("Source/ThirdParty/RQL", "Content/Python/Lib/site-packages/
 FAB_VENDORED_COPYRIGHT = "Copyright (c) 2026 Ivan Murzak. Licensed under the PolyForm Shield License 1.0.0."
 # The files of the source plugin assets, relative to UnrealMCP/.
 SOURCE_ASSET_INPUTS = ("UnrealMCP.uplugin", "Config", "Resources", "Content", "Source/UnrealMcpRuntime", "Source/UnrealMcpRql",
-                       "Source/UnrealMcpEditor", "Source/ThirdParty", "ThirdPartyNotices.txt")
+                       "Source/UnrealMcpEditor", "Source/UnrealMcpFab", "Source/ThirdParty", "ThirdPartyNotices.txt")
 # What Epic's Fab review calls an executable: native binaries by magic bytes (PE, ELF, Mach-O thin + fat), scripts by
 # shebang, and the usual executable / native-library extensions.
 EXECUTABLE_MAGIC = (b"MZ", b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe",

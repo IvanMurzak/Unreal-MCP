@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 // See the LICENSE file in the repository root for more information.
 
+#include "Interfaces/IPluginManager.h"
 #include "Modules/ModuleManager.h"
 #include "UnrealMcpLog.h"
 #include "UnrealMcpEditorCoordinator.h"
@@ -30,6 +31,11 @@ public:
 
 		Coordinator = MakeUnique<FUnrealMcpEditorCoordinator>();
 		Coordinator->Startup();
+
+		// The Fab sign-in companion (DEV-281) works on the Fab plugin's EOS platform: load it only alongside the Fab plugin.
+		const TSharedPtr<IPlugin> Fab = IPluginManager::Get().FindPlugin(TEXT("Fab"));
+		if (Fab.IsValid() && Fab->IsEnabled() && FModuleManager::Get().ModuleExists(TEXT("UnrealMcpFab")))
+			FModuleManager::Get().LoadModule(TEXT("UnrealMcpFab"));
 	}
 
 	virtual void ShutdownModule() override

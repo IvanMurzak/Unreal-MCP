@@ -8,6 +8,7 @@
 #include "Misc/Base64.h"
 #include "Misc/EngineVersion.h"
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpFabSignIn.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -133,6 +134,53 @@ void FUnrealMcpFabToolsSpec::Define()
 			return;
 		TestTrue(TEXT("says the sign-in is missing"), Result.Message.Contains(TEXT("Not signed in to Fab")));
 		TestTrue(TEXT("opened nothing"), Result.Message.Contains(TEXT("no browser was opened")));
+	});
+
+	It("fails at once, opening nothing, when Epic's sign-in service never started (DEV-281)", [this]()
+	{
+		const FEngineVersion& Engine = FEngineVersion::Current();
+		if (Engine.GetMajor() > 5 || (Engine.GetMajor() == 5 && Engine.GetMinor() >= 6))
+		{
+			AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
+			AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
+		}
+		const FUnrealMcpFabSignIn Saved = UnrealMcpFabSignIn();
+		UnrealMcpFabSignIn().Service = []() { return EUnrealMcpFabSignInService::NotStarted; };
+		UnrealMcpFabSignIn().Tokens = [](FString&, FString&) { return false; };
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpFabTools::Register(Registry);
+		const FUnrealMcpToolResult SignIn = Registry.Execute(TEXT("fab-sign-in"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
+		const FUnrealMcpToolResult Library = Registry.Execute(TEXT("fab-library"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
+		UnrealMcpFabSignIn() = Saved;
+		// A host without the Fab plugin answers that first; one signed in through the Fab plugin itself is signed in.
+		if (SignIn.Message.Contains(TEXT("Fab plugin is not loaded")) || SignIn.bSuccess)
+			return;
+		TestFalse(TEXT("fab-sign-in does not wait"), SignIn.bRetryLater);
+		TestTrue(TEXT("fab-sign-in says why"), SignIn.Message.Contains(TEXT("sign-in service did not start")));
+		TestTrue(TEXT("fab-sign-in opened nothing"), SignIn.Message.Contains(TEXT("no browser was opened")));
+		TestFalse(TEXT("fab-library does not wait"), Library.bRetryLater || Library.bSuccess);
+		TestTrue(TEXT("fab-library says why"), Library.Message.Contains(TEXT("sign-in service did not start")));
+	});
+
+	It("waits while the remembered sign-in is being restored (DEV-281)", [this]()
+	{
+		const FEngineVersion& Engine = FEngineVersion::Current();
+		if (Engine.GetMajor() > 5 || (Engine.GetMajor() == 5 && Engine.GetMinor() >= 6))
+		{
+			AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
+			AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
+		}
+		const FUnrealMcpFabSignIn Saved = UnrealMcpFabSignIn();
+		UnrealMcpFabSignIn().Service = []() { return EUnrealMcpFabSignInService::Restoring; };
+		UnrealMcpFabSignIn().Tokens = [](FString&, FString&) { return false; };
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpFabTools::Register(Registry);
+		const FUnrealMcpToolResult SignIn = Registry.Execute(TEXT("fab-sign-in"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
+		UnrealMcpFabSignIn() = Saved;
+		if (SignIn.Message.Contains(TEXT("Fab plugin is not loaded")) || SignIn.bSuccess)
+			return;
+		TestTrue(TEXT("waits for the restore"), SignIn.bRetryLater);
+		TestTrue(TEXT("says what it waits for"), SignIn.Message.Contains(TEXT("Restoring")));
 	});
 
 	It("rejects bad arguments before any network call", [this]()
