@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "UnrealMcpEditorDiagnostics.h"
+#include "UnrealMcpRqlMaterials.h"
 
 #include "Tools/UnrealMcpLogCollector.h"
 #include "Tools/UnrealMcpObjectRef.h"
@@ -10,6 +11,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Engine/Blueprint.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
@@ -34,6 +36,16 @@ namespace UnrealMcpEditorDiagnosticsLocal
 	constexpr int32 MaxLogItems = 200;        // distinct log lines kept, the most recent
 	constexpr int32 MaxMessageLogItems = 100; // per Message Log page, the newest
 	constexpr int32 MaxMessageChars = 2000;
+
+	/** A saved asset of the project (not /Engine, not an engine plugin's content such as /Niagara, not transient): the project's to fix. */
+	bool DiagnosticsIsProjectAsset(const UObject* Asset)
+	{
+		const UPackage* Package = Asset->GetOutermost();
+		if (!Package || Package == GetTransientPackage() || Package->GetName().StartsWith(TEXT("/Engine/")))
+			return false;
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPluginFromPath(Package->GetName());
+		return !(Plugin.IsValid() && Plugin->GetLoadedFrom() == EPluginLoadedFrom::Engine);
+	}
 
 	/** The Message Log pages read, by their listing names (only the registered ones are read). */
 	const TCHAR* const MessageLogPages[] = {
@@ -212,15 +224,27 @@ void FUnrealMcpEditorDiagnostics::GatherCompiler(TArray<FGathered>& Out) const
 		const bool bError = Blueprint->Status == BS_Error;
 		if (!bError && Blueprint->Status != BS_UpToDateWithWarnings)
 			continue;
-		const UPackage* Package = Blueprint->GetOutermost();
-		if (!Package || Package == GetTransientPackage() || Package->GetName().StartsWith(TEXT("/Engine/")))
-			continue;
-		// Engine plugins' content (/Niagara, /ControlRig, ...) is not the project's to fix.
-		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPluginFromPath(Package->GetName());
-		if (Plugin.IsValid() && Plugin->GetLoadedFrom() == EPluginLoadedFrom::Engine)
+		if (!DiagnosticsIsProjectAsset(Blueprint))
 			continue;
 		Out.Add({ TEXT("Compiler"), bError ? SevError : SevWarning, FString::Printf(TEXT("Blueprint %s %s (its messages: unreal.asset(\"%s\") | call Compile())"),
-			*Blueprint->GetPathName(), bError ? TEXT("fails to compile") : TEXT("compiles with warnings"), *Package->GetName()) });
+			*Blueprint->GetPathName(), bError ? TEXT("fails to compile") : TEXT("compiles with warnings"), *Blueprint->GetOutermost()->GetName()) });
+	}
+	// Materials: the editor only logs a failed compile, and a cooked game draws the default material instead. The last
+	// finished compile counts (no wait here: a compile in flight shows up on a later call).
+	for (TObjectIterator<UMaterial> It; It; ++It)
+	{
+		UMaterial* Material = *It;
+		if (!IsValid(Material) || Material->HasAnyFlags(RF_ClassDefaultObject | RF_Transient))
+			continue;
+		const TArray<FUnrealMcpMaterialCompileError> Errors = UnrealMcpRqlMaterialCompileErrors(Material, /*bWait*/ false);
+		if (Errors.IsEmpty() || !DiagnosticsIsProjectAsset(Material))
+			continue;
+		TArray<FString> Platforms;
+		for (const FUnrealMcpMaterialCompileError& Error : Errors)
+			Platforms.AddUnique(Error.Platform);
+		const FString More = Errors.Num() > 1 ? FString::Printf(TEXT(" (+%d more)"), Errors.Num() - 1) : FString();
+		Out.Add({ TEXT("Compiler"), SevError, FString::Printf(TEXT("Material %s fails to compile (%s): %s%s (all: unreal.asset(\"%s\") | select CompileErrors)"),
+			*Material->GetPathName(), *FString::Join(Platforms, TEXT(", ")), *Errors[0].Message, *More, *Material->GetOutermost()->GetName()) });
 	}
 }
 

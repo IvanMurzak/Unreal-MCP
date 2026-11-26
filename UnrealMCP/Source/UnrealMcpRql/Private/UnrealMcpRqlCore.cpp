@@ -1269,6 +1269,7 @@ void UnrealMcpRqlConfigureCore(FUnrealMcpRqlSession& Session)
 	UnrealMcpRqlAddBlueprints(Session);
 	UnrealMcpRqlAddWidgets(Session);
 	UnrealMcpRqlAddCollision(Session);
+	UnrealMcpRqlAddMaterials(Session);
 	UnrealMcpRqlAddSequences(Session);
 	UnrealMcpRqlAddDiagnostics(Session);
 	UnrealMcpRqlAddWorldPartition(Session);

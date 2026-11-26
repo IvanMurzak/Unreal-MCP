@@ -33,7 +33,7 @@
 | `rql-mutate` | `set` / `call` で終わる RQL クエリ（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）。すべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ。`dry_run` でプレビュー。`;` で区切った複数のクエリはそれぞれ 1 つの変更 |
 | `rql-schema` | ソース、関数、インストール済みの拡張機能、エディターのワールドにあるクラス。`type` でひとつの型のメンバーとメソッドを一覧表示。`guide` でインストール済み拡張機能のガイドを返す（`{"guide": "landscape"}`） |
 
-リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。
+リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。 マテリアルは、フィーチャーレベルとシェーダープラットフォームごとのコンパイルエラーと、それを使うメッシュに必要な使用フラグを報告します（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`）。`python-execute` の `recompile_material` はこれを返しません。コンパイルに失敗したマテリアルはエディター診断のメモにも表示されます。
 
 `unreal-rql` スキル（`unreal-skill-generate` が書き出します）は、この言語の使い方と、インストール済みの拡張機能が追加するものを説明します。
 

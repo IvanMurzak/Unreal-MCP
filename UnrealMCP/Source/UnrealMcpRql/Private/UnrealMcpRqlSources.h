@@ -78,6 +78,9 @@ void UnrealMcpRqlAddBlueprints(FUnrealMcpRqlSession& Session);
 /** Collision: PrimitiveComponent CollisionProfile / CollisionEnabled / ObjectType / Responses by channel name (UnrealMcpRqlCollision.cpp). */
 void UnrealMcpRqlAddCollision(FUnrealMcpRqlSession& Session);
 
+/** Materials: CompileErrors, UsageFlags, MissingUsages and Compile() (UnrealMcpRqlMaterials.cpp). */
+void UnrealMcpRqlAddMaterials(FUnrealMcpRqlSession& Session);
+
 /** UMG: Widget Blueprint widget trees (RootWidget, Widgets, AddWidget), panel Children, widget Parent / Destroy. */
 void UnrealMcpRqlAddWidgets(FUnrealMcpRqlSession& Session);
 
