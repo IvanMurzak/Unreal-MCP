@@ -134,8 +134,8 @@ void FUnrealMcpRqlMaterialsSpec::Define()
 		UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 		if (!TestNotNull(TEXT("editor world"), World) || !TestNotNull(TEXT("cube mesh"), Cube))
 			return;
-		TestFalse(*FString::Printf(TEXT("a new material has no instanced-mesh usage (%s)"), *Read(TEXT("UsageFlags"))),
-			Read(TEXT("UsageFlags")).Contains(TEXT("bUsedWithInstancedStaticMeshes")));
+		const FString Flags = Read(TEXT("UsageFlags"));
+		TestFalse(*FString::Printf(TEXT("a new material has no instanced-mesh usage (%s)"), *Flags), Flags.Contains(TEXT("bUsedWithInstancedStaticMeshes")));
 		TestEqual(TEXT("nothing uses it yet"), Read(TEXT("MissingUsages")), FString(TEXT("[]")));
 
 		AActor* Actor = World->SpawnActor<AActor>();
