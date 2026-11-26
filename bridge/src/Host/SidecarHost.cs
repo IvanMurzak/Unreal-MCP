@@ -449,6 +449,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// </summary>
         private Task<string?> ResolveBearerAsync(string dialHost)
         {
+            // DEV-272: an adopted credential (a sign-in, a peer's store write) can change its server without an auth-state
+            // edge, so whether a rejection may refresh it is decided again on every dial.
+            SyncCredentialCoordinator();
             var provider = _credentialProvider;
             bool isCloudMode;
             string? slotToken;
@@ -491,7 +494,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 return false;
             if (_isCloudMode)
                 return CredentialIssuedFor(provider.ServerTarget, dialHost);
-            return _isCustomOAuth && Uri.TryCreate(dialHost, UriKind.Absolute, out var uri) && uri.IsLoopback;
+            return _isCustomOAuth && HostScope.IsLoopback(dialHost); // the policy's own loopback rule
         }
 
         /// <summary>

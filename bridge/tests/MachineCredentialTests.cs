@@ -512,6 +512,25 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public void Coordinator_FollowsAnAdoptedCredentialWithoutAnAuthStateEdge()
+        {
+            // A sign-in (or a peer's store write) swaps the credential while the provider stays SignedIn: the next dial
+            // decides again whether a rejection may refresh it.
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+            Assert.False(host.HasCredentialCoordinator);
+
+            host.CredentialProvider!.Adopt(new MachineCredentials
+            {
+                Version = 1, AccessToken = "cloud-jwt", RefreshToken = "cloud-refresh",
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1), ServerTarget = "https://ai-game.dev",
+            });
+            Assert.Equal("cloud-jwt", host.CurrentBearer); // the dial
+            Assert.True(host.HasCredentialCoordinator);
+        }
+
+        [Fact]
         public void Coordinator_FollowsTheModeAndHost()
         {
             using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
