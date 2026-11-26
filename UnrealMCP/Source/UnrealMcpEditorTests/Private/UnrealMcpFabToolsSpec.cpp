@@ -92,6 +92,43 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("no versions"), UnrealMcpFabTools::PickUnrealVersion({}).IsEmpty());
 	});
 
+	It("tells the agent to ask the user and use fab-sign-in when no Fab sign-in exists (DEV-273)", [this]()
+	{
+		const FString Text = UnrealMcpFabTools::SignInRequiredText(TEXT("fab-add"));
+		TestTrue(TEXT("says nothing was opened"), Text.Contains(TEXT("no browser was opened")));
+		TestTrue(TEXT("asks the user in the chat"), Text.Contains(TEXT("AskUserQuestion")));
+		TestTrue(TEXT("names the sign-in tool"), Text.Contains(TEXT("fab-sign-in")));
+		TestTrue(TEXT("names the tool to call again"), Text.Contains(TEXT("call fab-add again")));
+		TestTrue(TEXT("covers a run nobody can answer"), Text.Contains(TEXT("If you cannot ask the user, do not call fab-sign-in")));
+		TestTrue(TEXT("fab-library names itself"), UnrealMcpFabTools::SignInRequiredText(TEXT("fab-library")).Contains(TEXT("call fab-library again")));
+	});
+
+	It("says in fab-search whether adding needs a sign-in first (DEV-273)", [this]()
+	{
+		const FString SignedOut = UnrealMcpFabTools::SearchFooter(false);
+		TestTrue(TEXT("signed out: says so"), SignedOut.Contains(TEXT("Not signed in to Fab")));
+		TestTrue(TEXT("signed out: names fab-sign-in"), SignedOut.Contains(TEXT("fab-sign-in")));
+		TestTrue(TEXT("signed out: asks the user"), SignedOut.Contains(TEXT("AskUserQuestion")));
+		const FString SignedIn = UnrealMcpFabTools::SearchFooter(true);
+		TestFalse(TEXT("signed in: no sign-in warning"), SignedIn.Contains(TEXT("Not signed in")));
+		TestTrue(TEXT("signed in: ownership rule"), SignedIn.Contains(TEXT("fab-library lists them")));
+	});
+
+	It("answers fab-library at once without a sign-in instead of opening a browser (DEV-273)", [this]()
+	{
+		// Reading a missing token logs errors of the Fab plugin and the EOS SDK; they are the expected path here.
+		AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
+		AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpFabTools::Register(Registry);
+		const FUnrealMcpToolResult Result = Registry.Execute(TEXT("fab-library"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
+		// A host without the Fab plugin answers that first; a signed-in editor (or a sign-in in progress) reads the library.
+		if (Result.Message.Contains(TEXT("Fab plugin is not loaded")) || Result.bRetryLater || Result.bSuccess)
+			return;
+		TestTrue(TEXT("says the sign-in is missing"), Result.Message.Contains(TEXT("Not signed in to Fab")));
+		TestTrue(TEXT("opened nothing"), Result.Message.Contains(TEXT("no browser was opened")));
+	});
+
 	It("rejects bad arguments before any network call", [this]()
 	{
 		FUnrealMcpToolRegistry Registry;

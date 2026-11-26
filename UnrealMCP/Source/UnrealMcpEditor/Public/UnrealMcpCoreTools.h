@@ -192,8 +192,9 @@ namespace UnrealMcpSourceTools
 }
 
 /**
- * The Fab tool family: `fab-search` (public Fab catalog), `fab-library` (the signed-in user's Fab library) and `fab-add`
- * (download + import a listing through the engine Fab plugin's own import workflows). The Fab plugin is reached only by
+ * The Fab tool family: `fab-search` (public Fab catalog), `fab-library` (the signed-in user's Fab library), `fab-add`
+ * (download + import a listing through the engine Fab plugin's own import workflows) and `fab-sign-in` (the user's Epic
+ * sign-in, the only one that opens a browser). The Fab plugin is reached only by
  * reflection (no link dependency); HTTP and imports run across frames through FUnrealMcpToolResult::RetryLater.
  */
 namespace UnrealMcpFabTools
@@ -208,6 +209,10 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString DistributionMethod(const FJsonObject& Format);
 	/** The uid of the unreal-engine version to download for this editor: exact UE, else newest older, else oldest newer. */
 	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions);
+	/** What fab-library / fab-add (@p ToolName) answer without a Fab sign-in: ask the user, then fab-sign-in, then call again. */
+	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName);
+	/** fab-search's closing line: what adding a listing needs, given whether this editor is signed in to Fab. */
+	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn);
 }
 
 /**
