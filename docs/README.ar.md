@@ -342,7 +342,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 | المسار | ما هو |
 |---|---|
-| [`UnrealMCP/`](../UnrealMCP/) | إضافة Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
+| [`UnrealMCP/`](../UnrealMCP/) | إضافة Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor`، `UnrealMcpFab` (اختياري) |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`، العملية المرافقة المبنية على .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، حزمة npm |
 | [`extensions/`](../extensions/) | ثمانية امتدادات اختيارية للمحرك بإصدارات مستقلة |

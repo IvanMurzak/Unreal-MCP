@@ -100,6 +100,8 @@ namespace UnrealMcpFabLocal
 
 	static void EOS_CALL FabRestoreDone(const EOS_Auth_LoginCallbackInfo* Data)
 	{
+		if (!EOS_EResult_IsOperationComplete(Data->ResultCode))
+			return; // e.g. EOS_OperationWillRetry: the SDK calls again with the final result
 		bRestoring = false;
 		if (Data->ResultCode == EOS_EResult::EOS_Success)
 		{

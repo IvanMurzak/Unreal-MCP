@@ -19,6 +19,7 @@
 #include "MaterialEditingLibrary.h"
 #include "MaterialShared.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
@@ -136,13 +137,23 @@ namespace UnrealMcpRqlMaterialsLocal
 		return rql::Value::list_of(std::move(Out));
 	}
 
-	/** The asset that holds @p Material's usage flags: since UE 5.8 an instance keeps its own (the editor sets a missing one on it). */
+	/**
+	 * The asset that holds @p Material's usage flags: since UE 5.8 an instance keeps its own (the editor sets a missing one
+	 * on it), the nearest saved one: a dynamic instance (a construction script's) copies its parent's flags and is never saved.
+	 */
 	const UMaterialInterface* MaterialsUsageOwner(const UMaterialInterface* Material)
 	{
 #if UE_VERSION_OLDER_THAN(5, 8, 0)
 		return Material->GetMaterial();
 #else
-		return Material;
+		const UMaterialInterface* Owner = Material;
+		while (const UMaterialInstance* Instance = Cast<UMaterialInstance>(Owner))
+		{
+			if (Instance->IsAsset() || !Instance->Parent)
+				break;
+			Owner = Instance->Parent;
+		}
+		return Owner;
 #endif
 	}
 
@@ -176,9 +187,10 @@ namespace UnrealMcpRqlMaterialsLocal
 	/**
 	 * The components of the open level that draw @p Material's base material (directly or through an instance) on a mesh
 	 * kind whose usage flag the drawn material lacks (its base's before UE 5.8): off, or on but unsaved (the editor sets a
-	 * missing flag in memory and marks the asset unsaved; a cooked game reads the saved flag).
+	 * missing flag in memory and marks the asset unsaved; a cooked game reads the saved flag). @p SavedBefore: a package
+	 * that counts as saved (Compile()'s own recompile marked it unsaved).
 	 */
-	rql::Value MissingUsages(FUnrealMcpRqlTypes& Types, UMaterialInterface* Material)
+	rql::Value MissingUsages(FUnrealMcpRqlTypes& Types, UMaterialInterface* Material, const UPackage* SavedBefore = nullptr)
 	{
 		std::vector<rql::Value> Out;
 		UMaterial* Base = Material->GetMaterial();
@@ -203,7 +215,7 @@ namespace UnrealMcpRqlMaterialsLocal
 				}
 				for (const UMaterialInterface* Owner : Owners)
 				{
-					const bool bUnsaved = MaterialsIsUnsaved(Owner);
+					const bool bUnsaved = Owner->GetOutermost() != SavedBefore && MaterialsIsUnsaved(Owner);
 					const FString OwnerPath = Owner->GetOutermost()->GetName();
 					for (const EMaterialUsage Usage : Needs)
 					{
@@ -223,11 +235,11 @@ namespace UnrealMcpRqlMaterialsLocal
 	}
 
 	/**
-	 * Recompile @p Material now (a material instance: its static permutation), as the material editor's Apply does. A
-	 * recompile changes nothing saved, so a package that was saved stays so (RecompileMaterial marks it unsaved; left
-	 * that way, MissingUsages would report every flag as unsaved).
+	 * Recompile @p Material now (a material instance: its static permutation), as the material editor's Apply does, and
+	 * leave it marked unsaved as Apply does (a Python edit before it may have marked nothing). Returns whether its package
+	 * was unsaved before.
 	 */
-	void Recompile(UMaterialInterface* Material)
+	bool Recompile(UMaterialInterface* Material)
 	{
 		TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
 		UPackage* Package = Material->GetOutermost();
@@ -238,8 +250,7 @@ namespace UnrealMcpRqlMaterialsLocal
 			UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
 		else
 			Throw(FString::Printf(TEXT("%s is a %s: only materials and material instances compile"), *Material->GetName(), *Material->GetClass()->GetName()));
-		if (!bWasUnsaved)
-			Package->SetDirtyFlag(false);
+		return bWasUnsaved;
 	}
 
 	void MaterialCompileMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
@@ -267,10 +278,10 @@ namespace UnrealMcpRqlMaterialsLocal
 			[Types](void* Self, const std::vector<rql::Value>&) -> rql::Value
 			{
 				UMaterialInterface* Material = static_cast<UMaterialInterface*>(Self);
-				Recompile(Material);
+				const bool bWasUnsaved = Recompile(Material);
 				TArray<FString> Compiled;
 				const TArray<FUnrealMcpMaterialCompileError> Errors = UnrealMcpRqlMaterialCompileErrors(Material, /*bWait*/ true, &Compiled);
-				const rql::Value Missing = MissingUsages(*Types, Material);
+				const rql::Value Missing = MissingUsages(*Types, Material, bWasUnsaved ? nullptr : Material->GetOutermost());
 				std::vector<std::pair<rql::Value, rql::Value>> Out;
 				Out.emplace_back(Str(TEXT("Succeeded")), rql::Value::boolean(Compiled.Num() > 0 && Errors.IsEmpty()));
 				Out.emplace_back(Str(TEXT("Compiled")), StrList(Compiled));

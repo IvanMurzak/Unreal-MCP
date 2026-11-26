@@ -342,7 +342,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 | مسیر | چیست |
 |---|---|
-| [`UnrealMCP/`](../UnrealMCP/) | پلاگین Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor` |
+| [`UnrealMCP/`](../UnrealMCP/) | پلاگین Unreal (C++): `UnrealMcpRuntime`، `UnrealMcpRql`، `UnrealMcpEditor`، `UnrealMcpFab` (اختیاری) |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`، sidecar مبتنی بر .NET 10 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`، پکیج npm |
 | [`extensions/`](../extensions/) | هشت افزونه اختیاری موتور با انتشارهای جداگانه |

@@ -97,9 +97,9 @@
 | `fab-search` | 搜索 [Fab](https://www.fab.com) 市场（`query`、`listingType`、`freeOnly`、`sort`、分页）；返回每个商品的 uid、标题、类型、价格和格式 |
 | `fab-library` | 列出已登录用户拥有的 Fab 资源，以及每个资源已导入到的位置；`filter` 搜索整个库 |
 | `fab-add` | 下载用户拥有的商品，并像 Fab 面板的 *Add to Project* 一样导入（Unreal Engine 资源包、带 `quality` 的 Megascans、glTF/FBX）；返回内容文件夹，跳过项目中已有的商品 |
-| `fab-sign-in` | 在此编辑器中让用户登录 Fab：在浏览器中打开 Epic 的登录页面并等待用户完成（已登录时立即答复）。唯一会打开浏览器的 Fab 工具 |
+| `fab-sign-in` | 在此编辑器中让用户登录 Fab：在浏览器中打开 Epic 的登录页面并等待用户完成（已登录时立即答复；若此编辑器中 Epic 的登录服务未启动，也会立即答复并说明原因）。唯一会打开浏览器的 Fab 工具 |
 
-它们驱动引擎自带的 Fab 插件（自 UE 5.5 起默认启用）：使用它的 Epic 登录和导入流程。未登录时，`fab-library` / `fab-add` 会立即答复，绝不会自行打开浏览器：它们让智能体在聊天中询问用户（`AskUserQuestion`，在 AI Game Dev 应用的桌面端和 CLI 聊天中是一张等待答复的卡片），只有用户同意时才调用 `fab-sign-in`，因此无人值守的运行不会自己留下一个打开的登录标签页；`fab-search` 会说明添加是否需要先登录。要在运行前登录，请让智能体运行 `fab-sign-in`，或从编辑器工具栏打开 Fab（之后的编辑器会话中它也会用记住的 Epic 登录信息登录）。购买商品，或把免费商品添加到库中，仍需在 fab.com 上完成。完整项目和引擎代码插件通过 Epic Games Launcher 安装，而不是添加到项目中。
+它们驱动引擎自带的 Fab 插件（自 UE 5.5 起默认启用）：使用它的 Epic 登录和导入流程。未登录时，`fab-library` / `fab-add` 会立即答复，绝不会自行打开浏览器：它们让智能体在聊天中询问用户（`AskUserQuestion`，在 AI Game Dev 应用的桌面端和 CLI 聊天中是一张等待答复的卡片），只有用户同意时才调用 `fab-sign-in`，因此无人值守的运行不会自己留下一个打开的登录标签页；`fab-search` 会说明添加是否需要先登录。要在运行前登录，请让智能体运行 `fab-sign-in`，或从编辑器工具栏打开 Fab。Epic 会在这台计算机上记住登录，编辑器启动时会自行恢复（不打开面板，也不打开浏览器），因此登录在编辑器重启后依然有效。购买商品，或把免费商品添加到库中，仍需在 fab.com 上完成。完整项目和引擎代码插件通过 Epic Games Launcher 安装，而不是添加到项目中。
 
 </details>
 

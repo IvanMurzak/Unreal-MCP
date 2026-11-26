@@ -506,11 +506,13 @@ material unsaved). `UnrealMcpRqlMaterials.cpp` adds to every `MaterialInterface`
 - `Compile()`: recompiles now (a material: `UMaterialEditingLibrary::RecompileMaterial`, a constant instance: its static
   permutation) and waits; returns `{Succeeded, Compiled, Errors, MissingUsages}`; `Compiled` lists the feature levels /
   platforms that compiled, and an editor without a renderer (`-nullrhi`) compiles nothing and says so in `Note`. It adds
-  no undo step, and a saved material stays saved (a recompile changes nothing on disk).
+  no undo step and, like the material editor's Apply, leaves the material marked unsaved (its own `MissingUsages` still
+  counts a material that was saved before the call as saved).
 - `UsageFlags`: the usage flags that are on (`bUsedWithNanite`, `bUsedWithInstancedStaticMeshes`, ...; before UE 5.8 an
   instance reads its base material's, since 5.8 instances keep their own).
 - `MissingUsages`: `[{Usage, Actor, Component, Problem}]` for the components of the open level that draw the base material
-  (directly or through an instance; the flag is read on the asset that holds it, the instance since UE 5.8) on a mesh kind
+  (directly or through an instance; the flag is read on the asset that holds it, since UE 5.8 the instance, or for a
+  dynamic instance its nearest saved parent) on a mesh kind
   it lacks the flag for, only these kinds: skinned meshes `bUsedWithSkeletalMesh`, instanced static meshes
   `bUsedWithInstancedStaticMeshes`, spline meshes `bUsedWithSplineMeshes`, Nanite meshes `bUsedWithNanite` (UE 5.7+,
   Voxelize shape preservation: `bUsedWithVoxels`). A flag that is off, or on while the material has unsaved changes,

@@ -869,8 +869,8 @@ all are handled in-repo (issues #139/#187), and submission itself remains an ope
    packaged paths are ≤140 chars from the plugin root; the packaged zip excludes
    `Binaries/Intermediate/Saved/.vs` (Fab strips them; the resolver's surviving
    `Source/ThirdParty/UnrealMcpBridge/<rid>/` copy is what remains).
-4. **Modules declare their supported platforms (#187).** Both modules in `UnrealMCP.uplugin`
-   (`UnrealMcpRuntime`, `UnrealMcpEditor`) carry `"PlatformAllowList": ["Win64","Mac","Linux"]`, matching
+4. **Modules declare their supported platforms (#187).** All modules in `UnrealMCP.uplugin`
+   (`UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor`, `UnrealMcpFab`) carry `"PlatformAllowList": ["Win64","Mac","Linux"]`, matching
    the desktop-only target platforms (console/mobile cannot spawn the .NET sidecar, §12.5). Fab review
    expects modules to enumerate their supported platforms rather than defaulting to all.
 

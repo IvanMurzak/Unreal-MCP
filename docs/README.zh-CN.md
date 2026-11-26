@@ -288,7 +288,7 @@ unreal-mcp-cli install-extension com.ivanmurzak.unreal-ai-gas ./MyGame
 
 | 路径 | 内容 |
 |---|---|
-| [`UnrealMCP/`](../UnrealMCP/) | Unreal 插件（C++）：`UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor` |
+| [`UnrealMCP/`](../UnrealMCP/) | Unreal 插件（C++）：`UnrealMcpRuntime`、`UnrealMcpRql`、`UnrealMcpEditor`、`UnrealMcpFab`（可选） |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`，.NET 10 边车进程 |
 | [`cli/`](../cli/) | `unreal-mcp-cli`，npm 包 |
 | [`extensions/`](../extensions/) | 八个可选引擎扩展，各自独立发布 |

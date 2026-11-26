@@ -239,10 +239,13 @@ void FUnrealMcpEditorDiagnostics::GatherCompiler(TArray<FGathered>& Out) const
 		const TArray<FUnrealMcpMaterialCompileError> Errors = UnrealMcpRqlMaterialCompileErrors(Material, /*bWait*/ false);
 		if (Errors.IsEmpty() || !DiagnosticsIsProjectAsset(Material))
 			continue;
-		TArray<FString> Platforms;
+		TArray<FString> Platforms, Messages; // one translator error repeats on every feature level: count it once
 		for (const FUnrealMcpMaterialCompileError& Error : Errors)
+		{
 			Platforms.AddUnique(Error.Platform);
-		const FString More = Errors.Num() > 1 ? FString::Printf(TEXT(" (+%d more)"), Errors.Num() - 1) : FString();
+			Messages.AddUnique(Error.Message);
+		}
+		const FString More = Messages.Num() > 1 ? FString::Printf(TEXT(" (+%d more)"), Messages.Num() - 1) : FString();
 		Out.Add({ TEXT("Compiler"), SevError, FString::Printf(TEXT("Material %s fails to compile (%s): %s%s (all: unreal.asset(\"%s\") | select CompileErrors)"),
 			*Material->GetPathName(), *FString::Join(Platforms, TEXT(", ")), *Errors[0].Message, *More, *Material->GetOutermost()->GetName()) });
 	}
