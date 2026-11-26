@@ -73,6 +73,14 @@ public:
 	 */
 	FString TakeNewBlock(const FString& AlreadyShown, bool bReport = true);
 
+	/**
+	 * Leave out the "no Fab auth token" errors (LogFab, LogEOSSDK) the log collector captured after sequence
+	 * @p AfterSequence through @p ThroughSequence: the span of one Fab token read, which logs them whenever nobody is
+	 * signed in to Fab (DEV-273). The same lines logged at any other time (a project's own EOS login) are reported.
+	 * Game thread.
+	 */
+	static void IgnoreFabTokenReadLog(int64 AfterSequence, int64 ThroughSequence);
+
 	/** Install the tool-result annotator (FUnrealMcpToolRegistry::SetResultAnnotator) and the console variable; Uninstall removes the annotator. */
 	static void Install();
 	static void Uninstall();
@@ -102,4 +110,5 @@ private:
 	int64 LastSequence = 0;
 	int64 LogCursor = 0;       // FUnrealMcpLogCollector sequence read so far
 	int32 LogItems = 0;        // Log:<category> rows in Items
+	TArray<TPair<int64, int64>> FabTokenReads; // (after, through] collector sequences of Fab token reads not yet ingested
 };

@@ -247,12 +247,38 @@ namespace UnrealMcpScreenshotTools
 		return bPinnedNearZero && !bManualExposure;
 	}
 
+	void ApplyVolumeLightingMethods(const TArray<IInterface_PostProcessVolume*>& Volumes, const FVector& Location,
+		EDynamicGlobalIlluminationMethod::Type& InOutGi, EReflectionMethod::Type& InOutReflection)
+	{
+		for (IInterface_PostProcessVolume* Volume : Volumes)
+		{
+			const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+			if (!Properties.bIsEnabled || Properties.BlendWeight <= 0.0f || !Properties.Settings)
+				continue;
+			if (!Properties.bIsUnbound)
+			{
+				// The reach of UWorld's DoPostProcessVolume: inside, or within the blend radius with a weight left above 0.
+				float Distance = 0.0f; // As the engine: a volume with no brush component leaves it at 0 and counts.
+				Volume->EncompassesPoint(Location, 0.0f, &Distance);
+				if (Distance < 0.0f || Distance > Properties.BlendRadius
+					|| (Properties.BlendRadius >= 1.0f && Distance >= Properties.BlendRadius))
+					continue;
+			}
+			// An enum setting applies at any blend weight above 0 (SET_PP in FSceneView::OverridePostProcessSettings).
+			if (Properties.Settings->bOverride_DynamicGlobalIlluminationMethod)
+				InOutGi = Properties.Settings->DynamicGlobalIlluminationMethod;
+			if (Properties.Settings->bOverride_ReflectionMethod)
+				InOutReflection = Properties.Settings->ReflectionMethod;
+		}
+	}
+
 	FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume)
 	{
 		FString Note = FString::Printf(
 			TEXT("Frame content: uniform (#%02X%02X%02X across %.1f%% of the pixels), so this image shows almost nothing of "
 			     "the scene. That is fine for a really plain scene; otherwise the view is over-exposed or unlit. "
-			     "screenshot-camera renders the scene with its own fixed exposure, which can differ from what the player sees."),
+			     "screenshot-camera renders the scene apart from this view (through a camera actor and its post-process), "
+			     "so it tells a problem of this view from one of the scene."),
 			Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B, Uniformity.Share * 100.0);
 		if (bOverexposingVolume)
 		{
@@ -271,6 +297,9 @@ namespace UnrealMcpScreenshotTools
 	{
 		// Keep the encoded payload well under the §1.2 64 MiB IPC line cap (base64 expands ~4/3).
 		static constexpr int64 MaxEncodedBytes = 40 * 1024 * 1024;
+
+		/** Frames a screenshot-camera capture renders, the last one read back (see CaptureWithSceneCapture). */
+		static constexpr int32 SceneViewWarmupFrames = 3;
 
 		/** IsRenderingAvailable(), with NullRhiScreenshotError() in @p OutError when it is not. */
 		bool EnsureRenderingAvailable(FString& OutError)
@@ -512,7 +541,8 @@ namespace UnrealMcpScreenshotTools
 		 */
 		FUnrealMcpToolResult CaptureWithSceneCapture(
 			UWorld* World, const FTransform& CaptureXform, float FovDeg, int32 Width, int32 Height,
-			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor, const FString& SavePath = FString())
+			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor, const FString& SavePath = FString(),
+			UCameraComponent* Camera = nullptr)
 		{
 			// Isolated mode (a background was requested) composites the actor over a solid color. A plain
 			// SCS_FinalColorLDR capture writes opaque pixels everywhere, overwriting the render target's
@@ -520,13 +550,18 @@ namespace UnrealMcpScreenshotTools
 			// color (verified windowed: a #FF0000 background came back pure black). To honor the background
 			// we capture coverage-carrying HDR scene color (SCS_SceneColorHDR, inverse opacity in alpha)
 			// into a float target and composite scene-over-background in the read-back. screenshot-camera
-			// passes no background and keeps the cheaper tonemapped LDR path.
+			// passes no background and keeps the cheaper tonemapped LDR path, rendered as a scene view (below).
 			const bool bComposite = (BackgroundColor != nullptr);
 
 			UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
 			RenderTarget->RenderTargetFormat = bComposite ? RTF_RGBA16f : RTF_RGBA8;
 			RenderTarget->ClearColor = BackgroundColor ? *BackgroundColor : FLinearColor::Black;
 			RenderTarget->bAutoGenerateMips = false;
+			// The tonemapper encodes for the target's display gamma, which is 1.0 for a linear RGBA8 target: a final-color
+			// capture would then hold linear values, read back below as sRGB bytes (about 1.2 EV too dark, DEV-269). 2.2
+			// makes it encode for display, as the viewport does.
+			if (!bComposite)
+				RenderTarget->TargetGamma = 2.2f;
 			RenderTarget->InitAutoFormat(Width, Height);
 			RenderTarget->UpdateResourceImmediate(true);
 			FGCObjectScopeGuard RenderTargetGuard(RenderTarget);
@@ -552,14 +587,54 @@ namespace UnrealMcpScreenshotTools
 			Capture->CaptureSource = bComposite ? SCS_SceneColorHDR : SCS_FinalColorLDR;
 			Capture->bCaptureEveryFrame = false;
 			Capture->bCaptureOnMovement = false;
-			// Pin auto-exposure. A single-shot CaptureScene() never gives eye-adaptation a chance to
-			// converge, so the default auto-exposure leaves one-off captures badly under/over-exposed.
-			// Locking min == max brightness makes exposure a fixed factor (no adaptation transient), so the
-			// capture is deterministic regardless of the scene's prior adaptation state.
-			Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-			Capture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
-			Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-			Capture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
+			if (!bComposite)
+			{
+				// A scene view (DEV-269): render the scene as a player view through this camera shows it. The engine turns
+				// Lumen GI and reflections off in scene captures, and a fixed exposure ignores the scene's brightness, which
+				// left a lit Lumen scene near-black. Put back the GI / reflection methods a player view at this spot gets,
+				// apply the camera's own post-process (exposure, lens, grading) at its blend weight over the world's volumes,
+				// and leave exposure automatic as in the viewport (see the warm-up below).
+				FPostProcessSettings& Settings = Capture->PostProcessSettings;
+				if (Camera)
+				{
+					FMinimalViewInfo CameraView;
+					Camera->GetCameraView(0.0f, CameraView);
+					if (CameraView.PostProcessBlendWeight > 0.0f)
+					{
+						Settings = CameraView.PostProcessSettings;
+						Capture->PostProcessBlendWeight = FMath::Min(CameraView.PostProcessBlendWeight, 1.0f);
+					}
+				}
+				// Enum settings apply at any blend weight above 0, so these hold whatever the camera's weight.
+				static const TConsoleVariableData<int32>* GiCVar =
+					IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DynamicGlobalIlluminationMethod"));
+				static const TConsoleVariableData<int32>* ReflectionCVar =
+					IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
+				EDynamicGlobalIlluminationMethod::Type GiMethod = (EDynamicGlobalIlluminationMethod::Type)GiCVar->GetValueOnGameThread();
+				EReflectionMethod::Type ReflectionMethod = (EReflectionMethod::Type)ReflectionCVar->GetValueOnGameThread();
+				ApplyVolumeLightingMethods(GetWorldPostProcessVolumes(*World), CaptureXform.GetLocation(), GiMethod, ReflectionMethod);
+				if (!Settings.bOverride_DynamicGlobalIlluminationMethod)
+				{
+					Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+					Settings.DynamicGlobalIlluminationMethod = GiMethod;
+				}
+				if (!Settings.bOverride_ReflectionMethod)
+				{
+					Settings.bOverride_ReflectionMethod = true;
+					Settings.ReflectionMethod = ReflectionMethod;
+				}
+				// Lumen and eye adaptation keep their history in the capture's view state, which exists only when persisted.
+				Capture->bAlwaysPersistRenderingState = true;
+			}
+			else
+			{
+				// Isolated render: pin auto-exposure. Locking min == max brightness makes exposure a fixed factor (no
+				// adaptation transient), so the capture is deterministic regardless of any prior adaptation state.
+				Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+				Capture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
+				Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+				Capture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
+			}
 			if (ShowOnlyActor)
 			{
 				Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
@@ -575,7 +650,15 @@ namespace UnrealMcpScreenshotTools
 			// CaptureScene renders the scene now (and the read-back below flushes the render thread), so the frame is
 			// fresh whatever the editor window's state; send pending scene updates first so the latest edit is in it.
 			World->SendAllEndOfFrameUpdates();
-			Capture->CaptureScene();
+			// A scene view renders a few frames into its fresh view state, reading back the last. The first is a camera cut,
+			// so auto exposure takes its target at once instead of adapting from nothing; the later ones let Lumen fill its
+			// surface cache, which a large scene does over several renders.
+			const int32 Frames = bComposite ? 1 : SceneViewWarmupFrames;
+			for (int32 Frame = 0; Frame < Frames; ++Frame)
+			{
+				Capture->bCameraCutThisFrame = Frame == 0;
+				Capture->CaptureScene();
+			}
 
 			FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
 			if (!Resource)
@@ -737,7 +820,9 @@ namespace UnrealMcpScreenshotTools
 		// screenshot-camera — render from a resolved camera actor via SceneCapture2D.
 		Registry.Tool(TEXT("screenshot-camera"))
 			.Title(TEXT("Screenshot Camera"))
-			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it.")) + SizeCapNote() + SavePathNote())
+			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it, "
+				"lit and exposed as that camera shows it: its post-process settings, the project's global illumination and "
+				"reflections (e.g. Lumen), and auto exposure.")) + SizeCapNote() + SavePathNote())
 			.ParamString(TEXT("camera"), TEXT("Camera actor reference (label, object name, or path) to render from."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
@@ -778,7 +863,7 @@ namespace UnrealMcpScreenshotTools
 				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
 				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
 				const FString Source = FString::Printf(TEXT("camera '%s'"), *CameraActor->GetActorNameOrLabel());
-				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr, SavePath);
+				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr, SavePath, CameraComponent);
 			});
 
 		// screenshot-isolated — isolated actor render (transient SceneCapture2D + show-only list + background).

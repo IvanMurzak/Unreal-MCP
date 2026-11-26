@@ -10,7 +10,7 @@ El inventario canónico de las herramientas que registra el plugin de editor **U
 | Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
 | Código fuente / C++ | `source-*`: read, create-class, update, delete, list, compile |
 | Captura de pantalla | `screenshot-*`: viewport, game-view, camera, isolated |
-| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Consola | `console-run-command` |
 | Python | `python-execute` |
 | Lista de herramientas | `unreal-tool-list` |
@@ -83,7 +83,7 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 
 | Id de herramienta | Qué hace |
 | --- | --- |
-| `python-execute` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade archivos/carpetas auxiliares de `<Project>/.ai-game-dev/snippets`; `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
+| `python-execute` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade auxiliares de `<Project>/.ai-game-dev/snippets`: un archivo `.py` se ejecuta en el espacio de nombres del snippet antes del código (no se puede importar), una carpeta va a `sys.path` (sus módulos se pueden importar); `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
 
 Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca en un juego empaquetado) y el runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) incluido en `UnrealMCP/Content/Python`. El cableado de grafos de Blueprint no se expone a Python: usa las herramientas de Blueprint para eso.
 
@@ -97,8 +97,9 @@ Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca
 | `fab-search` | Busca en el marketplace de [Fab](https://www.fab.com) (`query`, `listingType`, `freeOnly`, `sort`, paginación); devuelve el uid, título, tipo, precio y formatos de cada listing |
 | `fab-library` | Lista los assets de Fab que posee el usuario con sesión iniciada, con dónde está importado ya cada uno; `filter` busca en toda la biblioteca |
 | `fab-add` | Descarga un listing que posee el usuario y lo importa como el *Add to Project* del panel de Fab (packs de Unreal Engine, Megascans con `quality`, glTF/FBX); devuelve la carpeta de contenido y omite los listings que ya están en el proyecto |
+| `fab-sign-in` | Inicia la sesión del usuario en Fab en este editor: abre la página de inicio de sesión de Epic en el navegador y espera al usuario (responde al instante si ya hay sesión). La única herramienta de Fab que abre un navegador |
 
-Controlan el propio plugin Fab del motor (activado por defecto desde UE 5.5): su inicio de sesión de Epic y sus flujos de importación. El primer `fab-library` / `fab-add` sin sesión iniciada abre la página de inicio de sesión de Epic en el navegador (abrir Fab desde la barra de herramientas del editor también inicia sesión, a partir de un login de Epic recordado). Comprar, o añadir un listing gratuito a la biblioteca, se hace en fab.com. Los proyectos completos y los plugins de código del motor se instalan desde el Epic Games Launcher, no se añaden a un proyecto.
+Controlan el propio plugin Fab del motor (activado por defecto desde UE 5.5): su inicio de sesión de Epic y sus flujos de importación. Sin sesión iniciada, `fab-library` / `fab-add` responden al instante y nunca abren un navegador: le piden al agente que pregunte al usuario en el chat (`AskUserQuestion`, una tarjeta que bloquea en los chats de escritorio y CLI de la app AI Game Dev) y que llame a `fab-sign-in` solo si el usuario acepta, así una ejecución desatendida nunca deja abierta por sí sola una pestaña de inicio de sesión; `fab-search` indica si añadir necesitará iniciar sesión. Para iniciar sesión antes de una ejecución, pide al agente que ejecute `fab-sign-in`, o abre Fab desde la barra de herramientas del editor (que también inicia sesión con un login de Epic recordado en una sesión posterior del editor). Comprar, o añadir un listing gratuito a la biblioteca, se hace en fab.com. Los proyectos completos y los plugins de código del motor se instalan desde el Epic Games Launcher, no se añaden a un proyecto.
 
 </details>
 

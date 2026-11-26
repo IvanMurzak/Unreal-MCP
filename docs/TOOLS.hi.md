@@ -10,7 +10,7 @@
 | Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
 | Source / C++ | `source-*`: read, create-class, update, delete, list, compile |
 | Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
-| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Console | `console-run-command` |
 | Python | `python-execute` |
 | Tool list | `unreal-tool-list` |
@@ -83,7 +83,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 
 | Tool id | यह क्या करता है |
 | --- | --- |
-| `python-execute` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helper files/folders जोड़ता है; `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
+| `python-execute` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helpers जोड़ता है: `.py` file code से पहले snippet के अपने namespace में चलती है (import नहीं होती), folder `sys.path` पर जाता है (उसके modules import होते हैं); `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
 
 यह engine का PythonScriptPlugin (Unreal-MCP इसे enable करता है; सिर्फ़ editor में, packaged game में कभी नहीं) और `UnrealMCP/Content/Python` में vendored [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime इस्तेमाल करता है। Blueprint graph की wiring Python को उपलब्ध नहीं है: उसके लिए Blueprint tools इस्तेमाल करें।
 
@@ -97,8 +97,9 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 | `fab-search` | [Fab](https://www.fab.com) marketplace में खोजता है (`query`, `listingType`, `freeOnly`, `sort`, paging); हर listing का uid, title, type, price और formats लौटाता है |
 | `fab-library` | Signed-in user के अपने Fab assets की सूची, साथ में यह कि हर एक पहले से कहाँ import है; `filter` पूरी library में खोजता है |
 | `fab-add` | User की अपनी listing download करता है और उसे Fab panel के *Add to Project* की तरह import करता है (Unreal Engine packs, `quality` के साथ Megascans, glTF/FBX); content folder लौटाता है, project में पहले से मौजूद listings छोड़ देता है |
+| `fab-sign-in` | इस editor में user को Fab में sign in कराता है: browser में Epic का sign-in पेज खोलता है और user का इंतज़ार करता है (पहले से sign in हो तो तुरंत जवाब देता है)। Browser खोलने वाला एकमात्र Fab tool |
 
-ये engine के अपने Fab plugin को चलाते हैं (UE 5.5 से default रूप से चालू): उसका Epic sign-in और उसके import workflows। Sign-in के बिना पहला `fab-library` / `fab-add` browser में Epic का sign-in पेज खोलता है (editor के toolbar से Fab खोलने पर भी, याद रखे गए Epic login से, sign in हो जाता है)। खरीदना, या किसी मुफ़्त listing को library में जोड़ना, fab.com पर ही होता है। पूरे projects और engine code plugins Epic Games Launcher से install होते हैं, project में जोड़े नहीं जाते।
+ये engine के अपने Fab plugin को चलाते हैं (UE 5.5 से default रूप से चालू): उसका Epic sign-in और उसके import workflows। Sign-in के बिना `fab-library` / `fab-add` तुरंत जवाब देते हैं और कभी browser नहीं खोलते: वे agent से कहते हैं कि chat में user से पूछे (`AskUserQuestion`, AI Game Dev App के desktop और CLI chats में एक blocking card) और `fab-sign-in` तभी call करे जब user मान जाए, ताकि कोई unattended run अपने-आप sign-in tab खुला न छोड़े; `fab-search` बताता है कि जोड़ने के लिए sign-in चाहिए या नहीं। Run से पहले sign in करने के लिए agent से `fab-sign-in` चलाने को कहें, या editor के toolbar से Fab खोलें (बाद के editor session में भी यह याद रखे गए Epic login से sign in करता है)। खरीदना, या किसी मुफ़्त listing को library में जोड़ना, fab.com पर ही होता है। पूरे projects और engine code plugins Epic Games Launcher से install होते हैं, project में जोड़े नहीं जाते।
 
 </details>
 

@@ -537,6 +537,76 @@ void FUnrealMcpScreenshotToolsSpec::Define()
 			TestFalse(TEXT("Manual exposure ignores Max Brightness"), HasOverexposingPostProcessVolume({ Volume, Later }, false));
 		});
 
+		It("ApplyVolumeLightingMethods blends the GI and reflection methods of the volumes that reach the view (DEV-269)", [this]()
+		{
+			using namespace UnrealMcpScreenshotTools;
+			UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+			if (!World)
+				return;
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.ObjectFlags |= RF_Transient;
+			SpawnParams.bTemporaryEditorActor = true;
+			SpawnParams.bHideFromSceneOutliner = true;
+			APostProcessVolume* First = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, SpawnParams);
+			ON_SCOPE_EXIT { if (IsValid(First)) First->Destroy(); };
+			APostProcessVolume* Second = World->SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, SpawnParams);
+			ON_SCOPE_EXIT { if (IsValid(Second)) Second->Destroy(); };
+			if (!TestNotNull(TEXT("spawned the first volume"), First) || !TestNotNull(TEXT("spawned the second volume"), Second))
+				return;
+			for (APostProcessVolume* Volume : { First, Second })
+			{
+				Volume->bEnabled = true;
+				Volume->bUnbound = true;
+				Volume->BlendWeight = 1.0f;
+			}
+			const TArray<IInterface_PostProcessVolume*> Volumes = { First, Second };
+			EDynamicGlobalIlluminationMethod::Type Gi;
+			EReflectionMethod::Type Reflection;
+			const auto Resolve = [&Volumes, &Gi, &Reflection]()
+			{
+				// The project: no dynamic GI, screen-space reflections.
+				Gi = EDynamicGlobalIlluminationMethod::None;
+				Reflection = EReflectionMethod::ScreenSpace;
+				ApplyVolumeLightingMethods(Volumes, FVector::ZeroVector, Gi, Reflection);
+			};
+
+			Resolve();
+			TestEqual(TEXT("no override keeps the project's GI"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::None);
+			TestEqual(TEXT("no override keeps the project's reflections"), (int32)Reflection, (int32)EReflectionMethod::ScreenSpace);
+
+			First->Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+			First->Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
+			First->Settings.bOverride_ReflectionMethod = true;
+			First->Settings.ReflectionMethod = EReflectionMethod::Lumen;
+			Resolve();
+			TestEqual(TEXT("a volume turns Lumen GI on in a project without it"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::Lumen);
+			TestEqual(TEXT("and Lumen reflections"), (int32)Reflection, (int32)EReflectionMethod::Lumen);
+
+			Second->Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+			Second->Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::ScreenSpace;
+			Resolve();
+			TestEqual(TEXT("the later volume decides"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::ScreenSpace);
+			TestEqual(TEXT("a setting it does not override stays"), (int32)Reflection, (int32)EReflectionMethod::Lumen);
+
+			Second->BlendWeight = 0.3f;
+			Resolve();
+			TestEqual(TEXT("an enum applies at a partial weight"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::ScreenSpace);
+
+			Second->bEnabled = false;
+			Resolve();
+			TestEqual(TEXT("a disabled volume does not count"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::Lumen);
+
+			First->BlendWeight = 0.0f;
+			Resolve();
+			TestEqual(TEXT("a volume with no weight does not count"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::None);
+
+			First->BlendWeight = 1.0f;
+			First->bUnbound = false;
+			First->SetActorLocation(FVector(1.0e6, 0.0, 0.0));
+			Resolve();
+			TestEqual(TEXT("a bounded volume far from the view does not reach it"), (int32)Gi, (int32)EDynamicGlobalIlluminationMethod::None);
+		});
+
 		// Locks the wire shape the sidecar's ProxyResponseMapper depends on: SuccessWithImage must carry
 		// the supplied base64 + mimeType in an image block, alongside (after, per the bridge server's
 		// content-array ordering) the human-readable text block. The bridge server appends Images[] after

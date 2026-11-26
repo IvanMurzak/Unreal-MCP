@@ -122,6 +122,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly ITokenRevocationClient? _injectedRevocationClient;
         private ConnectionCredentialCoordinator? _credentialCoordinator;
         private IDisposable? _signInRequiredSubscription;
+        // DEV-272 review U2/U3: the coordinator lives for the whole host lifetime (disposing it cancels an in-flight
+        // refresh) and sees the connection only through this gate, which admits a rejection only when the rejected
+        // dial presented the machine credential to the server that issued it.
+        private CredentialRejectionGate? _rejectionGate;
+        // What the last dial presented (ResolveBearerAsync) and in which presentation epoch, read when a rejection
+        // burst or a dead-family verdict arrives. IssuedBy: the issuer origin of the machine credential it presented
+        // to that same issuer, else null.
+        private sealed record DialRecord(int Epoch, bool PresentedMachineCredential, string? IssuedBy);
+        private DialRecord? _lastDial;
+        // Bumped (under _connectionSlotLock) whenever the mode, auth option or dial host changes, so a refresh that
+        // completes after such a change leaves the re-dial to the config transition.
+        private int _presentationEpoch;
+        private string? _presentationKey;
+        // Cancelled only in Dispose: the one thing that may abort a refresh POST (ShutdownOnlyTokenRefresher).
+        private readonly CancellationTokenSource _refreshShutdown = new();
 
         // F1 failure path (03 F1): bounded retry of the token-exchange derivation after the agent family is
         // committed ("token exchange fails → P retries with backoff; the agent family stays committed").
@@ -324,7 +339,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         componentClientId: DeviceCodeAuthenticator.DefaultClientId,
                         httpClient: _authHttpClient);
                 _credentialProvider = new PluginCredentialProvider(
-                    _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)),
+                    _credentialStore, new ShutdownOnlyTokenRefresher(_tokenRefresher, _refreshShutdown.Token),
+                    loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)),
                     credentialLock: _machineLock);
                 _injectedExchangeClient = exchangeClient;
                 _injectedRevocationClient = revocationClient;
@@ -440,34 +456,148 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// except Custom + <c>oauth</c>: the account JWT for a loopback host only, otherwise the explicit token or a
         /// refusal (<see cref="CustomOAuthCredentialPolicy"/>).
         /// </summary>
-        private Task<string?> ResolveBearerAsync(string dialHost)
+        private async Task<string?> ResolveBearerAsync(string dialHost)
         {
             var provider = _credentialProvider;
-            bool isCloudMode;
-            string? slotToken;
+            bool isCloudMode, isCustomOAuth;
+            string? slotToken, explicitToken;
+            int epoch;
             lock (_connectionSlotLock)
             {
+                // A dial bound to an older host (a reconnect of the old link) belongs to no current epoch.
+                epoch = string.Equals(dialHost, _config.Host, StringComparison.Ordinal) ? _presentationEpoch : -1;
                 isCloudMode = _isCloudMode;
+                isCustomOAuth = _isCustomOAuth;
                 slotToken = BearerToken;
+                explicitToken = _customExplicitToken;
             }
-            if (!isCloudMode && _isCustomOAuth)
-                return CustomOAuthCredentialPolicy.ResolveAsync(
-                    dialHost,
-                    async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
-                    _customExplicitToken ?? _fallbackToken,
-                    EnvToken);
-            if (provider != null && isCloudMode && provider.IsSignedIn)
-                return ResolveCloudBearerAsync(provider, slotToken);
-            return Task.FromResult(slotToken);
+            // A closure bound to a host the connection no longer targets (a link built for the old host, or McpPlugin
+            // pairing the new URL with the old closure mid-SetHost) never presents the machine credential.
+            var stale = epoch == -1;
+            var presentedMachine = false;
+            string? issuedBy = null;
+            try
+            {
+                if (!isCloudMode && isCustomOAuth)
+                    return await CustomOAuthCredentialPolicy.ResolveAsync(
+                        dialHost,
+                        async () =>
+                        {
+                            if (stale || provider is not { IsSignedIn: true })
+                                return null;
+                            var serverTarget = provider.ServerTarget;
+                            var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
+                            presentedMachine = !string.IsNullOrEmpty(jwt);
+                            // The shared policy presents the account token to any loopback server; only the server
+                            // that issued it may have its rejection refresh it (DEV-272 review U2).
+                            if (presentedMachine && CredentialIssuedFor(serverTarget, dialHost))
+                                issuedBy = ProjectKeyIssuer(serverTarget);
+                            return jwt;
+                        },
+                        explicitToken ?? _fallbackToken,
+                        EnvToken).ConfigureAwait(false);
+                if (provider != null && isCloudMode && provider.State.CurrentValue != AuthState.SignedOut
+                    && (stale || !CredentialIssuedFor(provider.ServerTarget, dialHost)))
+                {
+                    // DEV-272 review U1: the machine credential belongs to another server (a development stand's
+                    // sign-in with the Cloud host switched back to production, or the reverse). The slot's account
+                    // token (the plugin's CloudToken, a device-flow commit) came from that sign-in, so it is not sent
+                    // either; only an explicit UNREAL_MCP_TOKEN the user gave this sidecar still is.
+                    return !string.IsNullOrEmpty(slotToken) && string.Equals(slotToken, _fallbackToken, StringComparison.Ordinal)
+                        ? slotToken
+                        : null;
+                }
+                if (provider != null && isCloudMode && provider.IsSignedIn)
+                {
+                    // slotToken is the Cloud bearer snapshotted together with the mode: re-reading BearerToken after
+                    // the await could pick up a Custom token pushed meanwhile and send it to the Cloud host.
+                    var serverTarget = provider.ServerTarget;
+                    var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
+                    if (!string.IsNullOrEmpty(jwt))
+                    {
+                        presentedMachine = true;
+                        issuedBy = ProjectKeyIssuer(serverTarget);
+                        return jwt;
+                    }
+                }
+                return slotToken;
+            }
+            finally
+            {
+                Volatile.Write(ref _lastDial, new DialRecord(epoch, presentedMachine, issuedBy));
+            }
         }
 
-        // slotToken is the Cloud bearer snapshotted together with the mode: re-reading BearerToken after the await
-        // could pick up a Custom token pushed meanwhile and send it to the Cloud host.
-        private static async Task<string?> ResolveCloudBearerAsync(PluginCredentialProvider provider, string? slotToken)
+        /// <summary>
+        /// Whether a credential stamped with <paramref name="serverTarget"/> was issued by the server behind the Cloud
+        /// <paramref name="dialHost"/>: the same origin (scheme, host, non-default port; the hub's <c>/mcp</c> suffix
+        /// ignored). A credential with no target is the hosted default's (<see cref="ProjectKeyIssuer"/>).
+        /// </summary>
+        internal static bool CredentialIssuedFor(string? serverTarget, string dialHost)
+            => string.Equals(ProjectKeyIssuer(serverTarget), ProjectKeyIssuer(StripCloudHubPath(dialHost)), StringComparison.Ordinal);
+
+        /// <summary>
+        /// Whether the connection presents the machine credential, so a dead-family verdict stops it
+        /// (<see cref="CredentialRejectionGate.Disconnect"/>): Cloud mode with a credential the Cloud host issued
+        /// (<see cref="CredentialIssuedFor"/>; the slot's Cloud bearer is that sign-in's token too), or Custom +
+        /// <c>oauth</c> when the last dial of this host actually sent the account token (a link that fell back to the
+        /// explicit token keeps running). Anything else presents a static bearer or none.
+        /// </summary>
+        private bool PresentsMachineCredential()
         {
-            var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
-            return !string.IsNullOrEmpty(jwt) ? jwt : slotToken;
+            var provider = _credentialProvider;
+            if (provider == null)
+                return false;
+            var dial = Volatile.Read(ref _lastDial);
+            lock (_connectionSlotLock)
+            {
+                if (_isCloudMode)
+                    return CredentialIssuedFor(provider.ServerTarget, _config.Host);
+                return _isCustomOAuth && dial is { PresentedMachineCredential: true } && dial.Epoch == _presentationEpoch;
+            }
         }
+
+        /// <summary>
+        /// Whether an authorization rejection may refresh (rotate) the machine credential (DEV-272 review U1/U2): the
+        /// last dial presented it to the server that issued it, mode, auth option and host have not changed since, and
+        /// the credential is still that server's (an adopted sign-in can swap it without an auth-state edge). A
+        /// rejection by any other server (a Cloud host the credential is foreign to, a loopback relay in front of
+        /// another account server) never rotates it; the provider's proactive pre-expiry refresh still keeps it fresh.
+        /// </summary>
+        private bool AdmitRejection()
+        {
+            var dial = Volatile.Read(ref _lastDial);
+            var provider = _credentialProvider;
+            if (dial is not { IssuedBy: not null } || provider == null
+                || !string.Equals(dial.IssuedBy, ProjectKeyIssuer(provider.ServerTarget), StringComparison.Ordinal))
+                return false;
+            lock (_connectionSlotLock)
+                return dial.Epoch == _presentationEpoch;
+        }
+
+        /// <summary>Under <see cref="_connectionSlotLock"/>: bump the presentation epoch when mode, auth option or host changed.
+        /// The epoch never returns to -1 (ResolveBearerAsync's stale marker): it starts at 0 and the constructor's SetHost
+        /// makes it 1.</summary>
+        private void UpdatePresentationEpochLocked()
+        {
+            var key = (_isCloudMode ? "cloud|" : "custom|") + (_isCustomOAuth ? "oauth|" : "-|") + _config.Host;
+            if (string.Equals(key, _presentationKey, StringComparison.Ordinal))
+                return;
+            _presentationKey = key;
+            Interlocked.Increment(ref _presentationEpoch);
+        }
+
+        /// <summary>Test seam: whether an authorization rejection right now would refresh the machine credential.</summary>
+        internal bool RejectionRefreshesCredential => AdmitRejection();
+
+        /// <summary>Test seam: whether a dead-family verdict right now would stop the connection.</summary>
+        internal bool SignInRequiredStopsConnection => PresentsMachineCredential();
+
+        /// <summary>Test seam: the gate the on-401 coordinator sees the connection through (null without a store).</summary>
+        internal CredentialRejectionGate? RejectionGate => _rejectionGate;
+
+        /// <summary>Test seam: whether the on-401 refresh-and-reconnect coordinator is wired.</summary>
+        internal bool HasCredentialCoordinator => _credentialCoordinator != null;
 
         /// <summary>
         /// The project-key provider the agent-config service mints/reuses Cloud project keys with (project-keys
@@ -677,8 +807,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // credential exists the very first Cloud dial is already signed in (zero-button, D12).
             if (_credentialProvider != null)
             {
-                _credentialCoordinator = new ConnectionCredentialCoordinator(
-                    _plugin, _credentialProvider, _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator)));
+                // DEV-272 review U2/U3: one coordinator for the host lifetime, gated so that only a rejection by the
+                // server that issued the credential refreshes it (CredentialRejectionGate).
+                var coordinatorLogger = _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator));
+                _rejectionGate = new CredentialRejectionGate(_plugin, AdmitRejection, PresentsMachineCredential, coordinatorLogger);
+                _credentialCoordinator = new ConnectionCredentialCoordinator(_rejectionGate, _credentialProvider, coordinatorLogger);
                 _signInRequiredSubscription = _credentialProvider.OnSignInRequired
                     .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
                 if (_credentialStore!.Exists)
@@ -853,9 +986,37 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Mode-aware host selection: Cloud connects to cloudUrl, Custom to host (§8). Fall back to the
             // other field only when the mode's own field is blank, so a partial message still resolves a host.
             var isCloud = string.Equals(mode, "Cloud", StringComparison.OrdinalIgnoreCase);
+            // Remember the raw Custom-mode host for the local-server bind-port precedence (level 2). Captured
+            // BEFORE the mode-aware selection below so the Cloud /mcp suffix never reaches the port parser. An
+            // absent key leaves the previous value (partial pushes); an explicit blank clears it back to derived.
+            //
+            // ⚠ KNOWN GAP — a host edited MID-SESSION updates this field but does not reach the C++ side until the
+            // next handshake, so the plugin's cached bind port can go stale while the writer emits the new port.
+            // Pre-T1 the resolved port depended only on immutable inputs, which is why caching it per handshake was
+            // correct. NOT fixed here: the two candidate fixes sit on opposite sides of the IPC boundary, so the
+            // choice is a design call — analysis and options are in PR #251 for owner sequencing.
+            if (host != null)
+                Volatile.Write(ref _customHost, string.IsNullOrWhiteSpace(host) ? null : host);
+            if (!string.IsNullOrWhiteSpace(cloudUrl))
+                Volatile.Write(ref _cloudBaseUrl, StripCloudHubPath(cloudUrl));
+            var explicitToken = ReadString(config, "explicitToken");
+            var selected = isCloud ? cloudUrl : host;
+            if (string.IsNullOrWhiteSpace(selected))
+                selected = isCloud ? host : cloudUrl;
+            string? dialHost = null;
+            if (!string.IsNullOrWhiteSpace(selected))
+                // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
+                // (idempotent — never /mcp/mcp). Custom mode: use the host as typed (a local/self-hosted server
+                // exposes the hub at the root, like Unity/Godot Custom), except that a loopback host with no port
+                // dials the project's local-server port (RepairLocalHost). Device-auth strips the Cloud suffix
+                // back off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
+                dialHost = isCloud ? AppendCloudHubPath(selected!) : RepairLocalHost(selected!);
+
             // Remember the mode so the §7 cloud-auth indicator does not treat a Custom-mode bearer as a cloud
             // token. Only update when the message actually carried a mode — a partial config push (mode absent)
             // must not silently flip us out of Cloud.
+            // The mode, auth option and dial host change together under the slot lock, so a dial or a rejection never
+            // sees a new mode with the old host (DEV-272 review U3).
             lock (_connectionSlotLock)
             {
                 if (mode != null)
@@ -871,40 +1032,17 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // this stored value on the next dial.
                 if (token != null)
                     BearerToken = string.IsNullOrEmpty(token) ? null : token;
+                // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
+                if (authOption != null)
+                    _isCustomOAuth = string.Equals(authOption, "oauth", StringComparison.OrdinalIgnoreCase);
+                if (explicitToken != null)
+                    _customExplicitToken = string.IsNullOrEmpty(explicitToken) ? null : explicitToken;
+                if (dialHost != null)
+                    SetHost(dialHost);
+                UpdatePresentationEpochLocked();
             }
-            // Custom-mode authorization ("none" / "oauth" / "token"); absent leaves the previous value (partial push).
             if (authOption != null)
-            {
-                _isCustomOAuth = string.Equals(authOption, "oauth", StringComparison.OrdinalIgnoreCase);
                 _logger?.LogInformation("Connection auth option {AuthOption} (Custom account token {Use}).", authOption, _isCustomOAuth ? "for a loopback host" : "not used");
-            }
-            var explicitToken = ReadString(config, "explicitToken");
-            if (explicitToken != null)
-                _customExplicitToken = string.IsNullOrEmpty(explicitToken) ? null : explicitToken;
-
-            // Remember the raw Custom-mode host for the local-server bind-port precedence (level 2). Captured
-            // BEFORE the mode-aware selection below so the Cloud /mcp suffix never reaches the port parser. An
-            // absent key leaves the previous value (partial pushes); an explicit blank clears it back to derived.
-            //
-            // ⚠ KNOWN GAP — a host edited MID-SESSION updates this field but does not reach the C++ side until the
-            // next handshake, so the plugin's cached bind port can go stale while the writer emits the new port.
-            // Pre-T1 the resolved port depended only on immutable inputs, which is why caching it per handshake was
-            // correct. NOT fixed here: the two candidate fixes sit on opposite sides of the IPC boundary, so the
-            // choice is a design call — analysis and options are in PR #251 for owner sequencing.
-            if (host != null)
-                Volatile.Write(ref _customHost, string.IsNullOrWhiteSpace(host) ? null : host);
-            if (!string.IsNullOrWhiteSpace(cloudUrl))
-                Volatile.Write(ref _cloudBaseUrl, StripCloudHubPath(cloudUrl));
-            var selected = isCloud ? cloudUrl : host;
-            if (string.IsNullOrWhiteSpace(selected))
-                selected = isCloud ? host : cloudUrl;
-            if (!string.IsNullOrWhiteSpace(selected))
-                // Cloud mode: suffix the SignalR host with the /mcp prefix the cloud serves the hub behind
-                // (idempotent — never /mcp/mcp). Custom mode: use the host as typed (a local/self-hosted server
-                // exposes the hub at the root, like Unity/Godot Custom), except that a loopback host with no port
-                // dials the project's local-server port (RepairLocalHost). Device-auth strips the Cloud suffix
-                // back off in StartDeviceAuth (the AS /oauth/... is NOT behind /mcp).
-                SetHost(isCloud ? AppendCloudHubPath(selected!) : RepairLocalHost(selected!));
 
             if (config["keepConnected"] is JsonValue keepNode && keepNode.TryGetValue<bool>(out var keepConnected))
                 _config.KeepConnected = keepConnected;
@@ -937,8 +1075,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         /// </summary>
         private void SetHost(string host)
         {
-            _config.Host = host;
-            _config.CredentialProvider = () => ResolveBearerAsync(host);
+            lock (_connectionSlotLock)
+            {
+                _config.Host = host;
+                _config.CredentialProvider = () => ResolveBearerAsync(host);
+                UpdatePresentationEpochLocked();
+            }
         }
 
         /// <summary>
@@ -2115,8 +2257,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // late R3 callback touches a half-disposed host (the store itself is stateless/owned by the caller).
             try { _signInRequiredSubscription?.Dispose(); } catch { /* ignore */ }
             _signInRequiredSubscription = null;
+            // Host shutdown is the one place an in-flight refresh is cancelled (DEV-272 review U3).
+            try { _refreshShutdown.Cancel(); } catch { /* ignore */ }
             try { _credentialCoordinator?.Dispose(); } catch { /* ignore */ }
             _credentialCoordinator = null;
+            try { _rejectionGate?.Dispose(); } catch { /* ignore */ }
+            _rejectionGate = null;
             try { _credentialProvider?.Dispose(); } catch { /* ignore */ }
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
             // observe a half-disposed field (or have its captured predecessor disposed out from under it): take

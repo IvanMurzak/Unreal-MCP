@@ -43,10 +43,10 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 level family (7) | superseded by RQL | #25 |
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
-| Fab family (3) | implemented: `fab-search` / `fab-library` / `fab-add` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`) | — |
+| Fab family (4) | implemented: `fab-search` / `fab-library` / `fab-add` / `fab-sign-in` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`; only `fab-sign-in` opens Epic's sign-in page, DEV-273) | — |
 
-**Total shipped: 30 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
-screenshot 4, fab 3), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
+**Total shipped: 31 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
+screenshot 4, fab 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).
 Prompts/Resources ship empty-but-wired (§10), as designed.
@@ -1094,6 +1094,20 @@ the connection-config task).
   `explicitToken` (else the sidecar's `UNREAL_MCP_TOKEN`), or the dial fails with "Refusing to send your ai-game.dev account token to <host>; set
   UNREAL_MCP_TOKEN or use a localhost server" (McpPlugin's shared `CustomOAuthCredentialPolicy` / `HostScope`, bound to
   the dial host in `SidecarHost.SetHost`).
+- **Whose rejection refreshes the machine credential (DEV-272).** The credential is stamped with the server that
+  issued it (`serverTarget`, compared by origin: scheme, host, non-default port). In Cloud mode it is presented only to
+  that server; a Cloud host it is foreign to gets neither it nor the slot's account token (the plugin's `CloudToken`
+  came from the same sign-in), only an explicit `UNREAL_MCP_TOKEN`. Custom + `oauth` keeps the shared loopback rule
+  above. Either way, an authorization rejection (McpPlugin's 3-strike signal) refreshes, i.e. rotates, the shared
+  family only when the rejected dial presented it to the server that issued it and mode, auth option and host have not
+  changed since: a dev stand rejecting a production sign-in, or production rejecting a stand's, never rotates it (the
+  proactive pre-expiry refresh still keeps it fresh). The on-401 `ConnectionCredentialCoordinator` lives for the host
+  lifetime behind `CredentialRejectionGate` and is disposed only at shutdown, and its refresh POST is cancelled only by
+  shutdown (`ShutdownOnlyTokenRefresher`): a config push or Disconnect ends the recovery pass but never the POST (a
+  rotation committed by the server but lost here would make the next refresh present the old token, and reuse detection
+  would revoke the family for every editor on the machine). A credential closure bound to a host the link no longer
+  targets presents no machine credential. A dead-family verdict stops only a link that presents the machine credential
+  (Custom + `oauth`: only when its last dial sent the account token, not the explicit one).
 - **Port-less loopback Custom host.** The default `http://localhost` (or a saved `http://localhost/mcp`) names no
   port. The sidecar dials it on the project's local-server port (`SidecarHost.RepairLocalHost`, McpPlugin
   `AgentConfiguratorSettings.NormalizeLocalHost`: marker `portOverride`, else the v1 derived port), and once the
@@ -1274,6 +1288,18 @@ execution tool = backlog (decision: out of MVP — extra plugin dependency).
 SceneCapture2D), `screenshot-isolated` (actor render with showflag isolation + background option —
 Godot SubViewport pattern → `USceneCaptureComponent2D`). PNG, size-capped (default ≤1024,
 hard cap 2048), returned as MCP image content.
+`screenshot-camera` renders as the camera shows the scene (DEV-269). It came back near-black for a lit Lumen scene for
+three reasons: the engine turns Lumen GI and reflections off in scene captures, the capture pinned a fixed exposure and
+ignored the camera's post-process, and its linear RGBA8 target made the tonemapper write linear values that the
+read-back took as sRGB (about 1.2 EV dark). The capture now sets the target's gamma to 2.2, puts back the GI /
+reflection methods a player view at that spot gets (the project's CVars, then the post-process volumes reaching it:
+`ApplyVolumeLightingMethods`) unless the camera overrides them, applies the camera's post-process at its blend weight,
+persists its view state and renders 3 frames (the first a camera cut, so auto exposure takes its target at once; the
+rest let Lumen fill its surface cache). An actor with no camera component gets the same, minus the camera
+post-process. Measured on 5.7 (`UnrealMcp.Tools.Screenshot.Exposure`: golden-hour sun, sky light, Lumen, the level
+viewport piloted to the camera and converged for 8 s): mean luma 30 before, 156 after, against 155-156 for
+`screenshot-viewport` of the same view.
+`screenshot-isolated` keeps a pinned exposure (a deterministic product shot, not a scene view).
 All four take an optional `savePath` that also writes the PNG inside the project (never outside it, never over an
 existing file) and report it as `Saved to <absolute path>`; they are therefore not `readOnlyHint`.
 
@@ -1369,8 +1395,9 @@ because the template's `DefaultEngine.ini` sets `r.DefaultFeature.AutoExposure.E
 same level in a project without that line reads 0 as luminance and renders pure white, in every state of the game view
 and in the editor viewport. Measured on 5.7, in one PIE session, toggling only that CVar: 100% `#FFFFFF`, then about
 36,000 colors, then white again. So the frame really is white and the capture is right; the fix belongs to the project,
-and the tool neither changes project rendering nor hides it. `screenshot-camera` was never affected because it pins its
-own exposure.
+and the tool neither changes project rendering nor hides it. `screenshot-camera` pinned its own exposure and was not
+affected; since DEV-269 it uses the project's auto exposure like a player view, so it should show that white frame
+too (inferred, not measured).
 
 ## 11. Top-5 risks & mitigations
 

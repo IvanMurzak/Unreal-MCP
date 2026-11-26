@@ -10,7 +10,7 @@ The canonical inventory of the tools the **UnrealMCP** editor plugin registers. 
 | Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
 | Source / C++ | `source-*`: read, create-class, update, delete, list, compile |
 | Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
-| Fab | `fab-search`, `fab-library`, `fab-add` |
+| Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Console | `console-run-command` |
 | Python | `python-execute` |
 | Tool list | `unreal-tool-list` |
@@ -83,7 +83,7 @@ Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"
 
 | Tool id | What it does |
 | --- | --- |
-| `python-execute` | Run Python in the editor (full `unreal` API, pre-imported): plain statements, the last expression is the result, `print` comes back as logs, errors point at `snippet.py` lines; `include` adds helper files/folders from `<Project>/.ai-game-dev/snippets`; `timeout` (seconds, default 30) stops a runaway snippet |
+| `python-execute` | Run Python in the editor (full `unreal` API, pre-imported): plain statements, the last expression is the result, `print` comes back as logs, errors point at `snippet.py` lines; `include` adds helpers from `<Project>/.ai-game-dev/snippets`: a `.py` file runs into the snippet's namespace before the code (not importable), a folder goes on `sys.path` (its modules are importable); `timeout` (seconds, default 30) stops a runaway snippet |
 
 Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never in a packaged game) and the [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime vendored in `UnrealMCP/Content/Python`. Blueprint graph wiring is not exposed to Python: use the Blueprint tools for that.
 
@@ -97,8 +97,9 @@ Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never 
 | `fab-search` | Search the [Fab](https://www.fab.com) marketplace (`query`, `listingType`, `freeOnly`, `sort`, paging); returns each listing's uid, title, type, price and formats |
 | `fab-library` | List the Fab assets the signed-in user owns, with where each is already imported; `filter` searches the whole library |
 | `fab-add` | Download a listing the user owns and import it like the Fab panel's *Add to Project* (Unreal Engine packs, Megascans with `quality`, glTF/FBX); returns the content folder, skips listings already in the project |
+| `fab-sign-in` | Sign the user in to Fab in this editor: opens Epic's sign-in page in the browser and waits for the user (answers at once when already signed in). The only Fab tool that opens a browser |
 
-They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic sign-in and its import workflows. The first `fab-library` / `fab-add` without a sign-in opens Epic's sign-in page in the browser (opening Fab from the editor's toolbar also signs in, from a remembered Epic login). Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code plugins are installed from the Epic Games Launcher, not added to a project.
+They drive the engine's own Fab plugin (on by default since UE 5.5): its Epic sign-in and its import workflows. `fab-library` / `fab-add` without a sign-in answer at once and never open a browser: they tell the agent to ask the user in the chat (`AskUserQuestion`, a blocking card in the AI Game Dev App's desktop and CLI chats) and to call `fab-sign-in` only when the user agreed, so an unattended run never leaves a sign-in tab open on its own; `fab-search` says whether adding will need a sign-in. To sign in ahead of a run, ask the agent to run `fab-sign-in`, or open Fab from the editor's toolbar (which also signs in from a remembered Epic login in a later editor session). Buying, or adding a free listing to the library, stays on fab.com. Complete projects and engine code plugins are installed from the Epic Games Launcher, not added to a project.
 
 </details>
 
