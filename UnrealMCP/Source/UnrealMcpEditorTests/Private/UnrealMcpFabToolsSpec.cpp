@@ -117,8 +117,12 @@ void FUnrealMcpFabToolsSpec::Define()
 	It("answers fab-library at once without a sign-in instead of opening a browser (DEV-273)", [this]()
 	{
 		// Reading a missing token logs errors of the Fab plugin and the EOS SDK; they are the expected path here.
+		// Any number of them, none included: Occurrences < 0 means "ignore silently" from UE 5.6 on. UE 5.5 refuses a
+		// negative count (and 0 there means "one or more"), so 5.5 adds no expectation; its Fab plugin logs none here.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6)
 		AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
 		AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
+#endif
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpFabTools::Register(Registry);
 		const FUnrealMcpToolResult Result = Registry.Execute(TEXT("fab-library"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
