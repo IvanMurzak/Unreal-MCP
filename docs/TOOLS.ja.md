@@ -10,7 +10,7 @@
 | Blueprint | `blueprint-*`: create、get、add-component、remove-component、add-variable、modify-variable、set-default、add-function、add-event、compile、spawn |
 | ソース / C++ | `source-*`: read、create-class、update、delete、list、compile |
 | スクリーンショット | `screenshot-*`: viewport、game-view、camera、isolated |
-| Fab | `fab-search`、`fab-library`、`fab-add` |
+| Fab | `fab-search`、`fab-library`、`fab-add`、`fab-sign-in` |
 | コンソール | `console-run-command` |
 | Python | `python-execute` |
 | ツール一覧 | `unreal-tool-list` |
@@ -97,8 +97,9 @@
 | `fab-search` | [Fab](https://www.fab.com) マーケットプレイスを検索（`query`、`listingType`、`freeOnly`、`sort`、ページング）。各リスティングの uid、タイトル、種類、価格、形式を返す |
 | `fab-library` | サインイン中のユーザーが所有する Fab アセットと、それぞれのインポート先を一覧表示。`filter` でライブラリ全体を検索 |
 | `fab-add` | ユーザーが所有するリスティングをダウンロードし、Fab パネルの *Add to Project* と同じようにインポート（Unreal Engine パック、`quality` 付きの Megascans、glTF/FBX）。コンテンツフォルダーを返し、プロジェクトにすでにあるものはスキップ |
+| `fab-sign-in` | このエディターでユーザーを Fab にサインインさせます。ブラウザで Epic のサインインページを開き、ユーザーの操作を待ちます（サインイン済みならすぐに応答）。ブラウザを開く唯一の Fab ツール |
 
-これらはエンジン自身の Fab プラグイン（UE 5.5 以降は既定で有効）を動かし、その Epic サインインとインポート処理を使います。サインインしていない状態で最初に `fab-library` / `fab-add` を呼ぶと、ブラウザで Epic のサインインページが開きます（エディターのツールバーから Fab を開いても、記憶された Epic ログインでサインインします）。購入や、無料リスティングのライブラリへの追加は fab.com で行います。完成したプロジェクトとエンジンのコードプラグインは、プロジェクトに追加するのではなく Epic Games Launcher からインストールします。
+これらはエンジン自身の Fab プラグイン（UE 5.5 以降は既定で有効）を動かし、その Epic サインインとインポート処理を使います。サインインしていない場合、`fab-library` / `fab-add` はすぐに応答し、ブラウザを開くことはありません。エージェントにはチャットでユーザーに確認し（`AskUserQuestion`。AI Game Dev アプリのデスクトップと CLI のチャットでは応答を待つカードになります）、ユーザーが同意したときだけ `fab-sign-in` を呼ぶよう伝えるので、無人の実行がサインインのタブを勝手に開いたままにすることはありません。`fab-search` は追加にサインインが必要かどうかを示します。実行前にサインインしておくには、エージェントに `fab-sign-in` の実行を頼むか、エディターのツールバーから Fab を開きます（後のエディターセッションでも、記憶された Epic ログインでサインインします）。購入や、無料リスティングのライブラリへの追加は fab.com で行います。完成したプロジェクトとエンジンのコードプラグインは、プロジェクトに追加するのではなく Epic Games Launcher からインストールします。
 
 </details>
 
