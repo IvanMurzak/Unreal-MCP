@@ -247,6 +247,31 @@ namespace UnrealMcpScreenshotTools
 		return bPinnedNearZero && !bManualExposure;
 	}
 
+	void ApplyVolumeLightingMethods(const TArray<IInterface_PostProcessVolume*>& Volumes, const FVector& Location,
+		EDynamicGlobalIlluminationMethod::Type& InOutGi, EReflectionMethod::Type& InOutReflection)
+	{
+		for (IInterface_PostProcessVolume* Volume : Volumes)
+		{
+			const FPostProcessVolumeProperties Properties = Volume->GetProperties();
+			if (!Properties.bIsEnabled || Properties.BlendWeight <= 0.0f || !Properties.Settings)
+				continue;
+			if (!Properties.bIsUnbound)
+			{
+				// The reach of UWorld's DoPostProcessVolume: inside, or within the blend radius with a weight left above 0.
+				float Distance = 0.0f; // As the engine: a volume with no brush component leaves it at 0 and counts.
+				Volume->EncompassesPoint(Location, 0.0f, &Distance);
+				if (Distance < 0.0f || Distance > Properties.BlendRadius
+					|| (Properties.BlendRadius >= 1.0f && Distance >= Properties.BlendRadius))
+					continue;
+			}
+			// An enum setting applies at any blend weight above 0 (SET_PP in FSceneView::OverridePostProcessSettings).
+			if (Properties.Settings->bOverride_DynamicGlobalIlluminationMethod)
+				InOutGi = Properties.Settings->DynamicGlobalIlluminationMethod;
+			if (Properties.Settings->bOverride_ReflectionMethod)
+				InOutReflection = Properties.Settings->ReflectionMethod;
+		}
+	}
+
 	FString FormatUniformFrameNote(const FFrameUniformity& Uniformity, bool bOverexposingVolume)
 	{
 		FString Note = FString::Printf(
@@ -273,8 +298,8 @@ namespace UnrealMcpScreenshotTools
 		// Keep the encoded payload well under the §1.2 64 MiB IPC line cap (base64 expands ~4/3).
 		static constexpr int64 MaxEncodedBytes = 40 * 1024 * 1024;
 
-		/** Frames a screenshot-camera call renders before the read-back (see CaptureWithSceneCapture). */
-		static constexpr int32 CameraCaptureWarmupFrames = 3;
+		/** Frames a screenshot-camera capture renders, the last one read back (see CaptureWithSceneCapture). */
+		static constexpr int32 SceneViewWarmupFrames = 3;
 
 		/** IsRenderingAvailable(), with NullRhiScreenshotError() in @p OutError when it is not. */
 		bool EnsureRenderingAvailable(FString& OutError)
@@ -525,7 +550,7 @@ namespace UnrealMcpScreenshotTools
 			// color (verified windowed: a #FF0000 background came back pure black). To honor the background
 			// we capture coverage-carrying HDR scene color (SCS_SceneColorHDR, inverse opacity in alpha)
 			// into a float target and composite scene-over-background in the read-back. screenshot-camera
-			// passes no background and keeps the cheaper tonemapped LDR path.
+			// passes no background and keeps the cheaper tonemapped LDR path, rendered as a scene view (below).
 			const bool bComposite = (BackgroundColor != nullptr);
 
 			UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
@@ -557,32 +582,41 @@ namespace UnrealMcpScreenshotTools
 			Capture->CaptureSource = bComposite ? SCS_SceneColorHDR : SCS_FinalColorLDR;
 			Capture->bCaptureEveryFrame = false;
 			Capture->bCaptureOnMovement = false;
-			if (Camera)
+			if (!bComposite)
 			{
-				// Render what the camera shows (DEV-269): the engine turns Lumen GI and reflections off in scene captures,
-				// and a fixed exposure ignores the scene's brightness, which left a lit Lumen scene near-black. Start from
-				// the camera's own post-process (its exposure, lens, grading; world
-				// volumes still blend in under it, as for any view), put the project's GI / reflection methods back
-				// unless the camera picks its own, and leave exposure automatic as in the viewport (see the warm-up).
-				// A camera post-process blend weight below 1 is applied in full: the capture blends one settings set.
-				FMinimalViewInfo CameraView;
-				Camera->GetCameraView(0.0f, CameraView);
-				if (CameraView.PostProcessBlendWeight > 0.0f)
-					Capture->PostProcessSettings = CameraView.PostProcessSettings;
+				// A scene view (DEV-269): render the scene as a player view through this camera shows it. The engine turns
+				// Lumen GI and reflections off in scene captures, and a fixed exposure ignores the scene's brightness, which
+				// left a lit Lumen scene near-black. Put back the GI / reflection methods a player view at this spot gets,
+				// apply the camera's own post-process (exposure, lens, grading) at its blend weight over the world's volumes,
+				// and leave exposure automatic as in the viewport (see the warm-up below).
 				FPostProcessSettings& Settings = Capture->PostProcessSettings;
+				if (Camera)
+				{
+					FMinimalViewInfo CameraView;
+					Camera->GetCameraView(0.0f, CameraView);
+					if (CameraView.PostProcessBlendWeight > 0.0f)
+					{
+						Settings = CameraView.PostProcessSettings;
+						Capture->PostProcessBlendWeight = FMath::Min(CameraView.PostProcessBlendWeight, 1.0f);
+					}
+				}
+				// Enum settings apply at any blend weight above 0, so these hold whatever the camera's weight.
+				static const TConsoleVariableData<int32>* GiCVar =
+					IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DynamicGlobalIlluminationMethod"));
+				static const TConsoleVariableData<int32>* ReflectionCVar =
+					IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
+				EDynamicGlobalIlluminationMethod::Type GiMethod = (EDynamicGlobalIlluminationMethod::Type)GiCVar->GetValueOnGameThread();
+				EReflectionMethod::Type ReflectionMethod = (EReflectionMethod::Type)ReflectionCVar->GetValueOnGameThread();
+				ApplyVolumeLightingMethods(GetWorldPostProcessVolumes(*World), CaptureXform.GetLocation(), GiMethod, ReflectionMethod);
 				if (!Settings.bOverride_DynamicGlobalIlluminationMethod)
 				{
-					static const TConsoleVariableData<int32>* GiMethod =
-						IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DynamicGlobalIlluminationMethod"));
 					Settings.bOverride_DynamicGlobalIlluminationMethod = true;
-					Settings.DynamicGlobalIlluminationMethod = (EDynamicGlobalIlluminationMethod::Type)GiMethod->GetValueOnGameThread();
+					Settings.DynamicGlobalIlluminationMethod = GiMethod;
 				}
 				if (!Settings.bOverride_ReflectionMethod)
 				{
-					static const TConsoleVariableData<int32>* ReflectionMethod =
-						IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
 					Settings.bOverride_ReflectionMethod = true;
-					Settings.ReflectionMethod = (EReflectionMethod::Type)ReflectionMethod->GetValueOnGameThread();
+					Settings.ReflectionMethod = ReflectionMethod;
 				}
 				// Lumen and eye adaptation keep their history in the capture's view state, which exists only when persisted.
 				Capture->bAlwaysPersistRenderingState = true;
@@ -611,10 +645,10 @@ namespace UnrealMcpScreenshotTools
 			// CaptureScene renders the scene now (and the read-back below flushes the render thread), so the frame is
 			// fresh whatever the editor window's state; send pending scene updates first so the latest edit is in it.
 			World->SendAllEndOfFrameUpdates();
-			// A camera capture renders a few frames into its fresh view state, reading back the last. The first is a camera
-			// cut, so auto exposure takes its target at once instead of adapting from nothing; the later ones let Lumen
-			// fill its surface cache, which a large scene does over several renders.
-			const int32 Frames = Camera ? CameraCaptureWarmupFrames : 1;
+			// A scene view renders a few frames into its fresh view state, reading back the last. The first is a camera cut,
+			// so auto exposure takes its target at once instead of adapting from nothing; the later ones let Lumen fill its
+			// surface cache, which a large scene does over several renders.
+			const int32 Frames = bComposite ? 1 : SceneViewWarmupFrames;
 			for (int32 Frame = 0; Frame < Frames; ++Frame)
 			{
 				Capture->bCameraCutThisFrame = Frame == 0;

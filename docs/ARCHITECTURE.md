@@ -1275,11 +1275,13 @@ SceneCapture2D), `screenshot-isolated` (actor render with showflag isolation + b
 Godot SubViewport pattern → `USceneCaptureComponent2D`). PNG, size-capped (default ≤1024,
 hard cap 2048), returned as MCP image content.
 `screenshot-camera` renders as the camera shows the scene (DEV-269): the engine turns Lumen GI and reflections off in
-scene captures and ignores the camera's post-process, so a lit Lumen scene came back near-black. The capture now starts
-from the camera's post-process, restores the project's `r.DynamicGlobalIlluminationMethod` / `r.ReflectionMethod` unless
-the camera overrides them, persists its view state and renders 3 frames (the first a camera cut, so auto exposure takes
-its target at once; the rest let Lumen fill its surface cache). Measured on 5.7 (`UnrealMcp.Tools.Screenshot.Exposure`,
-golden-hour sun, sky light, Lumen): mean luma 30 → 97 against 79 for `screenshot-viewport` of the same view.
+scene captures and ignores the camera's post-process, so a lit Lumen scene came back near-black. The capture now puts
+back the GI / reflection methods a player view at that spot gets (the project's CVars, then the post-process volumes
+reaching it: `ApplyVolumeLightingMethods`) unless the camera overrides them, applies the camera's post-process at its
+blend weight, persists its view state and renders 3 frames (the first a camera cut, so auto exposure takes its target
+at once; the rest let Lumen fill its surface cache). An actor with no camera component gets the same, minus the camera
+post-process. Measured on 5.7 (`UnrealMcp.Tools.Screenshot.Exposure`, golden-hour sun, sky light, Lumen): mean luma
+30 -> 97 against 79-88 for `screenshot-viewport` of the same view.
 `screenshot-isolated` keeps a pinned exposure (a deterministic product shot, not a scene view).
 All four take an optional `savePath` that also writes the PNG inside the project (never outside it, never over an
 existing file) and report it as `Saved to <absolute path>`; they are therefore not `readOnlyHint`.

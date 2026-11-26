@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -159,6 +160,16 @@ namespace UnrealMcpScreenshotTools
 	 */
 	UNREALMCPEDITOR_API TArray<IInterface_PostProcessVolume*> GetWorldPostProcessVolumes(const UWorld& World);
 	UNREALMCPEDITOR_API bool HasOverexposingPostProcessVolume(const TArray<IInterface_PostProcessVolume*>& Volumes, bool bExtendedLuminanceRange);
+
+	/**
+	 * Blend the GI and reflection methods of @p Volumes (ascending priority, see GetWorldPostProcessVolumes) into
+	 * @p InOutGi / @p InOutReflection (pass the project's r.DynamicGlobalIlluminationMethod / r.ReflectionMethod) for a view
+	 * at @p Location, as the engine blends a player view: every enabled volume with weight that reaches the point and
+	 * overrides a method sets it, the last one deciding. screenshot-camera needs it because a scene capture forces both to
+	 * None after that blend (DEV-269). GPU-free (spec-testable).
+	 */
+	UNREALMCPEDITOR_API void ApplyVolumeLightingMethods(const TArray<IInterface_PostProcessVolume*>& Volumes, const FVector& Location,
+		EDynamicGlobalIlluminationMethod::Type& InOutGi, EReflectionMethod::Type& InOutReflection);
 
 	/**
 	 * The note a viewport capture appends when its frame is uniform. It never fails the capture, since a plain scene is

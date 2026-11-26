@@ -12,6 +12,7 @@
 #include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "EditorViewportClient.h"
+#include "LevelEditorViewport.h"
 #include "UnrealClient.h"
 #include "ImageUtils.h"
 #include "ImageCore.h"
@@ -38,6 +39,37 @@ BEGIN_DEFINE_SPEC(FUnrealMcpScreenshotExposureSpec, "UnrealMcp.Tools.Screenshot.
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 	TArray<TWeakObjectPtr<AActor>> SceneActors;
 	FTSTicker::FDelegateHandle TickerHandle;
+
+	/** The level viewport the spec pilots, and its view before, restored in AfterEach (it is saved with the layout). */
+	FLevelEditorViewportClient* PilotedClient = nullptr;
+	FVector SavedViewLocation;
+	FRotator SavedViewRotation;
+	float SavedViewFov = 90.0f;
+
+	static FText ExposureSpecRealtimeReason()
+	{
+		return FText::FromString(TEXT("UnrealMcp.Tools.Screenshot.Exposure spec"));
+	}
+
+	/** PilotedClient while it is still a live level viewport (one can close during the run), else nullptr. */
+	FLevelEditorViewportClient* LivePilotedClient() const
+	{
+		return PilotedClient && GEditor && GEditor->GetLevelViewportClients().Contains(PilotedClient) && PilotedClient->Viewport
+			? PilotedClient : nullptr;
+	}
+
+	void RestoreViewport()
+	{
+		if (FLevelEditorViewportClient* Client = LivePilotedClient())
+		{
+			Client->SetViewLocation(SavedViewLocation);
+			Client->SetViewRotation(SavedViewRotation);
+			Client->ViewFOV = SavedViewFov;
+			Client->RemoveRealtimeOverride(ExposureSpecRealtimeReason(), /*bCheckMissingOverride*/ false);
+			Client->Invalidate();
+		}
+		PilotedClient = nullptr;
+	}
 
 	template <typename T>
 	T* SpawnSceneActor(UWorld* World, const FTransform& Transform)
@@ -102,6 +134,7 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
 		TickerHandle.Reset();
 		DestroyScene();
+		RestoreViewport();
 	});
 
 	LatentIt("screenshot-camera of a golden-hour Lumen scene is exposed like screenshot-viewport of the same view",
@@ -114,11 +147,17 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 			return;
 		}
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-		FViewport* Viewport = GEditor ? GEditor->GetActiveViewport() : nullptr;
-		FEditorViewportClient* Client = Viewport ? static_cast<FEditorViewportClient*>(Viewport->GetClient()) : nullptr;
+		// screenshot-viewport captures the active viewport: it must be the current level viewport, in perspective.
+		FLevelEditorViewportClient* Client = GCurrentLevelEditingViewportClient;
+		if (Client && (!Client->Viewport || Client->Viewport != GEditor->GetActiveViewport() || !Client->IsPerspective()))
+		{
+			AddInfo(TEXT("The active viewport is not a perspective level viewport; nothing to compare against."));
+			Done.Execute();
+			return;
+		}
 		UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 		UStaticMesh* Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
-		if (!TestNotNull(TEXT("editor world"), World) || !TestNotNull(TEXT("active editor viewport client"), Client)
+		if (!TestNotNull(TEXT("editor world"), World) || !TestNotNull(TEXT("current level viewport client"), Client)
 			|| !TestNotNull(TEXT("cube mesh"), Cube) || !TestNotNull(TEXT("plane mesh"), Plane))
 		{
 			Done.Execute();
@@ -167,15 +206,28 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 
 		// Pilot the level viewport to the camera (what an agent does with set_level_viewport_camera_info) and let it
 		// converge (Lumen, eye adaptation) for a while before both captures.
-		Client->SetRealtime(true);
+		PilotedClient = Client;
+		SavedViewLocation = Client->GetViewLocation();
+		SavedViewRotation = Client->GetViewRotation();
+		SavedViewFov = Client->ViewFOV;
+		Client->AddRealtimeOverride(true, ExposureSpecRealtimeReason());
 		Client->SetViewLocation(CameraView.Location);
 		Client->SetViewRotation(CameraView.Rotation);
 		Client->ViewFOV = CameraView.FOV;
 		const FString CameraName = Camera->GetName();
 		int32 FramesLeft = 120;
 		TickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-			[this, Done, CameraName, FramesLeft, Viewport](float) mutable
+			[this, Done, CameraName, FramesLeft](float) mutable
 		{
+			FLevelEditorViewportClient* LiveClient = LivePilotedClient();
+			if (!LiveClient || LiveClient->Viewport != GEditor->GetActiveViewport())
+			{
+				AddError(TEXT("The piloted level viewport closed or lost focus during the run."));
+				TickerHandle.Reset();
+				Done.Execute();
+				return false;
+			}
+			FViewport* Viewport = LiveClient->Viewport;
 			if (--FramesLeft > 0)
 			{
 				// An unfocused or offscreen editor may not redraw the level viewport on its own: draw it every frame,
@@ -210,7 +262,6 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 				TestTrue(TEXT("the camera frame is within 0.6x..1.6x of the viewport's mean luma"),
 					CameraLuma >= ViewportLuma * 0.6 && CameraLuma <= ViewportLuma * 1.6);
 			}
-			DestroyScene();
 			Done.Execute();
 			return false;
 		}));
