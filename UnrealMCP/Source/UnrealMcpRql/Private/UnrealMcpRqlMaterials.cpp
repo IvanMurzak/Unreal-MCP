@@ -136,13 +136,38 @@ namespace UnrealMcpRqlMaterialsLocal
 		return rql::Value::list_of(std::move(Out));
 	}
 
+	/** The asset that holds @p Material's usage flags: since UE 5.8 an instance keeps its own (the editor sets a missing one on it). */
+	const UMaterialInterface* MaterialsUsageOwner(const UMaterialInterface* Material)
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return Material->GetMaterial();
+#else
+		return Material;
+#endif
+	}
+
+	bool MaterialsHasUsage(const UMaterialInterface* Material, EMaterialUsage Usage)
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		const UMaterial* Base = Material->GetMaterial();
+		return Base && Base->GetUsageByFlag(Usage);
+#else
+		return Material->GetUsageByFlag(Usage);
+#endif
+	}
+
+	bool MaterialsIsUnsaved(const UObject* Asset)
+	{
+		const UPackage* Package = Asset ? Asset->GetOutermost() : nullptr;
+		return Package && Package->IsDirty();
+	}
+
 	rql::Value UsageFlags(UMaterialInterface* Material)
 	{
-		const UMaterial* Base = Material->GetMaterial();
 		TArray<FString> On;
 		for (const FMaterialsUsage& Entry : MaterialsUsages)
 		{
-			if (Base && Base->GetUsageByFlag(Entry.Usage))
+			if (MaterialsHasUsage(Material, Entry.Usage))
 				On.Add(Entry.Name);
 		}
 		return StrList(On);
@@ -150,8 +175,8 @@ namespace UnrealMcpRqlMaterialsLocal
 
 	/**
 	 * The components of the open level that draw @p Material's base material (directly or through an instance) on a mesh
-	 * kind whose usage flag it lacks: off, or on but unsaved (the editor sets a missing flag in memory and marks the
-	 * material unsaved; a cooked game reads the saved flag).
+	 * kind whose usage flag the drawn material lacks (its base's before UE 5.8): off, or on but unsaved (the editor sets a
+	 * missing flag in memory and marks the asset unsaved; a cooked game reads the saved flag).
 	 */
 	rql::Value MissingUsages(FUnrealMcpRqlTypes& Types, UMaterialInterface* Material)
 	{
@@ -160,9 +185,6 @@ namespace UnrealMcpRqlMaterialsLocal
 		UWorld* World = EditorWorld();
 		if (!Base || !World)
 			return rql::Value::list_of(std::move(Out));
-		const UPackage* Package = Base->GetOutermost();
-		const bool bUnsaved = Package && Package->IsDirty();
-		const FString BasePath = Package ? Package->GetName() : Base->GetPathName();
 		for (TActorIterator<AActor> It(World); It && static_cast<int32>(Out.size()) < MaxMissingUsages; ++It)
 		{
 			TInlineComponentArray<UPrimitiveComponent*> Components(*It);
@@ -173,36 +195,51 @@ namespace UnrealMcpRqlMaterialsLocal
 					continue;
 				TArray<UMaterialInterface*> Used;
 				Component->GetUsedMaterials(Used);
-				if (!Used.ContainsByPredicate([Base](const UMaterialInterface* Each) { return Each && Each->GetMaterial() == Base; }))
-					continue;
-				for (const EMaterialUsage Usage : Needs)
+				TArray<const UMaterialInterface*, TInlineAllocator<2>> Owners; // one row per flag holder, however many slots use it
+				for (const UMaterialInterface* Each : Used)
 				{
-					const bool bOn = Base->GetUsageByFlag(Usage);
-					if (bOn && !bUnsaved)
-						continue;
-					const FString Problem = bOn
-						? FString::Printf(TEXT("%s is on but %s has unsaved changes: save it, a cooked game reads the saved flag"), UsageName(Usage), *BasePath)
-						: FString::Printf(TEXT("%s is off on %s: the game draws the default material here"), UsageName(Usage), *BasePath);
-					Out.push_back(Record({ { Str(TEXT("Usage")), Str(UsageName(Usage)) }, { Str(TEXT("Actor")), Str(It->GetActorNameOrLabel()) },
-						{ Str(TEXT("Component")), Types.WrapObject(Component) }, { Str(TEXT("Problem")), Str(Problem) } }));
-					if (static_cast<int32>(Out.size()) >= MaxMissingUsages)
-						break;
+					if (Each && Each->GetMaterial() == Base)
+						Owners.AddUnique(MaterialsUsageOwner(Each));
+				}
+				for (const UMaterialInterface* Owner : Owners)
+				{
+					const bool bUnsaved = MaterialsIsUnsaved(Owner);
+					const FString OwnerPath = Owner->GetOutermost()->GetName();
+					for (const EMaterialUsage Usage : Needs)
+					{
+						const bool bOn = MaterialsHasUsage(Owner, Usage);
+						if ((bOn && !bUnsaved) || static_cast<int32>(Out.size()) >= MaxMissingUsages)
+							continue;
+						const FString Problem = bOn
+							? FString::Printf(TEXT("%s is on but %s has unsaved changes: save it, a cooked game reads the saved flag"), UsageName(Usage), *OwnerPath)
+							: FString::Printf(TEXT("%s is off on %s: the game draws the default material here"), UsageName(Usage), *OwnerPath);
+						Out.push_back(Record({ { Str(TEXT("Usage")), Str(UsageName(Usage)) }, { Str(TEXT("Actor")), Str(It->GetActorNameOrLabel()) },
+							{ Str(TEXT("Component")), Types.WrapObject(Component) }, { Str(TEXT("Problem")), Str(Problem) } }));
+					}
 				}
 			}
 		}
 		return rql::Value::list_of(std::move(Out));
 	}
 
-	/** Recompile @p Material now (a material instance: its static permutation), as the material editor's Apply does. */
+	/**
+	 * Recompile @p Material now (a material instance: its static permutation), as the material editor's Apply does. A
+	 * recompile changes nothing saved, so a package that was saved stays so (RecompileMaterial marks it unsaved; left
+	 * that way, MissingUsages would report every flag as unsaved).
+	 */
 	void Recompile(UMaterialInterface* Material)
 	{
 		TGuardValue<ITransaction*> NoUndo(GUndo, nullptr);
+		UPackage* Package = Material->GetOutermost();
+		const bool bWasUnsaved = Package->IsDirty();
 		if (UMaterial* Base = Cast<UMaterial>(Material))
 			UMaterialEditingLibrary::RecompileMaterial(Base);
 		else if (UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Material))
 			UMaterialEditingLibrary::UpdateMaterialInstance(Instance);
 		else
 			Throw(FString::Printf(TEXT("%s is a %s: only materials and material instances compile"), *Material->GetName(), *Material->GetClass()->GetName()));
+		if (!bWasUnsaved)
+			Package->SetDirtyFlag(false);
 	}
 
 	void MaterialCompileMembers(FUnrealMcpRqlTypes& T, rql::TypeDescriptor& D)
@@ -211,12 +248,17 @@ namespace UnrealMcpRqlMaterialsLocal
 		const rql::TypeDescriptor* Records = T.Registry().list_type(rql::builtin::any_type(), false);
 		FUnrealMcpRqlTypes::SetMember(D, Member("CompileErrors", Records, [](void* Self)
 		{
-			return ErrorList(UnrealMcpRqlMaterialCompileErrors(static_cast<UMaterialInterface*>(Self), /*bWait*/ true));
-		}, {}, "compile errors per feature level and shader platform (FeatureLevel Platform Message; waits for a compile in flight); empty when it compiles. A material with errors draws as the default material"));
+			// No wait here (a query over many materials would block the editor): a compile in flight is one row saying so.
+			TArray<FString> Pending;
+			TArray<FUnrealMcpMaterialCompileError> Errors = UnrealMcpRqlMaterialCompileErrors(static_cast<UMaterialInterface*>(Self), /*bWait*/ false, nullptr, &Pending);
+			for (const FString& Level : Pending)
+				Errors.Add({ Level, FString(), TEXT("still compiling: call Compile() to wait for the result") });
+			return ErrorList(Errors);
+		}, {}, "compile errors per feature level and shader platform (FeatureLevel Platform Message) of the last finished compile; empty when it compiles. A material with errors draws as the default material"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("UsageFlags", T.Registry().list_type(rql::builtin::string_type(), false), [](void* Self)
 		{
 			return UsageFlags(static_cast<UMaterialInterface*>(Self));
-		}, {}, "the usage flags that are on (bUsedWithNanite, bUsedWithInstancedStaticMeshes, ...; an instance: its base material's)"));
+		}, {}, "the usage flags that are on (bUsedWithNanite, bUsedWithInstancedStaticMeshes, ...; an instance before UE 5.8: its base material's)"));
 		FUnrealMcpRqlTypes::SetMember(D, Member("MissingUsages", Records, [Types](void* Self)
 		{
 			return MissingUsages(*Types, static_cast<UMaterialInterface*>(Self));
@@ -243,7 +285,8 @@ namespace UnrealMcpRqlMaterialsLocal
 	}
 }
 
-TArray<FUnrealMcpMaterialCompileError> UnrealMcpRqlMaterialCompileErrors(UMaterialInterface* Material, bool bWait, TArray<FString>* OutCompiled)
+TArray<FUnrealMcpMaterialCompileError> UnrealMcpRqlMaterialCompileErrors(UMaterialInterface* Material, bool bWait, TArray<FString>* OutCompiled,
+	TArray<FString>* OutPending)
 {
 	using namespace UnrealMcpRqlMaterialsLocal;
 	TArray<FUnrealMcpMaterialCompileError> Out;
@@ -256,13 +299,18 @@ TArray<FUnrealMcpMaterialCompileError> UnrealMcpRqlMaterialCompileErrors(UMateri
 		FMaterialResource* Resource = MaterialsResource(Material, Level, Platform);
 		if (!Resource)
 			continue;
-		if (bWait && !Resource->IsCompilationFinished())
-			Resource->FinishCompilation();
+		FString LevelName;
+		GetFeatureLevelName(Level, LevelName);
+		if (!Resource->IsCompilationFinished())
+		{
+			if (bWait)
+				Resource->FinishCompilation();
+			else if (OutPending)
+				OutPending->Add(LevelName);
+		}
 		const TArray<FString>& Errors = Resource->GetCompileErrors();
 		if (!Resource->GetGameThreadShaderMap() && Errors.IsEmpty())
 			continue; // never compiled for this feature level
-		FString LevelName;
-		GetFeatureLevelName(Level, LevelName);
 		const FString PlatformName = Platform == SP_NumPlatforms ? FString(TEXT("?")) : LexToString(Platform, /*bError*/ false);
 		if (OutCompiled)
 			OutCompiled->AddUnique(LevelName + TEXT(" ") + PlatformName);

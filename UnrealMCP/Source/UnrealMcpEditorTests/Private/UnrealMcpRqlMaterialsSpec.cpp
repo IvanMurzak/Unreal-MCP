@@ -54,12 +54,15 @@ BEGIN_DEFINE_SPEC(FUnrealMcpRqlMaterialsSpec, "UnrealMcp.Tools.Rql.Materials",
 		return UnrealMcpRqlSpecHelpers::CellText(Result);
 	}
 
-	/** diagnostics | where Message contains "@M@" (the material's package): how many rows. */
+	/** diagnostics | where Source == "Compiler" and Message contains "@P@" | select Message (@P@: the material's package): how many rows (the failed
+	 * compile's LogMaterial line is a Log: row of its own). */
 	int32 DiagnosticRows()
 	{
 		const TSharedPtr<FJsonObject> Result = UnrealMcpRqlSpecHelpers::Exec(*this, UnrealMcpRqlSpecHelpers::Fill(
-			TEXT(R"RQL({"rql":"0.1","source":{"path":["diagnostics"]},"stages":[{"op":"where","pred":{"op":"contains","args":[{"path":["Message"]},{"lit":"@P@"}]}}]})RQL"),
+			TEXT(R"RQL({"rql":"0.1","source":{"path":["diagnostics"]},"stages":[{"op":"where","pred":{"op":"and","args":[{"op":"==","args":[{"path":["Source"]},{"lit":"Compiler"}]},{"op":"contains","args":[{"path":["Message"]},{"lit":"@P@"}]}]}},{"op":"select","fields":[{"name":"Message","expr":{"path":["Message"]}}]}]})RQL"),
 			{ { TEXT("P"), Material->GetOutermost()->GetName() } }));
+		if (!UnrealMcpRqlSpecHelpers::IsOk(Result))
+			AddError(FString::Printf(TEXT("diagnostics query failed: %s"), *UnrealMcpRqlSpecHelpers::Codes(Result)));
 		return UnrealMcpRqlSpecHelpers::RowCount(Result);
 	}
 
@@ -99,6 +102,7 @@ void FUnrealMcpRqlMaterialsSpec::Define()
 			User->Destroy();
 		if (Material)
 		{
+			Material->GetOutermost()->SetDirtyFlag(false); // no save prompt for the spec's packages in a local editor
 			Material->ClearFlags(RF_Public | RF_Standalone);
 			Material->MarkAsGarbage();
 			Material = nullptr;
