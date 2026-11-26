@@ -22,8 +22,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 {
     /// <summary>
     /// DEV-272 review U2/U3: the connection the on-401 coordinator sees. A rejection passes only when admitted, the
-    /// post-refresh reconnect is skipped after a presentation change, the dead-family stop reaches only a connection
-    /// that presents the machine credential, and the gate never disposes the real connection.
+    /// post-refresh reconnect always reaches the connection, the dead-family stop reaches only a connection that
+    /// presents the machine credential, and the gate never disposes the real connection.
     /// </summary>
     public class CredentialRejectionGateTests
     {
@@ -48,7 +48,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var inner = new FakeConnection();
             var admit = false;
-            using var gate = new CredentialRejectionGate(inner, () => admit, () => true, () => 1);
+            using var gate = new CredentialRejectionGate(inner, () => admit, () => true);
             var seen = new List<Unit>();
             using var sub = gate.OnAuthorizationRejected.Subscribe(seen.Add);
 
@@ -60,20 +60,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public async Task RecoveryReconnect_IsSkippedAfterAPresentationChange()
+        public async Task RecoveryReconnect_AlwaysReachesTheConnection()
         {
+            // Review M1: a re-handshake or a mode flip that keeps the host starts no transition, so skipping this
+            // re-dial would leave a link the user wants up stopped after the rejection cap. A transition that does
+            // re-dial disconnects first, which ends the coordinator's pass before it gets here.
             var inner = new FakeConnection();
-            var epoch = 1;
-            using var gate = new CredentialRejectionGate(inner, () => true, () => true, () => epoch);
-            using var sub = gate.OnAuthorizationRejected.Subscribe(_ => { });
-
-            inner.Rejections.OnNext(Unit.Default);           // admitted in epoch 1
+            using var gate = new CredentialRejectionGate(inner, () => true, () => false);
             Assert.True(await gate.ConnectForRecovery(default));
-            Assert.Equal(1, inner.RecoveryConnects);
-
-            inner.Rejections.OnNext(Unit.Default);
-            epoch = 2;                                       // mode/host changed while the refresh ran
-            Assert.True(await gate.ConnectForRecovery(default)); // handled: the config transition re-dials
             Assert.Equal(1, inner.RecoveryConnects);
         }
 
@@ -82,7 +76,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var inner = new FakeConnection();
             var presents = false;
-            using var gate = new CredentialRejectionGate(inner, () => true, () => presents, () => 1);
+            using var gate = new CredentialRejectionGate(inner, () => true, () => presents);
 
             await gate.Disconnect();
             Assert.Equal(0, inner.Disconnects);
@@ -95,7 +89,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void Dispose_LeavesTheConnectionToItsOwner()
         {
             var inner = new FakeConnection();
-            new CredentialRejectionGate(inner, () => true, () => true, () => 1).Dispose();
+            new CredentialRejectionGate(inner, () => true, () => true).Dispose();
             Assert.Equal(0, inner.Disposes);
         }
     }

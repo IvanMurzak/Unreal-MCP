@@ -127,13 +127,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         // dial presented the machine credential to the server that issued it.
         private CredentialRejectionGate? _rejectionGate;
         // What the last dial presented (ResolveBearerAsync) and in which presentation epoch, read when a rejection
-        // burst arrives.
-        private sealed record DialRecord(int Epoch, bool PresentedToIssuer);
+        // burst or a dead-family verdict arrives. IssuedBy: the issuer origin of the machine credential it presented
+        // to that same issuer, else null.
+        private sealed record DialRecord(int Epoch, bool PresentedMachineCredential, string? IssuedBy);
         private DialRecord? _lastDial;
         // Bumped (under _connectionSlotLock) whenever the mode, auth option or dial host changes, so a refresh that
         // completes after such a change leaves the re-dial to the config transition.
         private int _presentationEpoch;
         private string? _presentationKey;
+        // Cancelled only in Dispose: the one thing that may abort a refresh POST (ShutdownOnlyTokenRefresher).
+        private readonly CancellationTokenSource _refreshShutdown = new();
 
         // F1 failure path (03 F1): bounded retry of the token-exchange derivation after the agent family is
         // committed ("token exchange fails → P retries with backoff; the agent family stays committed").
@@ -336,7 +339,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         componentClientId: DeviceCodeAuthenticator.DefaultClientId,
                         httpClient: _authHttpClient);
                 _credentialProvider = new PluginCredentialProvider(
-                    _credentialStore, _tokenRefresher, loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)),
+                    _credentialStore, new ShutdownOnlyTokenRefresher(_tokenRefresher, _refreshShutdown.Token),
+                    loggerProvider?.CreateLogger(nameof(PluginCredentialProvider)),
                     credentialLock: _machineLock);
                 _injectedExchangeClient = exchangeClient;
                 _injectedRevocationClient = revocationClient;
@@ -467,7 +471,11 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 slotToken = BearerToken;
                 explicitToken = _customExplicitToken;
             }
-            var presentedToIssuer = false;
+            // A closure bound to a host the connection no longer targets (a link built for the old host, or McpPlugin
+            // pairing the new URL with the old closure mid-SetHost) never presents the machine credential.
+            var stale = epoch == -1;
+            var presentedMachine = false;
+            string? issuedBy = null;
             try
             {
                 if (!isCloudMode && isCustomOAuth)
@@ -475,18 +483,21 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                         dialHost,
                         async () =>
                         {
-                            if (provider is not { IsSignedIn: true })
+                            if (stale || provider is not { IsSignedIn: true })
                                 return null;
+                            var serverTarget = provider.ServerTarget;
                             var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
+                            presentedMachine = !string.IsNullOrEmpty(jwt);
                             // The shared policy presents the account token to any loopback server; only the server
                             // that issued it may have its rejection refresh it (DEV-272 review U2).
-                            presentedToIssuer = !string.IsNullOrEmpty(jwt) && CredentialIssuedFor(provider.ServerTarget, dialHost);
+                            if (presentedMachine && CredentialIssuedFor(serverTarget, dialHost))
+                                issuedBy = ProjectKeyIssuer(serverTarget);
                             return jwt;
                         },
                         explicitToken ?? _fallbackToken,
                         EnvToken).ConfigureAwait(false);
                 if (provider != null && isCloudMode && provider.State.CurrentValue != AuthState.SignedOut
-                    && !CredentialIssuedFor(provider.ServerTarget, dialHost))
+                    && (stale || !CredentialIssuedFor(provider.ServerTarget, dialHost)))
                 {
                     // DEV-272 review U1: the machine credential belongs to another server (a development stand's
                     // sign-in with the Cloud host switched back to production, or the reverse). The slot's account
@@ -500,10 +511,12 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 {
                     // slotToken is the Cloud bearer snapshotted together with the mode: re-reading BearerToken after
                     // the await could pick up a Custom token pushed meanwhile and send it to the Cloud host.
+                    var serverTarget = provider.ServerTarget;
                     var jwt = await provider.GetAccessTokenAsync().ConfigureAwait(false);
                     if (!string.IsNullOrEmpty(jwt))
                     {
-                        presentedToIssuer = true;
+                        presentedMachine = true;
+                        issuedBy = ProjectKeyIssuer(serverTarget);
                         return jwt;
                     }
                 }
@@ -511,7 +524,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             }
             finally
             {
-                Volatile.Write(ref _lastDial, new DialRecord(epoch, presentedToIssuer));
+                Volatile.Write(ref _lastDial, new DialRecord(epoch, presentedMachine, issuedBy));
             }
         }
 
@@ -524,40 +537,47 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             => string.Equals(ProjectKeyIssuer(serverTarget), ProjectKeyIssuer(StripCloudHubPath(dialHost)), StringComparison.Ordinal);
 
         /// <summary>
-        /// Whether the current dial presents the machine credential: Cloud mode with a credential the Cloud host issued
-        /// (<see cref="CredentialIssuedFor"/>), or Custom + <c>oauth</c> on a loopback host
-        /// (<see cref="CustomOAuthCredentialPolicy"/>). Only then does a dead-family verdict stop the connection
-        /// (<see cref="CredentialRejectionGate.Disconnect"/>); anything else presents a static bearer or none.
+        /// Whether the connection presents the machine credential, so a dead-family verdict stops it
+        /// (<see cref="CredentialRejectionGate.Disconnect"/>): Cloud mode with a credential the Cloud host issued
+        /// (<see cref="CredentialIssuedFor"/>; the slot's Cloud bearer is that sign-in's token too), or Custom +
+        /// <c>oauth</c> when the last dial of this host actually sent the account token (a link that fell back to the
+        /// explicit token keeps running). Anything else presents a static bearer or none.
         /// </summary>
         private bool PresentsMachineCredential()
         {
             var provider = _credentialProvider;
             if (provider == null)
                 return false;
+            var dial = Volatile.Read(ref _lastDial);
             lock (_connectionSlotLock)
             {
                 if (_isCloudMode)
                     return CredentialIssuedFor(provider.ServerTarget, _config.Host);
-                return _isCustomOAuth && HostScope.IsLoopback(_config.Host); // the policy's own loopback rule
+                return _isCustomOAuth && dial is { PresentedMachineCredential: true } && dial.Epoch == _presentationEpoch;
             }
         }
 
         /// <summary>
         /// Whether an authorization rejection may refresh (rotate) the machine credential (DEV-272 review U1/U2): the
-        /// last dial presented it to the server that issued it, and mode, auth option and host have not changed since.
-        /// A rejection by any other server (a Cloud host the credential is foreign to, a loopback relay in front of
+        /// last dial presented it to the server that issued it, mode, auth option and host have not changed since, and
+        /// the credential is still that server's (an adopted sign-in can swap it without an auth-state edge). A
+        /// rejection by any other server (a Cloud host the credential is foreign to, a loopback relay in front of
         /// another account server) never rotates it; the provider's proactive pre-expiry refresh still keeps it fresh.
         /// </summary>
         private bool AdmitRejection()
         {
             var dial = Volatile.Read(ref _lastDial);
-            if (dial is not { PresentedToIssuer: true })
+            var provider = _credentialProvider;
+            if (dial is not { IssuedBy: not null } || provider == null
+                || !string.Equals(dial.IssuedBy, ProjectKeyIssuer(provider.ServerTarget), StringComparison.Ordinal))
                 return false;
             lock (_connectionSlotLock)
                 return dial.Epoch == _presentationEpoch;
         }
 
-        /// <summary>Under <see cref="_connectionSlotLock"/>: bump the presentation epoch when mode, auth option or host changed.</summary>
+        /// <summary>Under <see cref="_connectionSlotLock"/>: bump the presentation epoch when mode, auth option or host changed.
+        /// The epoch never returns to -1 (ResolveBearerAsync's stale marker): it starts at 0 and the constructor's SetHost
+        /// makes it 1.</summary>
         private void UpdatePresentationEpochLocked()
         {
             var key = (_isCloudMode ? "cloud|" : "custom|") + (_isCustomOAuth ? "oauth|" : "-|") + _config.Host;
@@ -790,8 +810,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                 // DEV-272 review U2/U3: one coordinator for the host lifetime, gated so that only a rejection by the
                 // server that issued the credential refreshes it (CredentialRejectionGate).
                 var coordinatorLogger = _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator));
-                _rejectionGate = new CredentialRejectionGate(
-                    _plugin, AdmitRejection, PresentsMachineCredential, () => Volatile.Read(ref _presentationEpoch), coordinatorLogger);
+                _rejectionGate = new CredentialRejectionGate(_plugin, AdmitRejection, PresentsMachineCredential, coordinatorLogger);
                 _credentialCoordinator = new ConnectionCredentialCoordinator(_rejectionGate, _credentialProvider, coordinatorLogger);
                 _signInRequiredSubscription = _credentialProvider.OnSignInRequired
                     .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
@@ -2239,6 +2258,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             try { _signInRequiredSubscription?.Dispose(); } catch { /* ignore */ }
             _signInRequiredSubscription = null;
             // Host shutdown is the one place an in-flight refresh is cancelled (DEV-272 review U3).
+            try { _refreshShutdown.Cancel(); } catch { /* ignore */ }
             try { _credentialCoordinator?.Dispose(); } catch { /* ignore */ }
             _credentialCoordinator = null;
             try { _rejectionGate?.Dispose(); } catch { /* ignore */ }

@@ -268,8 +268,14 @@ FUnrealMcpEditorDiagnostics::FRow& FUnrealMcpEditorDiagnostics::Upsert(const FGa
 void FUnrealMcpEditorDiagnostics::IgnoreFabTokenReadLog(int64 AfterSequence, int64 ThroughSequence)
 {
 	check(IsInGameThread());
-	if (ThroughSequence > AfterSequence)
-		Get().FabTokenReads.Emplace(AfterSequence, ThroughSequence);
+	if (ThroughSequence <= AfterSequence)
+		return;
+	// Ranges are dropped once ingested; while nothing ingests (no tool result refreshes the diagnostics), keep the
+	// newest few: the collector retains only its recent lines anyway.
+	TArray<TPair<int64, int64>>& Reads = Get().FabTokenReads;
+	if (Reads.Num() >= 64)
+		Reads.RemoveAt(0);
+	Reads.Emplace(AfterSequence, ThroughSequence);
 }
 
 void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)

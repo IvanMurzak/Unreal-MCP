@@ -22,39 +22,32 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
     /// The connection the sidecar hands McpPlugin's <see cref="ConnectionCredentialCoordinator"/> (DEV-272 review
     /// U1-U3). The coordinator refreshes (rotates) the machine credential on every authorization-rejection burst,
     /// whatever bearer was rejected, and stops the connection on a dead-family verdict. This decorator lets it act
-    /// only when that is right, so the coordinator can live for the whole host lifetime and is never disposed while
-    /// a refresh is in flight (disposing it cancels the refresh POST: a rotation the server committed but whose
-    /// answer was dropped makes the next refresh present the old token, and reuse detection then revokes the family
-    /// for every editor on the machine).
+    /// only when that is right, so the coordinator can live for the whole host lifetime: it is never retired (and
+    /// disposed) by a config push. Its refresh POST cannot be cancelled by anything but host shutdown either
+    /// (<see cref="ShutdownOnlyTokenRefresher"/>).
     /// <list type="bullet">
     ///   <item>A rejection reaches the coordinator only when <c>admitRejection</c> says the rejected dial presented
     ///   the machine credential to the server that issued it.</item>
-    ///   <item>The reconnect that follows a refresh is skipped (reported as handled) when the presentation context
-    ///   (mode, host, auth option) changed since the rejection was admitted: the host's own config transition
-    ///   re-dials then. The refresh itself always completes.</item>
     ///   <item>The dead-family stop (<see cref="Disconnect"/>) reaches the connection only while it presents the
-    ///   machine credential (<c>admitStop</c>); a Custom token link is never stopped for a machine sign-in.</item>
+    ///   machine credential (<c>admitStop</c>); a link presenting a static token is never stopped for a machine
+    ///   sign-in.</item>
     /// </list>
-    /// Disposing the gate never disposes the wrapped connection (the host owns it).
+    /// Everything else passes through. Disposing the gate never disposes the wrapped connection (the host owns it).
     /// </summary>
     internal sealed class CredentialRejectionGate : IConnection, IConnectionRecovery
     {
         private readonly IConnection _inner;
         private readonly Func<bool> _admitRejection;
         private readonly Func<bool> _admitStop;
-        private readonly Func<int> _presentationEpoch;
         private readonly ILogger? _logger;
         private readonly Subject<Unit> _injectedRejections = new();
         private readonly Observable<Unit> _rejections;
-        private int _admittedEpoch = -1;
 
-        public CredentialRejectionGate(IConnection inner, Func<bool> admitRejection, Func<bool> admitStop,
-            Func<int> presentationEpoch, ILogger? logger = null)
+        public CredentialRejectionGate(IConnection inner, Func<bool> admitRejection, Func<bool> admitStop, ILogger? logger = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _admitRejection = admitRejection ?? throw new ArgumentNullException(nameof(admitRejection));
             _admitStop = admitStop ?? throw new ArgumentNullException(nameof(admitStop));
-            _presentationEpoch = presentationEpoch ?? throw new ArgumentNullException(nameof(presentationEpoch));
             _logger = logger;
             _rejections = _inner.OnAuthorizationRejected.Merge(_injectedRejections).Where(_ => Admit());
         }
@@ -71,26 +64,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         private bool Admit()
         {
-            // Capture the epoch first: a context change racing the check then reads as changed, never as unchanged.
-            var epoch = _presentationEpoch();
-            if (!_admitRejection())
-            {
-                _logger?.LogWarning("The server rejected this connection, but it did not issue the machine credential (or the credential was not presented); the credential is not refreshed, so the sign-in the other editors on this machine share stays valid.");
-                return false;
-            }
-            Volatile.Write(ref _admittedEpoch, epoch);
-            return true;
+            if (_admitRejection())
+                return true;
+            _logger?.LogWarning("The server rejected this connection, but it did not issue the machine credential (or the credential was not presented); the credential is not refreshed, so the sign-in the other editors on this machine share stays valid.");
+            return false;
         }
 
         public Task<bool> ConnectForRecovery(CancellationToken cancellationToken)
-        {
-            if (Volatile.Read(ref _admittedEpoch) != _presentationEpoch())
-            {
-                _logger?.LogInformation("Credential refreshed; the connection target changed meanwhile, so its own transition re-dials.");
-                return Task.FromResult(true);
-            }
-            return (_inner as IConnectionRecovery)?.ConnectForRecovery(cancellationToken) ?? _inner.Connect(cancellationToken);
-        }
+            => (_inner as IConnectionRecovery)?.ConnectForRecovery(cancellationToken) ?? _inner.Connect(cancellationToken);
 
         public Task<bool> Connect(CancellationToken cancellationToken = default) => _inner.Connect(cancellationToken);
 

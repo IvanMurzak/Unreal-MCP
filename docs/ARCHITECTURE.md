@@ -1102,10 +1102,12 @@ the connection-config task).
   family only when the rejected dial presented it to the server that issued it and mode, auth option and host have not
   changed since: a dev stand rejecting a production sign-in, or production rejecting a stand's, never rotates it (the
   proactive pre-expiry refresh still keeps it fresh). The on-401 `ConnectionCredentialCoordinator` lives for the host
-  lifetime behind `CredentialRejectionGate` and is disposed only at shutdown, so a config push never cancels a refresh
-  POST in flight (a rotation committed by the server but lost here would make the next refresh present the old token,
-  and reuse detection would revoke the family for every editor on the machine); after such a push the gate leaves the
-  re-dial to the config transition. A dead-family verdict stops only a link that presents the machine credential.
+  lifetime behind `CredentialRejectionGate` and is disposed only at shutdown, and its refresh POST is cancelled only by
+  shutdown (`ShutdownOnlyTokenRefresher`): a config push or Disconnect ends the recovery pass but never the POST (a
+  rotation committed by the server but lost here would make the next refresh present the old token, and reuse detection
+  would revoke the family for every editor on the machine). A credential closure bound to a host the link no longer
+  targets presents no machine credential. A dead-family verdict stops only a link that presents the machine credential
+  (Custom + `oauth`: only when its last dial sent the account token, not the explicit one).
 - **Port-less loopback Custom host.** The default `http://localhost` (or a saved `http://localhost/mcp`) names no
   port. The sidecar dials it on the project's local-server port (`SidecarHost.RepairLocalHost`, McpPlugin
   `AgentConfiguratorSettings.NormalizeLocalHost`: marker `portOverride`, else the v1 derived port), and once the
