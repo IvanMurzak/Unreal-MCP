@@ -6,6 +6,7 @@
 //
 // Library-safe: never prints, never exits, never throws past the boundary.
 
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { asError } from '../utils/error.js';
@@ -109,6 +110,9 @@ GameDefaultMap=/Engine/Maps/Templates/OpenWorld
 
 [/Script/Engine.RendererSettings]
 r.GenerateMeshDistanceFields=True
+
+[/Script/Engine.CollisionProfile]
++Profiles=(Name="WaterBodyCollision",CollisionEnabled=QueryOnly,bCanModify=False,ObjectTypeName="",CustomResponses=((Channel="WorldDynamic",Response=ECR_Overlap),(Channel="Pawn",Response=ECR_Overlap),(Channel="Visibility",Response=ECR_Ignore),(Channel="Camera",Response=ECR_Ignore),(Channel="PhysicsBody",Response=ECR_Overlap),(Channel="Vehicle",Response=ECR_Overlap),(Channel="Destructible",Response=ECR_Overlap)),HelpMessage="Default Water Collision Profile (Created by Water Plugin)")
 `;
 
   const defaultGame = `[/Script/EngineSettings.GeneralProjectSettings]
@@ -144,13 +148,15 @@ DerivedDataCache/
   ];
 }
 
-function generateProjectId(): string {
-  // A UE ProjectID is a braced uppercase GUID. crypto.randomUUID is fine.
-  const uuid =
-    typeof globalThis.crypto?.randomUUID === 'function'
-      ? globalThis.crypto.randomUUID()
-      : '00000000-0000-0000-0000-000000000000';
-  return `{${uuid.toUpperCase()}}`;
+/**
+ * A fresh UE ProjectID. UE reads an FGuid from config text as 32 uppercase
+ * hex digits with no braces or dashes (`FGuid::ExportTextItem` /
+ * `EGuidFormats::Digits`); a braced, dashed GUID fails with
+ * `LoadConfig (...GeneralProjectSettings): import failed for ProjectID`.
+ * Exported for tests.
+ */
+export function generateProjectId(): string {
+  return randomUUID().replace(/-/g, '').toUpperCase();
 }
 
 export async function createProject(opts: CreateProjectOptions): Promise<CreateProjectResult> {

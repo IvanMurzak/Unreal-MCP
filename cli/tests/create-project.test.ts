@@ -1,7 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createProject, renderProjectTemplate, validateModuleName } from '../src/lib/create-project.js';
+import {
+  createProject,
+  generateProjectId,
+  renderProjectTemplate,
+  validateModuleName,
+} from '../src/lib/create-project.js';
 import { makeTempDir, rmTempDir } from './helpers.js';
 
 const dirs: string[] = [];
@@ -43,6 +48,29 @@ describe('renderProjectTemplate', () => {
     expect(rels).toContain('Source/MyGameEditor.Target.cs');
     const gi = files.find((f) => f.relPath === '.gitignore');
     expect(gi!.content).toContain('.env');
+  });
+});
+
+describe('generateProjectId', () => {
+  it('emits the FGuid config-text form UE imports: 32 uppercase hex digits, no braces or dashes', () => {
+    const id = generateProjectId();
+    expect(id).toMatch(/^[0-9A-F]{32}$/);
+    expect(generateProjectId()).not.toBe(id);
+  });
+
+  it('is what DefaultGame.ini carries as ProjectID', () => {
+    const files = renderProjectTemplate('MyGame', '5.7');
+    const game = files.find((f) => f.relPath === path.join('Config', 'DefaultGame.ini'));
+    expect(game!.content).toMatch(/^ProjectID=[0-9A-F]{32}$/m);
+  });
+});
+
+describe('DefaultEngine.ini', () => {
+  it('carries the WaterBodyCollision profile the Water plugin requires', () => {
+    const files = renderProjectTemplate('MyGame', '5.7');
+    const engine = files.find((f) => f.relPath === path.join('Config', 'DefaultEngine.ini'));
+    expect(engine!.content).toContain('[/Script/Engine.CollisionProfile]');
+    expect(engine!.content).toMatch(/^\+Profiles=\(Name="WaterBodyCollision",CollisionEnabled=QueryOnly,.*\)$/m);
   });
 });
 
