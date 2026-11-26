@@ -83,7 +83,7 @@
 
 | 工具 id | 作用 |
 | --- | --- |
-| `python-execute` | 在编辑器中运行 Python（完整的 `unreal` API，已预先导入）：普通语句，最后一个表达式即为结果，`print` 作为日志返回，错误指向 `snippet.py` 的行号；`include` 从 `<Project>/.ai-game-dev/snippets` 添加辅助文件/文件夹；`timeout`（秒，默认 30）会停止失控的代码片段 |
+| `python-execute` | 在编辑器中运行 Python（完整的 `unreal` API，已预先导入）：普通语句，最后一个表达式即为结果，`print` 作为日志返回，错误指向 `snippet.py` 的行号；`include` 从 `<Project>/.ai-game-dev/snippets` 添加辅助内容：`.py` 文件在代码之前运行于代码片段自身的命名空间（不可导入），文件夹加入 `sys.path`（其中的模块可导入）；`timeout`（秒，默认 30）会停止失控的代码片段 |
 
 使用引擎的 PythonScriptPlugin（由 Unreal-MCP 启用；仅限编辑器，绝不会进入打包的游戏）以及内置在 `UnrealMCP/Content/Python` 中的 [Code-Exec](https://github.com/IvanMurzak/Code-Exec) 运行时。Blueprint 图表连线不向 Python 开放：请使用 Blueprint 工具。
 

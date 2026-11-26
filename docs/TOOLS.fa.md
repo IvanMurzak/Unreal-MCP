@@ -85,7 +85,7 @@
 
 | شناسه ابزار | کار آن |
 | --- | --- |
-| `python-execute` | اجرای Python در ویرایشگر (کل API `unreal`، از پیش import‌شده): دستورهای ساده، آخرین عبارت نتیجه است، `print` به صورت لاگ برمی‌گردد، خطاها به خطوط `snippet.py` اشاره می‌کنند؛ `include` فایل‌ها/پوشه‌های کمکی را از `<Project>/.ai-game-dev/snippets` اضافه می‌کند؛ `timeout` (ثانیه، پیش‌فرض 30) یک snippet گیرکرده را متوقف می‌کند |
+| `python-execute` | اجرای Python در ویرایشگر (کل API `unreal`، از پیش import‌شده): دستورهای ساده، آخرین عبارت نتیجه است، `print` به صورت لاگ برمی‌گردد، خطاها به خطوط `snippet.py` اشاره می‌کنند؛ `include` کمک‌ها را از `<Project>/.ai-game-dev/snippets` اضافه می‌کند: یک فایل `.py` پیش از کد در فضای نام خود snippet اجرا می‌شود (قابل import نیست)، یک پوشه به `sys.path` افزوده می‌شود (ماژول‌هایش قابل import هستند)؛ `timeout` (ثانیه، پیش‌فرض 30) یک snippet گیرکرده را متوقف می‌کند |
 
 از PythonScriptPlugin موتور (که Unreal-MCP فعالش می‌کند؛ فقط در ویرایشگر، هرگز در بازی بسته‌بندی‌شده) و runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) که در `UnrealMCP/Content/Python` گنجانده شده استفاده می‌کند. سیم‌کشی گراف Blueprint در Python در دسترس نیست: برای آن از ابزارهای Blueprint استفاده کنید.
 

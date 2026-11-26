@@ -83,7 +83,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 
 | Tool id | यह क्या करता है |
 | --- | --- |
-| `python-execute` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helper files/folders जोड़ता है; `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
+| `python-execute` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helpers जोड़ता है: `.py` file code से पहले snippet के अपने namespace में चलती है (import नहीं होती), folder `sys.path` पर जाता है (उसके modules import होते हैं); `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
 
 यह engine का PythonScriptPlugin (Unreal-MCP इसे enable करता है; सिर्फ़ editor में, packaged game में कभी नहीं) और `UnrealMCP/Content/Python` में vendored [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime इस्तेमाल करता है। Blueprint graph की wiring Python को उपलब्ध नहीं है: उसके लिए Blueprint tools इस्तेमाल करें।
 

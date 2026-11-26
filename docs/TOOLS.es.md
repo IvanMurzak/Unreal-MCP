@@ -83,7 +83,7 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 
 | Id de herramienta | Qué hace |
 | --- | --- |
-| `python-execute` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade archivos/carpetas auxiliares de `<Project>/.ai-game-dev/snippets`; `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
+| `python-execute` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade auxiliares de `<Project>/.ai-game-dev/snippets`: un archivo `.py` se ejecuta en el espacio de nombres del snippet antes del código (no se puede importar), una carpeta va a `sys.path` (sus módulos se pueden importar); `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
 
 Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca en un juego empaquetado) y el runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) incluido en `UnrealMCP/Content/Python`. El cableado de grafos de Blueprint no se expone a Python: usa las herramientas de Blueprint para eso.
 

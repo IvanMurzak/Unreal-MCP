@@ -83,7 +83,7 @@
 
 | ツール id | 内容 |
 | --- | --- |
-| `python-execute` | エディターで Python を実行（完全な `unreal` API をインポート済み）。普通の文を書けば、最後の式が結果になり、`print` はログとして返り、エラーは `snippet.py` の行を指す。`include` で `<Project>/.ai-game-dev/snippets` のヘルパーファイル/フォルダーを追加。`timeout`（秒、既定 30）で暴走したスニペットを止める |
+| `python-execute` | エディターで Python を実行（完全な `unreal` API をインポート済み）。普通の文を書けば、最後の式が結果になり、`print` はログとして返り、エラーは `snippet.py` の行を指す。`include` で `<Project>/.ai-game-dev/snippets` のヘルパーを追加（`.py` ファイルはコードの前にスニペット自身の名前空間で実行され、import はできない。フォルダーは `sys.path` に入り、その中のモジュールを import できる）。`timeout`（秒、既定 30）で暴走したスニペットを止める |
 
 エンジンの PythonScriptPlugin（Unreal-MCP が有効にします。エディター専用で、パッケージ化したゲームには含まれません）と、`UnrealMCP/Content/Python` に同梱された [Code-Exec](https://github.com/IvanMurzak/Code-Exec) ランタイムを使います。Blueprint グラフの配線は Python には公開されていません。それには Blueprint ツールを使ってください。
 
