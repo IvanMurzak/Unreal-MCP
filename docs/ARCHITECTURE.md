@@ -45,8 +45,8 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
 | Fab family (4) | implemented: `fab-search` / `fab-library` / `fab-add` / `fab-sign-in` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`; only `fab-sign-in` opens Epic's sign-in page, DEV-273) | — |
 
-**Total shipped: 30 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
-screenshot 4, fab 3), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
+**Total shipped: 31 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
+screenshot 4, fab 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections
 below describe the superseded families as they were designed; their operations are RQL queries now
 ([`docs/rql.md`](rql.md) maps each removed tool to its query).
 Prompts/Resources ship empty-but-wired (§10), as designed.

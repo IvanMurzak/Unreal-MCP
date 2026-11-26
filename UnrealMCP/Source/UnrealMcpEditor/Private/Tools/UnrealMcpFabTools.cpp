@@ -364,6 +364,23 @@ namespace UnrealMcpFabToolsLocal
 		return FPlatformTime::Seconds() < FabPortalOpenedAt() + FabPortalWaitSeconds;
 	}
 
+	/** Epic's sign-in page was opened less than FabPortalReopenSeconds ago: it is not opened again, it may still complete. */
+	static bool FabSignInPageOpen()
+	{
+		return FPlatformTime::Seconds() < FabPortalOpenedAt() + FabPortalReopenSeconds;
+	}
+
+	/** What a call says once a sign-in page that is still open (FabSignInPageOpen) was not completed in time. */
+	static FString FabSignInStillOpenText(const FString& ToolName)
+	{
+		const int32 MinutesAgo = FMath::Max(0, FMath::FloorToInt((FPlatformTime::Seconds() - FabPortalOpenedAt()) / 60.0));
+		return FString::Printf(TEXT("Not signed in to Fab yet. Epic's sign-in page was opened in the browser on this computer %d "
+			"minute(s) ago and is not opened again until %d minutes after that (a second sign-in while the first one waits fails "
+			"both). Ask the user to finish signing in in that browser tab (or to open Fab from the editor's toolbar), then call %s "
+			"again; do not call fab-sign-in again before they say they are done."), MinutesAgo,
+			(int32)(FabPortalReopenSeconds / 60.0), *ToolName);
+	}
+
 	/**
 	 * The user's token for a fab-library / fab-add call. Without one the call ends at once with FabSignInRequiredText,
 	 * unless a sign-in fab-sign-in started is still waiting for the user: then the call waits for it too (RetryLater).
@@ -381,7 +398,8 @@ namespace UnrealMcpFabToolsLocal
 			OutWait = FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the Fab sign-in the user started."));
 			return false;
 		}
-		OutWait = FabFinish(Call, FUnrealMcpToolResult::Error(FabSignInRequiredText(ToolName)));
+		OutWait = FabFinish(Call, FUnrealMcpToolResult::Error(FabSignInPageOpen() ? FabSignInStillOpenText(ToolName)
+			: FabSignInRequiredText(ToolName)));
 		return false;
 	}
 
@@ -1151,26 +1169,27 @@ namespace UnrealMcpFabToolsLocal
 			Result.bMessageCoversStructured = true;
 			return FabFinish(Call, Result);
 		}
-		const double Now = FPlatformTime::Seconds();
 		if (!State.bAskedSignIn)
 		{
 			// Once per call: open the page unless one this editor opened may still be waiting for the user.
 			State.bAskedSignIn = true;
-			if (Now - FabPortalOpenedAt() >= FabPortalReopenSeconds)
+			State.StageStarted = FPlatformTime::Seconds();
+			if (!FabSignInPageOpen())
 			{
-				FabPortalOpenedAt() = Now;
-				FabInvoke(FabApi(), TEXT("Login"), [](UFunction*, uint8*) {}, [](UFunction*, uint8*) {});
+				if (!FabInvoke(FabApi(), TEXT("Login"), [](UFunction*, uint8*) {}, [](UFunction*, uint8*) {}))
+					return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("This engine's Fab plugin has no UFabBrowserApi::Login this tool can "
+						"call. The user signs in by opening Fab from the editor's toolbar.")));
+				FabPortalOpenedAt() = State.StageStarted;
 				UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] fab-sign-in: opened Epic's sign-in page in the browser."));
 			}
 		}
-		if (FabSignInPending() && FabTimeLeft(Call) > 0.0)
+		// The page stays usable until the reopen guard ends: wait for it up to FabPortalWaitSeconds from this call's start.
+		if (FabSignInPageOpen() && FPlatformTime::Seconds() - State.StageStarted < FabPortalWaitSeconds && FabTimeLeft(Call) > 0.0)
 			return FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the user to sign in on Epic's page."));
-		const int32 OpenedMinutesAgo = FMath::Max(0, FMath::FloorToInt((Now - FabPortalOpenedAt()) / 60.0));
-		return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("The Fab sign-in did not finish. Epic's sign-in page was "
-			"opened in the browser on this computer %d minute(s) ago; it is not opened again until %d minutes after that (a second "
-			"sign-in while the first one waits fails both). The user completes it in that browser tab with their Epic Games account, "
-			"or opens Fab from the editor's toolbar; when the user says they signed in, call fab-sign-in again to check."),
-			OpenedMinutesAgo, (int32)(FabPortalReopenSeconds / 60.0))));
+		if (!FabSignInPageOpen())
+			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("The Fab sign-in did not finish, and Epic's sign-in page has expired. "
+				"When the user is ready, call fab-sign-in again: it opens a new page.")));
+		return FabFinish(Call, FUnrealMcpToolResult::Error(FabSignInStillOpenText(TEXT("fab-sign-in"))));
 	}
 }
 

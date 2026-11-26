@@ -52,6 +52,17 @@ namespace UnrealMcpEditorDiagnosticsLocal
 		return false;
 	}
 
+	/**
+	 * Log errors that say nothing about the project: the Fab tools read the user's Fab sign-in token
+	 * (UnrealMcpFabTools.cpp), and while nobody is signed in every read logs these two lines (the Fab plugin's and the EOS
+	 * SDK's). Reported, they would send the agent after a problem that does not exist (DEV-273).
+	 */
+	bool IsKnownNoise(const FName& Category, const FString& Message)
+	{
+		return (Category == TEXT("LogFab") && Message.Contains(TEXT("unable to get auth token")))
+			|| (Category == TEXT("LogEOSSDK") && Message.Contains(TEXT("EOS_Auth_CopyUserAuthToken")));
+	}
+
 	FAutoConsoleVariable* GPushVariable = nullptr;
 
 	FString Clean(const FString& Text, int32 MaxChars)
@@ -256,7 +267,7 @@ void FUnrealMcpEditorDiagnostics::IngestLog(const FDateTime& Now)
 		LogCursor = FMath::Max(LogCursor, Entry.Sequence);
 		const ELogVerbosity::Type Verbosity = static_cast<ELogVerbosity::Type>(Entry.Verbosity & ELogVerbosity::VerbosityMask);
 		if (Verbosity > ELogVerbosity::Warning || Verbosity == ELogVerbosity::NoLogging || Entry.Category == TEXT("LogUnrealMcp")
-			|| IsMessageLogPage(Entry.Category))
+			|| IsMessageLogPage(Entry.Category) || IsKnownNoise(Entry.Category, Entry.Message))
 			continue;
 		bool bAdded = false;
 		FRow& Row = Upsert({ LogPrefix + Entry.Category.ToString(), Verbosity == ELogVerbosity::Warning ? SevWarning : SevError,

@@ -181,8 +181,9 @@ namespace UnrealMcpSourceTools
 }
 
 /**
- * The Fab tool family: `fab-search` (public Fab catalog), `fab-library` (the signed-in user's Fab library) and `fab-add`
- * (download + import a listing through the engine Fab plugin's own import workflows). The Fab plugin is reached only by
+ * The Fab tool family: `fab-search` (public Fab catalog), `fab-library` (the signed-in user's Fab library), `fab-add`
+ * (download + import a listing through the engine Fab plugin's own import workflows) and `fab-sign-in` (the user's Epic
+ * sign-in, the only one that opens a browser). The Fab plugin is reached only by
  * reflection (no link dependency); HTTP and imports run across frames through FUnrealMcpToolResult::RetryLater.
  */
 namespace UnrealMcpFabTools
