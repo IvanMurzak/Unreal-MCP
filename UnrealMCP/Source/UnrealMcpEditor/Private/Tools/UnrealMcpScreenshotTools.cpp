@@ -252,7 +252,8 @@ namespace UnrealMcpScreenshotTools
 		FString Note = FString::Printf(
 			TEXT("Frame content: uniform (#%02X%02X%02X across %.1f%% of the pixels), so this image shows almost nothing of "
 			     "the scene. That is fine for a really plain scene; otherwise the view is over-exposed or unlit. "
-			     "screenshot-camera renders the scene with its own fixed exposure, which can differ from what the player sees."),
+			     "screenshot-camera renders the scene apart from this view (through a camera actor and its post-process), "
+			     "so it tells a problem of this view from one of the scene."),
 			Uniformity.Color.R, Uniformity.Color.G, Uniformity.Color.B, Uniformity.Share * 100.0);
 		if (bOverexposingVolume)
 		{
@@ -271,6 +272,9 @@ namespace UnrealMcpScreenshotTools
 	{
 		// Keep the encoded payload well under the §1.2 64 MiB IPC line cap (base64 expands ~4/3).
 		static constexpr int64 MaxEncodedBytes = 40 * 1024 * 1024;
+
+		/** Frames a screenshot-camera call renders before the read-back (see CaptureWithSceneCapture). */
+		static constexpr int32 CameraCaptureWarmupFrames = 3;
 
 		/** IsRenderingAvailable(), with NullRhiScreenshotError() in @p OutError when it is not. */
 		bool EnsureRenderingAvailable(FString& OutError)
@@ -512,7 +516,8 @@ namespace UnrealMcpScreenshotTools
 		 */
 		FUnrealMcpToolResult CaptureWithSceneCapture(
 			UWorld* World, const FTransform& CaptureXform, float FovDeg, int32 Width, int32 Height,
-			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor, const FString& SavePath = FString())
+			const FString& Source, const FLinearColor* BackgroundColor, AActor* ShowOnlyActor, const FString& SavePath = FString(),
+			UCameraComponent* Camera = nullptr)
 		{
 			// Isolated mode (a background was requested) composites the actor over a solid color. A plain
 			// SCS_FinalColorLDR capture writes opaque pixels everywhere, overwriting the render target's
@@ -552,14 +557,45 @@ namespace UnrealMcpScreenshotTools
 			Capture->CaptureSource = bComposite ? SCS_SceneColorHDR : SCS_FinalColorLDR;
 			Capture->bCaptureEveryFrame = false;
 			Capture->bCaptureOnMovement = false;
-			// Pin auto-exposure. A single-shot CaptureScene() never gives eye-adaptation a chance to
-			// converge, so the default auto-exposure leaves one-off captures badly under/over-exposed.
-			// Locking min == max brightness makes exposure a fixed factor (no adaptation transient), so the
-			// capture is deterministic regardless of the scene's prior adaptation state.
-			Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-			Capture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
-			Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-			Capture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
+			if (Camera)
+			{
+				// Render what the camera shows (DEV-269). Two things left a lit Lumen scene near-black in a capture: the
+				// engine turns Lumen GI and reflections off in scene captures, and the old fixed exposure (here) ignored
+				// the scene's brightness. Start from the camera's own post-process (its exposure, lens, grading; world
+				// volumes still blend in under it, as for any view), put the project's GI / reflection methods back
+				// unless the camera picks its own, and leave exposure automatic as in the viewport (see the warm-up).
+				// A camera post-process blend weight below 1 is applied in full: the capture blends one settings set.
+				FMinimalViewInfo CameraView;
+				Camera->GetCameraView(0.0f, CameraView);
+				if (CameraView.PostProcessBlendWeight > 0.0f)
+					Capture->PostProcessSettings = CameraView.PostProcessSettings;
+				FPostProcessSettings& Settings = Capture->PostProcessSettings;
+				if (!Settings.bOverride_DynamicGlobalIlluminationMethod)
+				{
+					static const TConsoleVariableData<int32>* GiMethod =
+						IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.DynamicGlobalIlluminationMethod"));
+					Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+					Settings.DynamicGlobalIlluminationMethod = (EDynamicGlobalIlluminationMethod::Type)GiMethod->GetValueOnGameThread();
+				}
+				if (!Settings.bOverride_ReflectionMethod)
+				{
+					static const TConsoleVariableData<int32>* ReflectionMethod =
+						IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.ReflectionMethod"));
+					Settings.bOverride_ReflectionMethod = true;
+					Settings.ReflectionMethod = (EReflectionMethod::Type)ReflectionMethod->GetValueOnGameThread();
+				}
+				// Lumen and eye adaptation keep their history in the capture's view state, which exists only when persisted.
+				Capture->bAlwaysPersistRenderingState = true;
+			}
+			else
+			{
+				// Isolated render: pin auto-exposure. Locking min == max brightness makes exposure a fixed factor (no
+				// adaptation transient), so the capture is deterministic regardless of any prior adaptation state.
+				Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+				Capture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
+				Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+				Capture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
+			}
 			if (ShowOnlyActor)
 			{
 				Capture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
@@ -575,7 +611,15 @@ namespace UnrealMcpScreenshotTools
 			// CaptureScene renders the scene now (and the read-back below flushes the render thread), so the frame is
 			// fresh whatever the editor window's state; send pending scene updates first so the latest edit is in it.
 			World->SendAllEndOfFrameUpdates();
-			Capture->CaptureScene();
+			// A camera capture renders a few frames into its fresh view state, reading back the last. The first is a camera
+			// cut, so auto exposure takes its target at once instead of adapting from nothing; the later ones let Lumen
+			// fill its surface cache, which a large scene does over several renders.
+			const int32 Frames = Camera ? CameraCaptureWarmupFrames : 1;
+			for (int32 Frame = 0; Frame < Frames; ++Frame)
+			{
+				Capture->bCameraCutThisFrame = Frame == 0;
+				Capture->CaptureScene();
+			}
 
 			FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
 			if (!Resource)
@@ -737,7 +781,9 @@ namespace UnrealMcpScreenshotTools
 		// screenshot-camera — render from a resolved camera actor via SceneCapture2D.
 		Registry.Tool(TEXT("screenshot-camera"))
 			.Title(TEXT("Screenshot Camera"))
-			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it.")) + SizeCapNote() + SavePathNote())
+			.Description(FString(TEXT("Render the scene from a chosen camera actor (resolved by label/name/path) and capture it, "
+				"lit and exposed as that camera shows it: its post-process settings, the project's global illumination and "
+				"reflections (e.g. Lumen), and auto exposure.")) + SizeCapNote() + SavePathNote())
 			.ParamString(TEXT("camera"), TEXT("Camera actor reference (label, object name, or path) to render from."), EUnrealMcpParamRequirement::Required)
 			.ParamInt(TEXT("width"), TEXT("Optional output width in pixels (clamped to [1, 2048]); default 1024."))
 			.ParamInt(TEXT("height"), TEXT("Optional output height in pixels (clamped to [1, 2048]); default 1024."))
@@ -778,7 +824,7 @@ namespace UnrealMcpScreenshotTools
 				const int32 Width = ResolveCaptureDimension(Call.GetInt(TEXT("width"), 0));
 				const int32 Height = ResolveCaptureDimension(Call.GetInt(TEXT("height"), 0));
 				const FString Source = FString::Printf(TEXT("camera '%s'"), *CameraActor->GetActorNameOrLabel());
-				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr, SavePath);
+				return CaptureWithSceneCapture(World, CaptureXform, Fov, Width, Height, Source, nullptr, nullptr, SavePath, CameraComponent);
 			});
 
 		// screenshot-isolated — isolated actor render (transient SceneCapture2D + show-only list + background).

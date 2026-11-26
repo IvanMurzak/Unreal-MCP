@@ -1274,6 +1274,13 @@ execution tool = backlog (decision: out of MVP — extra plugin dependency).
 SceneCapture2D), `screenshot-isolated` (actor render with showflag isolation + background option —
 Godot SubViewport pattern → `USceneCaptureComponent2D`). PNG, size-capped (default ≤1024,
 hard cap 2048), returned as MCP image content.
+`screenshot-camera` renders as the camera shows the scene (DEV-269): the engine turns Lumen GI and reflections off in
+scene captures and ignores the camera's post-process, so a lit Lumen scene came back near-black. The capture now starts
+from the camera's post-process, restores the project's `r.DynamicGlobalIlluminationMethod` / `r.ReflectionMethod` unless
+the camera overrides them, persists its view state and renders 3 frames (the first a camera cut, so auto exposure takes
+its target at once; the rest let Lumen fill its surface cache). Measured on 5.7 (`UnrealMcp.Tools.Screenshot.Exposure`,
+golden-hour sun, sky light, Lumen): mean luma 30 → 97 against 79 for `screenshot-viewport` of the same view.
+`screenshot-isolated` keeps a pinned exposure (a deterministic product shot, not a scene view).
 All four take an optional `savePath` that also writes the PNG inside the project (never outside it, never over an
 existing file) and report it as `Saved to <absolute path>`; they are therefore not `readOnlyHint`.
 
@@ -1369,8 +1376,9 @@ because the template's `DefaultEngine.ini` sets `r.DefaultFeature.AutoExposure.E
 same level in a project without that line reads 0 as luminance and renders pure white, in every state of the game view
 and in the editor viewport. Measured on 5.7, in one PIE session, toggling only that CVar: 100% `#FFFFFF`, then about
 36,000 colors, then white again. So the frame really is white and the capture is right; the fix belongs to the project,
-and the tool neither changes project rendering nor hides it. `screenshot-camera` was never affected because it pins its
-own exposure.
+and the tool neither changes project rendering nor hides it. `screenshot-camera` pinned its own exposure and was not
+affected; since DEV-269 it uses the project's auto exposure like a player view, so it should show that white frame
+too (inferred, not measured).
 
 ## 11. Top-5 risks & mitigations
 

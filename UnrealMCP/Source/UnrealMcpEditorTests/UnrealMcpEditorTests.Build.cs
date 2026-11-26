@@ -41,6 +41,8 @@ public class UnrealMcpEditorTests : ModuleRules
 			"SlateCore",
 			"FileUtilities",  // FZipArchiveWriter builds the fixture zips of the bridge-download spec
 			"Projects",       // IPluginManager: the sidecar spec checks whether the plugin ships SHA256SUMS
+			"ImageCore",      // FImage: the screenshot exposure spec decodes the captured PNGs (DEV-269)
+			"CinematicCamera", // ACineCameraActor: the screenshot exposure spec captures from one (DEV-269)
 		});
 
 		// Reach BOTH modules' PRIVATE headers so the Automation specs can drive their internals directly.
