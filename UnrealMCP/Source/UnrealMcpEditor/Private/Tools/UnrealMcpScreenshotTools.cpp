@@ -559,9 +559,9 @@ namespace UnrealMcpScreenshotTools
 			Capture->bCaptureOnMovement = false;
 			if (Camera)
 			{
-				// Render what the camera shows (DEV-269). Two things left a lit Lumen scene near-black in a capture: the
-				// engine turns Lumen GI and reflections off in scene captures, and the old fixed exposure (here) ignored
-				// the scene's brightness. Start from the camera's own post-process (its exposure, lens, grading; world
+				// Render what the camera shows (DEV-269): the engine turns Lumen GI and reflections off in scene captures,
+				// and a fixed exposure ignores the scene's brightness, which left a lit Lumen scene near-black. Start from
+				// the camera's own post-process (its exposure, lens, grading; world
 				// volumes still blend in under it, as for any view), put the project's GI / reflection methods back
 				// unless the camera picks its own, and leave exposure automatic as in the viewport (see the warm-up).
 				// A camera post-process blend weight below 1 is applied in full: the capture blends one settings set.
