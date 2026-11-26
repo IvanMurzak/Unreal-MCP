@@ -246,7 +246,9 @@ namespace UnrealMcpPythonTools
 			                  "extension). Do not call this "
 			                  "editor's MCP server over HTTP from a snippet: that tool call needs the game thread the snippet holds and only "
 			                  "times out. Output is capped (~20k characters each for the value and the logs). 'include': helper files/folders (relative to "
-			                  "<Project>/.ai-game-dev/snippets): folders are importable, files run before the code. Before scripting an editor "
+			                  "<Project>/.ai-game-dev/snippets): a folder goes on sys.path, so its modules are importable; a .py file is NOT a module: "
+			                  "it runs into the snippet's own namespace before the code, so use its names directly (import ld fails for an included "
+			                  "ld.py; include its folder to import it). Before scripting an editor "
 			                  "feature (landscape, terrain, water, PCG, Niagara, Control Rig, ...), check rql-schema for an installed extension with "
 			                  "ready operations (and read its guide); Python stays right for what RQL cannot reach and for verifying results. Blueprint "
 			                  "graph wiring is not available from Python: add nodes and connect pins with rql-mutate "
@@ -262,7 +264,9 @@ namespace UnrealMcpPythonTools
 			.ParamString(TEXT("code"), TEXT("Python code. Example: \"actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)"
 			                                "\\nlen(actors.get_all_level_actors())\""), EUnrealMcpParamRequirement::Required)
 			.Param(TEXT("include"), TEXT("array"), TEXT(""), EUnrealMcpParamRequirement::Optional,
-				FUnrealMcpSchema::StringArray(TEXT("Helper .py files or folders, relative to <Project>/.ai-game-dev/snippets or absolute.")))
+				FUnrealMcpSchema::StringArray(TEXT("Helper .py files or folders, relative to <Project>/.ai-game-dev/snippets or absolute. "
+				                                   "A file runs into the snippet's namespace before the code (its names are defined, it is "
+				                                   "not importable); a folder is added to sys.path (its modules are importable).")))
 			.ParamNumber(TEXT("timeout"), TEXT("Time budget in seconds, default 30: a snippet still running then is stopped with a Timeout "
 			                                   "error. Capped a few seconds below the tool timeout. Use a small value (e.g. 5) to try code "
 			                                   "that might not end."))
