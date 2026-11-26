@@ -122,6 +122,13 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         private readonly ITokenRevocationClient? _injectedRevocationClient;
         private ConnectionCredentialCoordinator? _credentialCoordinator;
         private IDisposable? _signInRequiredSubscription;
+        // DEV-272: the coordinator exists only while the machine credential is the one this sidecar presents
+        // (SyncCredentialCoordinator). Guards its create/dispose, which run on the IPC reader thread (config pushes)
+        // and on the provider's state callbacks. _credentialStateSubscription re-evaluates after a sign-in changes
+        // the credential's server target.
+        private readonly object _coordinatorLock = new();
+        private IDisposable? _credentialStateSubscription;
+        private bool _hostDisposed;
 
         // F1 failure path (03 F1): bounded retry of the token-exchange derivation after the agent family is
         // committed ("token exchange fails → P retries with backoff; the agent family stays committed").
@@ -456,9 +463,81 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
                     async () => provider is { IsSignedIn: true } ? await provider.GetAccessTokenAsync().ConfigureAwait(false) : null,
                     _customExplicitToken ?? _fallbackToken,
                     EnvToken);
-            if (provider != null && isCloudMode && provider.IsSignedIn)
+            // DEV-272: never present a credential another server issued (a development stand's local sign-in to the
+            // Cloud host): the host rejects it, and every rejection used to refresh (rotate) the shared family.
+            if (provider != null && isCloudMode && provider.IsSignedIn && CredentialIssuedFor(provider.ServerTarget, dialHost))
                 return ResolveCloudBearerAsync(provider, slotToken);
             return Task.FromResult(slotToken);
+        }
+
+        /// <summary>
+        /// Whether a credential stamped with <paramref name="serverTarget"/> was issued by the server behind the Cloud
+        /// <paramref name="dialHost"/>: the same origin (scheme, host, non-default port; the hub's <c>/mcp</c> suffix
+        /// ignored). A credential with no target is the hosted default's (<see cref="ProjectKeyIssuer"/>).
+        /// </summary>
+        internal static bool CredentialIssuedFor(string? serverTarget, string dialHost)
+            => string.Equals(ProjectKeyIssuer(serverTarget), ProjectKeyIssuer(StripCloudHubPath(dialHost)), StringComparison.Ordinal);
+
+        /// <summary>
+        /// Whether the dial of <paramref name="dialHost"/> presents the machine credential, i.e. whether an
+        /// authorization rejection there may refresh it: Cloud mode with a credential that host issued
+        /// (<see cref="CredentialIssuedFor"/>), or Custom + <c>oauth</c> on a loopback host
+        /// (<see cref="CustomOAuthCredentialPolicy"/>). Anything else presents a static bearer or none.
+        /// </summary>
+        private bool PresentsMachineCredential(string dialHost)
+        {
+            var provider = _credentialProvider;
+            if (provider == null)
+                return false;
+            if (_isCloudMode)
+                return CredentialIssuedFor(provider.ServerTarget, dialHost);
+            return _isCustomOAuth && Uri.TryCreate(dialHost, UriKind.Absolute, out var uri) && uri.IsLoopback;
+        }
+
+        /// <summary>
+        /// DEV-272: keep the on-401 refresh-and-reconnect coordinator only while the dial presents the machine
+        /// credential. The coordinator refreshes on every rejection burst whatever bearer was rejected, so a sidecar
+        /// dialing a host that rejects this credential (a headless editor in Cloud mode holding a development stand's
+        /// local sign-in) rotated the shared family dozens of times a minute, until a concurrent refresh tripped the
+        /// server's reuse detection and revoked the family for every editor on the machine. Idempotent; a no-op
+        /// before Build().
+        /// </summary>
+        private void SyncCredentialCoordinator()
+        {
+            var plugin = _plugin;
+            var provider = _credentialProvider;
+            if (plugin == null || provider == null)
+                return;
+            ConnectionCredentialCoordinator? retired = null;
+            string host;
+            lock (_coordinatorLock)
+            {
+                host = _config.Host;
+                var wanted = PresentsMachineCredential(host);
+                if (_hostDisposed || wanted == (_credentialCoordinator != null))
+                    return;
+                if (wanted)
+                    _credentialCoordinator = new ConnectionCredentialCoordinator(
+                        plugin, provider, _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator)));
+                else
+                {
+                    retired = _credentialCoordinator;
+                    _credentialCoordinator = null;
+                }
+            }
+            if (retired != null)
+            {
+                try { retired.Dispose(); } catch { /* ignore */ }
+                _logger?.LogWarning(
+                    "The machine credential (server {CredentialServer}) is not presented to {Host}; a rejection there does not refresh it, so the sign-in the other editors on this machine share stays valid.",
+                    ProjectKeyIssuer(provider.ServerTarget), host);
+            }
+        }
+
+        /// <summary>Test seam: whether the on-401 refresh-and-reconnect coordinator is wired right now (DEV-272).</summary>
+        internal bool HasCredentialCoordinator
+        {
+            get { lock (_coordinatorLock) return _credentialCoordinator != null; }
         }
 
         // slotToken is the Cloud bearer snapshotted together with the mode: re-reading BearerToken after the await
@@ -677,8 +756,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // credential exists the very first Cloud dial is already signed in (zero-button, D12).
             if (_credentialProvider != null)
             {
-                _credentialCoordinator = new ConnectionCredentialCoordinator(
-                    _plugin, _credentialProvider, _loggerProvider?.CreateLogger(nameof(ConnectionCredentialCoordinator)));
+                // DEV-272: wired only while this sidecar presents the credential; re-evaluated on every host or mode
+                // change and on every auth-state change (a sign-in can change the credential's server).
+                _credentialStateSubscription = _credentialProvider.State.Subscribe(_ => SyncCredentialCoordinator());
+                SyncCredentialCoordinator();
                 _signInRequiredSubscription = _credentialProvider.OnSignInRequired
                     .Subscribe(signal => { _ = EmitStatusAsync(_config.KeepConnected ? "Connecting" : "Disconnected", cloudAuthState: "SignInRequired"); });
                 if (_credentialStore!.Exists)
@@ -916,6 +997,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // Absent or non-positive leaves the current value (partial pushes, older plugins).
             if (config["toolTimeoutMs"] is JsonValue timeoutNode && timeoutNode.TryGetValue<int>(out var toolTimeoutMs) && toolTimeoutMs > 0)
                 _toolTimeoutMs = toolTimeoutMs;
+            // A push that changed only the mode or the auth option changes whom the credential is presented to.
+            SyncCredentialCoordinator();
         }
 
         /// <summary>
@@ -939,6 +1022,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
         {
             _config.Host = host;
             _config.CredentialProvider = () => ResolveBearerAsync(host);
+            SyncCredentialCoordinator();
         }
 
         /// <summary>
@@ -2115,8 +2199,16 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             // late R3 callback touches a half-disposed host (the store itself is stateless/owned by the caller).
             try { _signInRequiredSubscription?.Dispose(); } catch { /* ignore */ }
             _signInRequiredSubscription = null;
-            try { _credentialCoordinator?.Dispose(); } catch { /* ignore */ }
-            _credentialCoordinator = null;
+            try { _credentialStateSubscription?.Dispose(); } catch { /* ignore */ }
+            _credentialStateSubscription = null;
+            ConnectionCredentialCoordinator? coordinator;
+            lock (_coordinatorLock)
+            {
+                _hostDisposed = true;
+                coordinator = _credentialCoordinator;
+                _credentialCoordinator = null;
+            }
+            try { coordinator?.Dispose(); } catch { /* ignore */ }
             try { _credentialProvider?.Dispose(); } catch { /* ignore */ }
             // Tear down the transition CTS under _transitionLock so a concurrent RunConnectionTransition cannot
             // observe a half-disposed field (or have its captured predecessor disposed out from under it): take

@@ -458,6 +458,81 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             host.Dispose(); // disposes the coordinator + subscription + provider without throwing
         }
 
+        // --- DEV-272: a credential another server issued is never presented or refreshed --------------------------
+
+        private static string SeedStore(string serverTarget)
+        {
+            var dir = NewStoreDir();
+            new MachineCredentialStore(dir).Write(new MachineCredentials
+            {
+                Version = 1,
+                AccessToken = "machine-jwt",
+                RefreshToken = "machine-refresh",
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                ServerTarget = serverTarget,
+            });
+            return dir;
+        }
+
+        [Theory]
+        [InlineData("https://ai-game.dev", "https://ai-game.dev/mcp", true)]
+        [InlineData("https://ai-game.dev/", "https://AI-GAME.dev/mcp/", true)]
+        [InlineData(null, "https://ai-game.dev/mcp", true)]                   // no target: the hosted default
+        [InlineData("http://127.0.0.1", "http://127.0.0.1:80/mcp", true)]     // the scheme's default port is the same origin
+        [InlineData("http://127.0.0.1", "https://ai-game.dev/mcp", false)]    // a stand's local sign-in, Cloud host
+        [InlineData("https://ai-game.dev", "http://127.0.0.1/mcp", false)]
+        [InlineData("http://127.0.0.1", "http://127.0.0.1:8080/mcp", false)]  // another port is another server
+        public void CredentialIssuedFor_ComparesOrigins(string? serverTarget, string dialHost, bool expected)
+            => Assert.Equal(expected, SidecarHost.CredentialIssuedFor(serverTarget, dialHost));
+
+        [Fact]
+        public void CloudMode_ForeignCredential_IsNeitherPresentedNorRefreshed()
+        {
+            // StormValley 2026-11-26: headless editors started outside the App (Cloud mode, the default) inherited a
+            // development stand's credential directory. ai-game.dev rejected the stand's token and every rejection
+            // refreshed the shared family, until the server's reuse detection revoked it for the live editor too.
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+
+            Assert.True(host.CredentialProvider!.IsSignedIn);
+            Assert.Null(host.CurrentBearer);              // not presented to the host that did not issue it
+            Assert.False(host.HasCredentialCoordinator);  // so a rejection cannot rotate it
+        }
+
+        [Fact]
+        public void CloudMode_OwnCredential_KeepsTheCoordinator()
+        {
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("https://ai-game.dev")));
+            host.ApplyConnectionConfig(CloudConfig());
+            host.Build();
+
+            Assert.Equal("machine-jwt", host.CurrentBearer);
+            Assert.True(host.HasCredentialCoordinator);
+        }
+
+        [Fact]
+        public void Coordinator_FollowsTheModeAndHost()
+        {
+            using var host = new SidecarHost(NewIpc(), "0.1.0", credentialStore: new MachineCredentialStore(SeedStore("http://127.0.0.1")));
+            host.Build();
+            Assert.False(host.HasCredentialCoordinator); // no config yet: nothing presents the credential
+
+            // The App's development stand: Custom + oauth on the loopback relay presents the account credential.
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:80/mcp", ["authOption"] = "oauth" });
+            Assert.True(host.HasCredentialCoordinator);
+
+            // Custom with a static token presents that token: a rejection must not refresh the machine credential.
+            host.ApplyConnectionConfig(new JsonObject { ["mode"] = "Custom", ["host"] = "http://127.0.0.1:80/mcp", ["authOption"] = "token", ["token"] = "local-tok" });
+            Assert.False(host.HasCredentialCoordinator);
+
+            // Cloud mode on the server that issued it, then on one that did not.
+            host.ApplyConnectionConfig(CloudConfig("http://127.0.0.1"));
+            Assert.True(host.HasCredentialCoordinator);
+            host.ApplyConnectionConfig(CloudConfig());
+            Assert.False(host.HasCredentialCoordinator);
+        }
+
         // --- oauth-client-error-hygiene d1: dead-family verdict → "SignInRequired" on the status feed ----------
 
         /// <summary>A refresher whose every attempt is the dead-family verdict (invalid_grant, 04 §3.5).</summary>
