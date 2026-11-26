@@ -197,6 +197,10 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString DistributionMethod(const FJsonObject& Format);
 	/** The uid of the unreal-engine version to download for this editor: exact UE, else newest older, else oldest newer. */
 	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions);
+	/** What fab-library / fab-add (@p ToolName) answer without a Fab sign-in: ask the user, then fab-sign-in, then call again. */
+	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName);
+	/** fab-search's closing line: what adding a listing needs, given whether this editor is signed in to Fab. */
+	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn);
 }
 
 /**

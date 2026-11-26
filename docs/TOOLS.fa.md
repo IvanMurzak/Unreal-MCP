@@ -12,7 +12,7 @@
 | Blueprint | `blueprint-*`: create, get, add-component, remove-component, add-variable, modify-variable, set-default, add-function, add-event, compile, spawn |
 | سورس / C++ | `source-*`: read, create-class, update, delete, list, compile |
 | اسکرین‌شات | `screenshot-*`: viewport, game-view, camera, isolated |
-| Fab | `fab-search`، `fab-library`، `fab-add` |
+| Fab | `fab-search`، `fab-library`، `fab-add`، `fab-sign-in` |
 | کنسول | `console-run-command` |
 | Python | `python-execute` |
 | فهرست ابزارها | `unreal-tool-list` |
@@ -99,8 +99,9 @@
 | `fab-search` | جستجو در مارکت‌پلیس [Fab](https://www.fab.com) (`query`، `listingType`، `freeOnly`، `sort`، صفحه‌بندی)؛ uid، عنوان، نوع، قیمت و فرمت‌های هر listing را برمی‌گرداند |
 | `fab-library` | فهرست دارایی‌های Fab که کاربر واردشده مالک آن‌هاست، همراه با محلی که هر کدام قبلاً در آن import شده است؛ `filter` در کل کتابخانه جستجو می‌کند |
 | `fab-add` | دانلود listing ای که کاربر مالک آن است و import آن مانند *Add to Project* در پنل Fab (پک‌های Unreal Engine، Megascans با `quality`، glTF/FBX)؛ پوشه محتوا را برمی‌گرداند و listing هایی را که از قبل در پروژه هستند رد می‌کند |
+| `fab-sign-in` | ورود کاربر به Fab در این ویرایشگر: صفحه ورود Epic را در مرورگر باز می‌کند و منتظر کاربر می‌ماند (اگر از قبل وارد شده باشد بی‌درنگ پاسخ می‌دهد). تنها ابزار Fab که مرورگر باز می‌کند |
 
-این ابزارها پلاگین Fab خود موتور را به کار می‌گیرند (از UE 5.5 به طور پیش‌فرض فعال است): ورود Epic و روندهای import آن را. اولین `fab-library` / `fab-add` بدون ورود، صفحه ورود Epic را در مرورگر باز می‌کند (باز کردن Fab از نوار ابزار ویرایشگر هم با یک ورود Epic به‌خاطرسپرده‌شده وارد می‌شود). خرید، یا افزودن یک listing رایگان به کتابخانه، در fab.com انجام می‌شود. پروژه‌های کامل و پلاگین‌های کد موتور از Epic Games Launcher نصب می‌شوند، نه اینکه به پروژه اضافه شوند.
+این ابزارها پلاگین Fab خود موتور را به کار می‌گیرند (از UE 5.5 به طور پیش‌فرض فعال است): ورود Epic و روندهای import آن را. بدون ورود، `fab-library` / `fab-add` بی‌درنگ پاسخ می‌دهند و هرگز مرورگری باز نمی‌کنند: به عامل می‌گویند در گفتگو از کاربر بپرسد (`AskUserQuestion`، کارتی که در گفتگوهای دسکتاپ و CLI اپ AI Game Dev منتظر پاسخ می‌ماند) و فقط وقتی کاربر موافقت کرد `fab-sign-in` را صدا بزند، تا یک اجرای بدون ناظر هرگز خودبه‌خود زبانه ورودی را باز نگذارد؛ `fab-search` می‌گوید که آیا افزودن به ورود نیاز دارد. برای ورود پیش از اجرا، از عامل بخواهید `fab-sign-in` را اجرا کند، یا Fab را از نوار ابزار ویرایشگر باز کنید (که در نشست بعدی ویرایشگر هم با ورود Epic به‌خاطرسپرده‌شده وارد می‌شود). خرید، یا افزودن یک listing رایگان به کتابخانه، در fab.com انجام می‌شود. پروژه‌های کامل و پلاگین‌های کد موتور از Epic Games Launcher نصب می‌شوند، نه اینکه به پروژه اضافه شوند.
 
 </details>
 
