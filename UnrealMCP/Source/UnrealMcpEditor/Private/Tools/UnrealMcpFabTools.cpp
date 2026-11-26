@@ -308,12 +308,9 @@ namespace UnrealMcpFabToolsLocal
 		return SignIn.Tokens && SignIn.Tokens(OutAccessToken, OutRefreshToken);
 	}
 
-	/** The signed-in user's EOS access token, or empty when nobody is signed in to Fab in this editor. */
+	/** The access token of a sign-in the Fab plugin itself made (UFabBrowserApi::GetAuthToken), or empty. */
 	static FString FabAuthToken()
 	{
-		FString Access, Refresh;
-		if (FabPlatformTokens(Access, Refresh))
-			return Access;
 		// Signed out, the read logs a LogFab and a LogEOSSDK error; the diagnostics leave out exactly those (DEV-273).
 		const int64 Before = FUnrealMcpLogCollector::Get().GetLastSequence();
 		FString Token = FabApiString(TEXT("GetAuthToken"));
@@ -399,9 +396,15 @@ namespace UnrealMcpFabToolsLocal
 		            "the user owns; a free listing must first be added to the user's library on fab.com.");
 	}
 
-	/** The token if this editor is signed in to Fab now (read once: a failed read logs a LogFab error), else empty. */
+	/**
+	 * The token if this editor is signed in to Fab now, else empty. UnrealMcpFab's read is silent, so it runs on every pass (a
+	 * restore that just finished is seen at once); the Fab plugin's own read logs errors when it fails, so at most once a second.
+	 */
 	static FString FabReadToken(FFabCallState& State)
 	{
+		FString Refresh;
+		if (State.Token.IsEmpty())
+			FabPlatformTokens(State.Token, Refresh);
 		const double Now = FPlatformTime::Seconds();
 		if (State.Token.IsEmpty() && Now - State.LastTokenCheck >= 1.0)
 		{
@@ -1230,8 +1233,14 @@ namespace UnrealMcpFabToolsLocal
 		const EUnrealMcpFabSignInService Service = FabService();
 		if (Service == EUnrealMcpFabSignInService::NotStarted)
 			return FabFinish(Call, FUnrealMcpToolResult::Error(FabServiceDownText(TEXT("fab-sign-in"))));
-		if (Service == EUnrealMcpFabSignInService::Restoring && !State.bAskedSignIn && FabTimeLeft(Call) > 0.0)
-			return FUnrealMcpToolResult::RetryLater(TEXT("Restoring the Fab sign-in Epic remembers on this computer."));
+		if (Service == EUnrealMcpFabSignInService::Restoring && !State.bAskedSignIn)
+		{
+			// Never open a page while the remembered sign-in is still being restored: a second login would race it.
+			if (FabTimeLeft(Call) > 0.0)
+				return FUnrealMcpToolResult::RetryLater(TEXT("Restoring the Fab sign-in Epic remembers on this computer."));
+			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("The Fab sign-in Epic remembers on this computer is still being "
+				"restored (no browser was opened). Call fab-sign-in again in a moment.")));
+		}
 		if (!State.bAskedSignIn)
 		{
 			// Once per call: open the page unless one this editor opened may still be waiting for the user.

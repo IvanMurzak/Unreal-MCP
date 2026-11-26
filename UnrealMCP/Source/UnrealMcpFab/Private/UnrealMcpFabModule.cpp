@@ -21,7 +21,8 @@
  * the tokens from the platform for the Fab tools, since the Fab plugin's own GetAuthToken knows only sign-ins it started.
  *
  * Fab's platform is the one EOS platform that was created from options rather than from a named config: the Fab plugin
- * creates it that way, the engine's online subsystems use named configs. Without an EOS SDK, Epic's sign-in service never
+ * creates it that way, the engine's online subsystems use named configs. Only those created while the editor starts count
+ * (MetaHuman's cloud sign-in creates one later), and the one found is kept. Without an EOS SDK, Epic's sign-in service never
  * started. With no such platform or more than one, this module cannot tell (the tools then behave as without it).
  */
 namespace UnrealMcpFabLocal
@@ -35,22 +36,53 @@ namespace UnrealMcpFabLocal
 	/** Where Fab's EOS platform stands: no SDK, no candidate, exactly one (returned) or more than one. */
 	enum class EFabPlatform : uint8 { NoSdk, None, Found, Ambiguous };
 
-	/** Fab's platform: the one active platform without a config name (the Fab plugin creates it from options). */
+	/** Fab's platform once known. It is kept: platforms other plugins create later (MetaHuman's cloud sign-in) never hide it. */
+	static IEOSPlatformHandleWeakPtr FabKnownPlatform;
+	/** The platforms without a config name created while the editor started (the Fab plugin creates its own then). */
+	static TArray<IEOSPlatformHandleWeakPtr> FabStartupPlatforms;
+	static FDelegateHandle FabPlatformCreatedHandle;
+
+	static void FabOnPlatformCreated(const IEOSPlatformHandlePtr& Platform)
+	{
+		if (Platform.IsValid() && Platform->GetConfigName().IsEmpty())
+			FabStartupPlatforms.Add(Platform);
+	}
+
+	/**
+	 * Fab's platform: the one platform without a config name (the Fab plugin creates it from options) among those created
+	 * while the editor started, else among the active ones. The first lookup runs on editor start, before other plugins
+	 * create theirs on demand, and the platform it finds is kept.
+	 */
 	static EFabPlatform FabFindPlatform(EOS_HPlatform& OutPlatform)
 	{
 		OutPlatform = nullptr;
 		IEOSSDKManager* Sdk = IEOSSDKManager::Get();
 		if (!Sdk || !Sdk->IsInitialized())
 			return EFabPlatform::NoSdk;
-		int32 Count = 0;
-		for (const IEOSPlatformHandlePtr& Platform : Sdk->GetActivePlatforms())
+		if (const IEOSPlatformHandlePtr Known = FabKnownPlatform.Pin())
 		{
-			if (Platform.IsValid() && Platform->GetConfigName().IsEmpty() && ++Count == 1)
-				OutPlatform = *Platform;
+			OutPlatform = *Known;
+			return EFabPlatform::Found;
 		}
-		if (Count > 1)
-			OutPlatform = nullptr;
-		return Count == 0 ? EFabPlatform::None : Count == 1 ? EFabPlatform::Found : EFabPlatform::Ambiguous;
+		TArray<IEOSPlatformHandlePtr> Candidates;
+		for (const IEOSPlatformHandleWeakPtr& Platform : FabStartupPlatforms)
+		{
+			if (const IEOSPlatformHandlePtr Pinned = Platform.Pin())
+				Candidates.Add(Pinned);
+		}
+		if (Candidates.IsEmpty()) // loaded after the editor started, or no platform was announced
+		{
+			for (const IEOSPlatformHandlePtr& Platform : Sdk->GetActivePlatforms())
+			{
+				if (Platform.IsValid() && Platform->GetConfigName().IsEmpty())
+					Candidates.Add(Platform);
+			}
+		}
+		if (Candidates.Num() != 1)
+			return Candidates.IsEmpty() ? EFabPlatform::None : EFabPlatform::Ambiguous;
+		FabKnownPlatform = Candidates[0];
+		OutPlatform = *Candidates[0];
+		return EFabPlatform::Found;
 	}
 
 	/** The account signed in on @p Auth, or null. */
@@ -111,6 +143,8 @@ namespace UnrealMcpFabLocal
 	/** On editor start: restore now if Fab's platform exists, else on first use (FabPlatform). */
 	static void FabRestoreOnStart()
 	{
+		if (IEOSSDKManager* Sdk = IEOSSDKManager::Get())
+			Sdk->OnPlatformCreated.Remove(FabPlatformCreatedHandle);
 		EOS_HPlatform Platform;
 		const EFabPlatform Found = FabFindPlatform(Platform);
 		if (Found == EFabPlatform::Found)
@@ -173,15 +207,26 @@ public:
 		SignIn.Service = &UnrealMcpFabLocal::FabService;
 		SignIn.Tokens = &UnrealMcpFabLocal::FabTokens;
 		if (GIsRunning)
+		{
 			UnrealMcpFabLocal::FabRestoreOnStart();
-		else
-			PostEngineInit = FCoreDelegates::OnPostEngineInit.AddStatic(&UnrealMcpFabLocal::FabRestoreOnStart);
+			return;
+		}
+		// Record the platforms created until the editor has started: the Fab plugin (PostDefault) creates its own after this.
+		if (IEOSSDKManager* Sdk = IEOSSDKManager::Get())
+		{
+			UnrealMcpFabLocal::FabPlatformCreatedHandle = Sdk->OnPlatformCreated.AddStatic(&UnrealMcpFabLocal::FabOnPlatformCreated);
+		}
+		PostEngineInit = FCoreDelegates::OnPostEngineInit.AddStatic(&UnrealMcpFabLocal::FabRestoreOnStart);
 #endif
 	}
 
 	virtual void ShutdownModule() override
 	{
 		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInit);
+#if WITH_EOS_SDK
+		if (IEOSSDKManager* Sdk = IEOSSDKManager::Get())
+			Sdk->OnPlatformCreated.Remove(UnrealMcpFabLocal::FabPlatformCreatedHandle);
+#endif
 		UnrealMcpFabSignIn() = FUnrealMcpFabSignIn();
 	}
 
