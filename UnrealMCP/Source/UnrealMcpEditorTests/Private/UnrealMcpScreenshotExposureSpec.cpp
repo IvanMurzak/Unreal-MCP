@@ -205,7 +205,9 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 		}();
 
 		// Pilot the level viewport to the camera (what an agent does with set_level_viewport_camera_info) and let it
-		// converge (Lumen, eye adaptation) for a while before both captures.
+		// converge (Lumen, eye adaptation) before both captures. Eye adaptation moves a few EV per second of frame time from
+		// wherever earlier specs left this viewport, and an offscreen editor draws 120 frames in well under a second: wait
+		// for both enough frames and enough time.
 		PilotedClient = Client;
 		SavedViewLocation = Client->GetViewLocation();
 		SavedViewRotation = Client->GetViewRotation();
@@ -216,8 +218,9 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 		Client->ViewFOV = CameraView.FOV;
 		const FString CameraName = Camera->GetName();
 		int32 FramesLeft = 120;
+		double SecondsLeft = 8.0;
 		TickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-			[this, Done, CameraName, FramesLeft](float) mutable
+			[this, Done, CameraName, FramesLeft, SecondsLeft](float DeltaTime) mutable
 		{
 			FLevelEditorViewportClient* LiveClient = LivePilotedClient();
 			if (!LiveClient || LiveClient->Viewport != GEditor->GetActiveViewport())
@@ -228,7 +231,8 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 				return false;
 			}
 			FViewport* Viewport = LiveClient->Viewport;
-			if (--FramesLeft > 0)
+			SecondsLeft -= DeltaTime;
+			if (--FramesLeft > 0 || SecondsLeft > 0.0)
 			{
 				// An unfocused or offscreen editor may not redraw the level viewport on its own: draw it every frame,
 				// so its Lumen and eye adaptation converge like an interactive viewport's.
@@ -253,14 +257,16 @@ void FUnrealMcpScreenshotExposureSpec::Define()
 			TestTrue(FString::Printf(TEXT("screenshot-viewport succeeds: %s"), *ViewportShot.Message), ViewportShot.bSuccess);
 			const double CameraLuma = ExposureSpecMeanLuma(CameraShot);
 			const double ViewportLuma = ExposureSpecMeanLuma(ViewportShot);
-			AddInfo(FString::Printf(TEXT("DEV-269 mean luma (0-255): screenshot-camera %.1f, screenshot-viewport %.1f (viewport %dx%d)"),
-				CameraLuma, ViewportLuma, Size.X, Size.Y));
+			AddInfo(FString::Printf(TEXT("DEV-269 mean luma (0-255): screenshot-camera %.1f, screenshot-viewport %.1f (viewport %dx%d, view mode %d, "
+				"fixed exposure %d EV100 %.2f, game view %d)"), CameraLuma, ViewportLuma, Size.X, Size.Y, (int32)LiveClient->GetViewMode(),
+				LiveClient->ExposureSettings.bFixed ? 1 : 0, LiveClient->ExposureSettings.FixedEV100, LiveClient->IsInGameView() ? 1 : 0));
 			if (TestTrue(TEXT("both images decode"), CameraLuma >= 0.0 && ViewportLuma >= 0.0))
 			{
 				TestTrue(TEXT("the viewport frame is lit (a meaningful reference)"), ViewportLuma > 20.0);
-				// Same view, same lighting: exposure may differ a little, never by a near-black factor.
-				TestTrue(TEXT("the camera frame is within 0.6x..1.6x of the viewport's mean luma"),
-					CameraLuma >= ViewportLuma * 0.6 && CameraLuma <= ViewportLuma * 1.6);
+				// Same view, same lighting, both converged: measured equal on 5.7 (156.0 / 155.1). Before DEV-269 the camera
+				// frame came back at about 0.2x.
+				TestTrue(TEXT("the camera frame is within 0.8x..1.25x of the viewport's mean luma"),
+					CameraLuma >= ViewportLuma * 0.8 && CameraLuma <= ViewportLuma * 1.25);
 			}
 			Done.Execute();
 			return false;

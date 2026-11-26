@@ -557,6 +557,11 @@ namespace UnrealMcpScreenshotTools
 			RenderTarget->RenderTargetFormat = bComposite ? RTF_RGBA16f : RTF_RGBA8;
 			RenderTarget->ClearColor = BackgroundColor ? *BackgroundColor : FLinearColor::Black;
 			RenderTarget->bAutoGenerateMips = false;
+			// The tonemapper encodes for the target's display gamma, which is 1.0 for a linear RGBA8 target: a final-color
+			// capture would then hold linear values, read back below as sRGB bytes (about 1.2 EV too dark, DEV-269). 2.2
+			// makes it encode for display, as the viewport does.
+			if (!bComposite)
+				RenderTarget->TargetGamma = 2.2f;
 			RenderTarget->InitAutoFormat(Width, Height);
 			RenderTarget->UpdateResourceImmediate(true);
 			FGCObjectScopeGuard RenderTargetGuard(RenderTarget);
