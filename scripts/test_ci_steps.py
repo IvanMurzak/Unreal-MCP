@@ -131,7 +131,8 @@ class CiStepTests(unittest.TestCase):
     def fake_plugin(self) -> Path:
         plugin = self.temp / "repo/UnrealMCP"
         for rel in ("Config/x.ini", "Resources/Icon128.png", "Content/a.txt", "Source/UnrealMcpRuntime/a.cpp",
-                    "Source/UnrealMcpRql/a.cpp", "Source/UnrealMcpEditor/a.cpp", "Source/UnrealMcpEditorTests/a.cpp",
+                    "Source/UnrealMcpRql/a.cpp", "Source/UnrealMcpEditor/a.cpp", "Source/UnrealMcpFab/a.cpp",
+                    "Source/UnrealMcpEditorTests/a.cpp",
                     "Source/UnrealMcpEditor/Private/Server/UnrealMcpServerDownload.cpp",
                     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.cpp",
                     "Source/UnrealMcpEditor/Private/Sidecar/UnrealMcpBridgeDownloader.h",

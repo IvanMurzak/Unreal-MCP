@@ -43,7 +43,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 level family (7) | superseded by RQL | #25 |
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
 | Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
-| Fab family (4) | implemented: `fab-search` / `fab-library` / `fab-add` / `fab-sign-in` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`; only `fab-sign-in` opens Epic's sign-in page, DEV-273) | — |
+| Fab family (4) | implemented: `fab-search` / `fab-library` / `fab-add` / `fab-sign-in` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`; only `fab-sign-in` opens Epic's sign-in page, DEV-273; the optional `UnrealMcpFab` module, loaded only with the Fab plugin, restores the remembered sign-in on editor start, DEV-281) | — |
 
 **Total shipped: 31 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
 screenshot 4, fab 4), plus 3 SYSTEM tools (§2.4)** (counts verified from the registration source). The §10 sections

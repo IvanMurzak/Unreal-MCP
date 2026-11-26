@@ -7,7 +7,9 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersion.h"
+#include "Misc/ScopeExit.h"
 #include "UnrealMcpCoreTools.h"
+#include "UnrealMcpFabSignIn.h"
 #include "UnrealMcpToolRegistry.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -34,6 +36,33 @@ BEGIN_DEFINE_SPEC(FUnrealMcpFabToolsSpec, "UnrealMcp.Tools.Fab",
 	static FString FabSpecEngine(int32 MinorOffset)
 	{
 		return FString::Printf(TEXT("UE_%d.%d"), FEngineVersion::Current().GetMajor(), FEngineVersion::Current().GetMinor() + MinorOffset);
+	}
+
+	/**
+	 * Reading a missing token logs errors of the Fab plugin and the EOS SDK; they are the expected path here.
+	 * Any number of them, none included: Occurrences < 0 means "ignore silently" from UE 5.6 on. UE 5.5 refuses a
+	 * negative count (and 0 there means "one or more"), so 5.5 adds no expectation; its Fab plugin logs none here.
+	 */
+	void ExpectFabTokenReadErrors()
+	{
+		const FEngineVersion& Engine = FEngineVersion::Current();
+		if (Engine.GetMajor() > 5 || (Engine.GetMajor() == 5 && Engine.GetMinor() >= 6))
+		{
+			AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
+			AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
+		}
+	}
+
+	/** @p Tool's answer while UnrealMcpFabSignIn reports @p Service and no sign-in (the real hook is restored after). */
+	static FUnrealMcpToolResult FabSpecRunWithService(EUnrealMcpFabSignInService Service, const TCHAR* Tool)
+	{
+		const FUnrealMcpFabSignIn Saved = UnrealMcpFabSignIn();
+		ON_SCOPE_EXIT { UnrealMcpFabSignIn() = Saved; };
+		UnrealMcpFabSignIn().Service = [Service]() { return Service; };
+		UnrealMcpFabSignIn().Tokens = [](FString&, FString&) { return false; };
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpFabTools::Register(Registry);
+		return Registry.Execute(Tool, FUnrealMcpToolCall(MakeShared<FJsonObject>()));
 	}
 
 END_DEFINE_SPEC(FUnrealMcpFabToolsSpec)
@@ -116,15 +145,7 @@ void FUnrealMcpFabToolsSpec::Define()
 
 	It("answers fab-library at once without a sign-in instead of opening a browser (DEV-273)", [this]()
 	{
-		// Reading a missing token logs errors of the Fab plugin and the EOS SDK; they are the expected path here.
-		// Any number of them, none included: Occurrences < 0 means "ignore silently" from UE 5.6 on. UE 5.5 refuses a
-		// negative count (and 0 there means "one or more"), so 5.5 adds no expectation; its Fab plugin logs none here.
-		const FEngineVersion& Engine = FEngineVersion::Current();
-		if (Engine.GetMajor() > 5 || (Engine.GetMajor() == 5 && Engine.GetMinor() >= 6))
-		{
-			AddExpectedErrorPlain(TEXT("unable to get auth token"), EAutomationExpectedErrorFlags::Contains, -1);
-			AddExpectedErrorPlain(TEXT("EOS_Auth_CopyUserAuthToken"), EAutomationExpectedErrorFlags::Contains, -1);
-		}
+		ExpectFabTokenReadErrors();
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpFabTools::Register(Registry);
 		const FUnrealMcpToolResult Result = Registry.Execute(TEXT("fab-library"), FUnrealMcpToolCall(MakeShared<FJsonObject>()));
@@ -133,6 +154,31 @@ void FUnrealMcpFabToolsSpec::Define()
 			return;
 		TestTrue(TEXT("says the sign-in is missing"), Result.Message.Contains(TEXT("Not signed in to Fab")));
 		TestTrue(TEXT("opened nothing"), Result.Message.Contains(TEXT("no browser was opened")));
+	});
+
+	It("fails at once, opening nothing, when Epic's sign-in service never started (DEV-281)", [this]()
+	{
+		ExpectFabTokenReadErrors();
+		const FUnrealMcpToolResult SignIn = FabSpecRunWithService(EUnrealMcpFabSignInService::NotStarted, TEXT("fab-sign-in"));
+		const FUnrealMcpToolResult Library = FabSpecRunWithService(EUnrealMcpFabSignInService::NotStarted, TEXT("fab-library"));
+		// A host without the Fab plugin answers that first; one signed in through the Fab plugin itself is signed in.
+		if (SignIn.Message.Contains(TEXT("Fab plugin is not loaded")) || SignIn.bSuccess)
+			return;
+		TestFalse(TEXT("fab-sign-in does not wait"), SignIn.bRetryLater);
+		TestTrue(TEXT("fab-sign-in says why"), SignIn.Message.Contains(TEXT("sign-in service did not start")));
+		TestTrue(TEXT("fab-sign-in opened nothing"), SignIn.Message.Contains(TEXT("no browser was opened")));
+		TestFalse(TEXT("fab-library does not wait"), Library.bRetryLater || Library.bSuccess);
+		TestTrue(TEXT("fab-library says why"), Library.Message.Contains(TEXT("sign-in service did not start")));
+	});
+
+	It("waits while the remembered sign-in is being restored (DEV-281)", [this]()
+	{
+		ExpectFabTokenReadErrors();
+		const FUnrealMcpToolResult SignIn = FabSpecRunWithService(EUnrealMcpFabSignInService::Restoring, TEXT("fab-sign-in"));
+		if (SignIn.Message.Contains(TEXT("Fab plugin is not loaded")) || SignIn.bSuccess)
+			return;
+		TestTrue(TEXT("waits for the restore"), SignIn.bRetryLater);
+		TestTrue(TEXT("says what it waits for"), SignIn.Message.Contains(TEXT("Restoring")));
 	});
 
 	It("rejects bad arguments before any network call", [this]()
