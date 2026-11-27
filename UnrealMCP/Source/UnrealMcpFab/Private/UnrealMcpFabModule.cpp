@@ -164,7 +164,7 @@ namespace UnrealMcpFabLocal
 	/** Sign in on Fab's platform from the remembered sign-in, once, unless someone is signed in there already. */
 	static void FabRestoreOnce(EOS_HPlatform Platform)
 	{
-		if (bRestoreTried || FPlatformTime::Seconds() < FabRestoreNotBefore)
+		if (bRestoreTried || FabRestorePending())
 			return;
 		bRestoreTried = true;
 		const EOS_HAuth Auth = EOS_Platform_GetAuthInterface(Platform);

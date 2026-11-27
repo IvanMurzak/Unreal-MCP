@@ -661,6 +661,12 @@ namespace UnrealMcpFabToolsLocal
 		return FCString::Atoi(*Major) * 100 + FCString::Atoi(*Minor);
 	}
 
+	/** A Fab engine id as shown ("UE_5.7" -> "5.7"), or empty when unparsable. */
+	static FString FabEngineLabel(const FString& Engine)
+	{
+		return FabEngineNumber(Engine) > 0 ? Engine.Replace(TEXT("UE_"), TEXT("")) : FString();
+	}
+
 	static TArray<TSharedPtr<FJsonValue>> FabJsonStrings(const TArray<FString>& Values)
 	{
 		TArray<TSharedPtr<FJsonValue>> Array;
@@ -693,8 +699,8 @@ namespace UnrealMcpFabToolsLocal
 			for (const TSharedPtr<FJsonValue>& Version : *Versions)
 			{
 				FString Engine;
-				if (Version.IsValid() && Version->TryGetString(Engine) && FabEngineNumber(Engine) > 0)
-					Engines.AddUnique(Engine.Replace(TEXT("UE_"), TEXT("")));
+				if (Version.IsValid() && Version->TryGetString(Engine) && !FabEngineLabel(Engine).IsEmpty())
+					Engines.AddUnique(FabEngineLabel(Engine));
 			}
 		}
 		Engines.Sort([](const FString& A, const FString& B) { return FabEngineNumber(A) < FabEngineNumber(B); });
@@ -1024,28 +1030,28 @@ namespace UnrealMcpFabToolsLocal
 		return Text;
 	}
 
-	/** The plugin that has a module named @p Module, or null (an engine module, or none of that name). */
-	static TSharedPtr<IPlugin> FabPluginOfModule(const FString& Module)
+	/** Module name -> the discovered plugin that has it (FString keys compare case-insensitively); engine modules are absent. */
+	using FFabModulePlugins = TMap<FString, TSharedPtr<IPlugin>>;
+
+	static FFabModulePlugins FabModulePlugins()
 	{
+		FFabModulePlugins Plugins;
 		for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetDiscoveredPlugins())
 		{
 			for (const FModuleDescriptor& Descriptor : Plugin->GetDescriptor().Modules)
-			{
-				if (Descriptor.Name.ToString().Equals(Module, ESearchCase::IgnoreCase))
-					return Plugin;
-			}
+				Plugins.FindOrAdd(Descriptor.Name.ToString(), Plugin);
 		}
-		return nullptr;
+		return Plugins;
 	}
 
 	/**
-	 * The plugin a dependency of an imported package needs: the owner of a /Script/<Module> package, or the plugin whose
-	 * content root a /<Plugin>/... package lies under. Null for engine and project content.
+	 * The plugin a dependency of an imported package needs: the owner of a /Script/<Module> package (from @p ModulePlugins),
+	 * or the plugin whose content root a /<Plugin>/... package lies under. Null for engine and project content.
 	 */
-	static TSharedPtr<IPlugin> FabPluginOfDependency(const FString& Dependency)
+	static TSharedPtr<IPlugin> FabPluginOfDependency(const FString& Dependency, const FFabModulePlugins& ModulePlugins)
 	{
 		if (Dependency.StartsWith(TEXT("/Script/")))
-			return FabPluginOfModule(Dependency.Mid(8));
+			return ModulePlugins.FindRef(Dependency.Mid(8));
 		FString Root = Dependency.Mid(1);
 		int32 Slash = INDEX_NONE;
 		if (Root.FindChar(TEXT('/'), Slash))
@@ -1143,7 +1149,13 @@ namespace UnrealMcpFabToolsLocal
 		TSet<FName> Packages;
 		for (const FAssetData& Asset : Assets)
 			Packages.Add(Asset.PackageName);
-		TMap<FString, FString> NeededPlugins; // plugin name -> the first package that needs it
+		struct FFabNeededPlugin
+		{
+			TSharedPtr<IPlugin> Plugin;
+			FString NeededBy; // the first package that needs it
+		};
+		TMap<FString, FFabNeededPlugin> NeededPlugins; // by plugin name
+		const FFabModulePlugins ModulePlugins = FabModulePlugins();
 		TArray<FString> Unresolved;
 		TSet<FName> Seen;
 		for (const FName& Package : Packages)
@@ -1157,10 +1169,10 @@ namespace UnrealMcpFabToolsLocal
 				if (bAlreadySeen)
 					continue;
 				const FString Dependency = DependencyName.ToString();
-				const TSharedPtr<IPlugin> Plugin = FabPluginOfDependency(Dependency);
+				const TSharedPtr<IPlugin> Plugin = FabPluginOfDependency(Dependency, ModulePlugins);
 				if (Plugin.IsValid())
 				{
-					NeededPlugins.FindOrAdd(Plugin->GetName(), Package.ToString());
+					NeededPlugins.FindOrAdd(Plugin->GetName(), { Plugin, Package.ToString() });
 					if (!Plugin->IsEnabled())
 						continue; // a disabled plugin's content and classes are reported as that plugin
 				}
@@ -1181,17 +1193,15 @@ namespace UnrealMcpFabToolsLocal
 		TArray<TSharedPtr<FJsonValue>> PluginValues;
 		TArray<FString> Disabled, Notes;
 		NeededPlugins.KeySort([](const FString& A, const FString& B) { return A < B; });
-		for (const TPair<FString, FString>& Needed : NeededPlugins)
+		for (const TPair<FString, FFabNeededPlugin>& Needed : NeededPlugins)
 		{
-			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Needed.Key);
-			if (!Plugin.IsValid())
-				continue;
+			const TSharedPtr<IPlugin>& Plugin = Needed.Value.Plugin;
 			const FPluginDescriptor& Descriptor = Plugin->GetDescriptor();
 			const TCHAR* Stage = Descriptor.bIsExperimentalVersion ? TEXT("experimental") : Descriptor.bIsBetaVersion ? TEXT("beta") : nullptr;
 			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 			Row->SetStringField(TEXT("name"), Needed.Key);
 			Row->SetBoolField(TEXT("enabled"), Plugin->IsEnabled());
-			Row->SetStringField(TEXT("neededBy"), Needed.Value);
+			Row->SetStringField(TEXT("neededBy"), Needed.Value.NeededBy);
 			if (Stage)
 				Row->SetStringField(TEXT("stage"), Stage);
 			const FString Note = FabPluginNote(Needed.Key);
@@ -1202,7 +1212,7 @@ namespace UnrealMcpFabToolsLocal
 			}
 			PluginValues.Add(MakeShared<FJsonValueObject>(Row));
 			if (!Plugin->IsEnabled())
-				Disabled.Add(FString::Printf(TEXT("%s%s (needed by %s)"), *Needed.Key, Stage ? *(FString(TEXT(", ")) + Stage) : TEXT(""), *Needed.Value));
+				Disabled.Add(FString::Printf(TEXT("%s%s (needed by %s)"), *Needed.Key, Stage ? *(FString(TEXT(", ")) + Stage) : TEXT(""), *Needed.Value.NeededBy));
 		}
 		R->SetArrayField(TEXT("plugins"), PluginValues);
 		if (Disabled.Num())
@@ -1401,7 +1411,7 @@ namespace UnrealMcpFabToolsLocal
 	 */
 	static FString FabUnrealVersionUid(const TArray<TSharedPtr<FJsonValue>>& Versions, TArray<FString>* OutEngines = nullptr)
 	{
-		const int32 Mine = FEngineVersion::Current().GetMajor() * 100 + FEngineVersion::Current().GetMinor();
+		const int32 Mine = FabEngineNumber(FabCurrentEngine());
 		FString Best;
 		int32 BestScore = MIN_int32;
 		for (const TSharedPtr<FJsonValue>& Version : Versions)
@@ -1423,7 +1433,11 @@ namespace UnrealMcpFabToolsLocal
 					{
 						OutEngines->Reset();
 						for (const TSharedPtr<FJsonValue>& Listed : *Engines)
-							OutEngines->Add(Listed->AsString().Replace(TEXT("UE_"), TEXT("")));
+						{
+							const FString Label = FabEngineLabel(Listed->AsString());
+							if (!Label.IsEmpty())
+								OutEngines->Add(Label);
+						}
 					}
 				}
 			}
@@ -1829,7 +1843,7 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path) { return UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path); }
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency)
 	{
-		const TSharedPtr<IPlugin> Plugin = UnrealMcpFabToolsLocal::FabPluginOfDependency(Dependency);
+		const TSharedPtr<IPlugin> Plugin = UnrealMcpFabToolsLocal::FabPluginOfDependency(Dependency, UnrealMcpFabToolsLocal::FabModulePlugins());
 		return Plugin.IsValid() ? Plugin->GetName() : FString();
 	}
 

@@ -70,6 +70,18 @@ BEGIN_DEFINE_SPEC(FUnrealMcpFabToolsSpec, "UnrealMcp.Tools.Fab",
 		}
 	}
 
+	/** Write a package header a newer engine saved (tag, legacy version, UE3 version, UE4 / UE5 file versions) to @p Filename. */
+	static bool FabSpecWriteNewerPackage(const FString& Filename)
+	{
+		TArray<uint8> Bytes;
+		FMemoryWriter Writer(Bytes);
+		int32 Tag = (int32)PACKAGE_FILE_TAG, Legacy = -8, LegacyUE3 = 864;
+		int32 UE4 = GPackageFileUEVersion.FileVersionUE4, UE5 = GPackageFileUEVersion.FileVersionUE5 + 1;
+		Writer << Tag << Legacy << LegacyUE3 << UE4 << UE5;
+		Bytes.AddZeroed(256);
+		return FFileHelper::SaveArrayToFile(Bytes, *Filename);
+	}
+
 	/** @p Tool's answer while UnrealMcpFabSignIn reports @p Service and no sign-in (the real hook is restored after). */
 	static FUnrealMcpToolResult FabSpecRunWithService(EUnrealMcpFabSignInService Service, const TCHAR* Tool)
 	{
@@ -280,15 +292,8 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("a text file is no package"), UnrealMcpFabTools::PackageFileProblem(NotPackage, bFatal).Contains(TEXT("not a package file")));
 		TestTrue(TEXT("fatal"), bFatal);
 
-		// A package header saved by a newer engine: tag, legacy version, UE3 version, UE4 / UE5 file versions.
-		TArray<uint8> Bytes;
-		FMemoryWriter Writer(Bytes);
-		int32 Tag = (int32)PACKAGE_FILE_TAG, Legacy = -8, LegacyUE3 = 864;
-		int32 UE4 = GPackageFileUEVersion.FileVersionUE4, UE5 = GPackageFileUEVersion.FileVersionUE5 + 1;
-		Writer << Tag << Legacy << LegacyUE3 << UE4 << UE5;
-		Bytes.AddZeroed(256);
 		const FString Newer = Dir / TEXT("Newer.uasset");
-		TestTrue(TEXT("wrote the header"), FFileHelper::SaveArrayToFile(Bytes, *Newer));
+		TestTrue(TEXT("wrote the header"), FabSpecWriteNewerPackage(Newer));
 		const FString Problem = UnrealMcpFabTools::PackageFileProblem(Newer, bFatal);
 		TestTrue(TEXT("a newer package is named so"), Problem.Contains(TEXT("newer engine")));
 		TestTrue(TEXT("fatal"), bFatal);
@@ -353,13 +358,7 @@ void FUnrealMcpFabToolsSpec::Define()
 		FString InstanceFile;
 		FPackageName::TryConvertLongPackageNameToFilename(Package->GetName(), InstanceFile, FPackageName::GetAssetPackageExtension());
 		IAssetRegistry::Get()->ScanFilesSynchronous({ InstanceFile }, /*bForceRescan*/ true);
-		TArray<uint8> Bytes;
-		FMemoryWriter Writer(Bytes);
-		int32 Tag = (int32)PACKAGE_FILE_TAG, Legacy = -8, LegacyUE3 = 864;
-		int32 UE4 = GPackageFileUEVersion.FileVersionUE4, UE5 = GPackageFileUEVersion.FileVersionUE5 + 1;
-		Writer << Tag << Legacy << LegacyUE3 << UE4 << UE5;
-		Bytes.AddZeroed(256);
-		TestTrue(TEXT("wrote the newer package"), FFileHelper::SaveArrayToFile(Bytes, *(Dir / TEXT("SM_FromNewerEngine.uasset"))));
+		TestTrue(TEXT("wrote the newer package"), FabSpecWriteNewerPackage(Dir / TEXT("SM_FromNewerEngine.uasset")));
 
 		TArray<FString> Lines;
 		const TSharedPtr<FJsonObject> Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
