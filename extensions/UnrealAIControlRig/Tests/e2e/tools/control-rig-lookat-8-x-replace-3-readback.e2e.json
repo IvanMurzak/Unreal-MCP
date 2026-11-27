@@ -5,6 +5,6 @@
     "query": "unreal.asset(\"/Game/E2E/ABP_HeadLookAt\") | select ControlRigs"
   },
   "assert": {
-    "pattern": "Rig:CR_HeadLookAt,Graph:AnimGraph,After:[^,]+,Before:Output Pose,.*LODThreshold:"
+    "pattern": "Rig:CR_HeadLookAt,Graph:AnimGraph,After:(?!,)[^,]+,Before:\\\\?\"?Output Pose\\\\?\"?,.*LODThreshold:"
   }
 }

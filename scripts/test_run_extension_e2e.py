@@ -416,10 +416,11 @@ CONTROL_RIG = {
                           'input, \\"@Variable\\" | value))'),
         rig_receipt(WIRE, 'AnimGraphNode_ControlRig_1 runs CR_HeadLookAt between the reference pose and Output Pose')),
     'control-rig-lookat-8-x-replace-3-readback.e2e.json': (
-        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_1,Rig:CR_HeadLookAt,Graph:AnimGraph,After:Default Slot,'
-                    'Before:Output Pose,Inputs:{Alpha:1.0,LookAtTarget:(X=0,Y=0,Z=0)},Settings:{Alpha:1.000000,LODThreshold:-1}}]'),
+        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_1,Rig:CR_HeadLookAt,Graph:AnimGraph,'
+                    'After:"Blendspace Player \'NewBlendSpace1D\'",Before:"Output Pose",Inputs:{Alpha:"1.000000",'
+                    'LookAtTarget:"0, 0, 0"},Settings:{Alpha:"1.000000",AlphaInputType:Float,LODThreshold:"-1"}}]'),
         text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_1,Rig:CR_HeadLookAt,Graph:AnimGraph,After:,'
-                    'Before:Output Pose,Inputs:{Alpha:1.0},Settings:{LODThreshold:-1}}]')),
+                    'Before:"Output Pose",Inputs:{Alpha:"1.000000"},Settings:{LODThreshold:"-1"}}]')),
     'control-rig-lookat-8-unknown-unit.e2e.json': (
         '{"error": "error call-threw: AddUnit threw: no rig unit named \'Aimm\'; similar: AimItem (Aim)"}',
         '{"error": "error call-threw: AddUnit threw: CR_HeadLookAt has no rig graph"}'),
