@@ -288,7 +288,7 @@ Extensions compile from source in your project (on the next editor open, or now 
 
 | Path | What it is |
 |---|---|
-| [`UnrealMCP/`](UnrealMCP/) | The Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
+| [`UnrealMCP/`](UnrealMCP/) | The Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor`, `UnrealMcpFab` (optional) |
 | [`bridge/`](bridge/) | `unreal-mcp-bridge`, the .NET 10 sidecar |
 | [`cli/`](cli/) | `unreal-mcp-cli`, the npm package |
 | [`extensions/`](extensions/) | Eight optional engine extensions with their own releases |

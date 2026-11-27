@@ -33,7 +33,7 @@
 | `rql-mutate` | `set` / `call` で終わる RQL クエリ（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）。すべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ。`dry_run` でプレビュー。`;` で区切った複数のクエリはそれぞれ 1 つの変更 |
 | `rql-schema` | ソース、関数、インストール済みの拡張機能、エディターのワールドにあるクラス。`type` でひとつの型のメンバーとメソッドを一覧表示。`guide` でインストール済み拡張機能のガイドを返す（`{"guide": "landscape"}`） |
 
-リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。
+リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。 マテリアルは、フィーチャーレベルとシェーダープラットフォームごとのコンパイルエラーと、それを使うメッシュに必要な使用フラグを報告します（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`）。`python-execute` の `recompile_material` はこれを返しません。コンパイルに失敗したマテリアルはエディター診断のメモにも表示されます。
 
 `unreal-rql` スキル（`unreal-skill-generate` が書き出します）は、この言語の使い方と、インストール済みの拡張機能が追加するものを説明します。
 
@@ -97,9 +97,9 @@
 | `fab-search` | [Fab](https://www.fab.com) マーケットプレイスを検索（`query`、`listingType`、`freeOnly`、`sort`、ページング）。各リスティングの uid、タイトル、種類、価格、形式を返す |
 | `fab-library` | サインイン中のユーザーが所有する Fab アセットと、それぞれのインポート先を一覧表示。`filter` でライブラリ全体を検索 |
 | `fab-add` | ユーザーが所有するリスティングをダウンロードし、Fab パネルの *Add to Project* と同じようにインポート（Unreal Engine パック、`quality` 付きの Megascans、glTF/FBX）。コンテンツフォルダーを返し、プロジェクトにすでにあるものはスキップ |
-| `fab-sign-in` | このエディターでユーザーを Fab にサインインさせます。ブラウザで Epic のサインインページを開き、ユーザーの操作を待ちます（サインイン済みならすぐに応答）。ブラウザを開く唯一の Fab ツール |
+| `fab-sign-in` | このエディターでユーザーを Fab にサインインさせます。ブラウザで Epic のサインインページを開き、ユーザーの操作を待ちます（サインイン済みならすぐに応答し、このエディターで Epic のサインインサービスが起動していない場合も理由を添えてすぐに応答）。ブラウザを開く唯一の Fab ツール |
 
-これらはエンジン自身の Fab プラグイン（UE 5.5 以降は既定で有効）を動かし、その Epic サインインとインポート処理を使います。サインインしていない場合、`fab-library` / `fab-add` はすぐに応答し、ブラウザを開くことはありません。エージェントにはチャットでユーザーに確認し（`AskUserQuestion`。AI Game Dev アプリのデスクトップと CLI のチャットでは応答を待つカードになります）、ユーザーが同意したときだけ `fab-sign-in` を呼ぶよう伝えるので、無人の実行がサインインのタブを勝手に開いたままにすることはありません。`fab-search` は追加にサインインが必要かどうかを示します。実行前にサインインしておくには、エージェントに `fab-sign-in` の実行を頼むか、エディターのツールバーから Fab を開きます（後のエディターセッションでも、記憶された Epic ログインでサインインします）。購入や、無料リスティングのライブラリへの追加は fab.com で行います。完成したプロジェクトとエンジンのコードプラグインは、プロジェクトに追加するのではなく Epic Games Launcher からインストールします。
+これらはエンジン自身の Fab プラグイン（UE 5.5 以降は既定で有効）を動かし、その Epic サインインとインポート処理を使います。サインインしていない場合、`fab-library` / `fab-add` はすぐに応答し、ブラウザを開くことはありません。エージェントにはチャットでユーザーに確認し（`AskUserQuestion`。AI Game Dev アプリのデスクトップと CLI のチャットでは応答を待つカードになります）、ユーザーが同意したときだけ `fab-sign-in` を呼ぶよう伝えるので、無人の実行がサインインのタブを勝手に開いたままにすることはありません。`fab-search` は追加にサインインが必要かどうかを示します。実行前にサインインしておくには、エージェントに `fab-sign-in` の実行を頼むか、エディターのツールバーから Fab を開きます。Epic はこのコンピューターでのサインインを記憶し、エディターは起動時にそれを自動で復元する（パネルもブラウザも開かない）ので、サインインはエディターを再起動しても続きます。購入や、無料リスティングのライブラリへの追加は fab.com で行います。完成したプロジェクトとエンジンのコードプラグインは、プロジェクトに追加するのではなく Epic Games Launcher からインストールします。
 
 </details>
 

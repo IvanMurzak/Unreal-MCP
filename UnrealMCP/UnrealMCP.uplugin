@@ -32,6 +32,12 @@
       "Type": "Editor",
       "LoadingPhase": "Default",
       "PlatformAllowList": [ "Win64", "Mac", "Linux" ]
+    },
+    {
+      "Name": "UnrealMcpFab",
+      "Type": "Editor",
+      "LoadingPhase": "None",
+      "PlatformAllowList": [ "Win64", "Mac", "Linux" ]
     }
   ],
   "Plugins": [
@@ -46,6 +52,12 @@
     {
       "Name": "PythonScriptPlugin",
       "Enabled": true,
+      "TargetAllowList": [ "Editor" ]
+    },
+    {
+      "Name": "EOSShared",
+      "Enabled": true,
+      "Optional": true,
       "TargetAllowList": [ "Editor" ]
     }
   ]

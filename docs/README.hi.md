@@ -288,7 +288,7 @@ Extensions आपके project में source से compile होते ह
 
 | Path | यह क्या है |
 |---|---|
-| [`UnrealMCP/`](../UnrealMCP/) | Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor` |
+| [`UnrealMCP/`](../UnrealMCP/) | Unreal plugin (C++): `UnrealMcpRuntime`, `UnrealMcpRql`, `UnrealMcpEditor`, `UnrealMcpFab` (optional) |
 | [`bridge/`](../bridge/) | `unreal-mcp-bridge`, .NET 10 sidecar |
 | [`cli/`](../cli/) | `unreal-mcp-cli`, npm package |
 | [`extensions/`](../extensions/) | आठ वैकल्पिक engine extensions, जिनकी अपनी releases हैं |

@@ -76,7 +76,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   brush, null without one; writable: rebuilds it as a box, undoable) and `BrushBounds` (world box); component `Owner` (and `Name`: a Blueprint's
   component templates read under their variable name, without the `_GEN_VARIABLE` suffix); Level `Map`, `Package`, `IsPersistent`, `IsCurrent` (writable), `IsVisible` (writable: the Levels panel's eye), `Actors`; World
   `Map`, `Levels`, `PersistentLevel`, `CurrentLevel`; MaterialInterface `Scalars` / `Vectors` / `Textures` (parameter
-  maps, writable on material instances).
+  maps, writable on material instances) and the compile feedback of [Materials](#materials).
 - **Methods** (`call`): Actor `Destroy()` (refused, with the actor's reason and nothing destroyed, where the editor's Delete
   refuses it: `AActor::CanDeleteSelectedActor`, e.g. a World Partition landscape whose streaming proxies are left, which
   a delete would orphan; checked for every planned Destroy before the first runs), `Duplicate(Offset)`, `AddComponent(ClassName, Name)`; component
@@ -333,7 +333,7 @@ the game thread, and the agent gets them two ways.
 | Field | Meaning |
 |---|---|
 | `Sequence` | raised each time the row appears or changes (a new row has a higher `Sequence` than every earlier one) |
-| `Source` | `Viewport` (the viewport's on-screen messages: `FCoreDelegates::OnGetOnScreenMessages`, the engine's map warnings such as `BLUEPRINT COMPILE ERROR` / unbuilt lighting, and renderer scene warnings derived from the scene state the renderer checks: competing directional lights), `Compiler` (loaded Blueprints whose compile failed or warned), `MessageLog:<page>` (`MapCheck`, `PIE`, `BlueprintLog`, `LoadErrors`, `AssetCheck`, `EditorErrors`, `LightingResults`, `AssetTools`, `PackagingResults`, `HLODResults`; errors and warnings, the newest 100 per page), `Log:<category>` (Warning / Error log lines since the editor finished starting, deduplicated, the newest 200; `console` has every line) |
+| `Source` | `Viewport` (the viewport's on-screen messages: `FCoreDelegates::OnGetOnScreenMessages`, the engine's map warnings such as `BLUEPRINT COMPILE ERROR` / unbuilt lighting, and renderer scene warnings derived from the scene state the renderer checks: competing directional lights), `Compiler` (loaded Blueprints whose compile failed or warned, loaded project materials whose last compile failed: [Materials](#materials)), `MessageLog:<page>` (`MapCheck`, `PIE`, `BlueprintLog`, `LoadErrors`, `AssetCheck`, `EditorErrors`, `LightingResults`, `AssetTools`, `PackagingResults`, `HLODResults`; errors and warnings, the newest 100 per page), `Log:<category>` (Warning / Error log lines since the editor finished starting, deduplicated, the newest 200; `console` has every line) |
 | `Severity` | `Error`, `Warning` or `Info` |
 | `Message` | the text (at most 2000 characters) |
 | `Count` | how often a log line was seen (1 otherwise) |
@@ -493,6 +493,36 @@ defaultResponse = "Block", bTraceChannel = false)` adds a project channel in the
 New Object Channel / New Trace Channel buttons), saves `DefaultEngine.ini` at once (not undoable) and reloads the
 profiles so the name resolves; it returns the engine channel.
 
+### Materials
+
+A material that fails to compile, or lacks the usage flag of a mesh kind it is drawn on, renders as the default
+material in a cooked or `-game` run, while the editor only logs it (and sets a missing usage flag in memory, marking the
+material unsaved). `UnrealMcpRqlMaterials.cpp` adds to every `MaterialInterface`:
+
+- `CompileErrors`: `[{FeatureLevel, Platform, Message}]` (`SM6`, `PCD3D_SM6`, the translator's message naming the node) for
+  each feature level the editor compiles for, from the last finished compile (it does not wait: a feature level still
+  compiling is a row saying so); `[]` when it compiles. An instance without its own static permutation repeats its
+  parent's errors.
+- `Compile()`: recompiles now (a material: `UMaterialEditingLibrary::RecompileMaterial`, a constant instance: its static
+  permutation) and waits; returns `{Succeeded, Compiled, Errors, MissingUsages}`; `Compiled` lists the feature levels /
+  platforms that compiled, and an editor without a renderer (`-nullrhi`) compiles nothing and says so in `Note`. It adds
+  no undo step and, like the material editor's Apply, leaves the material marked unsaved (its own `MissingUsages` still
+  counts a material that was saved before the call as saved).
+- `UsageFlags`: the usage flags that are on (`bUsedWithNanite`, `bUsedWithInstancedStaticMeshes`, ...; before UE 5.8 an
+  instance reads its base material's, since 5.8 instances keep their own).
+- `MissingUsages`: `[{Usage, Actor, Component, Problem}]` for the components of the open level that draw the base material
+  (directly or through an instance; the flag is read on the asset that holds it, since UE 5.8 the instance, or for a
+  dynamic instance its nearest saved parent) on a mesh kind
+  it lacks the flag for, only these kinds: skinned meshes `bUsedWithSkeletalMesh`, instanced static meshes
+  `bUsedWithInstancedStaticMeshes`, spline meshes `bUsedWithSplineMeshes`, Nanite meshes `bUsedWithNanite` (UE 5.7+,
+  Voxelize shape preservation: `bUsedWithVoxels`). A flag that is off, or on while the material has unsaved changes,
+  is reported; at most 50 rows.
+
+`unreal.asset("/Game/M_Rock") | call Compile()` after a Python edit (`unreal.MaterialEditingLibrary.recompile_material`
+starts the compile and, before UE 5.8, returns nothing), `unreal.assets("Material") | where len(CompileErrors) > 0 | select Path CompileErrors`. A material whose
+last compile failed is also a `Compiler` row of the `diagnostics` source, so the next tool result's diagnostics note
+names it.
+
 ### User-defined structs
 
 A user-defined struct (the struct asset a DataTable row or a Blueprint variable uses when the project has no C++ struct)
@@ -536,7 +566,7 @@ Every change is undoable (one transaction per mutation). Spawnables are listed b
 | `actor-component-add`, `actor-component-destroy`, `actor-component-list-all` | `call AddComponent(class, name)`, `… | get Components | where $ is X | call Destroy()`, `unreal.classes("ActorComponent")` |
 | `asset-find`, `asset-get-data` | `unreal.assets("Material", "/Game/...")`, `unreal.asset(path)` |
 | `asset-copy` / `-move` / `-delete` / `-create-folder` / `-refresh` / `-import` | `editor | call CopyAsset / MoveAsset / DeleteAsset / CreateFolder / RefreshAssets / ImportAsset` (and `CreateAsset(path, class)` for any asset class) |
-| `asset-material-create`, `-modify`, `-get-data` | `editor | call CreateMaterialInstance(path, parent)`, `Scalars["…"]`, `Vectors["…"]`, `Textures["…"]` |
+| `asset-material-create`, `-modify`, `-get-data` | `editor | call CreateMaterialInstance(path, parent)`, `Scalars["…"]`, `Vectors["…"]`, `Textures["…"]`, `call Compile()` / `CompileErrors` / `MissingUsages` |
 | `level-create` / `-open` / `-save` / `-set-current` / `-unload-sublevel` / `-list-loaded` | `editor | call NewLevel / OpenLevel / SaveLevel / AddSublevel / UnloadSublevel`, `levels` (`set IsCurrent = true`, `set IsVisible = false`) |
 | `editor-application-get-state` / `-set-state` | `editor` `IsPlaying`, `IsPaused` (writable) |
 | `editor-selection-get` / `-set` | `selection`, `editor | set Selection = [...]` |
@@ -629,6 +659,9 @@ of that domain. A new first-party extension adds its entry to the bundled list
   property of each kind (`UnrealMcpRqlSpecFixtures.h`): the nine math structs (text, lists, literals, equality, errors),
   references, arrays / sets / maps, scalars and enums (ranges, rollback, undo), asset and class-defaults lists, the
   console, material parameter maps, the seven class hooks and every registration of the extension seam.
+- `UnrealMcpRqlMaterialsSpec.cpp` (`UnrealMcp.Tools.Rql.Materials`): material compile errors (`Compile()`,
+  `CompileErrors`, the `diagnostics` row; under `-nullrhi` the no-renderer note), `UsageFlags` and `MissingUsages` of an
+  instanced static mesh component.
 - `UnrealMcpRqlDataModelsSpec.cpp` (`UnrealMcp.Tools.Rql.DataModels`): DataTable rows (edit, add / rename / duplicate /
   remove, validation, undo, save and reload), user-defined struct fields, gameplay tags (tag ini edits, text conversion,
   parent tags and their comments, rows with tags), Blueprint component defaults and Instance Editable variables,

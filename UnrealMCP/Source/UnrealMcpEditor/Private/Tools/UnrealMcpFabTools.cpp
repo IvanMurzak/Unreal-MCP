@@ -8,6 +8,7 @@
 #include "UnrealMcpToolRegistry.h"
 #include "Tools/UnrealMcpLogCollector.h"
 #include "UnrealMcpEditorDiagnostics.h"
+#include "UnrealMcpFabSignIn.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -41,6 +42,11 @@
  * reflection: UFabBrowserApi::GetAuthToken / AddToProject (UFUNCTIONs) and UFabLocalAssets::PathsListingID (the config
  * map the workflows write when an import completes). Nothing links against the Fab module, so the editor still loads
  * when the Fab plugin is disabled; the tools then answer with an error.
+ *
+ * Sign-in across editor restarts (DEV-281): the optional UnrealMcpFab module (loaded only with the Fab plugin) restores
+ * the sign-in Epic remembers on this computer when the editor starts and hands its tokens to this family
+ * (UnrealMcpFabSignIn), and says when Epic's sign-in service never started, so fab-sign-in fails at once instead of
+ * waiting for a sign-in that cannot finish.
  *
  * Handlers never block the game thread: an HTTP request or an import in flight answers RetryLater and the dispatcher
  * runs the handler again on a later frame with the same call (the per-call state is keyed by the call's arguments
@@ -288,7 +294,21 @@ namespace UnrealMcpFabToolsLocal
 		return Value;
 	}
 
-	/** The signed-in user's EOS access token, or empty when nobody is signed in to Fab in this editor. */
+	/** What UnrealMcpFab says of Epic's sign-in service (Unknown without that module). */
+	static EUnrealMcpFabSignInService FabService()
+	{
+		const FUnrealMcpFabSignIn& SignIn = UnrealMcpFabSignIn();
+		return SignIn.Service ? SignIn.Service() : EUnrealMcpFabSignInService::Unknown;
+	}
+
+	/** The tokens of the sign-in UnrealMcpFab reads from Fab's EOS platform (a restored one included); false without one. */
+	static bool FabPlatformTokens(FString& OutAccessToken, FString& OutRefreshToken)
+	{
+		const FUnrealMcpFabSignIn& SignIn = UnrealMcpFabSignIn();
+		return SignIn.Tokens && SignIn.Tokens(OutAccessToken, OutRefreshToken);
+	}
+
+	/** The access token of a sign-in the Fab plugin itself made (UFabBrowserApi::GetAuthToken), or empty. */
 	static FString FabAuthToken()
 	{
 		// Signed out, the read logs a LogFab and a LogEOSSDK error; the diagnostics leave out exactly those (DEV-273).
@@ -322,6 +342,15 @@ namespace UnrealMcpFabToolsLocal
 		return Sub;
 	}
 
+	/** The refresh token of the sign-in, for Fab's web session (POST /p/authenticate). */
+	static FString FabRefreshToken()
+	{
+		FString Access, Refresh;
+		if (FabPlatformTokens(Access, Refresh))
+			return Refresh;
+		return FabApiString(TEXT("GetRefreshToken"));
+	}
+
 	/** When this editor last opened Epic's sign-in page, so concurrent and repeated calls do not open a browser tab each. */
 	static double& FabPortalOpenedAt()
 	{
@@ -342,9 +371,22 @@ namespace UnrealMcpFabToolsLocal
 			"or open Fab from the editor's toolbar) so a later run can add them."), *ToolName, *ToolName);
 	}
 
-	/** fab-search's last line: what adding a listing needs, given whether this editor is signed in to Fab. */
-	static FString FabSearchFooterText(bool bSignedIn)
+	/** What every sign-in path answers when Epic's sign-in service never started in this editor: nothing can sign in here. */
+	static FString FabServiceDownText(const FString& ToolName)
 	{
+		return FString::Printf(TEXT(
+			"Epic's sign-in service did not start in this editor (the Fab plugin found no EOS SDK, e.g. the editor was started with "
+			"-NoEOS), so no Fab sign-in can finish here and %s did not run (no browser was opened). Do not call fab-sign-in again in "
+			"this editor session: continue without Fab assets, and tell the user that Fab needs an editor started normally (without "
+			"-NoEOS); the editor log's LogFab lines say why the service did not start."), *ToolName);
+	}
+
+	/** fab-search's last line: what adding a listing needs, given whether this editor is signed in to Fab and can sign in. */
+	static FString FabSearchFooterText(bool bSignedIn, bool bServiceDown = false)
+	{
+		if (!bSignedIn && bServiceDown)
+			return TEXT("\nEpic's sign-in service did not start in this editor (e.g. it was started with -NoEOS), so fab-add and "
+			            "fab-library cannot run in it: plan without Fab assets.");
 		if (bSignedIn)
 			return TEXT("\nfab-add imports a listing the user owns (fab-library lists them); a free listing must first be added to the "
 			            "user's library on fab.com.");
@@ -354,9 +396,15 @@ namespace UnrealMcpFabToolsLocal
 		            "the user owns; a free listing must first be added to the user's library on fab.com.");
 	}
 
-	/** The token if this editor is signed in to Fab now (read once: a failed read logs a LogFab error), else empty. */
+	/**
+	 * The token if this editor is signed in to Fab now, else empty. UnrealMcpFab's read is silent, so it runs on every pass (a
+	 * restore that just finished is seen at once); the Fab plugin's own read logs errors when it fails, so at most once a second.
+	 */
 	static FString FabReadToken(FFabCallState& State)
 	{
+		FString Refresh;
+		if (State.Token.IsEmpty())
+			FabPlatformTokens(State.Token, Refresh);
 		const double Now = FPlatformTime::Seconds();
 		if (State.Token.IsEmpty() && Now - State.LastTokenCheck >= 1.0)
 		{
@@ -401,13 +449,15 @@ namespace UnrealMcpFabToolsLocal
 		OutToken = FabReadToken(State);
 		if (!OutToken.IsEmpty())
 			return true;
-		if (FabSignInPending() && FabTimeLeft(Call) > 0.0)
+		const EUnrealMcpFabSignInService Service = FabService();
+		if ((Service == EUnrealMcpFabSignInService::Restoring || FabSignInPending()) && FabTimeLeft(Call) > 0.0)
 		{
-			OutWait = FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the Fab sign-in the user started."));
+			OutWait = FUnrealMcpToolResult::RetryLater(Service == EUnrealMcpFabSignInService::Restoring
+				? TEXT("Waiting for the remembered Fab sign-in to be restored.") : TEXT("Waiting for the Fab sign-in the user started."));
 			return false;
 		}
-		OutWait = FabFinish(Call, FUnrealMcpToolResult::Error(FabSignInPageOpen() ? FabSignInStillOpenText(ToolName)
-			: FabSignInRequiredText(ToolName)));
+		OutWait = FabFinish(Call, FUnrealMcpToolResult::Error(Service == EUnrealMcpFabSignInService::NotStarted ? FabServiceDownText(ToolName)
+			: FabSignInPageOpen() ? FabSignInStillOpenText(ToolName) : FabSignInRequiredText(ToolName)));
 		return false;
 	}
 
@@ -708,7 +758,8 @@ namespace UnrealMcpFabToolsLocal
 		const bool bSignedIn = FabPluginLoaded(PluginError) && !FabReadToken(State).IsEmpty();
 		FUnrealMcpToolResult Result = FabPageResult(Call, Rows, Lines, FabNextCursor(*Json),
 			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):"), Rows.Num()),
-			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn) : TEXT("\n") + PluginError);
+			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn, FabService() == EUnrealMcpFabSignInService::NotStarted)
+			: TEXT("\n") + PluginError);
 		Result.Structured->SetBoolField(TEXT("signedIn"), bSignedIn);
 		return Result;
 	}
@@ -1015,7 +1066,7 @@ namespace UnrealMcpFabToolsLocal
 			if (!State.Http.IsValid()) // the body is needed only to start the request
 			{
 				TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
-				Body->SetStringField(TEXT("refresh_token"), FabApiString(TEXT("GetRefreshToken")));
+				Body->SetStringField(TEXT("refresh_token"), FabRefreshToken());
 				AuthBody = UnrealMcpSerializeCondensed(Body);
 			}
 			FFabHttpResult Http;
@@ -1158,6 +1209,9 @@ namespace UnrealMcpFabToolsLocal
 	 * the call's time runs out. Opening the Fab panel in the editor signs in silently from the remembered Epic login too;
 	 * this family never opens the panel itself: the panel's web view cannot exist in a -nullrhi editor, and the engine
 	 * asserts there on a layout that saved it.
+	 *
+	 * When Epic's sign-in service never started (UnrealMcpFab says so, or the plugin's Login logs that it has no EOS
+	 * platform), no page opens and nothing could complete: the call fails at once with FabServiceDownText (DEV-281).
 	 */
 	static FUnrealMcpToolResult FabSignIn(const FUnrealMcpToolCall& Call)
 	{
@@ -1171,11 +1225,21 @@ namespace UnrealMcpFabToolsLocal
 			TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
 			S->SetBoolField(TEXT("signedIn"), true);
 			FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(FString::Printf(TEXT("%s fab-library and fab-add can run now. "
-				"The sign-in lasts for this editor session; Epic remembers it on this computer, so in a later editor session opening "
-				"Fab from the editor's toolbar signs in again without a browser."),
+				"Epic remembers the sign-in on this computer, so a later editor session signs in again by itself, without a browser."),
 				bAskedBefore ? TEXT("Signed in to Fab.") : TEXT("Already signed in to Fab in this editor.")), S);
 			Result.bMessageCoversStructured = true;
 			return FabFinish(Call, Result);
+		}
+		const EUnrealMcpFabSignInService Service = FabService();
+		if (Service == EUnrealMcpFabSignInService::NotStarted)
+			return FabFinish(Call, FUnrealMcpToolResult::Error(FabServiceDownText(TEXT("fab-sign-in"))));
+		if (Service == EUnrealMcpFabSignInService::Restoring && !State.bAskedSignIn)
+		{
+			// Never open a page while the remembered sign-in is still being restored: a second login would race it.
+			if (FabTimeLeft(Call) > 0.0)
+				return FUnrealMcpToolResult::RetryLater(TEXT("Restoring the Fab sign-in Epic remembers on this computer."));
+			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("The Fab sign-in Epic remembers on this computer is still being "
+				"restored (no browser was opened). Call fab-sign-in again in a moment.")));
 		}
 		if (!State.bAskedSignIn)
 		{
@@ -1184,9 +1248,17 @@ namespace UnrealMcpFabToolsLocal
 			State.StageStarted = FPlatformTime::Seconds();
 			if (!FabSignInPageOpen())
 			{
+				const int64 Before = FUnrealMcpLogCollector::Get().GetLastSequence();
 				if (!FabInvoke(FabApi(), TEXT("Login"), [](UFunction*, uint8*) {}, [](UFunction*, uint8*) {}))
 					return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("This engine's Fab plugin has no UFabBrowserApi::Login this tool can "
 						"call. The user signs in by opening Fab from the editor's toolbar.")));
+				// Login returns nothing; without an EOS platform it only logs so (FabAuthentication::LoginUsingAccountPortal).
+				static const FName LogFab(TEXT("LogFab"));
+				for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(Before))
+				{
+					if (Entry.Category == LogFab && Entry.Message.Contains(TEXT("Invalid EOS platform handle")))
+						return FabFinish(Call, FUnrealMcpToolResult::Error(FabServiceDownText(TEXT("fab-sign-in"))));
+				}
 				FabPortalOpenedAt() = State.StageStarted;
 				UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] fab-sign-in: opened Epic's sign-in page in the browser."));
 			}
@@ -1199,6 +1271,12 @@ namespace UnrealMcpFabToolsLocal
 				"When the user is ready, call fab-sign-in again: it opens a new page.")));
 		return FabFinish(Call, FUnrealMcpToolResult::Error(FabSignInStillOpenText(TEXT("fab-sign-in"))));
 	}
+}
+
+UNREALMCPEDITOR_API FUnrealMcpFabSignIn& UnrealMcpFabSignIn()
+{
+	static FUnrealMcpFabSignIn SignIn;
+	return SignIn;
 }
 
 namespace UnrealMcpFabTools

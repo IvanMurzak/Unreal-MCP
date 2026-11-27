@@ -63,6 +63,7 @@ public class UnrealMcpRql : ModuleRules
 			"LevelSequence",
 			"MovieScene",
 			"MovieSceneTracks",
+			"RHI", // material compile errors per feature level / shader platform (GShaderPlatformForFeatureLevel, LexToString)
 			"MessageLog", // the `diagnostics` source reads the Message Log pages (Map Check, PIE, Blueprint Log, Load Errors, ...)
 		});
 	}
