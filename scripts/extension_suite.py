@@ -19,6 +19,7 @@ import time
 
 from extension_release import components as extensions, supports_engine
 from ue_machine_lock import machine_lock
+import ubt_conflict
 import ue_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -174,11 +175,22 @@ def build(engine: Path, project: Path) -> None:
                f"-Project={project}", "-WaitMutex", "-NoHotReloadFromIDE"]
     print(f"Building {project.parent} (no editor launch)", flush=True)
     log_path = project.parent / "build.log"
-    with log_path.open("w", encoding="utf-8") as log:
-        completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
-    if completed.returncode:
-        print("\n".join(log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]), flush=True)
-        completed.check_returncode()
+
+    def attempt(watch) -> int:
+        with log_path.open("w", encoding="utf-8") as log:
+            code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
+        if code:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            print("\n".join(lines[-80:]), flush=True)
+            for line in lines:
+                watch(line)
+        return code
+
+    # -WaitMutex waits only for a UBT of the same Windows session: one in another session (the CI runner is
+    # session 0, a local build is not) fails this build at once, so ubt_conflict waits that out.
+    code = ubt_conflict.retry(attempt, f"Build {project.parent.name}")
+    if code:
+        raise subprocess.CalledProcessError(code, command)
 
 
 def check_report(report: Path, selected: list[str], core_tests: bool = True) -> dict:

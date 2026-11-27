@@ -28,6 +28,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT / "scripts"), str
 from chain_feed import NUGET_CONFIG_NAME, TARGETS_NAME, _is_ours  # noqa: E402  (vendored, same folder)
 from publish import ALL_RUNTIMES as RIDS, PROJECT_FILE as BRIDGE_CSPROJ, zip_dir  # noqa: E402  (bridge/publish.py)
 import ue_json  # noqa: E402  (scripts/)
+import ubt_conflict  # noqa: E402  (scripts/)
 import ue_machine_lock  # noqa: E402  (scripts/)
 from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402  (same folder)
 
@@ -85,9 +86,18 @@ def temp() -> Path:
     return Path(env("RUNNER_TEMP"))
 
 
-def run(command: list, **options) -> int:
-    print("+ " + subprocess.list2cmdline([str(c) for c in command]), flush=True)
-    return subprocess.run([str(c) for c in command], **options).returncode
+def run(command: list, watch=None, **options) -> int:
+    """Run `command`; with `watch`, also pass it each line of the (merged) output while echoing it."""
+    command = [str(c) for c in command]
+    print("+ " + subprocess.list2cmdline(command), flush=True)
+    if watch is None:
+        return subprocess.run(command, **options).returncode
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                          errors="replace", **options) as process:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            watch(line)
+    return process.returncode
 
 
 def remove_tree(path: Path) -> None:
@@ -120,7 +130,8 @@ def build_plugin(package: Path, strict: bool = False, plugin: Path | None = None
                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket"]
     if strict:
         command.append("-StrictIncludes")
-    code = run(command)
+    # Another UBT on this machine (a local or agent build) holding its mutex is waited out, not a failure.
+    code = ubt_conflict.retry(lambda watch: run(command, watch=watch), "BuildPlugin")
     if code != 0:
         raise StepError(f"BuildPlugin failed with exit code {code}")
 

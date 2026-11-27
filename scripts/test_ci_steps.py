@@ -128,6 +128,33 @@ class CiStepTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"UE_RUNUAT": uat}):
             self.assertEqual(ci.main(["build-plugin-dist"]), 1)
 
+    def build_plugin_dist(self, uat_body: str):
+        """build-plugin-dist against a fake RunUAT; returns (exit code, the retry sleeps)."""
+        sleeps = []
+        with mock.patch.dict(os.environ, {"UE_RUNUAT": fake_uat(self.temp, uat_body)}), \
+                mock.patch.object(ci.ubt_conflict.time, "sleep", sleeps.append):
+            return ci.main(["build-plugin-dist"]), sleeps
+
+    def test_build_plugin_waits_out_a_ubt_mutex_conflict(self):
+        # DEV-287: another UBT on the machine (a local or agent build) held UBT's global mutex (UE 5.7 wording).
+        marker = self.temp / "tried"
+        result = self.build_plugin_dist(f"""
+            marker = pathlib.Path({str(marker)!r})
+            if not marker.exists():
+                marker.write_text('1')
+                print({r"A conflicting instance of Global\UnrealBuildTool_Mutex_cc1e is already running."!r})
+                print('Result: Failed (ConflictingInstance)')
+                sys.exit(10)
+            package.mkdir(parents=True, exist_ok=True)
+            (package / 'UnrealMCP.uplugin').write_text(json.dumps({{'Modules': [{{'Name': 'UnrealMcpRuntime'}}]}}))
+        """)
+        self.assertEqual(result, (0, [ci.ubt_conflict.RETRY_DELAYS[0]]))
+
+    def test_build_plugin_never_retries_a_compile_error(self):
+        result = self.build_plugin_dist("print(\"Foo.cpp(1): error C2065: 'X': undeclared identifier\")\n"
+                                        "print('A conflicting instance of UnrealBuildTool is already running.')\nsys.exit(6)\n")
+        self.assertEqual(result, (1, []))
+
     def fake_plugin(self) -> Path:
         plugin = self.temp / "repo/UnrealMCP"
         for rel in ("Config/x.ini", "Resources/Icon128.png", "Content/a.txt", "Source/UnrealMcpRuntime/a.cpp",
