@@ -9,6 +9,7 @@
 #include "AnimGraphNode_ControlRig.h"
 #include "AnimGraphNode_Root.h"
 #include "AnimationGraphSchema.h"
+#include "Algo/AnyOf.h"
 #include "Animation/AnimBlueprint.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimNodeBase.h"
@@ -413,11 +414,12 @@ namespace UnrealAIControlRigAnimLocal
 		const FNumericProperty* Number = CastField<FNumericProperty>(Setting);
 		if (Number && !Number->IsEnum())
 		{
-			// A number's import reads "abc", "-" or "." as 0: the text is checked first.
-			if (Number->IsFloatingPoint() && (Value.EndsWith(TEXT("f")) || Value.EndsWith(TEXT("F"))))
-				Value.LeftChopInline(1);
-			if (Number->IsFloatingPoint() ? !FDefaultValueHelper::IsStringValidFloat(Value) : !FDefaultValueHelper::IsStringValidInteger(Value))
+			// A number's import reads "abc", "-" or "." as 0: the text is checked first (a float's check takes "1.0f", and "." without a digit).
+			const bool bDigit = Algo::AnyOf(Value, [](TCHAR Char) { return FChar::IsDigit(Char); });
+			if (!bDigit || (Number->IsFloatingPoint() ? !FDefaultValueHelper::IsStringValidFloat(Value) : !FDefaultValueHelper::IsStringValidInteger(Value)))
 				return FString::Printf(TEXT("not a%s number"), Number->IsFloatingPoint() ? TEXT("") : TEXT(" whole"));
+			if (Number->IsFloatingPoint() && (Value.EndsWith(TEXT("f")) || Value.EndsWith(TEXT("F"))))
+				Value.LeftChopInline(1); // valid as a float literal; the property's import stops before the f
 		}
 		if (Value.IsEmpty())
 			return TEXT("empty");
@@ -533,7 +535,7 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 	TArray<UAnimGraphNode_Root*> Roots;
 	Graph->GetNodesOfClass(Roots);
 	UEdGraphPin* Output = Roots.Num() ? PosePin(Roots[0], EGPD_Input) : nullptr;
-	auto LoosePose = [Graph, Output, &Note]() -> UEdGraphPin*
+	auto LoosePose = [Graph, &Note]() -> UEdGraphPin*
 	{
 		// Only a pose Output Pose (local space, as the rig node's input) can take: not a component-space one.
 		TArray<UEdGraphPin*> Loose;
@@ -541,7 +543,7 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 		for (UEdGraphNode* Candidate : Graph->Nodes)
 		{
 			UEdGraphPin* Pin = Candidate && !Candidate->IsA<UAnimGraphNode_Root>() ? PosePin(Candidate, EGPD_Output) : nullptr;
-			if (Pin && Pin->LinkedTo.Num() == 0 && Graph->GetSchema()->CanCreateConnection(Pin, Output).Response != CONNECT_RESPONSE_DISALLOW)
+			if (Pin && Pin->LinkedTo.Num() == 0 && UAnimationGraphSchema::IsLocalSpacePosePin(Pin->PinType))
 			{
 				Loose.Add(Pin);
 				Labels.Add(NodeLabel(Candidate));

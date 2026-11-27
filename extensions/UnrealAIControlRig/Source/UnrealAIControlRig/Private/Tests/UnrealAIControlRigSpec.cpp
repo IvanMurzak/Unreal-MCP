@@ -644,6 +644,14 @@ void FUnrealAIControlRigSpec::Define()
 			TestTrue(*FString::Printf(TEXT("the Anim Blueprint compiles (%s)"), *SpecJson(Compiled).Left(1500)), SpecJson(Compiled).Contains(TEXT("Succeeded\":true")));
 			Rigs = SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp));
 			TestTrue(*FString::Printf(TEXT("ControlRigs lists the settings (%s)"), *Rigs), Rigs.Contains(TEXT("\"LODThreshold\":\"2\"")) && Rigs.Contains(TEXT("\"Alpha\":\"@RigAlpha\"")));
+			// SetRigInput(..., "AlphaInputType", "Bool") then SetRigInput(..., "Alpha", ".")      Alpha without a pin: a float needs a digit
+			TestTrue(TEXT("AlphaInputType Bool"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("AlphaInputType")), SpecLit(TEXT("Bool")) })));
+			TSharedPtr<FJsonObject> Dot;
+			TestFalse(TEXT("Alpha '.' refused"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT(".")) }), &Dot));
+			TestTrue(*FString::Printf(TEXT("as not a number (%s)"), *SpecJson(Dot).Left(400)), SpecJson(Dot).Contains(TEXT("not a number")));
+			TSharedPtr<FJsonObject> Literal;
+			TestTrue(TEXT("Alpha '0.5f' taken"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("0.5f")) }), &Literal));
+			TestTrue(*FString::Printf(TEXT("Alpha = 0.5 (%s)"), *SpecJson(Literal)), SpecJson(Literal).Contains(TEXT("Alpha = 0.5")));
 		});
 	});
 
