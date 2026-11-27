@@ -20,6 +20,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(ROOT / "scripts"), str
 from chain_feed import NUGET_CONFIG_NAME, TARGETS_NAME, _is_ours  # noqa: E402  (vendored, same folder)
 from publish import ALL_RUNTIMES as RIDS, PROJECT_FILE as BRIDGE_CSPROJ, zip_dir  # noqa: E402  (bridge/publish.py)
 import ue_json  # noqa: E402  (scripts/)
+import ubt_conflict  # noqa: E402  (scripts/)
 import ue_machine_lock  # noqa: E402  (scripts/)
 from ue_env import IS_WINDOWS, add_job_env, link_path, remove_link  # noqa: E402  (same folder)
 
@@ -85,9 +87,37 @@ def temp() -> Path:
     return Path(env("RUNNER_TEMP"))
 
 
-def run(command: list, **options) -> int:
-    print("+ " + subprocess.list2cmdline([str(c) for c in command]), flush=True)
-    return subprocess.run([str(c) for c in command], **options).returncode
+def run(command: list, watch=None, **options) -> int:
+    """Run `command`; with `watch`, also pass it each line of the (merged) output while echoing it."""
+    command = [str(c) for c in command]
+    print("+ " + subprocess.list2cmdline(command), flush=True)
+    if watch is None:
+        return subprocess.run(command, **options).returncode
+    # Binary pipe, echoed as raw bytes: UBT/MSVC write the OEM codepage when redirected, and re-encoding a
+    # decoded line through a cp1252 sys.stdout raised in the reader thread, which then stopped draining the
+    # pipe and hung the build. Only the copy passed to `watch` is decoded (lossy is fine for detection).
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options)
+    out = getattr(sys.stdout, "buffer", None)
+
+    def echo() -> None:
+        for raw in process.stdout:
+            try:
+                if out is not None:
+                    out.write(raw)
+                    out.flush()
+                else:
+                    print(raw.decode("utf-8", "replace"), end="", flush=True)
+                watch(raw.decode("utf-8", "replace"))
+            except Exception as error:  # never stop draining: a stopped reader blocks the child on a full pipe
+                print(f"(output echo failed: {error!r}; still draining)", file=sys.stderr, flush=True)
+
+    # The pipe stays open while any grandchild that inherited it lives (mspdbsrv, an MSBuild node), so the step
+    # waits for the command itself, then gives the reader a moment to drain what the command wrote.
+    reader = threading.Thread(target=echo, daemon=True)
+    reader.start()
+    code = process.wait()
+    reader.join(timeout=30)
+    return code
 
 
 def remove_tree(path: Path) -> None:
@@ -120,7 +150,8 @@ def build_plugin(package: Path, strict: bool = False, plugin: Path | None = None
                f"-TargetPlatforms={env('UE_PLATFORM')}", "-Rocket"]
     if strict:
         command.append("-StrictIncludes")
-    code = run(command)
+    # Another UBT on this machine (a local or agent build) holding its mutex is waited out, not a failure.
+    code = ubt_conflict.retry(lambda watch: run(command, watch=watch), "BuildPlugin")
     if code != 0:
         raise StepError(f"BuildPlugin failed with exit code {code}")
 
@@ -287,8 +318,10 @@ def build_host(_args) -> None:
     uproject = Path(env("HOST_UPROJECT"))
     target = uproject.stem + "Editor"
     log = temp() / f"UBT-{target}-{os.environ.get('GITHUB_JOB', 'job')}-{os.environ.get('RUNNER_NAME', 'runner')}.log"
-    code = run([env("UE_BUILD"), target, env("UE_PLATFORM"), "Development", f"-project={uproject}", "-WaitMutex",
-                "-NoLiveCoding", f"-log={log}"])
+    command = [env("UE_BUILD"), target, env("UE_PLATFORM"), "Development", f"-project={uproject}", "-WaitMutex",
+               "-NoLiveCoding", f"-log={log}"]
+    # -WaitMutex does not wait for a UBT in another Windows session (DEV-287): retry that conflict too.
+    code = ubt_conflict.retry(lambda watch: run(command, watch=watch), "Build host")
     if code != 0:
         raise StepError(f"Host editor target ({target}) build failed for UE_ROOT={env('UE_ROOT')} (exit {code})")
 

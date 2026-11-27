@@ -601,6 +601,33 @@ Waiters retry every 5 s, so the lock is **not first-come-first-served**. With on
 Unreal-MCP runner per machine, Unreal-MCP jobs queue on GitHub rather than on the
 lock; a wait now comes only from another repo's UE job or a local run on that machine.
 
+**The UE runner shares the owner's dev machine, and the lock does not cover local
+builds.** The Windows runner (session 0) builds with the same engine installs as
+interactive and agent builds on that machine (UnrealEditor, Build.bat, RunUAT
+BuildCookRun), which do not take the lock. Both sides then collide on UBT's own
+machine-wide mutex (`Global\UnrealBuildTool_Mutex_<hash>`):
+
+- the CI build fails at once with `A conflicting instance of ... UnrealBuildTool ...
+  is already running` (`Result: Failed (ConflictingInstance)`, UAT exit 10 or 6);
+- a local build, when the holder is the runner in session 0, fails with
+  `UnauthorizedAccessException: Access to the path 'Global\UnrealBuildTool_Mutex_...'
+  is denied` instead of waiting (UBT's `-WaitMutex` waits for its own session only).
+
+So the CI builds (`ue_ci.py` BuildPlugin: `build-plugin-dist`, `plugin-zip`,
+`prebuilt-zip`; `build-host`; the extension suite's UBT build) wait such a conflict out
+(`scripts/ubt_conflict.py`): a build whose output shows one of those messages is
+rerun after 30, 60, 120, 180 and 210 s, each wait logged as a `::warning::` naming
+the step. All builds of one step share one 10-min wait budget (the suite step runs
+several builds), so a plugin job (BuildPlugin step + suite step) waits at most about
+20 min in total, well inside its `timeout-minutes`. The
+cross-session `Global\AutomationTool_<hash> ... is denied` of a local RunUAT is
+retried the same way. A build that also printed a compiler or linker error is never
+retried, and when the attempts or the budget run out the step fails with a `::error::`.
+
+A local or agent UE build on that machine can still fail the same way (nothing
+retries it for you): wait and rerun it, and never kill a UBT, UAT or editor you did
+not start — it may be the CI job's.
+
 ### Never red-by-absence
 
 Both plugin jobs (`plugin` in `test_pull_request.yml`/`release.yml` and
