@@ -220,16 +220,27 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn, EUnrealMcpFabSignInService Service = EUnrealMcpFabSignInService::Unknown);
 	/** The engines a listing's unreal-engine format lists (technicalSpecs.unrealEngineEngineVersions), oldest first: "5.7". */
 	UNREALMCPEDITOR_API TArray<FString> ListingEngines(const FJsonObject& Listing);
-	/** Why this engine cannot load the package file @p Filename (empty when it can); @p bOutFatal false for a warning only. */
-	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutFatal);
+	/**
+	 * What may keep this engine from loading the package file @p Filename (empty when nothing does); @p bOutNeedsNewerEngine
+	 * true only when a newer engine saved it (everything else, e.g. a locked or too old file, is a warning).
+	 */
+	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutNeedsNewerEngine);
 	/** The custom versions newer than this engine's ("<name> <saved> (this engine: <n>)"); unregistered ones go to @p OutUnknown. */
 	UNREALMCPEDITOR_API TArray<FString> CustomVersionProblems(const FCustomVersionArray& Versions, TArray<FString>& OutUnknown);
 	/** The plugin a package dependency needs (a /Script/<Module> owner or a /<Plugin>/ content root); empty for engine / project. */
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency);
 	/** fab-add's post-import checks of the content folder @p Path: the `requirements` object; @p OutLines the lines its text adds. */
 	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> CheckImport(const FString& Path, TArray<FString>& OutLines);
-	/** Reparent @p Path's material instances off read-only engine base materials onto project copies; "<copy> (<n> instance(s))". */
-	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path);
+	/**
+	 * Reparent the material instances under @p Path that an import begun at @p StartedUtc (UTC) made or changed (never one
+	 * in @p DirtyBefore, the packages with unsaved changes when it began) off read-only engine base materials onto tagged,
+	 * per-engine-version copies under @p CopyRoot ("/Game/Fab/Materials/" in fab-add); "<copy> (<n> instance(s))" per copy,
+	 * @p OutWarnings what was left as it was.
+	 */
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const TSet<FName>& DirtyBefore, const FDateTime& StartedUtc,
+		const FString& CopyRoot, TArray<FString>& OutWarnings);
+	/** Specs only: while true, every Fab HTTP request answers at once with no response (nothing reaches fab.com). */
+	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline);
 }
 
 /**

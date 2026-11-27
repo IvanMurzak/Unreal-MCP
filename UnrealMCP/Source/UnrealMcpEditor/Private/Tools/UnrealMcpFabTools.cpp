@@ -35,7 +35,13 @@
 #include "Misc/Paths.h"
 #include "Safety/UnrealMcpEngineContentGuard.h"
 #include "Serialization/CustomVersion.h"
+#include "Misc/DateTime.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Misc/FeedbackContext.h"
 #include "UObject/CoreRedirects.h"
+#include "UObject/MetaData.h"
+#include "UObject/SavePackage.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/PackageFileSummary.h"
 #include "UObject/ObjectVersion.h"
 #include "UObject/UnrealType.h"
@@ -99,11 +105,23 @@ namespace UnrealMcpFabToolsLocal
 		TArray<FString> Headers;
 	};
 
+	/** Specs only (UnrealMcpFabTools::SetOfflineForTests): every request answers at once with no response, so none reaches fab.com. */
+	static bool& FabOffline()
+	{
+		static bool bOffline = false;
+		return bOffline;
+	}
+
 	/** Start a request; its completion (on the game thread) fills the returned result. */
 	static TSharedPtr<FFabHttpResult> FabHttpStart(const FString& Verb, const FString& Url, const TMap<FString, FString>& Headers,
 		const FString& Body = FString())
 	{
 		TSharedPtr<FFabHttpResult> Result = MakeShared<FFabHttpResult>();
+		if (FabOffline())
+		{
+			Result->bDone = true; // answered at once as "no response": nothing leaves this computer
+			return Result;
+		}
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 		Request->SetVerb(Verb);
 		Request->SetURL(Url);
@@ -167,6 +185,14 @@ namespace UnrealMcpFabToolsLocal
 
 	// ---------------------------------------------------------------- per-call state (survives RetryLater)
 
+	/** fab-add: when this call's import began, and which packages had unsaved changes then (the user's, never touched). */
+	struct FFabImportWindow
+	{
+		TSet<FName> DirtyBefore;
+		/** MinValue: no import ran in this call (nothing counts as changed by it). */
+		FDateTime StartedUtc = FDateTime::MinValue();
+	};
+
 	/** One fab-* call in flight: its stage, the request it waits on and what earlier stages found. */
 	struct FFabCallState
 	{
@@ -194,6 +220,7 @@ namespace UnrealMcpFabToolsLocal
 		int64 LogSequence = 0;
 		/** fab-add: the log sequence when the import started, for what the import logged (Nanite Assembly warnings). */
 		int64 ImportLogStart = 0;
+		FFabImportWindow ImportWindow;
 	};
 
 	static TMap<const FJsonObject*, TSharedPtr<FFabCallState>>& FabCalls()
@@ -978,15 +1005,17 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * Why this engine cannot load the package file @p Filename, or empty when it can. @p bOutFatal: false for a warning
-	 * only (custom versions this editor does not know, which load with a warning).
+	 * What may keep this engine from loading the package file @p Filename, or empty when nothing does.
+	 * @p bOutNeedsNewerEngine: true only when a newer engine saved it (newer file or custom versions: this editor never loads
+	 * it). Everything else is a warning with its own wording: a file that cannot be read now (locked, or held by an
+	 * antivirus scan), one that is no package, one too old for this editor, custom versions this editor does not know.
 	 */
-	static FString FabPackageFileProblem(const FString& Filename, bool& bOutFatal)
+	static FString FabPackageFileProblem(const FString& Filename, bool& bOutNeedsNewerEngine)
 	{
-		bOutFatal = true;
+		bOutNeedsNewerEngine = false;
 		TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Filename, FILEREAD_Silent));
 		if (!Reader.IsValid())
-			return TEXT("the file cannot be read");
+			return TEXT("the file could not be opened to check it (locked, or held by an antivirus scan?); not checked");
 		// The versions first, read raw: the summary resets them when they are out of range, so it cannot say which way.
 		int32 Tag = 0, LegacyVersion = 0, LegacyUE3Version = 0, VersionUE4 = 0, VersionUE5 = 0;
 		if (Reader->TotalSize() >= 20)
@@ -999,22 +1028,40 @@ namespace UnrealMcpFabToolsLocal
 				*Reader << VersionUE5;
 		}
 		if (Reader->IsError() || Tag != (int32)PACKAGE_FILE_TAG)
-			return TEXT("not a package file this engine reads");
+			return TEXT("not a package file (no package header; damaged or not an Unreal asset)");
 		if (VersionUE4 > GPackageFileUEVersion.FileVersionUE4 || VersionUE5 > GPackageFileUEVersion.FileVersionUE5)
+		{
+			bOutNeedsNewerEngine = true;
 			return FString::Printf(TEXT("saved by a newer engine (package version %d/%d; this engine loads up to %d/%d)"), VersionUE4, VersionUE5,
 				GPackageFileUEVersion.FileVersionUE4, GPackageFileUEVersion.FileVersionUE5);
+		}
 		Reader->Seek(0);
 		FPackageFileSummary Summary;
 		*Reader << Summary;
-		if (Reader->IsError() || Summary.IsFileVersionTooOld())
-			return TEXT("saved by an engine version this editor does not load");
+		if (Reader->IsError())
+			return TEXT("its package summary could not be read (damaged file?)");
 		if (Summary.bUnversioned)
-			return FString(); // the summary already stands for this engine's versions
+		{
+			// Loaded as this engine's versions, unless the editor refuses unversioned content (then the versions stay unset).
+			return Summary.IsFileVersionTooOld() ? TEXT("an unversioned (cooked) package, which this editor does not load") : FString();
+		}
+		if (Summary.IsFileVersionTooOld())
+		{
+			// The summary also resets the versions of a summary layout newer than this engine's, whose raw versions look fine.
+			if (VersionUE4 >= (int32)VER_UE4_OLDEST_LOADABLE_PACKAGE)
+			{
+				bOutNeedsNewerEngine = true;
+				return TEXT("saved by a newer engine (a package summary format this engine does not read)");
+			}
+			return TEXT("saved by an engine too old for this editor to load (resave it in an older engine first)");
+		}
 		TArray<FString> Unknown;
 		const TArray<FString> TooNew = FabCustomVersionProblems(Summary.GetCustomVersionContainer().GetAllVersions(), Filename, Unknown);
 		if (TooNew.Num())
+		{
+			bOutNeedsNewerEngine = true;
 			return TEXT("saved with newer custom versions than this engine's: ") + FString::Join(TooNew, TEXT(", "));
-		bOutFatal = false;
+		}
 		if (Unknown.Num())
 			return FString::Printf(TEXT("saved with %d custom version(s) this editor does not know (a plugin that registers them may be missing)"), Unknown.Num());
 		return FString();
@@ -1118,20 +1165,20 @@ namespace UnrealMcpFabToolsLocal
 		const int32 Checked = FMath::Min(Files.Num(), FabMaxCheckedPackages);
 		for (int32 Index = 0; Index < Checked; ++Index)
 		{
-			bool bFatal = true;
-			const FString Problem = FabPackageFileProblem(Files[Index], bFatal);
+			bool bNeedsNewerEngine = false;
+			const FString Problem = FabPackageFileProblem(Files[Index], bNeedsNewerEngine);
 			if (Problem.IsEmpty())
 				continue;
 			FString Package;
 			if (!FPackageName::TryConvertFilenameToLongPackageName(Files[Index], Package))
 				Package = FPaths::GetBaseFilename(Files[Index]);
-			(bFatal ? Report.Unloadable : Warnings).Add(Package + TEXT(": ") + Problem);
+			(bNeedsNewerEngine ? Report.Unloadable : Warnings).Add(Package + TEXT(": ") + Problem);
 		}
 		R->SetNumberField(TEXT("packagesChecked"), Checked);
 		R->SetArrayField(TEXT("unloadablePackages"), FabJsonStrings(Report.Unloadable));
 		if (Report.Unloadable.Num())
-			Report.Lines.Add(FString::Printf(TEXT("%d of %d package(s) cannot be loaded by this editor (UE %s): the editor skips them, so they are "
-				"missing from the project, its levels and its cooks: %s."), Report.Unloadable.Num(), Checked, *FabCurrentEngine(),
+			Report.Lines.Add(FString::Printf(TEXT("%d of %d package(s) were saved by a newer engine than this editor (UE %s): the editor skips them, "
+				"so they are missing from the project, its levels and its cooks: %s."), Report.Unloadable.Num(), Checked, *FabCurrentEngine(),
 				*FabNameList(Report.Unloadable)));
 		if (Warnings.Num())
 		{
@@ -1267,55 +1314,177 @@ namespace UnrealMcpFabToolsLocal
 	/** The Fab plugin's material root, and where fab-add mirrors the base materials under it into the project. */
 	static const TCHAR* FabPluginMaterials = TEXT("/Fab/Materials/");
 	static const TCHAR* FabProjectMaterials = TEXT("/Game/Fab/Materials/");
+	/** The package metadata fab-add tags its copies with: "<source material path>|UE <major.minor>" (FabCopyTag). */
+	static const TCHAR* FabCopyTagKey = TEXT("UnrealMcp.FabBaseMaterialCopyOf");
+
+	static FFabImportWindow FabOpenImportWindow()
+	{
+		FFabImportWindow Window;
+		// A little before now: file times may be rounded (FAT: 2 s) and the clock may step.
+		Window.StartedUtc = FDateTime::UtcNow() - FTimespan::FromSeconds(2.0);
+		for (TObjectIterator<UPackage> It; It; ++It)
+		{
+			if (It->IsDirty())
+				Window.DirtyBefore.Add(It->GetFName());
+		}
+		return Window;
+	}
 
 	/**
-	 * The project path of the copy of @p Base: only for a material of the Fab plugin's own content in an installed engine
-	 * (M_MS_Base and its siblings), mirrored by its path under /Fab/Materials/ so two materials never share a copy
-	 * ("/Fab/Materials/Standard/M_MS_Base" -> "/Game/Fab/Materials/Standard/M_MS_Base"). Empty for any other material.
+	 * Whether this call's import made or changed @p Package: it had no unsaved changes when the import began (those are the
+	 * user's), and since then it was changed in memory (Fab's Interchange / glTF importers leave what they create unsaved) or
+	 * its file was written (a pack lands on disk). A package nothing touched since, the user's own, is not.
 	 */
-	static FString FabBaseMaterialCopyPackage(const UMaterial* Base)
+	static bool FabChangedByImport(const UPackage* Package, const FFabImportWindow& Window)
+	{
+		if (!Package || Window.StartedUtc == FDateTime::MinValue() || Window.DirtyBefore.Contains(Package->GetFName()))
+			return false;
+		if (Package->IsDirty())
+			return true;
+		FString Filename;
+		if (!FPackageName::TryConvertLongPackageNameToFilename(Package->GetName(), Filename, FPackageName::GetAssetPackageExtension()))
+			return false;
+		const FDateTime Stamp = IFileManager::Get().GetTimeStamp(*Filename);
+		return Stamp != FDateTime::MinValue() && Stamp >= Window.StartedUtc;
+	}
+
+	/** What fab-add tags its copy of @p Base with: a copy is reused only for the same material in the same engine version. */
+	static FString FabCopyTag(const UMaterial* Base)
+	{
+		return Base->GetPathName() + TEXT("|UE ") + FabCurrentEngine();
+	}
+
+	static FString FabReadCopyTag(UObject* Object)
+	{
+#if WITH_METADATA
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		UMetaData* MetaData = Object->GetOutermost()->GetMetaData();
+		return MetaData ? MetaData->GetValue(Object, FabCopyTagKey) : FString();
+#else
+		return Object->GetOutermost()->GetMetaData().GetValue(Object, FabCopyTagKey);
+#endif
+#else
+		return FString();
+#endif
+	}
+
+	static void FabWriteCopyTag(UObject* Object, const FString& Tag)
+	{
+#if WITH_METADATA
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		if (UMetaData* MetaData = Object->GetOutermost()->GetMetaData())
+			MetaData->SetValue(Object, FabCopyTagKey, *Tag);
+#else
+		Object->GetOutermost()->GetMetaData().SetValue(Object, FabCopyTagKey, *Tag);
+#endif
+#endif
+	}
+
+	/**
+	 * Save @p Package to its file without any dialog (no Save As, no source-control checkout prompt: a tool call must not
+	 * open a modal window). False with @p OutError when it is not on disk afterwards, e.g. a read-only file that source
+	 * control has not checked out.
+	 */
+	static bool FabSaveQuietly(UPackage* Package, FString& OutError)
+	{
+		const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		if (IFileManager::Get().FileExists(*Filename) && IFileManager::Get().IsReadOnly(*Filename))
+		{
+			OutError = FString::Printf(TEXT("%s (its file is read-only: check it out of source control, then save it)"), *Package->GetName());
+			return false;
+		}
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		Args.Error = GWarn;
+		if (!UPackage::SavePackage(Package, Package->FindAssetInPackage(), *Filename, Args) || !IFileManager::Get().FileExists(*Filename))
+		{
+			OutError = FString::Printf(TEXT("%s (saving failed: the editor's log says why)"), *Package->GetName());
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * The project path of the copy of @p Base under @p CopyRoot: only for a material of the Fab plugin's own content in an
+	 * installed engine (M_MS_Base and its siblings), mirrored by its path under /Fab/Materials/ and named for this engine
+	 * version, so two materials or two engines never share a copy ("/Fab/Materials/Standard/M_MS_Base" ->
+	 * "/Game/Fab/Materials/Standard/M_MS_Base_UE5_7"). Empty for any other material.
+	 */
+	static FString FabBaseMaterialCopyPackage(const UMaterial* Base, const FString& CopyRoot)
 	{
 		const FString Package = Base ? Base->GetOutermost()->GetName() : FString();
 		FString Filename;
 		if (!Package.StartsWith(FabPluginMaterials) || !FPackageName::TryConvertLongPackageNameToFilename(Package, Filename)
 			|| !FUnrealMcpEngineContentGuard::IsInstalledEngineFile(Filename))
 			return FString();
-		return FabProjectMaterials + Package.Mid(FCString::Strlen(FabPluginMaterials));
+		return CopyRoot + Package.Mid(FCString::Strlen(FabPluginMaterials)) + TEXT("_UE") + FabCurrentEngine().Replace(TEXT("."), TEXT("_"));
 	}
 
-	/** The project copy of the Fab plugin material @p Base at @p PackageName (made once, usages set), or null. */
-	static UMaterial* FabProjectBaseMaterial(UMaterial* Base, const FString& PackageName, TArray<UPackage*>& OutToSave)
+	/**
+	 * The project copy of the Fab plugin material @p Base at @p PackageName, on disk: the copy fab-add made of @p Base for
+	 * this engine version (its FabCopyTag), else a new one (Nanite and instanced usages set, tagged, saved). Null with
+	 * @p OutWarning when anything else is at that path (never reused, never replaced) or the copy could not be saved.
+	 */
+	static UMaterial* FabProjectBaseMaterial(UMaterial* Base, const FString& PackageName, FString& OutWarning)
 	{
-		const FString ObjectPath = PackageName + TEXT(".") + Base->GetName();
-		if (UMaterial* Existing = FindObject<UMaterial>(nullptr, *ObjectPath))
+		const FString ObjectPath = PackageName + TEXT(".") + FPackageName::GetShortName(PackageName);
+		const bool bOnDisk = FPackageName::DoesPackageExist(PackageName);
+		UPackage* Package = FindPackage(nullptr, *PackageName);
+		FString Error;
+		if (Package || bOnDisk)
+		{
+			UMaterial* Existing = FindObject<UMaterial>(nullptr, *ObjectPath);
+			if (!Existing && !Package)
+				Existing = LoadObject<UMaterial>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+			if (!Existing || FabReadCopyTag(Existing) != FabCopyTag(Base))
+			{
+				OutWarning = FString::Printf(TEXT("%s already exists and is not the copy fab-add makes of %s for UE %s: it is left as it is, "
+					"and the instances keep their engine base material"), *PackageName, *Base->GetPathName(), *FabCurrentEngine());
+				return nullptr;
+			}
+			// Saved only when it never reached disk (an earlier save failed): unsaved changes to a copy on disk stay the user's.
+			if (!bOnDisk && !FabSaveQuietly(Existing->GetOutermost(), Error))
+			{
+				OutWarning = TEXT("the base material copy could not be saved, so no instance was moved to it: ") + Error;
+				return nullptr;
+			}
 			return Existing;
-		// Something else at that path (another class, or a package without that material): never reused or replaced.
-		if (FindPackage(nullptr, *PackageName))
-			return nullptr;
-		if (FPackageName::DoesPackageExist(PackageName))
-			return LoadObject<UMaterial>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
-		UPackage* Package = CreatePackage(*PackageName);
-		UMaterial* Copy = DuplicateObject<UMaterial>(Base, Package, Base->GetFName());
+		}
+		Package = CreatePackage(*PackageName);
+		UMaterial* Copy = DuplicateObject<UMaterial>(Base, Package, *FPackageName::GetShortName(PackageName));
 		if (!Copy)
+		{
+			OutWarning = FString::Printf(TEXT("%s could not be copied to %s"), *Base->GetPathName(), *PackageName);
 			return nullptr;
+		}
 		Copy->SetFlags(RF_Public | RF_Standalone);
 		// The usages PCG / Nanite / foliage set at first use, set up front: using the copy never dirties anything read-only.
 		Copy->bUsedWithNanite = true;
 		Copy->bUsedWithInstancedStaticMeshes = true;
 		Copy->PostEditChange();
+		FabWriteCopyTag(Copy, FabCopyTag(Base));
 		FAssetRegistryModule::AssetCreated(Copy);
 		Package->MarkPackageDirty();
-		OutToSave.Add(Package);
+		if (!FabSaveQuietly(Package, Error))
+		{
+			OutWarning = TEXT("the base material copy could not be saved, so no instance was moved to it: ") + Error;
+			return nullptr;
+		}
 		return Copy;
 	}
 
 	/**
-	 * Reparent the imported material instances (without unsaved changes) whose parent is a material of the Fab plugin's
-	 * content in an installed engine (M_MS_Base under Program Files) to a project copy of it with its Nanite / instanced usages already set: a PCG or
-	 * Nanite use would otherwise set them on the engine material, which cannot be saved, and leave it dirty (that blocked
-	 * an editor restart). Returns "<copy> (<n> instance(s))" per copy used.
+	 * Reparent the material instances under @p Path that this call's import made or changed (@p Window; never one with
+	 * unsaved changes from before it, never the user's untouched ones) whose parent is a material of the Fab plugin's
+	 * content in an installed engine (M_MS_Base under Program Files) to a project copy of it under @p CopyRoot with its
+	 * Nanite / instanced usages already set: a PCG or Nanite use would otherwise set them on the engine material, which
+	 * cannot be saved, and leave it dirty (that blocked an editor restart). An instance the import left unsaved stays
+	 * unsaved (it is saved with the rest of the import); one the import wrote to disk is saved again, without a dialog.
+	 * Returns "<copy> (<n> instance(s))" per copy used; @p OutWarnings what was left as it was, and why.
 	 */
-	static TArray<FString> FabLocalizeBaseMaterials(const FString& Path)
+	static TArray<FString> FabLocalizeBaseMaterials(const FString& Path, const FFabImportWindow& Window, const FString& CopyRoot,
+		TArray<FString>& OutWarnings)
 	{
 		TArray<FString> Done;
 		IAssetRegistry* Registry = IAssetRegistry::Get();
@@ -1328,29 +1497,44 @@ namespace UnrealMcpFabToolsLocal
 		Filter.bRecursiveClasses = true;
 		TArray<FAssetData> Assets;
 		Registry->GetAssets(Filter, Assets);
-		TMap<UMaterial*, int32> Reparented;
-		TArray<UPackage*> ToSave;
+		TMap<UMaterial*, TArray<UMaterialInstanceConstant*>> ByBase;
 		for (const FAssetData& Asset : Assets)
 		{
 			UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Asset.GetAsset());
 			UMaterial* Base = Instance ? Cast<UMaterial>(Instance->Parent) : nullptr;
-			const FString CopyPackage = FabBaseMaterialCopyPackage(Base);
-			// An instance with unsaved changes (the user's) is left as it is: saving it here would write them without asking.
-			if (CopyPackage.IsEmpty() || Instance->GetOutermost()->IsDirty())
-				continue;
-			UMaterial* Copy = FabProjectBaseMaterial(Base, CopyPackage, ToSave);
-			if (!Copy)
-				continue;
-			Instance->SetParentEditorOnly(Copy);
-			Instance->PostEditChange();
-			Instance->MarkPackageDirty();
-			ToSave.AddUnique(Instance->GetOutermost());
-			++Reparented.FindOrAdd(Copy);
+			if (!FabBaseMaterialCopyPackage(Base, CopyRoot).IsEmpty() && FabChangedByImport(Instance->GetOutermost(), Window))
+				ByBase.FindOrAdd(Base).Add(Instance);
 		}
-		if (ToSave.Num())
-			UEditorLoadingAndSavingUtils::SavePackages(ToSave, /*bOnlyDirty*/ false);
-		for (const TPair<UMaterial*, int32>& Pair : Reparented)
-			Done.Add(FString::Printf(TEXT("%s (%d instance(s))"), *Pair.Key->GetPathName(), Pair.Value));
+		TArray<UPackage*> ToSave;
+		for (const TPair<UMaterial*, TArray<UMaterialInstanceConstant*>>& Pair : ByBase)
+		{
+			FString Warning;
+			UMaterial* Copy = FabProjectBaseMaterial(Pair.Key, FabBaseMaterialCopyPackage(Pair.Key, CopyRoot), Warning);
+			if (!Copy)
+			{
+				OutWarnings.Add(Warning);
+				continue;
+			}
+			for (UMaterialInstanceConstant* Instance : Pair.Value)
+			{
+				const bool bWasSaved = !Instance->GetOutermost()->IsDirty();
+				Instance->SetParentEditorOnly(Copy);
+				Instance->PostEditChange();
+				Instance->MarkPackageDirty();
+				if (bWasSaved)
+					ToSave.Add(Instance->GetOutermost());
+			}
+			Done.Add(FString::Printf(TEXT("%s (%d instance(s))"), *Copy->GetPathName(), Pair.Value.Num()));
+		}
+		TArray<FString> NotSaved;
+		for (UPackage* Package : ToSave)
+		{
+			FString Error;
+			if (!FabSaveQuietly(Package, Error))
+				NotSaved.Add(Error);
+		}
+		if (NotSaved.Num())
+			OutWarnings.Add(TEXT("these reparented instances are not saved yet: ") + FabNameList(NotSaved));
 		return Done;
 	}
 
@@ -1472,9 +1656,16 @@ namespace UnrealMcpFabToolsLocal
 		const FString Name = Title.IsEmpty() ? Uid : Title;
 		const FFabImportReport Report = FabCheckImport(Path, State.VersionEngines, bAlready ? 0 : State.ImportLogStart);
 		TArray<FString> Lines = Report.Lines;
-		// Not for a pack this editor cannot use: nothing of the project is changed for it.
-		const TArray<FString> BaseMaterials = Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true)
-			? FabLocalizeBaseMaterials(Path) : TArray<FString>();
+		// Only for what this call imported (a listing already in the project is only located: nothing of it changes), and not
+		// for a pack this editor cannot use.
+		TArray<FString> BaseMaterialWarnings;
+		const TArray<FString> BaseMaterials = !bAlready && Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true)
+			? FabLocalizeBaseMaterials(Path, State.ImportWindow, FabProjectMaterials, BaseMaterialWarnings) : TArray<FString>();
+		if (BaseMaterialWarnings.Num())
+		{
+			Report.Requirements->SetArrayField(TEXT("baseMaterialWarnings"), FabJsonStrings(BaseMaterialWarnings));
+			Lines.Add(TEXT("Base material copy: ") + FabNameList(BaseMaterialWarnings) + TEXT("."));
+		}
 		if (BaseMaterials.Num())
 		{
 			Report.Requirements->SetArrayField(TEXT("baseMaterialCopies"), FabJsonStrings(BaseMaterials));
@@ -1696,6 +1887,7 @@ namespace UnrealMcpFabToolsLocal
 			FabForgetImport(Uid); // a reimport's old record, or one whose folder is gone, must not count as this import done
 			State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 			State.ImportLogStart = State.LogSequence;
+			State.ImportWindow = FabOpenImportWindow();
 			bool bFilled = false;
 			const bool bCalled = FabInvoke(FabApi(), TEXT("AddToProject"), [&](UFunction* Function, uint8* Params)
 			{
@@ -1826,9 +2018,9 @@ namespace UnrealMcpFabTools
 		return UnrealMcpFabToolsLocal::FabSearchFooterText(bSignedIn, Service);
 	}
 	UNREALMCPEDITOR_API TArray<FString> ListingEngines(const FJsonObject& Listing) { return UnrealMcpFabToolsLocal::FabListingEngines(Listing); }
-	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutFatal)
+	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutNeedsNewerEngine)
 	{
-		return UnrealMcpFabToolsLocal::FabPackageFileProblem(Filename, bOutFatal);
+		return UnrealMcpFabToolsLocal::FabPackageFileProblem(Filename, bOutNeedsNewerEngine);
 	}
 	UNREALMCPEDITOR_API TArray<FString> CustomVersionProblems(const FCustomVersionArray& Versions, TArray<FString>& OutUnknown)
 	{
@@ -1840,7 +2032,15 @@ namespace UnrealMcpFabTools
 		OutLines = Report.Lines;
 		return Report.Requirements;
 	}
-	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path) { return UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path); }
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const TSet<FName>& DirtyBefore, const FDateTime& StartedUtc,
+		const FString& CopyRoot, TArray<FString>& OutWarnings)
+	{
+		UnrealMcpFabToolsLocal::FFabImportWindow Window;
+		Window.DirtyBefore = DirtyBefore;
+		Window.StartedUtc = StartedUtc;
+		return UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path, Window, CopyRoot, OutWarnings);
+	}
+	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline) { UnrealMcpFabToolsLocal::FabOffline() = bOffline; }
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency)
 	{
 		const TSharedPtr<IPlugin> Plugin = UnrealMcpFabToolsLocal::FabPluginOfDependency(Dependency, UnrealMcpFabToolsLocal::FabModulePlugins());
@@ -1895,9 +2095,11 @@ namespace UnrealMcpFabTools
 			.ParamString(TEXT("quality"), TEXT("Megascans only: low, medium (default), high or raw."))
 			.ParamBool(TEXT("reimport"), TEXT("Download and import again even when the listing is already in the project, replacing its "
 			                                   "assets (default false)."))
-			.ParamBool(TEXT("localBaseMaterial"), TEXT("Reparent imported material instances whose base material is read-only engine content "
-			                                            "(Megascans' M_MS_Base) to a copy in /Game/Fab/Materials with the Nanite and instanced "
-			                                            "usages set, so PCG / Nanite use never dirties engine content (default true)."))
+			.ParamBool(TEXT("localBaseMaterial"), TEXT("Reparent the material instances this call imports whose base material is read-only engine "
+			                                            "content (Megascans' M_MS_Base) to fab-add's copy of it for this engine version in "
+			                                            "/Game/Fab/Materials with the Nanite and instanced usages set, so PCG / Nanite use never "
+			                                            "dirties engine content (default true). Never touches a listing already in the project, "
+			                                            "instances with unsaved changes from before the import, or a material there fab-add did not make."))
 			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(true)
 			.Handle(&FabAdd);
 
