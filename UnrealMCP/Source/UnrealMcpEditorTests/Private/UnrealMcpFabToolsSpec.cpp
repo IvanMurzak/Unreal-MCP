@@ -449,10 +449,11 @@ void FUnrealMcpFabToolsSpec::Define()
 		const FString Listing = FGuid::NewGuid().ToString();
 		UnrealMcpFabTools::OpenImportWindow(Listing);
 		ON_SCOPE_EXIT { UnrealMcpFabTools::CloseImportWindow(Listing); };
-		// The import's: two it left unsaved (Fab's Interchange / Megascans glTF importers), one it wrote to disk that is
+		// The import's: two it left only in memory (Fab's Interchange / Megascans glTF importers), one it wrote to disk that is
 		// then changed in memory (not the import's to save).
 		UPackage* FreshA = MakeAsset(TEXT("MI_ImportedA"), false);
 		UPackage* FreshB = MakeAsset(TEXT("Textures/T_ImportedB"), false);
+		FreshB->SetDirtyFlag(false); // only in memory, yet not marked dirty: still unsaved
 		UPackage* OnDisk = MakeAsset(TEXT("MI_OnDiskEdited"), true);
 		OnDisk->MarkPackageDirty();
 

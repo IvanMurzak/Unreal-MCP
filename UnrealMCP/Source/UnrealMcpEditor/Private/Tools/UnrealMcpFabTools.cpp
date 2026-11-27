@@ -1578,36 +1578,44 @@ namespace UnrealMcpFabToolsLocal
 
 	// ---------------------------------------------------------------- fab-add: save what the import left unsaved (DEV-306)
 
-	/** The packages under the content folder @p Path (itself or below it) loaded in this editor with unsaved changes. */
-	static TArray<UPackage*> FabDirtyPackagesUnder(const FString& Path)
+	/** Whether the loaded asset package @p Package has never been written to disk (only in memory). */
+	static bool FabOnlyInMemory(const UPackage* Package)
 	{
-		TArray<UPackage*> Dirty;
-		const FString Prefix = Path / TEXT("");
-		for (TObjectIterator<UPackage> It; It; ++It)
-		{
-			if (It->IsDirty() && (It->GetName().StartsWith(Prefix) || It->GetName() == Path))
-				Dirty.Add(*It);
-		}
-		Dirty.Sort([](const UPackage& A, const UPackage& B) { return A.GetName() < B.GetName(); });
-		return Dirty;
+		return Package->FindAssetInPackage() && !FPackageName::DoesPackageExist(Package->GetName());
 	}
 
 	/**
-	 * Save the packages under @p Path that the import of @p Window created and left unsaved (Fab's Interchange / Megascans
-	 * glTF importers do: an editor crash or close then loses the whole import), without any dialog. Only a package that
-	 * was not loaded when the import began and has never been on disk: never one loaded before it (the user's, maybe with
-	 * unsaved edits of their own; FabChangedByImport) and never a file on disk with unsaved changes. Returns the packages
-	 * saved; @p OutErrors the ones that could not be.
+	 * The packages under the content folder @p Path (itself or below it) loaded in this editor that are not saved: with
+	 * unsaved changes, or only in memory (an import may leave a package it created unmarked, yet never written).
+	 */
+	static TArray<UPackage*> FabUnsavedPackagesUnder(const FString& Path)
+	{
+		TArray<UPackage*> Unsaved;
+		const FString Prefix = Path / TEXT("");
+		for (TObjectIterator<UPackage> It; It; ++It)
+		{
+			if ((It->GetName().StartsWith(Prefix) || It->GetName() == Path) && (It->IsDirty() || FabOnlyInMemory(*It)))
+				Unsaved.Add(*It);
+		}
+		Unsaved.Sort([](const UPackage& A, const UPackage& B) { return A.GetName() < B.GetName(); });
+		return Unsaved;
+	}
+
+	/**
+	 * Save the packages under @p Path that the import of @p Window created and left only in memory (Fab's Interchange /
+	 * Megascans glTF importers do, dirty or not: an editor crash or close then loses the whole import), without any dialog.
+	 * Only a package that was not loaded when the import began and has never been on disk: never one loaded before it (the
+	 * user's, maybe with unsaved edits of their own; FabChangedByImport) and never a file on disk with unsaved changes.
+	 * Returns the packages saved; @p OutErrors the ones that could not be.
 	 */
 	static TArray<FString> FabSaveImport(const FString& Path, const FFabImportWindow& Window, TArray<FString>& OutErrors)
 	{
 		TArray<FString> Saved;
 		if (Window.StartedUtc == FDateTime::MinValue())
 			return Saved;
-		for (UPackage* Package : FabDirtyPackagesUnder(Path))
+		for (UPackage* Package : FabUnsavedPackagesUnder(Path))
 		{
-			if (Window.LoadedBefore.Contains(Package->GetFName()) || !Package->FindAssetInPackage()
-				|| FPackageName::DoesPackageExist(Package->GetName()))
+			if (Window.LoadedBefore.Contains(Package->GetFName()) || !FabOnlyInMemory(Package))
 				continue;
 			FString Error;
 			if (FabSaveQuietly(Package, Error))
@@ -1754,7 +1762,7 @@ namespace UnrealMcpFabToolsLocal
 		if (Saved.Num())
 			Lines.Add(FString::Printf(TEXT("Saved the %d package(s) the import created and left unsaved."), Saved.Num()));
 		TArray<FString> Unsaved;
-		for (const UPackage* Package : FabDirtyPackagesUnder(Path))
+		for (const UPackage* Package : FabUnsavedPackagesUnder(Path))
 			Unsaved.Add(Package->GetName());
 		Report.Requirements->SetArrayField(TEXT("unsavedPackages"), FabJsonStrings(Unsaved));
 		if (Unsaved.Num())
