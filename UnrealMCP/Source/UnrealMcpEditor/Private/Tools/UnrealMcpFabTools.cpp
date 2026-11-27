@@ -28,7 +28,12 @@
 #include "FileHelpers.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
+#include "Editor.h"
+#include "Engine/World.h"
+#include "Misc/CoreDelegates.h"
 #include "Interfaces/IPluginManager.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Subsystems/ImportSubsystem.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Misc/PackageName.h"
@@ -193,6 +198,8 @@ namespace UnrealMcpFabToolsLocal
 	{
 		TSet<FName> LoadedBefore;
 		TSet<FName> InstancesBefore;
+		/** The packages of the assets an importer reported while the window was open (FabWatchImports, DEV-306). */
+		TSet<FName> Imported;
 		/** MinValue: no import began (nothing counts as made by one). */
 		FDateTime StartedUtc = FDateTime::MinValue();
 		/** FPlatformTime::Seconds when it was opened. */
@@ -210,6 +217,11 @@ namespace UnrealMcpFabToolsLocal
 		return Windows;
 	}
 	static constexpr double FabImportWindowSeconds = 2.0 * 3600.0;
+
+	static FFabImportWindow* FabFindImportWindow(const FString& ListingUid)
+	{
+		return FabImportWindows().Find(ListingUid);
+	}
 
 	/** One fab-* call in flight: its stage, the request it waits on and what earlier stages found. */
 	struct FFabCallState
@@ -1204,6 +1216,14 @@ namespace UnrealMcpFabToolsLocal
 		}
 		if (Files.Num() > Checked)
 			Report.Lines.Add(FString::Printf(TEXT("Only the first %d of %d package files were checked."), Checked, Files.Num()));
+		if (Checked == 0)
+		{
+			// Never a silent 0 (DEV-306): an import's packages that are only in memory have no file to read yet.
+			const FString Why = FString::Printf(TEXT("no package file (.uasset / .umap) is on disk under %s: packages that are only in memory "
+				"(not saved yet) have no file to check"), *Path);
+			R->SetStringField(TEXT("packagesNotChecked"), Why);
+			Report.Lines.Add(TEXT("No package was checked against this engine: ") + Why + TEXT("."));
+		}
 
 		// 2. What the loadable packages reference: plugins (enabled or not) and references that do not resolve.
 		IAssetRegistry* Registry = IAssetRegistry::Get();
@@ -1334,8 +1354,43 @@ namespace UnrealMcpFabToolsLocal
 	/** The package metadata fab-add tags its copies with: "<source material path>|UE <major.minor>" (FabCopyTag). */
 	static const TCHAR* FabCopyTagKey = TEXT("UnrealMcp.FabBaseMaterialCopyOf");
 
+	/** Record @p Asset's package in every open import window: an importer reported it as imported. */
+	static void FabNoteImported(UObject* Asset)
+	{
+		if (!Asset)
+			return;
+		const FName Package = Asset->GetOutermost()->GetFName();
+		for (TPair<FString, FFabImportWindow>& Pair : FabImportWindows())
+			Pair.Value.Imported.Add(Package);
+	}
+
+	/**
+	 * From the first import window on, record what the importers report through UImportSubsystem::OnAssetPostImport:
+	 * the editor's factory imports and, forwarded by the subsystem, Interchange's (Fab's Megascans glTF and generic
+	 * imports). Only these packages, under the listing's folder, are what an import created (DEV-306): an asset the
+	 * user makes in that folder while the window is open is never one of them. The remaining gap: an import the user
+	 * starts into that same folder during the window is reported the same way. Unbound when the engine exits.
+	 */
+	static void FabWatchImports()
+	{
+		static FDelegateHandle Handle;
+		if (Handle.IsValid())
+			return;
+		UImportSubsystem* Imports = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr;
+		if (!Imports)
+			return; // tried again with the next window
+		Handle = Imports->OnAssetPostImport.AddLambda([](UFactory*, UObject* Asset) { FabNoteImported(Asset); });
+		FCoreDelegates::OnEnginePreExit.AddLambda([]()
+		{
+			if (UImportSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
+				Subsystem->OnAssetPostImport.Remove(Handle);
+			Handle.Reset();
+		});
+	}
+
 	static FFabImportWindow FabOpenImportWindow()
 	{
+		FabWatchImports();
 		FFabImportWindow Window;
 		// A little before now: file times may be rounded (FAT: 2 s) and the clock may step.
 		Window.StartedUtc = FDateTime::UtcNow() - FTimespan::FromSeconds(2.0);
@@ -1410,6 +1465,13 @@ namespace UnrealMcpFabToolsLocal
 #endif
 	}
 
+	/** The file of @p Package: a .umap for a level (as the editor's SaveAsset decides it), else a .uasset. */
+	static FString FabPackageFilename(UPackage* Package)
+	{
+		return FPackageName::LongPackageNameToFilename(Package->GetName(), Package->ContainsMap() || UWorld::FindWorldInPackage(Package)
+			? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension());
+	}
+
 	/**
 	 * Save @p Package to its file without any dialog (no Save As, no source-control checkout prompt: a tool call must not
 	 * open a modal window). False with @p OutError when it is not on disk afterwards, e.g. a read-only file that source
@@ -1417,7 +1479,7 @@ namespace UnrealMcpFabToolsLocal
 	 */
 	static bool FabSaveQuietly(UPackage* Package, FString& OutError)
 	{
-		const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		const FString Filename = FabPackageFilename(Package);
 		if (IFileManager::Get().FileExists(*Filename) && IFileManager::Get().IsReadOnly(*Filename))
 		{
 			OutError = FString::Printf(TEXT("%s (its file is read-only: check it out of source control, then save it)"), *Package->GetName());
@@ -1509,8 +1571,9 @@ namespace UnrealMcpFabToolsLocal
 	 * that was loaded when it began, so never the user's edits) whose parent is a material of the Fab plugin's
 	 * content in an installed engine (M_MS_Base under Program Files) to a project copy of it under @p CopyRoot with its
 	 * Nanite / instanced usages already set: a PCG or Nanite use would otherwise set them on the engine material, which
-	 * cannot be saved, and leave it dirty (that blocked an editor restart). An instance the import left unsaved stays
-	 * unsaved (it is saved with the rest of the import); one the import wrote to disk is saved again, without a dialog.
+	 * cannot be saved, and leave it dirty (that blocked an editor restart). An instance that is on disk (fab-add saves the
+	 * import's in-memory packages first, FabSaveImport, so that is every instance it made) is saved again after the
+	 * reparent, without a dialog; one still only in memory stays so (it is listed as unsaved).
 	 * Returns "<copy> (<n> instance(s))" per copy used; @p OutWarnings what was left as it was, and why.
 	 */
 	static TArray<FString> FabLocalizeBaseMaterials(const FString& Path, const FFabImportWindow& Window, const FString& CopyRoot,
@@ -1566,6 +1629,200 @@ namespace UnrealMcpFabToolsLocal
 		if (NotSaved.Num())
 			OutWarnings.Add(TEXT("these reparented instances are not saved yet: ") + FabNameList(NotSaved));
 		return Done;
+	}
+
+	// ---------------------------------------------------------------- fab-add: save what the import left unsaved (DEV-306)
+
+	/** A loaded asset package that is not saved: with unsaved changes, or never written to disk (only in memory). */
+	struct FFabUnsavedPackage
+	{
+		UPackage* Package = nullptr;
+		bool bOnlyInMemory = false;
+	};
+
+	/** @p Package when it is an asset package that is not saved, else unset. */
+	static TOptional<FFabUnsavedPackage> FabUnsaved(UPackage* Package)
+	{
+		if (!Package || !Package->FindAssetInPackage())
+			return {};
+		const bool bOnlyInMemory = !FPackageName::DoesPackageExist(Package->GetName());
+		if (!bOnlyInMemory && !Package->IsDirty())
+			return {};
+		return FFabUnsavedPackage{ Package, bOnlyInMemory };
+	}
+
+	/**
+	 * Whether fab-add saves @p Unsaved as the import of @p Window made it: never written (only in memory), not loaded
+	 * when the import began, and not open in an asset editor (the user may be editing it). Never a file on disk with
+	 * unsaved changes: those may be the user's.
+	 */
+	static bool FabSavesAsImported(const FFabUnsavedPackage& Unsaved, const FFabImportWindow& Window)
+	{
+		if (!Unsaved.bOnlyInMemory || Window.LoadedBefore.Contains(Unsaved.Package->GetFName()))
+			return false;
+		UAssetEditorSubsystem* Editors = GEditor ? GEditor->GetEditorSubsystem<UAssetEditorSubsystem>() : nullptr;
+		return !Editors || Editors->FindEditorsForAsset(Unsaved.Package->FindAssetInPackage()).IsEmpty();
+	}
+
+	/** What FabSaveImport saved, and what stays unsaved (under the folder, or a dependency of what it saved). */
+	struct FFabSaveResult
+	{
+		TArray<FString> Saved;
+		TArray<FString> Errors;
+		/** Unsaved changes: lost on a crash (closing the editor asks to save them). */
+		TArray<FString> Dirty;
+		/** Never written and not marked dirty: lost on any editor close, which does not ask about them. */
+		TArray<FString> OnlyInMemory;
+	};
+
+	/**
+	 * Save, without any dialog, what the import of @p Window created and left only in memory (Fab's Megascans / Interchange
+	 * glTF importers do, dirty or not: an editor crash or close then loses the whole import): the packages under @p Path
+	 * the importers reported (FFabImportWindow::Imported) that FabSavesAsImported, then, from the asset registry, the hard
+	 * package dependencies of each saved one that pass the same test (an import may put shared textures outside its
+	 * folder). Everything else under @p Path that is not saved, and the unsaved dependencies it did not save, are listed.
+	 */
+	static FFabSaveResult FabSaveImport(const FString& Path, const FFabImportWindow& Window)
+	{
+		FFabSaveResult Result;
+		IAssetRegistry* Registry = IAssetRegistry::Get();
+		TArray<FFabUnsavedPackage> Queue;
+		TArray<FFabUnsavedPackage> Rest; // unsaved under the folder, not (yet) the import's to save
+		TSet<FName> Queued;
+		TSet<FName> Saved;
+		const FString Prefix = Path / TEXT("");
+		auto List = [&Result](const FFabUnsavedPackage& Unsaved)
+		{
+			(Unsaved.bOnlyInMemory ? Result.OnlyInMemory : Result.Dirty).Add(Unsaved.Package->GetName());
+		};
+		// One pass over what is loaded under the folder: what the importers reported is saved, the rest is listed (unless a
+		// saved package turns out to depend on it). Outside the folder, only a dependency of a saved package is saved.
+		for (TObjectIterator<UPackage> It; It; ++It)
+		{
+			if (!It->GetName().StartsWith(Prefix))
+				continue;
+			const TOptional<FFabUnsavedPackage> Unsaved = FabUnsaved(*It);
+			if (!Unsaved)
+				continue;
+			if (Window.Imported.Contains(It->GetFName()) && FabSavesAsImported(*Unsaved, Window))
+			{
+				Queue.Add(*Unsaved);
+				Queued.Add(It->GetFName());
+			}
+			else
+				Rest.Add(*Unsaved);
+		}
+		for (int32 Index = 0; Index < Queue.Num(); ++Index)
+		{
+			UPackage* Package = Queue[Index].Package;
+			FString Error;
+			if (!FabSaveQuietly(Package, Error))
+			{
+				Result.Errors.Add(Error);
+				List(Queue[Index]);
+				continue;
+			}
+			Result.Saved.Add(Package->GetName());
+			Saved.Add(Package->GetFName());
+			if (!Registry)
+				continue;
+			// The saved file says what it imports: read it, then follow its hard references to packages still unsaved.
+			Registry->ScanFilesSynchronous({ FabPackageFilename(Package) }, /*bForceRescan*/ true);
+			TArray<FName> Dependencies;
+			Registry->GetDependencies(Package->GetFName(), Dependencies, UE::AssetRegistry::EDependencyCategory::Package,
+				UE::AssetRegistry::EDependencyQuery::Hard);
+			for (const FName& Dependency : Dependencies)
+			{
+				bool bAlready = false;
+				Queued.Add(Dependency, &bAlready);
+				const TOptional<FFabUnsavedPackage> Unsaved = bAlready ? TOptional<FFabUnsavedPackage>() : FabUnsaved(FindPackage(nullptr, *Dependency.ToString()));
+				if (!Unsaved)
+					continue;
+				if (FabSavesAsImported(*Unsaved, Window))
+					Queue.Add(*Unsaved);
+				else if (!Dependency.ToString().StartsWith(Prefix))
+					List(*Unsaved); // one under the folder is in Rest already
+			}
+		}
+		for (const FFabUnsavedPackage& Unsaved : Rest)
+		{
+			if (!Saved.Contains(Unsaved.Package->GetFName()))
+				List(Unsaved);
+		}
+		Result.Saved.Sort();
+		Result.Dirty.Sort();
+		Result.OnlyInMemory.Sort();
+		return Result;
+	}
+
+	/**
+	 * fab-add's report once the listing is in the project at @p Path: the import's in-memory packages saved (DEV-306),
+	 * the post-import checks (DEV-290: packages this engine cannot load, plugins, startup cvars, unresolved references)
+	 * and the base-material copy (DEV-291). The import window of @p Uid (this call's, or an earlier call's whose import
+	 * outlived it) decides what fab-add may change; without one (a listing found already in the project) nothing is
+	 * saved or changed, only reported. The window is closed afterwards.
+	 */
+	static FFabImportReport FabImportReport(const FString& Path, const FString& Uid, const TArray<FString>& VersionEngines, int64 LogStart,
+		bool bLocalBaseMaterial)
+	{
+		const FFabImportWindow* Window = FabFindImportWindow(Uid);
+		// Saved first, so the package check below reads what the import made.
+		FFabSaveResult Save;
+		if (Window)
+			Save = FabSaveImport(Path, *Window);
+		else
+		{
+			const FString Prefix = Path / TEXT("");
+			for (TObjectIterator<UPackage> It; It; ++It)
+			{
+				const TOptional<FFabUnsavedPackage> Unsaved = It->GetName().StartsWith(Prefix) ? FabUnsaved(*It) : TOptional<FFabUnsavedPackage>();
+				if (Unsaved)
+					(Unsaved->bOnlyInMemory ? Save.OnlyInMemory : Save.Dirty).Add(It->GetName());
+			}
+		}
+		FFabImportReport Report = FabCheckImport(Path, VersionEngines, LogStart);
+		TArray<FString>& Lines = Report.Lines;
+		const TSharedPtr<FJsonObject>& R = Report.Requirements;
+		TArray<FString> BaseMaterialWarnings;
+		TArray<FString> BaseMaterials;
+		if (Window)
+		{
+			// Not for a pack this editor cannot use.
+			if (Report.Unloadable.IsEmpty() && bLocalBaseMaterial)
+				BaseMaterials = FabLocalizeBaseMaterials(Path, *Window, FabProjectMaterials, BaseMaterialWarnings);
+			FabImportWindows().Remove(Uid);
+		}
+		R->SetArrayField(TEXT("savedPackages"), FabJsonStrings(Save.Saved));
+		if (Save.Saved.Num())
+			Lines.Add(FString::Printf(TEXT("Saved the %d package(s) the import created and left only in memory."), Save.Saved.Num()));
+		if (Save.Errors.Num())
+			Lines.Add(TEXT("Could not save these packages of the import: ") + FabNameList(Save.Errors) + TEXT("."));
+		TArray<FString> Unsaved = Save.OnlyInMemory;
+		Unsaved.Append(Save.Dirty);
+		Unsaved.Sort();
+		R->SetArrayField(TEXT("unsavedPackages"), FabJsonStrings(Unsaved));
+		// Never "save all": what fab-add did not save may be the user's own unsaved work (DEV-291's import window).
+		static const TCHAR* SaveOne = TEXT("save the ones to keep, one by one, with rql-mutate `editor | call SaveAsset(\"<package>\")`");
+		if (Save.OnlyInMemory.Num())
+			Lines.Add(FString::Printf(TEXT("%d package(s) were never saved to disk, and closing the editor does not ask about them, so they are "
+				"lost on any close or crash: %s. fab-add saves only what its own import created; %s."), Save.OnlyInMemory.Num(),
+				*FabNameList(Save.OnlyInMemory), SaveOne));
+		if (Save.Dirty.Num())
+			Lines.Add(FString::Printf(TEXT("%d package(s) have unsaved changes (lost on a crash; closing the editor asks to save them): %s; %s."),
+				Save.Dirty.Num(), *FabNameList(Save.Dirty), SaveOne));
+		if (BaseMaterialWarnings.Num())
+		{
+			R->SetArrayField(TEXT("baseMaterialWarnings"), FabJsonStrings(BaseMaterialWarnings));
+			Lines.Add(TEXT("Base material copy: ") + FabNameList(BaseMaterialWarnings) + TEXT("."));
+		}
+		if (BaseMaterials.Num())
+		{
+			R->SetArrayField(TEXT("baseMaterialCopies"), FabJsonStrings(BaseMaterials));
+			Lines.Add(FString::Printf(TEXT("Its material instances used a base material of the Fab plugin in the installed engine (read-only), so they "
+				"now use a project copy with the Nanite and instanced usages set (PCG / Nanite use then never dirties engine content): %s."),
+				*FabNameList(BaseMaterials)));
+		}
+		return Report;
 	}
 
 	// ---------------------------------------------------------------- fab-add
@@ -1676,38 +1933,16 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * fab-add's answer once the listing is in the project at @p Path: the post-import checks (DEV-290: packages this
-	 * engine cannot load, plugins, startup cvars, unresolved references) and the base-material copy (DEV-291). Packages
-	 * this engine cannot load make it an error: the import landed, but the editor skips them.
+	 * fab-add's answer once the listing is in the project at @p Path (FabImportReport). Packages this engine cannot load
+	 * make it an error: the import landed, but the editor skips them.
 	 */
 	static FUnrealMcpToolResult FabAddDone(const FUnrealMcpToolCall& Call, const FFabCallState& State, const FString& Uid, const FString& Title,
 		const FString& Path, bool bAlready)
 	{
 		const FString Name = Title.IsEmpty() ? Uid : Title;
-		const FFabImportReport Report = FabCheckImport(Path, State.VersionEngines, bAlready ? 0 : State.ImportLogStart);
-		TArray<FString> Lines = Report.Lines;
-		// Only for what a fab-add import made (its window: this call's, or an earlier call's whose import outlived it; a
-		// listing found already in the project without one is only located), and not for a pack this editor cannot use.
-		TArray<FString> BaseMaterialWarnings;
-		TArray<FString> BaseMaterials;
-		if (const FFabImportWindow* Window = FabImportWindows().Find(Uid))
-		{
-			if (Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true))
-				BaseMaterials = FabLocalizeBaseMaterials(Path, *Window, FabProjectMaterials, BaseMaterialWarnings);
-			FabImportWindows().Remove(Uid);
-		}
-		if (BaseMaterialWarnings.Num())
-		{
-			Report.Requirements->SetArrayField(TEXT("baseMaterialWarnings"), FabJsonStrings(BaseMaterialWarnings));
-			Lines.Add(TEXT("Base material copy: ") + FabNameList(BaseMaterialWarnings) + TEXT("."));
-		}
-		if (BaseMaterials.Num())
-		{
-			Report.Requirements->SetArrayField(TEXT("baseMaterialCopies"), FabJsonStrings(BaseMaterials));
-			Lines.Add(FString::Printf(TEXT("Its material instances used a base material of the Fab plugin in the installed engine (read-only), so they "
-				"now use a project copy with the Nanite and instanced usages set (PCG / Nanite use then never dirties engine content): %s."),
-				*FabNameList(BaseMaterials)));
-		}
+		const FFabImportReport Report = FabImportReport(Path, Uid, State.VersionEngines, bAlready ? 0 : State.ImportLogStart,
+			Call.GetBool(TEXT("localBaseMaterial"), true));
+		const TArray<FString>& Lines = Report.Lines;
 		const FString Details = Lines.Num() ? TEXT("\n") + FString::Join(Lines, TEXT("\n")) : FString();
 		if (Report.Unloadable.Num())
 		{
@@ -2079,8 +2314,14 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const FString& ListingUid, const FString& CopyRoot,
 		TArray<FString>& OutWarnings)
 	{
-		const UnrealMcpFabToolsLocal::FFabImportWindow* Window = UnrealMcpFabToolsLocal::FabImportWindows().Find(ListingUid);
+		const UnrealMcpFabToolsLocal::FFabImportWindow* Window = UnrealMcpFabToolsLocal::FabFindImportWindow(ListingUid);
 		return Window ? UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path, *Window, CopyRoot, OutWarnings) : TArray<FString>();
+	}
+	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> ImportReport(const FString& Path, const FString& ListingUid, TArray<FString>& OutLines)
+	{
+		const UnrealMcpFabToolsLocal::FFabImportReport Report = UnrealMcpFabToolsLocal::FabImportReport(Path, ListingUid, {}, 0, true);
+		OutLines = Report.Lines;
+		return Report.Requirements;
 	}
 	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline) { UnrealMcpFabToolsLocal::FabOffline() = bOffline; }
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency)
@@ -2127,6 +2368,9 @@ namespace UnrealMcpFabTools
 			                  "Returns the content folder it landed in and the pack's 'requirements' in this editor: packages it cannot "
 			                  "load (saved by a newer engine; the call is then an error), plugins its content needs and whether they are "
 			                  "enabled, startup cvars it needs (Nanite Assemblies) with their values, and references that do not resolve. "
+			                  "The packages the import created and left only in memory (Megascans, glTF) are saved before they are checked "
+			                  "(requirements.savedPackages); any still unsaved under the folder are listed (requirements.unsavedPackages) "
+			                  "with the call that saves one, and a check that found no package file says why (requirements.packagesNotChecked). "
 			                  "A listing already in the project is not downloaded again. Large "
 			                  "packs may take minutes: when the call ends before the import does, call it again with the same listing. "
 			                  "Complete projects and engine code plugins are not added to a project (the Epic Games Launcher installs them). "

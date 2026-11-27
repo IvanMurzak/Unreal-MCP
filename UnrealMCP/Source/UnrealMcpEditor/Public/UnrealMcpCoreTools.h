@@ -241,6 +241,13 @@ namespace UnrealMcpFabTools
 	 */
 	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const FString& ListingUid, const FString& CopyRoot,
 		TArray<FString>& OutWarnings);
+	/**
+	 * fab-add's post-import report of the content folder @p Path for @p ListingUid's import (DEV-306): saves the import's
+	 * in-memory packages (only with an open window: never a package loaded when it began, one on disk, or one no importer
+	 * reported), runs the checks of CheckImport, moves its instances to the base-material copies, closes the window and
+	 * returns the `requirements` object; @p OutLines the lines its text adds.
+	 */
+	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> ImportReport(const FString& Path, const FString& ListingUid, TArray<FString>& OutLines);
 	/** Specs only: while true, every Fab HTTP request answers at once with no response (nothing reaches fab.com). */
 	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline);
 }
