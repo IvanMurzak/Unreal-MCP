@@ -73,9 +73,6 @@ public class UnrealMcpEditor : ModuleRules
 			// Asset lookups of the Blueprint family (the asset / material data tools moved to the UnrealMcpRql module,
 			// docs/rql.md).
 			"AssetRegistry",
-			// fab-add records what Fab's importers report as imported (UInterchangeManager::OnAssetPostImport, DEV-306).
-			"InterchangeCore",
-			"InterchangeEngine",
 			// Blueprint tool family (§10): FKismetEditorUtilities / FBlueprintEditorUtils / FCompilerResultsLog
 			// live in UnrealEd; the K2 pin-type schema + event/function K2 nodes live in BlueprintGraph; the
 			// compiler backend (EBlueprintCompileOptions) in KismetCompiler. (AssetRegistry shared above.)

@@ -30,7 +30,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Editor.h"
 #include "Engine/World.h"
-#include "InterchangeManager.h"
+#include "Misc/CoreDelegates.h"
 #include "Interfaces/IPluginManager.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Subsystems/ImportSubsystem.h"
@@ -1365,20 +1365,27 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * From the first import window on, record what the importers report: Interchange (Fab's Megascans glTF and generic
-	 * imports) and the editor's factory imports (UImportSubsystem, the legacy FBX path). Only these packages are what an
-	 * import created (DEV-306): an asset the user makes in the same folder while the window is open is never one of them.
-	 * The remaining gap: an import the user starts into that folder during the window is reported the same way.
+	 * From the first import window on, record what the importers report through UImportSubsystem::OnAssetPostImport:
+	 * the editor's factory imports and, forwarded by the subsystem, Interchange's (Fab's Megascans glTF and generic
+	 * imports). Only these packages, under the listing's folder, are what an import created (DEV-306): an asset the
+	 * user makes in that folder while the window is open is never one of them. The remaining gap: an import the user
+	 * starts into that same folder during the window is reported the same way. Unbound when the engine exits.
 	 */
 	static void FabWatchImports()
 	{
-		static bool bWatching = false;
-		if (bWatching)
+		static FDelegateHandle Handle;
+		if (Handle.IsValid())
 			return;
-		bWatching = true;
-		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.AddStatic(&FabNoteImported);
-		if (UImportSubsystem* Imports = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
-			Imports->OnAssetPostImport.AddLambda([](UFactory*, UObject* Asset) { FabNoteImported(Asset); });
+		UImportSubsystem* Imports = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr;
+		if (!Imports)
+			return; // tried again with the next window
+		Handle = Imports->OnAssetPostImport.AddLambda([](UFactory*, UObject* Asset) { FabNoteImported(Asset); });
+		FCoreDelegates::OnEnginePreExit.AddLambda([]()
+		{
+			if (UImportSubsystem* Subsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
+				Subsystem->OnAssetPostImport.Remove(Handle);
+			Handle.Reset();
+		});
 	}
 
 	static FFabImportWindow FabOpenImportWindow()
@@ -1670,27 +1677,29 @@ namespace UnrealMcpFabToolsLocal
 
 	/**
 	 * Save, without any dialog, what the import of @p Window created and left only in memory (Fab's Megascans / Interchange
-	 * glTF importers do, dirty or not: an editor crash or close then loses the whole import): the packages the importers
-	 * reported (FFabImportWindow::Imported) that FabSavesAsImported, then, from the asset registry, the hard package
-	 * dependencies of each saved one that pass the same test (an import may put shared textures outside its folder).
-	 * Everything else under @p Path that is not saved, and the unsaved dependencies it did not save, are listed.
+	 * glTF importers do, dirty or not: an editor crash or close then loses the whole import): the packages under @p Path
+	 * the importers reported (FFabImportWindow::Imported) that FabSavesAsImported, then, from the asset registry, the hard
+	 * package dependencies of each saved one that pass the same test (an import may put shared textures outside its
+	 * folder). Everything else under @p Path that is not saved, and the unsaved dependencies it did not save, are listed.
 	 */
 	static FFabSaveResult FabSaveImport(const FString& Path, const FFabImportWindow& Window)
 	{
 		FFabSaveResult Result;
 		IAssetRegistry* Registry = IAssetRegistry::Get();
 		TArray<FFabUnsavedPackage> Queue;
+		TArray<FFabUnsavedPackage> Rest; // unsaved under the folder, not (yet) the import's to save
 		TSet<FName> Queued;
+		TSet<FName> Saved;
 		const FString Prefix = Path / TEXT("");
 		auto List = [&Result](const FFabUnsavedPackage& Unsaved)
 		{
 			(Unsaved.bOnlyInMemory ? Result.OnlyInMemory : Result.Dirty).Add(Unsaved.Package->GetName());
 		};
-		// One pass over what is loaded: the import's packages to save, the rest of the folder's unsaved ones to list.
+		// One pass over what is loaded under the folder: what the importers reported is saved, the rest is listed (unless a
+		// saved package turns out to depend on it). Outside the folder, only a dependency of a saved package is saved.
 		for (TObjectIterator<UPackage> It; It; ++It)
 		{
-			const bool bUnder = It->GetName().StartsWith(Prefix);
-			if (!bUnder && !Window.Imported.Contains(It->GetFName()))
+			if (!It->GetName().StartsWith(Prefix))
 				continue;
 			const TOptional<FFabUnsavedPackage> Unsaved = FabUnsaved(*It);
 			if (!Unsaved)
@@ -1700,8 +1709,8 @@ namespace UnrealMcpFabToolsLocal
 				Queue.Add(*Unsaved);
 				Queued.Add(It->GetFName());
 			}
-			else if (bUnder)
-				List(*Unsaved);
+			else
+				Rest.Add(*Unsaved);
 		}
 		for (int32 Index = 0; Index < Queue.Num(); ++Index)
 		{
@@ -1714,6 +1723,7 @@ namespace UnrealMcpFabToolsLocal
 				continue;
 			}
 			Result.Saved.Add(Package->GetName());
+			Saved.Add(Package->GetFName());
 			if (!Registry)
 				continue;
 			// The saved file says what it imports: read it, then follow its hard references to packages still unsaved.
@@ -1731,8 +1741,13 @@ namespace UnrealMcpFabToolsLocal
 				if (FabSavesAsImported(*Unsaved, Window))
 					Queue.Add(*Unsaved);
 				else if (!Dependency.ToString().StartsWith(Prefix))
-					List(*Unsaved); // under the folder, the pass above listed it already
+					List(*Unsaved); // one under the folder is in Rest already
 			}
+		}
+		for (const FFabUnsavedPackage& Unsaved : Rest)
+		{
+			if (!Saved.Contains(Unsaved.Package->GetFName()))
+				List(Unsaved);
 		}
 		Result.Saved.Sort();
 		Result.Dirty.Sort();

@@ -481,6 +481,7 @@ void FUnrealMcpFabToolsSpec::Define()
 		FreshB->GetOutermost()->SetDirtyFlag(false); // only in memory, yet not marked dirty: still unsaved
 		UMaterialInstanceConstant* OnDisk = MakeInstance(Folder / TEXT("MI_OnDiskEdited"), true);
 		OnDisk->GetOutermost()->MarkPackageDirty();
+		// As Interchange reports an import (UImportSubsystem forwards it to fab-add), and as a factory import does.
 		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.Broadcast(FreshA);
 		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.Broadcast(OnDisk);
 		GEditor->GetEditorSubsystem<UImportSubsystem>()->BroadcastAssetPostImport(nullptr, FreshB);
@@ -490,10 +491,11 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("no window, nothing saved"), Names(UnrealMcpFabTools::ImportReport(Folder, TEXT("no-such-listing"), Lines),
 			TEXT("savedPackages")).IsEmpty());
 		Requirements = UnrealMcpFabTools::ImportReport(Folder, Listing, Lines);
+		auto Sorted = [](TArray<FString> Values) { Values.Sort(); return Values; }; // as Names sorts (FString's case-insensitive order)
 		TestEqual(TEXT("saved what the import left in memory, and its in-memory dependency"), Names(Requirements, TEXT("savedPackages")),
-			TArray<FString>({ TEXT("MI_ImportedA"), TEXT("MI_ImportedB"), TEXT("M_SharedBase") }));
+			Sorted({ TEXT("MI_ImportedA"), TEXT("MI_ImportedB"), TEXT("M_SharedBase") }));
 		TestEqual(TEXT("lists the rest of the folder as unsaved"), Names(Requirements, TEXT("unsavedPackages")),
-			TArray<FString>({ TEXT("MI_OnDiskEdited"), TEXT("MI_UsersCreatedDuring"), TEXT("MI_UsersUnsaved") }));
+			Sorted({ TEXT("MI_OnDiskEdited"), TEXT("MI_UsersCreatedDuring"), TEXT("MI_UsersUnsaved") }));
 		TestEqual(TEXT("checks what is on disk under the folder now"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 3);
 		TestFalse(TEXT("no reason for an empty check"), Requirements->HasField(TEXT("packagesNotChecked")));
 		const FString Text = FString::Join(Lines, TEXT("\n"));
