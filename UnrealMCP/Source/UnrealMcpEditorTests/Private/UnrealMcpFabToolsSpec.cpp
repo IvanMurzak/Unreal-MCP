@@ -430,7 +430,8 @@ void FUnrealMcpFabToolsSpec::Define()
 		{
 			UPackage* Package = CreatePackage(*(Folder / AssetName));
 			Made.Add(Package);
-			UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, *AssetName, RF_Public | RF_Standalone);
+			UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, *FPackageName::GetShortName(AssetName),
+				RF_Public | RF_Standalone);
 			FAssetRegistryModule::AssetCreated(Instance);
 			Package->MarkPackageDirty();
 			if (bSave)

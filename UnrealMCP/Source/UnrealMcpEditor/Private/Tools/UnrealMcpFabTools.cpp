@@ -1425,7 +1425,8 @@ namespace UnrealMcpFabToolsLocal
 	 */
 	static bool FabSaveQuietly(UPackage* Package, FString& OutError)
 	{
-		const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(),
+			Package->ContainsMap() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension());
 		if (IFileManager::Get().FileExists(*Filename) && IFileManager::Get().IsReadOnly(*Filename))
 		{
 			OutError = FString::Printf(TEXT("%s (its file is read-only: check it out of source control, then save it)"), *Package->GetName());
@@ -1585,8 +1586,8 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * The packages under the content folder @p Path loaded in this editor that are not saved: with
-	 * unsaved changes, or only in memory (an import may leave a package it created unmarked, yet never written).
+	 * The asset packages under the content folder @p Path loaded in this editor that are not saved: with unsaved changes,
+	 * or only in memory (an import may leave a package it created unmarked, yet never written).
 	 */
 	static TArray<UPackage*> FabUnsavedPackagesUnder(const FString& Path)
 	{
@@ -1594,7 +1595,7 @@ namespace UnrealMcpFabToolsLocal
 		const FString Prefix = Path / TEXT("");
 		for (TObjectIterator<UPackage> It; It; ++It)
 		{
-			if (It->GetName().StartsWith(Prefix) && (It->IsDirty() || FabOnlyInMemory(*It)))
+			if (It->GetName().StartsWith(Prefix) && It->FindAssetInPackage() && (It->IsDirty() || FabOnlyInMemory(*It)))
 				Unsaved.Add(*It);
 		}
 		Unsaved.Sort([](const UPackage& A, const UPackage& B) { return A.GetName() < B.GetName(); });
@@ -1765,11 +1766,14 @@ namespace UnrealMcpFabToolsLocal
 		for (const UPackage* Package : FabUnsavedPackagesUnder(Path))
 			Unsaved.Add(Package->GetName());
 		Report.Requirements->SetArrayField(TEXT("unsavedPackages"), FabJsonStrings(Unsaved));
+		if (SaveErrors.Num())
+			Lines.Add(TEXT("Could not save these packages of the import: ") + FabNameList(SaveErrors) + TEXT("."));
 		if (Unsaved.Num())
 		{
-			Lines.Add(FString::Printf(TEXT("%d package(s) under %s are not saved (lost if the editor closes or crashes)%s: %s. Save them with "
-				"rql-mutate `editor | call SaveAsset(\"<package>\")` (or `editor | call SaveAll()`)."), Unsaved.Num(), *Path,
-				SaveErrors.Num() ? *(TEXT("; saving failed for ") + FabNameList(SaveErrors)) : TEXT(""), *FabNameList(Unsaved)));
+			// Never "save all": what fab-add did not save may be the user's own unsaved work (DEV-291's import window).
+			Lines.Add(FString::Printf(TEXT("%d package(s) under %s are not saved (lost if the editor closes or crashes): %s. fab-add saves only "
+				"the packages its own import created; save the ones to keep, one by one, with rql-mutate `editor | call SaveAsset(\"<package>\")`."),
+				Unsaved.Num(), *Path, *FabNameList(Unsaved)));
 		}
 		if (BaseMaterialWarnings.Num())
 		{
@@ -2208,7 +2212,7 @@ namespace UnrealMcpFabTools
 			                  "load (saved by a newer engine; the call is then an error), plugins its content needs and whether they are "
 			                  "enabled, startup cvars it needs (Nanite Assemblies) with their values, and references that do not resolve. "
 			                  "The packages the import created and left unsaved (Megascans, glTF) are saved before they are checked; "
-			                  "any still unsaved under the folder are listed with the save call. "
+			                  "any still unsaved under the folder are listed (`unsavedPackages`) with the call that saves one. "
 			                  "A listing already in the project is not downloaded again. Large "
 			                  "packs may take minutes: when the call ends before the import does, call it again with the same listing. "
 			                  "Complete projects and engine code plugins are not added to a project (the Epic Games Launcher installs them). "
