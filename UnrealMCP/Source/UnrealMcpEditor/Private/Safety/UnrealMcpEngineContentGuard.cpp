@@ -60,6 +60,10 @@ void FUnrealMcpEngineContentGuard::Uninstall()
 	bSaveCheckBound = false;
 }
 
+// A file of an installed engine (Build/InstalledBuild.txt, what FApp::IsEngineInstalled reads) under its Engine folder.
+// Deliberately not narrowed by whether the file is writable: the agent must not change engine content even where it could.
+// The App's close-if-saved.ts `in_engine` starts from this same rule (installed build, under the Engine folder) and only
+// for dropping a dirty package adds "this user cannot write the file"; keep the shared part of both sides in step.
 bool FUnrealMcpEngineContentGuard::IsInstalledEngineFile(const FString& Filename)
 {
 	if (!FApp::IsEngineInstalled() || Filename.IsEmpty())

@@ -2,6 +2,7 @@
 // See the LICENSE file in the repository root for more information.
 
 #include "CoreGlobals.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
 #include "UnrealMcpFabSignIn.h"
@@ -30,8 +31,26 @@ namespace UnrealMcpFabLocal
 #if WITH_EOS_SDK
 	/** A persistent-auth login this module started is in flight. */
 	static bool bRestoring = false;
-	/** The restore is tried once per editor session: on editor start, or on first use when Fab's platform came later. */
+	/**
+	 * The restore is tried once per editor session: on editor start, or on first use when Fab's platform came later. A try
+	 * that failed only for a passing reason (FabRestoreRetryable) clears it, so a later use tries again (DEV-293).
+	 */
 	static bool bRestoreTried = false;
+	/** No new try before this time (FPlatformTime::Seconds): a passing failure is retried, but not on every frame. */
+	static double FabRestoreNotBefore = 0.0;
+	static constexpr double FabRestoreRetrySeconds = 15.0;
+	/** Passing failures retried so far; after FabRestoreMaxRetries the next one is final. */
+	static int32 FabRestoreRetries = 0;
+	static constexpr int32 FabRestoreMaxRetries = 3;
+
+	/**
+	 * A retry of a passing failure is due later (FabRestoreDone). The tools then wait as for a restore in flight: fab-search
+	 * does not report a missing sign-in, and fab-sign-in opens no browser page that the retried login would collide with.
+	 */
+	static bool FabRestorePending()
+	{
+		return !bRestoreTried && FPlatformTime::Seconds() < FabRestoreNotBefore;
+	}
 
 	/** Where Fab's EOS platform stands: no SDK, no candidate, exactly one (returned) or more than one. */
 	enum class EFabPlatform : uint8 { NoSdk, None, Found, Ambiguous };
@@ -98,6 +117,26 @@ namespace UnrealMcpFabLocal
 		return nullptr;
 	}
 
+	/**
+	 * A failed restore that may succeed later with the same remembered sign-in: no network yet, a timeout, a busy or failing
+	 * service. Epic's SDK keeps the remembered sign-in then. Every other failure is final: none remembered, Epic refused it, or
+	 * another login holds Fab's platform (EOS_RequestInProgress: a retry would only collide with it again).
+	 */
+	static bool FabRestoreRetryable(EOS_EResult Result)
+	{
+		switch (Result)
+		{
+		case EOS_EResult::EOS_NoConnection:
+		case EOS_EResult::EOS_NetworkDisconnected:
+		case EOS_EResult::EOS_TimedOut:
+		case EOS_EResult::EOS_TooManyRequests:
+		case EOS_EResult::EOS_ServiceFailure:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	static void EOS_CALL FabRestoreDone(const EOS_Auth_LoginCallbackInfo* Data)
 	{
 		if (!EOS_EResult_IsOperationComplete(Data->ResultCode))
@@ -106,6 +145,14 @@ namespace UnrealMcpFabLocal
 		if (Data->ResultCode == EOS_EResult::EOS_Success)
 		{
 			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: restored the Epic sign-in remembered on this computer (no browser)."));
+		}
+		else if (FabRestoreRetryable(Data->ResultCode) && FabRestoreRetries < FabRestoreMaxRetries)
+		{
+			++FabRestoreRetries;
+			bRestoreTried = false;
+			FabRestoreNotBefore = FPlatformTime::Seconds() + FabRestoreRetrySeconds;
+			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: the remembered Epic sign-in was not restored yet (%s); the next Fab tool call "
+				"tries again."), UTF8_TO_TCHAR(EOS_EResult_ToString(Data->ResultCode)));
 		}
 		else
 		{
@@ -117,12 +164,13 @@ namespace UnrealMcpFabLocal
 	/** Sign in on Fab's platform from the remembered sign-in, once, unless someone is signed in there already. */
 	static void FabRestoreOnce(EOS_HPlatform Platform)
 	{
-		if (bRestoreTried)
+		if (bRestoreTried || FabRestorePending())
 			return;
 		bRestoreTried = true;
 		const EOS_HAuth Auth = EOS_Platform_GetAuthInterface(Platform);
 		if (!Auth || FabSignedInAccount(Auth))
 			return;
+		UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: restoring the Epic sign-in remembered on this computer (no browser)."));
 		EOS_Auth_Credentials Credentials = {};
 		Credentials.ApiVersion = EOS_AUTH_CREDENTIALS_API_LATEST;
 		Credentials.Type = EOS_ELoginCredentialType::EOS_LCT_PersistentAuth;
@@ -169,7 +217,7 @@ namespace UnrealMcpFabLocal
 			return EUnrealMcpFabSignInService::NotStarted;
 		case EFabPlatform::Found:
 			FabRestoreOnce(Platform);
-			return bRestoring ? EUnrealMcpFabSignInService::Restoring : EUnrealMcpFabSignInService::Running;
+			return bRestoring || FabRestorePending() ? EUnrealMcpFabSignInService::Restoring : EUnrealMcpFabSignInService::Running;
 		default:
 			// No candidate yet, or several: not known here (fab-sign-in's own check of the Fab plugin's Login decides).
 			return EUnrealMcpFabSignInService::Unknown;
