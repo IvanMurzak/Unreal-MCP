@@ -308,7 +308,7 @@ void FUnrealMcpFabToolsSpec::Define()
 	It("checks an imported folder and moves its instances off a read-only engine base material (DEV-290, DEV-291)", [this]()
 	{
 		UMaterial* EngineBase = LoadObject<UMaterial>(nullptr, TEXT("/Fab/Materials/Standard/M_MS_Base.M_MS_Base"));
-		const FString CopyPackage = TEXT("/Game/Fab/Materials/M_MS_Base");
+		const FString CopyPackage = TEXT("/Game/Fab/Materials/Standard/M_MS_Base");
 		if (!EngineBase || !FApp::IsEngineInstalled() || FPackageName::DoesPackageExist(CopyPackage))
 			return; // needs the Fab plugin's content in an installed engine, and a project without that copy yet
 		const bool bBaseWasDirty = EngineBase->GetOutermost()->IsDirty();
@@ -361,6 +361,12 @@ void FUnrealMcpFabToolsSpec::Define()
 		const TArray<TSharedPtr<FJsonValue>>* Unresolved = nullptr;
 		TestTrue(TEXT("nothing unresolved"), Requirements->TryGetArrayField(TEXT("unresolvedReferences"), Unresolved) && Unresolved->IsEmpty());
 
+		// An instance with unsaved changes (the user's) is never reparented or saved by fab-add.
+		UPackage* DirtyPackage = CreatePackage(*(Folder / TEXT("MI_FabSpecUnsaved")));
+		UMaterialInstanceConstant* Unsaved = NewObject<UMaterialInstanceConstant>(DirtyPackage, TEXT("MI_FabSpecUnsaved"), RF_Public | RF_Standalone);
+		Unsaved->SetParentEditorOnly(EngineBase);
+		FAssetRegistryModule::AssetCreated(Unsaved);
+		DirtyPackage->MarkPackageDirty();
 		const TArray<FString> Copies = UnrealMcpFabTools::LocalizeBaseMaterials(Folder);
 		if (TestEqual(TEXT("one copy used"), Copies.Num(), 1))
 			TestTrue(TEXT("named with its instance count"), Copies[0].Contains(CopyPackage) && Copies[0].Contains(TEXT("1 instance")));
@@ -372,7 +378,10 @@ void FUnrealMcpFabToolsSpec::Define()
 			TestFalse(TEXT("the copy is saved"), Copy->GetOutermost()->IsDirty());
 		}
 		TestEqual(TEXT("the engine material is untouched"), EngineBase->GetOutermost()->IsDirty(), bBaseWasDirty);
+		TestTrue(TEXT("the unsaved instance keeps its parent"), Unsaved->Parent == EngineBase);
+		TestTrue(TEXT("and stays unsaved"), DirtyPackage->IsDirty());
 		TestTrue(TEXT("a second pass changes nothing"), UnrealMcpFabTools::LocalizeBaseMaterials(Folder).IsEmpty());
+		DirtyPackage->SetDirtyFlag(false); // no save prompt for the spec's package in a local editor
 	});
 }
 

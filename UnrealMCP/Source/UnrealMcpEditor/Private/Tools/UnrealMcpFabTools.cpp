@@ -35,6 +35,7 @@
 #include "Misc/Paths.h"
 #include "Safety/UnrealMcpEngineContentGuard.h"
 #include "Serialization/CustomVersion.h"
+#include "UObject/CoreRedirects.h"
 #include "UObject/PackageFileSummary.h"
 #include "UObject/ObjectVersion.h"
 #include "UObject/UnrealType.h"
@@ -1149,8 +1150,14 @@ namespace UnrealMcpFabToolsLocal
 				}
 				if (FPackageName::IsMemoryPackage(Dependency) || FPackageName::IsTempPackage(Dependency))
 					continue;
-				const bool bExists = Dependency.StartsWith(TEXT("/Script/")) ? FindPackage(nullptr, *Dependency) != nullptr
-					: Packages.Contains(DependencyName) || FPackageName::DoesPackageExist(Dependency);
+				// A moved or renamed package (a PackageRedirects line) loads under its new name; one marked removed is no gap.
+				const FCoreRedirectObjectName Redirected = FCoreRedirects::GetRedirectedName(ECoreRedirectFlags::Type_Package,
+					FCoreRedirectObjectName(NAME_None, NAME_None, DependencyName));
+				if (FCoreRedirects::IsKnownMissing(ECoreRedirectFlags::Type_Package, Redirected))
+					continue;
+				const FString Target = Redirected.PackageName.IsNone() ? Dependency : Redirected.PackageName.ToString();
+				const bool bExists = Target.StartsWith(TEXT("/Script/")) ? FindPackage(nullptr, *Target) != nullptr
+					: Packages.Contains(FName(*Target)) || FPackageName::DoesPackageExist(Target);
 				if (!bExists)
 					Unresolved.Add(FString::Printf(TEXT("%s (from %s)"), *Dependency, *Package.ToString()));
 			}
@@ -1231,25 +1238,36 @@ namespace UnrealMcpFabToolsLocal
 
 	// ---------------------------------------------------------------- fab-add: base materials out of engine content (DEV-291)
 
-	/** Where fab-add keeps its project copies of base materials that live in installed engine content (M_MS_Base). */
-	static const TCHAR* FabBaseMaterialFolder = TEXT("/Game/Fab/Materials");
+	/** The Fab plugin's material root, and where fab-add mirrors the base materials under it into the project. */
+	static const TCHAR* FabPluginMaterials = TEXT("/Fab/Materials/");
+	static const TCHAR* FabProjectMaterials = TEXT("/Game/Fab/Materials/");
 
-	static bool FabIsInstalledEnginePackage(const UObject* Object)
+	/**
+	 * The project path of the copy of @p Base: only for a material of the Fab plugin's own content in an installed engine
+	 * (M_MS_Base and its siblings), mirrored by its path under /Fab/Materials/ so two materials never share a copy
+	 * ("/Fab/Materials/Standard/M_MS_Base" -> "/Game/Fab/Materials/Standard/M_MS_Base"). Empty for any other material.
+	 */
+	static FString FabBaseMaterialCopyPackage(const UMaterial* Base)
 	{
+		const FString Package = Base ? Base->GetOutermost()->GetName() : FString();
 		FString Filename;
-		return Object && FPackageName::TryConvertLongPackageNameToFilename(Object->GetOutermost()->GetName(), Filename)
-			&& FUnrealMcpEngineContentGuard::IsInstalledEngineFile(Filename);
+		if (!Package.StartsWith(FabPluginMaterials) || !FPackageName::TryConvertLongPackageNameToFilename(Package, Filename)
+			|| !FUnrealMcpEngineContentGuard::IsInstalledEngineFile(Filename))
+			return FString();
+		return FabProjectMaterials + Package.Mid(FCString::Strlen(FabPluginMaterials));
 	}
 
-	/** The project copy of the engine-content material @p Base (made once, with the Nanite and instanced usages set), or null. */
-	static UMaterial* FabProjectBaseMaterial(UMaterial* Base, TArray<UPackage*>& OutToSave)
+	/** The project copy of the Fab plugin material @p Base at @p PackageName (made once, usages set), or null. */
+	static UMaterial* FabProjectBaseMaterial(UMaterial* Base, const FString& PackageName, TArray<UPackage*>& OutToSave)
 	{
-		const FString PackageName = FString(FabBaseMaterialFolder) / Base->GetName();
 		const FString ObjectPath = PackageName + TEXT(".") + Base->GetName();
 		if (UMaterial* Existing = FindObject<UMaterial>(nullptr, *ObjectPath))
 			return Existing;
+		// Something else at that path (another class, or a package without that material): never reused or replaced.
+		if (FindPackage(nullptr, *PackageName))
+			return nullptr;
 		if (FPackageName::DoesPackageExist(PackageName))
-			return LoadObject<UMaterial>(nullptr, *ObjectPath); // null when something else of that name is there
+			return LoadObject<UMaterial>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
 		UPackage* Package = CreatePackage(*PackageName);
 		UMaterial* Copy = DuplicateObject<UMaterial>(Base, Package, Base->GetFName());
 		if (!Copy)
@@ -1266,8 +1284,8 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * Reparent the imported material instances whose parent is a material in installed engine content (the Fab plugin's
-	 * M_MS_Base under Program Files) to a project copy of it with its Nanite / instanced usages already set: a PCG or
+	 * Reparent the imported material instances (without unsaved changes) whose parent is a material of the Fab plugin's
+	 * content in an installed engine (M_MS_Base under Program Files) to a project copy of it with its Nanite / instanced usages already set: a PCG or
 	 * Nanite use would otherwise set them on the engine material, which cannot be saved, and leave it dirty (that blocked
 	 * an editor restart). Returns "<copy> (<n> instance(s))" per copy used.
 	 */
@@ -1290,9 +1308,11 @@ namespace UnrealMcpFabToolsLocal
 		{
 			UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Asset.GetAsset());
 			UMaterial* Base = Instance ? Cast<UMaterial>(Instance->Parent) : nullptr;
-			if (!Base || !FabIsInstalledEnginePackage(Base))
+			const FString CopyPackage = FabBaseMaterialCopyPackage(Base);
+			// An instance with unsaved changes (the user's) is left as it is: saving it here would write them without asking.
+			if (CopyPackage.IsEmpty() || Instance->GetOutermost()->IsDirty())
 				continue;
-			UMaterial* Copy = FabProjectBaseMaterial(Base, ToSave);
+			UMaterial* Copy = FabProjectBaseMaterial(Base, CopyPackage, ToSave);
 			if (!Copy)
 				continue;
 			Instance->SetParentEditorOnly(Copy);
@@ -1422,11 +1442,13 @@ namespace UnrealMcpFabToolsLocal
 		const FString Name = Title.IsEmpty() ? Uid : Title;
 		const FFabImportReport Report = FabCheckImport(Path, State.VersionEngines, bAlready ? 0 : State.ImportLogStart);
 		TArray<FString> Lines = Report.Lines;
-		const TArray<FString> BaseMaterials = Call.GetBool(TEXT("localBaseMaterial"), true) ? FabLocalizeBaseMaterials(Path) : TArray<FString>();
+		// Not for a pack this editor cannot use: nothing of the project is changed for it.
+		const TArray<FString> BaseMaterials = Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true)
+			? FabLocalizeBaseMaterials(Path) : TArray<FString>();
 		if (BaseMaterials.Num())
 		{
 			Report.Requirements->SetArrayField(TEXT("baseMaterialCopies"), FabJsonStrings(BaseMaterials));
-			Lines.Add(FString::Printf(TEXT("Its material instances used a base material in the installed engine's content (read-only), so they "
+			Lines.Add(FString::Printf(TEXT("Its material instances used a base material of the Fab plugin in the installed engine (read-only), so they "
 				"now use a project copy with the Nanite and instanced usages set (PCG / Nanite use then never dirties engine content): %s."),
 				*FabNameList(BaseMaterials)));
 		}
