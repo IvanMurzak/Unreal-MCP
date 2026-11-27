@@ -260,7 +260,9 @@ namespace UnrealMcpPythonTools
 			                  "editor | call StartPlay() then AdvancePlay(3), and rql-query console | where Verbosity == \"Error\". "
 			                  "Build rotators and colours with "
 			                  "keyword arguments, unreal.Rotator(pitch=, yaw=, roll=) and unreal.Color(r=, g=, b=, a=) / unreal.LinearColor(r=, g=, b=, a=): "
-			                  "Rotator and Color take positional arguments in an unusual order (Rotator: roll, pitch, yaw; Color: b, g, r, a)."))
+			                  "Rotator and Color take positional arguments in an unusual order (Rotator: roll, pitch, yaw; Color: b, g, r, a), but a list "
+			                  "given for a Rotator (unreal.Transform(rotation=[...]), a function argument) is read as pitch, yaw, roll: "
+			                  "[0, 0, yaw] is a roll and lays meshes on their side."))
 			.ParamString(TEXT("code"), TEXT("Python code. Example: \"actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)"
 			                                "\\nlen(actors.get_all_level_actors())\""), EUnrealMcpParamRequirement::Required)
 			.Param(TEXT("include"), TEXT("array"), TEXT(""), EUnrealMcpParamRequirement::Optional,

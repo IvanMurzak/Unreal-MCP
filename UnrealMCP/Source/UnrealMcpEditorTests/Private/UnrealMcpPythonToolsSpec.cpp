@@ -65,19 +65,23 @@ void FUnrealMcpPythonToolsSpec::Define()
 		const FUnrealMcpRegisteredTool* Tool = Registry.Find(TEXT("python-execute"));
 		TestTrue(TEXT("the description has the keyword hint"), Tool && Tool->Description.Contains(TEXT("unreal.Rotator(pitch=, yaw=, roll=)"))
 			&& Tool->Description.Contains(TEXT("unreal.Color(r=, g=, b=, a=)"))
-			&& Tool->Description.Contains(TEXT("Rotator: roll, pitch, yaw; Color: b, g, r, a")));
+			&& Tool->Description.Contains(TEXT("Rotator: roll, pitch, yaw; Color: b, g, r, a"))
+			&& Tool->Description.Contains(TEXT("unreal.Transform(rotation=[...]), a function argument) is read as pitch, yaw, roll")));
 		TestTrue(TEXT("the description points editor features at the installed RQL extensions first"), Tool
 			&& Tool->Description.Contains(TEXT("check rql-schema for an installed extension with ready operations")));
 
-		// The orders the description names are what UE's Python really does (FRotator is built through MakeRotator).
+		// The orders the description names are what UE's Python really does (positional FRotator args go through MakeRotator;
+		// a list converted to an FRotator fills Pitch, Yaw, Roll).
 		const FUnrealMcpToolResult R = Run(TEXT(
 			"rot = unreal.Rotator(1.0, 2.0, 3.0)\n"
 			"col = unreal.Color(1, 2, 3, 4)\n"
 			"kw = unreal.Rotator(pitch=10.0, yaw=20.0, roll=30.0)\n"
 			"kc = unreal.Color(r=255, g=0, b=0, a=255)\n"
-			"f'{rot.roll:g},{rot.pitch:g},{rot.yaw:g}|{col.b},{col.g},{col.r},{col.a}|{kw.pitch:g},{kw.yaw:g},{kw.roll:g}|{kc.r},{kc.b}'"));
+			"tr = unreal.Transform(rotation=[10.0, 20.0, 30.0]).rotation.rotator()\n"
+			"f'{rot.roll:g},{rot.pitch:g},{rot.yaw:g}|{col.b},{col.g},{col.r},{col.a}|{kw.pitch:g},{kw.yaw:g},{kw.roll:g}|{kc.r},{kc.b}"
+			"|{round(tr.pitch)},{round(tr.yaw)},{round(tr.roll)}'"));
 		TestTrue(*FString::Printf(TEXT("positional and keyword orders (%s)"), *R.Message), R.bSuccess
-			&& R.Message.StartsWith(TEXT("1,2,3|1,2,3,4|10,20,30|255,0")));
+			&& R.Message.StartsWith(TEXT("1,2,3|1,2,3,4|10,20,30|255,0|10,20,30")));
 	});
 
 	It("returns the last expression and the unreal module is pre-imported", [this]()

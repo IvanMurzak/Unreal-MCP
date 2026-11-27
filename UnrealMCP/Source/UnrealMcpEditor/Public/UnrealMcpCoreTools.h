@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
 #include "Serialization/CustomVersion.h"
+#include "UnrealMcpFabSignIn.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -212,8 +213,11 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions);
 	/** What fab-library / fab-add (@p ToolName) answer without a Fab sign-in: ask the user, then fab-sign-in, then call again. */
 	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName);
-	/** fab-search's closing line: what adding a listing needs, given whether this editor is signed in to Fab. */
-	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn);
+	/**
+	 * fab-search's closing line: what adding a listing needs, given whether this editor is signed in to Fab and, when it is
+	 * not, where Epic's sign-in service stands (@p Service: never started, or still restoring the remembered sign-in).
+	 */
+	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn, EUnrealMcpFabSignInService Service = EUnrealMcpFabSignInService::Unknown);
 	/** The engines a listing's unreal-engine format lists (technicalSpecs.unrealEngineEngineVersions), oldest first: "5.7". */
 	UNREALMCPEDITOR_API TArray<FString> ListingEngines(const FJsonObject& Listing);
 	/** Why this engine cannot load the package file @p Filename (empty when it can); @p bOutFatal false for a warning only. */
