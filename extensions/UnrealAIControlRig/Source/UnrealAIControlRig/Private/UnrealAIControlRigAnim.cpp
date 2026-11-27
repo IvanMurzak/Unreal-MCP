@@ -366,27 +366,31 @@ namespace UnrealAIControlRigAnimLocal
 	}
 
 	/**
-	 * The anim node's own setting @p Name (an editable property of FAnimNode_ControlRig: Alpha, AlphaInputType,
-	 * LODThreshold, ...; the rig it runs is AddToAnimBlueprint's), by property or display name; null when none.
-	 * @p OutNames gets the settings there are.
+	 * The anim node's own settings: the editable properties of the struct it runs (FAnimNode_ControlRig: Alpha,
+	 * AlphaInputType, LODThreshold, ...), without the rig it runs (AddToAnimBlueprint's).
 	 */
-	FProperty* NodeSetting(const UAnimGraphNode_ControlRig* Node, const FString& Name, TArray<FString>* OutNames = nullptr)
+	TArray<FProperty*> NodeSettings(const UAnimGraphNode_ControlRig* Node)
 	{
+		TArray<FProperty*> Settings;
 		const FStructProperty* Struct = AnimNodeStruct(Node);
 		if (!Struct)
-			return nullptr;
-		FProperty* Found = nullptr;
+			return Settings;
 		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
 		{
-			FProperty* Property = *It;
-			if (!Property->HasAnyPropertyFlags(CPF_Edit) || Property->IsA<FObjectPropertyBase>() || Property->GetMetaData(TEXT("Category")) == TEXT("ControlRig"))
-				continue;
-			if (OutNames)
-				OutNames->Add(Property->GetName());
-			if (!Found && (Property->GetName().Equals(Name.TrimStartAndEnd(), ESearchCase::IgnoreCase) || Compact(Property->GetDisplayNameText().ToString()) == Compact(Name)))
-				Found = Property;
+			if (It->HasAnyPropertyFlags(CPF_Edit) && !It->IsA<FObjectPropertyBase>() && It->GetMetaData(TEXT("Category")) != TEXT("ControlRig"))
+				Settings.Add(*It);
 		}
-		return Found;
+		return Settings;
+	}
+
+	/** The setting @p Name of @p Settings, by property or display name; null when none. */
+	FProperty* FindSetting(const TArray<FProperty*>& Settings, const FString& Name)
+	{
+		FProperty* const* Found = Settings.FindByPredicate([&Name](const FProperty* Property)
+		{
+			return Property->GetName().Equals(Name.TrimStartAndEnd(), ESearchCase::IgnoreCase) || Compact(Property->GetDisplayNameText().ToString()) == Compact(Name);
+		});
+		return Found ? *Found : nullptr;
 	}
 
 	FString SettingText(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting)
@@ -509,7 +513,7 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 		}
 		Note = Loose.Num()
 			? FString::Printf(TEXT(" (WARNING: Output Pose had no input and several poses feed nothing: %s; the rig starts from the reference pose: remove this node and pass After to pick one)"), *FString::Join(Labels, TEXT(", ")))
-			: FString(TEXT(" (WARNING: Output Pose had no input and no pose feeds nothing: the rig starts from the reference pose)"));
+			: FString(TEXT(" (WARNING: Output Pose had no input and every other pose feeds a node: the rig starts from the reference pose; pass After to pick a pose)"));
 		return nullptr;
 	};
 	if (After.TrimStartAndEnd().IsEmpty())
@@ -624,11 +628,16 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 	}
 	else
 	{
-		TArray<FString> Settings;
-		Setting = NodeSetting(Node, Input, &Settings);
+		const TArray<FProperty*> Settings = NodeSettings(Node);
+		Setting = FindSetting(Settings, Input);
 		if (!Setting)
+		{
+			TArray<FString> Names;
+			for (const FProperty* Property : Settings)
+				Names.Add(Property->GetName());
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s has no rig input or node setting '%s' (rig %s's inputs: %s, a rig variable is an input when it is public: AddVariable(..., true); node settings: %s)"),
-				*Node->GetName(), *Input, *RigName(Node), Inputs.Num() ? *FString::Join(Inputs, TEXT(", ")) : TEXT("none"), *FString::Join(Settings, TEXT(", "))));
+				*Node->GetName(), *Input, *RigName(Node), Inputs.Num() ? *FString::Join(Inputs, TEXT(", ")) : TEXT("none"), *FString::Join(Names, TEXT(", "))));
+		}
 		Pin = SettingPin(Node, Setting, bBind);
 		if (!Pin && bBind)
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's setting %s has no pin to bind (Alpha binds while AlphaInputType is Float, bAlphaBoolEnabled while it is Bool): set a constant, or change AlphaInputType first"),
@@ -919,11 +928,9 @@ TSharedPtr<FJsonValue> UnrealAIControlRigAnim::ControlRigsJson(UObject* Object)
 				Inputs->SetStringField(Pin->PinName.ToString(), PinValue(Pin));
 		}
 		Row->SetObjectField(TEXT("Inputs"), Inputs);
-		TArray<FString> SettingNames;
-		NodeSetting(Node, FString(), &SettingNames);
 		TSharedPtr<FJsonObject> Settings = MakeShared<FJsonObject>();
-		for (const FString& Name : SettingNames)
-			Settings->SetStringField(Name, SettingText(Node, NodeSetting(Node, Name)));
+		for (const FProperty* Setting : NodeSettings(Node))
+			Settings->SetStringField(Setting->GetName(), SettingText(Node, Setting));
 		Row->SetObjectField(TEXT("Settings"), Settings);
 		Rows.Add(MakeShared<FJsonValueObject>(Row));
 	}
