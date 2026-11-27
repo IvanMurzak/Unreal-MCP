@@ -241,6 +241,12 @@ namespace UnrealMcpFabTools
 	 */
 	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const FString& ListingUid, const FString& CopyRoot,
 		TArray<FString>& OutWarnings);
+	/**
+	 * Save the packages under @p Path that @p ListingUid's import created and left unsaved (none without an open window;
+	 * never a package loaded when it began, never one already on disk), without a dialog; returns those saved,
+	 * @p OutErrors those that could not be (DEV-306).
+	 */
+	UNREALMCPEDITOR_API TArray<FString> SaveImport(const FString& Path, const FString& ListingUid, TArray<FString>& OutErrors);
 	/** Specs only: while true, every Fab HTTP request answers at once with no response (nothing reaches fab.com). */
 	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline);
 }

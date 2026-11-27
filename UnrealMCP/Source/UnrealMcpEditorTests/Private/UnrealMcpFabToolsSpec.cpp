@@ -412,6 +412,72 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("nothing unresolved"), Requirements->TryGetArrayField(TEXT("unresolvedReferences"), Unresolved) && Unresolved->IsEmpty());
 	});
 
+	It("saves only the packages an import created and left unsaved, then checks them (DEV-306)", [this]()
+	{
+		// A folder of this run only: nothing of the project (or of another run) is touched or removed.
+		const FString Name = FString::Printf(TEXT("UnrealMcpFabSpec_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+		const FString Folder = TEXT("/Game/") + Name;
+		const FString Dir = FPaths::ProjectContentDir() / Name;
+		TArray<UPackage*> Made;
+		ON_SCOPE_EXIT
+		{
+			for (UPackage* Package : Made)
+				Package->SetDirtyFlag(false); // no save prompt for the spec's packages in a local editor
+			UEditorAssetLibrary::DeleteDirectory(Folder);
+			IFileManager::Get().DeleteDirectory(*Dir, false, true);
+		};
+		auto MakeAsset = [&](const FString& AssetName, bool bSave) -> UPackage*
+		{
+			UPackage* Package = CreatePackage(*(Folder / AssetName));
+			Made.Add(Package);
+			UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, *AssetName, RF_Public | RF_Standalone);
+			FAssetRegistryModule::AssetCreated(Instance);
+			Package->MarkPackageDirty();
+			if (bSave)
+				TestTrue(TEXT("saved ") + AssetName, UEditorLoadingAndSavingUtils::SavePackages({ Package }, false));
+			return Package;
+		};
+
+		// Nothing on disk yet: the check says why it read nothing instead of a silent 0.
+		UPackage* UsersUnsaved = MakeAsset(TEXT("MI_UsersUnsaved"), false); // the user's, loaded before the import began
+		TArray<FString> Lines;
+		TSharedPtr<FJsonObject> Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
+		TestEqual(TEXT("nothing on disk to check"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 0);
+		TestTrue(TEXT("says why nothing was checked"), Requirements->HasTypedField<EJson::String>(TEXT("packagesNotChecked")));
+		TestTrue(TEXT("in the text too"), FString::Join(Lines, TEXT("\n")).Contains(TEXT("No package was checked")));
+
+		const FString Listing = FGuid::NewGuid().ToString();
+		UnrealMcpFabTools::OpenImportWindow(Listing);
+		ON_SCOPE_EXIT { UnrealMcpFabTools::CloseImportWindow(Listing); };
+		// The import's: two it left unsaved (Fab's Interchange / Megascans glTF importers), one it wrote to disk that is
+		// then changed in memory (not the import's to save).
+		UPackage* FreshA = MakeAsset(TEXT("MI_ImportedA"), false);
+		UPackage* FreshB = MakeAsset(TEXT("Textures/T_ImportedB"), false);
+		UPackage* OnDisk = MakeAsset(TEXT("MI_OnDiskEdited"), true);
+		OnDisk->MarkPackageDirty();
+
+		TArray<FString> Errors;
+		TestTrue(TEXT("no window, nothing saved"), UnrealMcpFabTools::SaveImport(Folder, TEXT("no-such-listing"), Errors).IsEmpty());
+		TArray<FString> Saved = UnrealMcpFabTools::SaveImport(Folder, Listing, Errors);
+		Saved.Sort();
+		TestTrue(TEXT("no errors"), Errors.IsEmpty());
+		if (TestEqual(TEXT("saved the two the import left unsaved"), Saved.Num(), 2))
+		{
+			TestEqual(TEXT("the first"), Saved[0], FreshA->GetName());
+			TestEqual(TEXT("the one in a subfolder"), Saved[1], FreshB->GetName());
+		}
+		TestTrue(TEXT("they are on disk and clean"), FPackageName::DoesPackageExist(FreshA->GetName()) && FPackageName::DoesPackageExist(FreshB->GetName())
+			&& !FreshA->IsDirty() && !FreshB->IsDirty());
+		TestTrue(TEXT("the user's package stays unsaved and off disk"), UsersUnsaved->IsDirty() && !FPackageName::DoesPackageExist(UsersUnsaved->GetName()));
+		TestTrue(TEXT("a package on disk with unsaved changes is left so"), OnDisk->IsDirty());
+
+		Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
+		TestEqual(TEXT("checks what is on disk now"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 3);
+		TestFalse(TEXT("no reason for an empty check"), Requirements->HasField(TEXT("packagesNotChecked")));
+		const TArray<TSharedPtr<FJsonValue>>* Unloadable = nullptr;
+		TestTrue(TEXT("all loadable"), Requirements->TryGetArrayField(TEXT("unloadablePackages"), Unloadable) && Unloadable->IsEmpty());
+	});
+
 	It("moves only this import's instances off a read-only engine base material, onto a tagged copy on disk (DEV-291)", [this]()
 	{
 		UMaterial* EngineBase = LoadObject<UMaterial>(nullptr, TEXT("/Fab/Materials/Standard/M_MS_Base.M_MS_Base"));
