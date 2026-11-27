@@ -185,13 +185,31 @@ namespace UnrealMcpFabToolsLocal
 
 	// ---------------------------------------------------------------- per-call state (survives RetryLater)
 
-	/** fab-add: when this call's import began, and which packages had unsaved changes then (the user's, never touched). */
+	/**
+	 * fab-add: what the project held when an import began, so that only what the import made is changed afterwards: the
+	 * packages loaded then (the user may edit and save those at any time) and the material instances that existed then.
+	 */
 	struct FFabImportWindow
 	{
-		TSet<FName> DirtyBefore;
-		/** MinValue: no import ran in this call (nothing counts as changed by it). */
+		TSet<FName> LoadedBefore;
+		TSet<FName> InstancesBefore;
+		/** MinValue: no import began (nothing counts as made by one). */
 		FDateTime StartedUtc = FDateTime::MinValue();
+		/** FPlatformTime::Seconds when it was opened. */
+		double OpenedSeconds = 0.0;
 	};
+
+	/**
+	 * The window of each listing's import, by listing uid: an import may outlive the call that started it (the next
+	 * fab-add call for the listing finds it done or still running), so the window outlives the call. Dropped when a
+	 * fab-add answer uses it, when the import fails, or after FabImportWindowSeconds.
+	 */
+	static TMap<FString, FFabImportWindow>& FabImportWindows()
+	{
+		static TMap<FString, FFabImportWindow> Windows;
+		return Windows;
+	}
+	static constexpr double FabImportWindowSeconds = 2.0 * 3600.0;
 
 	/** One fab-* call in flight: its stage, the request it waits on and what earlier stages found. */
 	struct FFabCallState
@@ -220,7 +238,6 @@ namespace UnrealMcpFabToolsLocal
 		int64 LogSequence = 0;
 		/** fab-add: the log sequence when the import started, for what the import logged (Nanite Assembly warnings). */
 		int64 ImportLogStart = 0;
-		FFabImportWindow ImportWindow;
 	};
 
 	static TMap<const FJsonObject*, TSharedPtr<FFabCallState>>& FabCalls()
@@ -1322,25 +1339,38 @@ namespace UnrealMcpFabToolsLocal
 		FFabImportWindow Window;
 		// A little before now: file times may be rounded (FAT: 2 s) and the clock may step.
 		Window.StartedUtc = FDateTime::UtcNow() - FTimespan::FromSeconds(2.0);
+		Window.OpenedSeconds = FPlatformTime::Seconds();
 		for (TObjectIterator<UPackage> It; It; ++It)
+			Window.LoadedBefore.Add(It->GetFName());
+		if (IAssetRegistry* Registry = IAssetRegistry::Get())
 		{
-			if (It->IsDirty())
-				Window.DirtyBefore.Add(It->GetFName());
+			FARFilter Filter;
+			Filter.PackagePaths.Add(TEXT("/Game"));
+			Filter.bRecursivePaths = true;
+			Filter.ClassPaths.Add(UMaterialInstanceConstant::StaticClass()->GetClassPathName());
+			Filter.bRecursiveClasses = true;
+			TArray<FAssetData> Assets;
+			Registry->GetAssets(Filter, Assets);
+			for (const FAssetData& Asset : Assets)
+				Window.InstancesBefore.Add(Asset.PackageName);
 		}
 		return Window;
 	}
 
 	/**
-	 * Whether this call's import made or changed @p Package: it had no unsaved changes when the import began (those are the
-	 * user's), and since then it was changed in memory (Fab's Interchange / glTF importers leave what they create unsaved) or
-	 * its file was written (a pack lands on disk). A package nothing touched since, the user's own, is not.
+	 * Whether the import of @p Window made @p Package: a package that did not exist when the import began (Fab's
+	 * Interchange / glTF importers leave theirs unsaved; a pack lands on disk), or one that existed only on disk, not
+	 * loaded, and whose file the import rewrote (a pack reimport; it is loaded fresh from that file). Never a package that
+	 * was loaded when the import began: the user may have edited or saved it since, and its memory may predate the file.
 	 */
 	static bool FabChangedByImport(const UPackage* Package, const FFabImportWindow& Window)
 	{
-		if (!Package || Window.StartedUtc == FDateTime::MinValue() || Window.DirtyBefore.Contains(Package->GetFName()))
+		if (!Package || Window.StartedUtc == FDateTime::MinValue() || Window.LoadedBefore.Contains(Package->GetFName()))
 			return false;
-		if (Package->IsDirty())
+		if (!Window.InstancesBefore.Contains(Package->GetFName()))
 			return true;
+		if (Package->IsDirty())
+			return false; // changed since it was loaded after the import began: the user's
 		FString Filename;
 		if (!FPackageName::TryConvertLongPackageNameToFilename(Package->GetName(), Filename, FPackageName::GetAssetPackageExtension()))
 			return false;
@@ -1475,8 +1505,8 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * Reparent the material instances under @p Path that this call's import made or changed (@p Window; never one with
-	 * unsaved changes from before it, never the user's untouched ones) whose parent is a material of the Fab plugin's
+	 * Reparent the material instances under @p Path that the import of @p Window made (FabChangedByImport: never one
+	 * that was loaded when it began, so never the user's edits) whose parent is a material of the Fab plugin's
 	 * content in an installed engine (M_MS_Base under Program Files) to a project copy of it under @p CopyRoot with its
 	 * Nanite / instanced usages already set: a PCG or Nanite use would otherwise set them on the engine material, which
 	 * cannot be saved, and leave it dirty (that blocked an editor restart). An instance the import left unsaved stays
@@ -1656,11 +1686,16 @@ namespace UnrealMcpFabToolsLocal
 		const FString Name = Title.IsEmpty() ? Uid : Title;
 		const FFabImportReport Report = FabCheckImport(Path, State.VersionEngines, bAlready ? 0 : State.ImportLogStart);
 		TArray<FString> Lines = Report.Lines;
-		// Only for what this call imported (a listing already in the project is only located: nothing of it changes), and not
-		// for a pack this editor cannot use.
+		// Only for what a fab-add import made (its window: this call's, or an earlier call's whose import outlived it; a
+		// listing found already in the project without one is only located), and not for a pack this editor cannot use.
 		TArray<FString> BaseMaterialWarnings;
-		const TArray<FString> BaseMaterials = !bAlready && Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true)
-			? FabLocalizeBaseMaterials(Path, State.ImportWindow, FabProjectMaterials, BaseMaterialWarnings) : TArray<FString>();
+		TArray<FString> BaseMaterials;
+		if (const FFabImportWindow* Window = FabImportWindows().Find(Uid))
+		{
+			if (Report.Unloadable.IsEmpty() && Call.GetBool(TEXT("localBaseMaterial"), true))
+				BaseMaterials = FabLocalizeBaseMaterials(Path, *Window, FabProjectMaterials, BaseMaterialWarnings);
+			FabImportWindows().Remove(Uid);
+		}
 		if (BaseMaterialWarnings.Num())
 		{
 			Report.Requirements->SetArrayField(TEXT("baseMaterialWarnings"), FabJsonStrings(BaseMaterialWarnings));
@@ -1887,7 +1922,10 @@ namespace UnrealMcpFabToolsLocal
 			FabForgetImport(Uid); // a reimport's old record, or one whose folder is gone, must not count as this import done
 			State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
 			State.ImportLogStart = State.LogSequence;
-			State.ImportWindow = FabOpenImportWindow();
+			// An import of this listing an earlier call started may still run (AddToProject then starts none): keep its window.
+			const FFabImportWindow* Open = FabImportWindows().Find(Uid);
+			if (!Open || FPlatformTime::Seconds() - Open->OpenedSeconds > FabImportWindowSeconds)
+				FabImportWindows().Add(Uid, FabOpenImportWindow());
 			bool bFilled = false;
 			const bool bCalled = FabInvoke(FabApi(), TEXT("AddToProject"), [&](UFunction* Function, uint8* Params)
 			{
@@ -1914,6 +1952,7 @@ namespace UnrealMcpFabToolsLocal
 		const FString Errors = FabImportErrors(State.LogSequence, Uid, Title);
 		if (!Errors.IsEmpty())
 		{
+			FabImportWindows().Remove(Uid); // a new try opens a new window
 			return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("Importing '%s' failed: %s"), *(Title.IsEmpty() ? Uid : Title), *Errors)));
 		}
 		const double Waited = FPlatformTime::Seconds() - State.StageStarted;
@@ -2032,13 +2071,16 @@ namespace UnrealMcpFabTools
 		OutLines = Report.Lines;
 		return Report.Requirements;
 	}
-	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const TSet<FName>& DirtyBefore, const FDateTime& StartedUtc,
-		const FString& CopyRoot, TArray<FString>& OutWarnings)
+	UNREALMCPEDITOR_API void OpenImportWindow(const FString& ListingUid)
 	{
-		UnrealMcpFabToolsLocal::FFabImportWindow Window;
-		Window.DirtyBefore = DirtyBefore;
-		Window.StartedUtc = StartedUtc;
-		return UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path, Window, CopyRoot, OutWarnings);
+		UnrealMcpFabToolsLocal::FabImportWindows().Add(ListingUid, UnrealMcpFabToolsLocal::FabOpenImportWindow());
+	}
+	UNREALMCPEDITOR_API void CloseImportWindow(const FString& ListingUid) { UnrealMcpFabToolsLocal::FabImportWindows().Remove(ListingUid); }
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const FString& ListingUid, const FString& CopyRoot,
+		TArray<FString>& OutWarnings)
+	{
+		const UnrealMcpFabToolsLocal::FFabImportWindow* Window = UnrealMcpFabToolsLocal::FabImportWindows().Find(ListingUid);
+		return Window ? UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path, *Window, CopyRoot, OutWarnings) : TArray<FString>();
 	}
 	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline) { UnrealMcpFabToolsLocal::FabOffline() = bOffline; }
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency)

@@ -446,20 +446,27 @@ void FUnrealMcpFabToolsSpec::Define()
 				TestTrue(TEXT("saved ") + AssetName, UEditorLoadingAndSavingUtils::SavePackages({ Package }, false));
 			return Instance;
 		};
-		// The user's: saved before the import began, and one with unsaved changes when it began.
+		// The user's, there before the import began: one saved, one with unsaved changes, and two the user changes while the
+		// import runs (one edited and left unsaved, one edited and saved).
 		UMaterialInstanceConstant* Untouched = MakeInstance(TEXT("MI_UsersSaved"), true);
-		FString UntouchedFile;
-		FPackageName::TryConvertLongPackageNameToFilename(Untouched->GetOutermost()->GetName(), UntouchedFile, FPackageName::GetAssetPackageExtension());
-		IFileManager::Get().SetTimeStamp(*UntouchedFile, FDateTime::UtcNow() - FTimespan::FromHours(1.0));
 		UMaterialInstanceConstant* UsersUnsaved = MakeInstance(TEXT("MI_UsersUnsaved"), false);
-		const TSet<FName> DirtyBefore = { UsersUnsaved->GetOutermost()->GetFName() };
-		const FDateTime Started = FDateTime::UtcNow() - FTimespan::FromMinutes(1.0);
+		UMaterialInstanceConstant* EditedDuring = MakeInstance(TEXT("MI_UsersEditedDuring"), true);
+		UMaterialInstanceConstant* SavedDuring = MakeInstance(TEXT("MI_UsersSavedDuring"), true);
+		const FString Listing = FGuid::NewGuid().ToString();
+		UnrealMcpFabTools::OpenImportWindow(Listing);
+		ON_SCOPE_EXIT { UnrealMcpFabTools::CloseImportWindow(Listing); };
+		EditedDuring->GetOutermost()->MarkPackageDirty();
+		SavedDuring->GetOutermost()->MarkPackageDirty();
+		TestTrue(TEXT("saved during the import"), UEditorLoadingAndSavingUtils::SavePackages({ SavedDuring->GetOutermost() }, false));
 		// The import's: one it left unsaved (Fab's Interchange / glTF importers) and one it wrote to disk (a pack).
 		UMaterialInstanceConstant* Fresh = MakeInstance(TEXT("MI_ImportedUnsaved"), false);
 		UMaterialInstanceConstant* Written = MakeInstance(TEXT("MI_ImportedOnDisk"), true);
 
 		TArray<FString> Warnings;
-		const TArray<FString> Copies = UnrealMcpFabTools::LocalizeBaseMaterials(Imported, DirtyBefore, Started, CopyRoot, Warnings);
+		const TArray<FString> Copies = UnrealMcpFabTools::LocalizeBaseMaterials(Imported, Listing, CopyRoot, Warnings);
+		TestTrue(TEXT("an instance the user edited during the import keeps its parent"), EditedDuring->Parent == EngineBase);
+		TestTrue(TEXT("one the user saved during the import too"), SavedDuring->Parent == EngineBase && !SavedDuring->GetOutermost()->IsDirty());
+		TestTrue(TEXT("no window, no change"), UnrealMcpFabTools::LocalizeBaseMaterials(Imported, TEXT("no-such-listing"), CopyRoot, Warnings).IsEmpty());
 		TestTrue(TEXT("no warnings"), Warnings.IsEmpty());
 		if (TestEqual(TEXT("one copy used"), Copies.Num(), 1))
 			TestTrue(TEXT("named with its instance count"), Copies[0].Contains(CopyPackage) && Copies[0].Contains(TEXT("2 instance")));
@@ -481,7 +488,7 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("and stays unsaved"), UsersUnsaved->GetOutermost()->IsDirty());
 		TestEqual(TEXT("the engine material is untouched"), EngineBase->GetOutermost()->IsDirty(), bBaseWasDirty);
 		Warnings.Reset();
-		TestTrue(TEXT("a second pass changes nothing"), UnrealMcpFabTools::LocalizeBaseMaterials(Imported, DirtyBefore, Started, CopyRoot, Warnings).IsEmpty());
+		TestTrue(TEXT("a second pass changes nothing"), UnrealMcpFabTools::LocalizeBaseMaterials(Imported, Listing, CopyRoot, Warnings).IsEmpty());
 
 		// A material at the copy's path that fab-add did not make (the user's, or an older engine's): never reused or replaced.
 		const FString OtherRoot = Folder / TEXT("Other/");
@@ -492,7 +499,7 @@ void FUnrealMcpFabToolsSpec::Define()
 		FAssetRegistryModule::AssetCreated(Users);
 		UMaterialInstanceConstant* Another = MakeInstance(TEXT("MI_ImportedAnother"), false);
 		Warnings.Reset();
-		TestTrue(TEXT("no copy used"), UnrealMcpFabTools::LocalizeBaseMaterials(Imported, DirtyBefore, Started, OtherRoot, Warnings).IsEmpty());
+		TestTrue(TEXT("no copy used"), UnrealMcpFabTools::LocalizeBaseMaterials(Imported, Listing, OtherRoot, Warnings).IsEmpty());
 		TestTrue(TEXT("the instance keeps the engine base"), Another->Parent == EngineBase);
 		if (TestEqual(TEXT("one warning"), Warnings.Num(), 1))
 			TestTrue(TEXT("says why"), Warnings[0].Contains(TEXT("is not the copy fab-add makes")));

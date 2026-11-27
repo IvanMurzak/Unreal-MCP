@@ -231,14 +231,16 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency);
 	/** fab-add's post-import checks of the content folder @p Path: the `requirements` object; @p OutLines the lines its text adds. */
 	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> CheckImport(const FString& Path, TArray<FString>& OutLines);
+	/** Record what the project holds now as the start of listing @p ListingUid's import (fab-add does so before AddToProject). */
+	UNREALMCPEDITOR_API void OpenImportWindow(const FString& ListingUid);
+	UNREALMCPEDITOR_API void CloseImportWindow(const FString& ListingUid);
 	/**
-	 * Reparent the material instances under @p Path that an import begun at @p StartedUtc (UTC) made or changed (never one
-	 * in @p DirtyBefore, the packages with unsaved changes when it began) off read-only engine base materials onto tagged,
-	 * per-engine-version copies under @p CopyRoot ("/Game/Fab/Materials/" in fab-add); "<copy> (<n> instance(s))" per copy,
-	 * @p OutWarnings what was left as it was.
+	 * Reparent the material instances under @p Path that @p ListingUid's import made (none without an open window; never a
+	 * package loaded when it began) off read-only engine base materials onto tagged, per-engine-version copies under
+	 * @p CopyRoot ("/Game/Fab/Materials/" in fab-add); "<copy> (<n> instance(s))" per copy, @p OutWarnings what was left.
 	 */
-	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const TSet<FName>& DirtyBefore, const FDateTime& StartedUtc,
-		const FString& CopyRoot, TArray<FString>& OutWarnings);
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path, const FString& ListingUid, const FString& CopyRoot,
+		TArray<FString>& OutWarnings);
 	/** Specs only: while true, every Fab HTTP request answers at once with no response (nothing reaches fab.com). */
 	UNREALMCPEDITOR_API void SetOfflineForTests(bool bOffline);
 }
