@@ -655,6 +655,14 @@ namespace UnrealMcpFabToolsLocal
 		return FCString::Atoi(*Major) * 100 + FCString::Atoi(*Minor);
 	}
 
+	static TArray<TSharedPtr<FJsonValue>> FabJsonStrings(const TArray<FString>& Values)
+	{
+		TArray<TSharedPtr<FJsonValue>> Array;
+		for (const FString& Value : Values)
+			Array.Add(MakeShared<FJsonValueString>(Value));
+		return Array;
+	}
+
 	/** This editor's engine as Fab writes it after "UE_" ("5.7"). */
 	static FString FabCurrentEngine()
 	{
@@ -719,19 +727,13 @@ namespace UnrealMcpFabToolsLocal
 		if (Listing.TryGetObjectField(TEXT("category"), Category) && (*Category)->TryGetStringField(TEXT("name"), CategoryName))
 			Row->SetStringField(TEXT("category"), CategoryName);
 		const TArray<FString> Formats = FabFormats(Listing);
-		TArray<TSharedPtr<FJsonValue>> FormatValues;
-		for (const FString& Format : Formats)
-			FormatValues.Add(MakeShared<FJsonValueString>(Format));
-		Row->SetArrayField(TEXT("formats"), FormatValues);
+		Row->SetArrayField(TEXT("formats"), FabJsonStrings(Formats));
 		// DEV-290: a pack built only for newer engines imports, then does not load; say so before the agent picks it.
 		const TArray<FString> Engines = FabListingEngines(Listing);
 		FString EngineText;
 		if (Engines.Num())
 		{
-			TArray<TSharedPtr<FJsonValue>> EngineValues;
-			for (const FString& Engine : Engines)
-				EngineValues.Add(MakeShared<FJsonValueString>(Engine));
-			Row->SetArrayField(TEXT("engineVersions"), EngineValues);
+			Row->SetArrayField(TEXT("engineVersions"), FabJsonStrings(Engines));
 			const bool bThisEngine = Engines.Contains(FabCurrentEngine());
 			Row->SetBoolField(TEXT("supportsThisEngine"), bThisEngine);
 			EngineText = FString::Printf(TEXT(" | UE %s%s"), *FString::Join(Engines, TEXT(",")),
@@ -1003,14 +1005,6 @@ namespace UnrealMcpFabToolsLocal
 		if (Names.Num() > Shown.Num())
 			Text += FString::Printf(TEXT("; and %d more"), Names.Num() - Shown.Num());
 		return Text;
-	}
-
-	static TArray<TSharedPtr<FJsonValue>> FabJsonStrings(const TArray<FString>& Values)
-	{
-		TArray<TSharedPtr<FJsonValue>> Array;
-		for (const FString& Value : Values)
-			Array.Add(MakeShared<FJsonValueString>(Value));
-		return Array;
 	}
 
 	/** The plugin that has a module named @p Module, or null (an engine module, or none of that name). */
