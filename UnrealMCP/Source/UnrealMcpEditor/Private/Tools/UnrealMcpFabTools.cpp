@@ -382,11 +382,14 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/** fab-search's last line: what adding a listing needs, given whether this editor is signed in to Fab and can sign in. */
-	static FString FabSearchFooterText(bool bSignedIn, bool bServiceDown = false)
+	static FString FabSearchFooterText(bool bSignedIn, EUnrealMcpFabSignInService Service = EUnrealMcpFabSignInService::Unknown)
 	{
-		if (!bSignedIn && bServiceDown)
+		if (!bSignedIn && Service == EUnrealMcpFabSignInService::NotStarted)
 			return TEXT("\nEpic's sign-in service did not start in this editor (e.g. it was started with -NoEOS), so fab-add and "
 			            "fab-library cannot run in it: plan without Fab assets.");
+		if (!bSignedIn && Service == EUnrealMcpFabSignInService::Restoring)
+			return TEXT("\nThe Fab sign-in Epic remembers on this computer is still being restored in this editor (no browser is "
+			            "needed for it): call fab-search again in a moment, before you ask the user to sign in.");
 		if (bSignedIn)
 			return TEXT("\nfab-add imports a listing the user owns (fab-library lists them); a free listing must first be added to the "
 			            "user's library on fab.com.");
@@ -726,6 +729,11 @@ namespace UnrealMcpFabToolsLocal
 		if (!Sorts.Contains(Sort))
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("'sort' is one of: relevance, rating, newest, price, -price.")));
 		const int32 Count = (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("count"), 12), 1, FabMaxCount);
+		// Right after the editor starts, the remembered sign-in may still be restoring: wait for it rather than report
+		// signedIn:false, which makes the agent ask the user to sign in again (DEV-293). Checked before the search starts.
+		if (!State.Http.IsValid() && FabReadToken(State).IsEmpty() && FabService() == EUnrealMcpFabSignInService::Restoring
+			&& FabTimeLeft(Call) > 0.0)
+			return FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the remembered Fab sign-in to be restored."));
 		const FString Url = FString::Printf(TEXT("%s/i/listings/search?%s"), FabRoot, *FabQuery({
 			{ TEXT("q"), Call.GetString(TEXT("query")) },
 			{ TEXT("listing_types"), Call.GetString(TEXT("listingType")) },
@@ -758,7 +766,7 @@ namespace UnrealMcpFabToolsLocal
 		const bool bSignedIn = FabPluginLoaded(PluginError) && !FabReadToken(State).IsEmpty();
 		FUnrealMcpToolResult Result = FabPageResult(Call, Rows, Lines, FabNextCursor(*Json),
 			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):"), Rows.Num()),
-			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn, FabService() == EUnrealMcpFabSignInService::NotStarted)
+			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn, bSignedIn ? EUnrealMcpFabSignInService::Unknown : FabService())
 			: TEXT("\n") + PluginError);
 		Result.Structured->SetBoolField(TEXT("signedIn"), bSignedIn);
 		return Result;
@@ -1286,7 +1294,10 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString DistributionMethod(const FJsonObject& Format) { return UnrealMcpFabToolsLocal::FabDistributionMethod(Format); }
 	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions) { return UnrealMcpFabToolsLocal::FabUnrealVersionUid(Versions); }
 	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName) { return UnrealMcpFabToolsLocal::FabSignInRequiredText(ToolName); }
-	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn) { return UnrealMcpFabToolsLocal::FabSearchFooterText(bSignedIn); }
+	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn, EUnrealMcpFabSignInService Service)
+	{
+		return UnrealMcpFabToolsLocal::FabSearchFooterText(bSignedIn, Service);
+	}
 
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry)
 	{

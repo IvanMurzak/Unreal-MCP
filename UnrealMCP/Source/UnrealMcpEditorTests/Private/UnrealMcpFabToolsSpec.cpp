@@ -181,6 +181,23 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("says what it waits for"), SignIn.Message.Contains(TEXT("Restoring")));
 	});
 
+	It("fab-search waits for a restore in flight instead of reporting signedIn:false (DEV-293)", [this]()
+	{
+		ExpectFabTokenReadErrors();
+		const FUnrealMcpToolResult Search = FabSpecRunWithService(EUnrealMcpFabSignInService::Restoring, TEXT("fab-search"));
+		TestTrue(TEXT("waits, no answer yet"), Search.bRetryLater);
+		// An editor signed in through the Fab plugin itself does not wait: it starts the search ("Searching Fab.").
+		if (!Search.Message.Contains(TEXT("Searching Fab")))
+			TestTrue(TEXT("says what it waits for"), Search.Message.Contains(TEXT("remembered Fab sign-in")));
+		const FString Footer = UnrealMcpFabTools::SearchFooter(false, EUnrealMcpFabSignInService::Restoring);
+		TestTrue(TEXT("time out while restoring: call again"), Footer.Contains(TEXT("call fab-search again")));
+		TestFalse(TEXT("time out while restoring: no sign-in prompt"), Footer.Contains(TEXT("AskUserQuestion whether to sign in")));
+		TestTrue(TEXT("signed in: the restore is no news"),
+			UnrealMcpFabTools::SearchFooter(true, EUnrealMcpFabSignInService::Restoring).Contains(TEXT("fab-library lists them")));
+		TestTrue(TEXT("service down: plan without Fab"),
+			UnrealMcpFabTools::SearchFooter(false, EUnrealMcpFabSignInService::NotStarted).Contains(TEXT("plan without Fab assets")));
+	});
+
 	It("rejects bad arguments before any network call", [this]()
 	{
 		FUnrealMcpToolRegistry Registry;
