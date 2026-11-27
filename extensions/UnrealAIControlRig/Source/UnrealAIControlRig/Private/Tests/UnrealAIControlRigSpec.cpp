@@ -569,8 +569,8 @@ void FUnrealAIControlRigSpec::Define()
 			UAnimBlueprint* Abp = SpecAsset<UAnimBlueprint>(AbpPath);
 			if (!TestNotNull(TEXT("the Anim Blueprint"), Abp))
 				return;
-			// controlRig | call AddToAnimBlueprint("@ABP@", "@RIG@")
-			TestTrue(TEXT("first rig node"), Run(SpecCall(TEXT("controlRig"), TEXT("AddToAnimBlueprint"), { SpecLit(AbpPath), SpecLit(RigPath) })));
+			// controlRig | call AddToAnimBlueprint("@ABP@", "@RIG@", "", false)
+			TestTrue(TEXT("first rig node"), Run(SpecCall(TEXT("controlRig"), TEXT("AddToAnimBlueprint"), { SpecLit(AbpPath), SpecLit(RigPath), SpecLit(TEXT("")), TEXT(R"({"lit":false})") })));
 			TArray<UAnimGraphNode_ControlRig*> Nodes;
 			FBlueprintEditorUtils::GetAllNodesOfClass(Abp, Nodes);
 			if (!TestEqual(TEXT("one rig node"), Nodes.Num(), 1))
@@ -603,10 +603,11 @@ void FUnrealAIControlRigSpec::Define()
 			TSharedPtr<FJsonObject> Lod;
 			TestTrue(TEXT("LODThreshold set"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("LODThreshold")), SpecLit(TEXT("2")) }), &Lod));
 			TestTrue(*FString::Printf(TEXT("LODThreshold = 2 (%s)"), *SpecJson(Lod)), SpecJson(Lod).Contains(TEXT("LODThreshold = 2")));
-			Nodes.Reset();
-			FBlueprintEditorUtils::GetAllNodesOfClass(Abp, Nodes);
-			if (TestEqual(TEXT("still one rig node"), Nodes.Num(), 1))
-				TestEqual(TEXT("the node's LODThreshold"), Nodes[0]->Node.LODThreshold, 2);
+			TestTrue(*FString::Printf(TEXT("the node's LODThreshold is 2 (%s)"), *SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp))),
+				SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp)).Contains(TEXT("\"LODThreshold\":\"2\"")));
+			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "abc")      a value that is no number changes nothing
+			TestFalse(TEXT("Alpha abc refused"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("abc")) })));
+			TestTrue(TEXT("Alpha still 0.25"), SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp)).Contains(TEXT("\"Alpha\":\"0.25\"")));
 			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "@RigAlpha")      a setting bound like an input
 			TSharedPtr<FJsonObject> AlphaBound;
 			TestTrue(TEXT("Alpha bound"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("@RigAlpha")) }), &AlphaBound));

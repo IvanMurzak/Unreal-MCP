@@ -11,6 +11,7 @@
 #include "AnimationGraphSchema.h"
 #include "Animation/AnimBlueprint.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimNodeBase.h"
 #include "Animation/Skeleton.h"
 #include "ControlRig.h"
 #include "ControlRigBlueprintLegacy.h"
@@ -38,6 +39,7 @@
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/ITransaction.h"
 #include "Rigs/RigHierarchy.h"
+#include "UObject/StructOnScope.h"
 
 namespace UnrealAIControlRigAnimLocal
 {
@@ -377,7 +379,10 @@ namespace UnrealAIControlRigAnimLocal
 			return Settings;
 		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
 		{
-			if (It->HasAnyPropertyFlags(CPF_Edit) && !It->IsA<FObjectPropertyBase>() && It->GetMetaData(TEXT("Category")) != TEXT("ControlRig"))
+			// Not the rig it runs, nor the input pose (Source, an FPoseLink).
+			const FStructProperty* Link = CastField<FStructProperty>(*It);
+			if (It->HasAnyPropertyFlags(CPF_Edit) && !It->IsA<FObjectPropertyBase>() && It->GetMetaData(TEXT("Category")) != TEXT("ControlRig")
+				&& !(Link && Link->Struct->IsChildOf(FPoseLinkBase::StaticStruct())))
 				Settings.Add(*It);
 		}
 		return Settings;
@@ -399,6 +404,19 @@ namespace UnrealAIControlRigAnimLocal
 		const void* Container = AnimNodeStruct(Node)->ContainerPtrToValuePtr<void>(Node);
 		Setting->ExportText_InContainer(0, Text, Container, Container, const_cast<UAnimGraphNode_ControlRig*>(Node), PPF_None);
 		return Text;
+	}
+
+	/** Whether @p Text is a whole value of @p Setting ("0.5" for Alpha, "Bool" for AlphaInputType), tried on a copy of the node's struct. */
+	bool SettingAccepts(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting, const FString& Text)
+	{
+		const FNumericProperty* Number = CastField<FNumericProperty>(Setting);
+		if (Text.IsEmpty() || (Number && !Number->IsEnum() && !Text.IsNumeric()))
+			return false; // a number's import reads "abc" as 0
+		const FStructProperty* Struct = AnimNodeStruct(Node);
+		FStructOnScope Copy(Struct->Struct);
+		Struct->Struct->CopyScriptStruct(Copy.GetStructMemory(), Struct->ContainerPtrToValuePtr<void>(Node));
+		const TCHAR* Rest = Setting->ImportText_InContainer(*Text, Copy.GetStructMemory(), const_cast<UAnimGraphNode_ControlRig*>(Node), PPF_None);
+		return Rest && FString(Rest).TrimStartAndEnd().IsEmpty();
 	}
 
 	/**
@@ -650,27 +668,28 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
 		return Bound;
 	}
+	// Everything is checked before anything changes: the pin's text form, then the property's (on a copy of the node's struct).
+	const FString Text = Pin ? PinDefaultText(Pin, Trimmed) : FString();
+	if (Pin)
+	{
+		const FString Invalid = Pin->GetSchema()->IsPinDefaultValid(Pin, Text, nullptr, FText::GetEmpty());
+		if (!Invalid.IsEmpty())
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value: %s"), *Value, *UEdGraphSchema_K2::TypeToText(Pin->PinType).ToString(), *Invalid));
+	}
+	if (Setting && !SettingAccepts(Node, Setting, Trimmed))
+		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value for %s (now %s)"), *Value, *Setting->GetCPPType(), *Setting->GetName(), *SettingText(Node, Setting)));
 	Node->Modify();
 	if (Setting)
 	{
 		// The property is the value while no pin is shown, and the pin's default once one is (kept the same).
-		const FStructProperty* Struct = AnimNodeStruct(Node);
-		void* Container = Struct->ContainerPtrToValuePtr<void>(Node);
-		const FString Before = SettingText(Node, Setting);
-		if (!Setting->ImportText_InContainer(*Trimmed, Container, Node, PPF_None))
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value for %s (now %s)"), *Value, *Setting->GetCPPType(), *Setting->GetName(), *Before));
+		Setting->ImportText_InContainer(*Trimmed, AnimNodeStruct(Node)->ContainerPtrToValuePtr<void>(Node), Node, PPF_None);
 		if (UEdGraphPin* Hidden = Pin ? nullptr : Node->FindPin(Setting->GetFName(), EGPD_Input))
 			Hidden->GetSchema()->TrySetDefaultValue(*Hidden, PinDefaultText(Hidden, Trimmed));
 	}
 	if (Pin)
 	{
-		const UEdGraphSchema* Schema = Pin->GetSchema();
-		const FString Text = PinDefaultText(Pin, Trimmed);
-		const FString Invalid = Schema->IsPinDefaultValid(Pin, Text, nullptr, FText::GetEmpty());
-		if (!Invalid.IsEmpty())
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value: %s"), *Value, *UEdGraphSchema_K2::TypeToText(Pin->PinType).ToString(), *Invalid));
-		Schema->BreakPinLinks(*Pin, /*bSendsNodeNotifcation*/ true); // a constant replaces a binding
-		Schema->TrySetDefaultValue(*Pin, Text);
+		Pin->GetSchema()->BreakPinLinks(*Pin, /*bSendsNodeNotifcation*/ true); // a constant replaces a binding
+		Pin->GetSchema()->TrySetDefaultValue(*Pin, Text);
 	}
 	if (Setting)
 	{
