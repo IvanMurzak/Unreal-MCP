@@ -1,0 +1,10 @@
+{
+  "description": "the new rig node takes the pose the destroyed one had, with its inputs as unbound pins (bindVariables false)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call AddToAnimBlueprint(\"/Game/E2E/ABP_HeadLookAt\", \"/Game/E2E/CR_HeadLookAt\", \"\", false)"
+  },
+  "assert": {
+    "pattern": "runs CR_HeadLookAt between (?!the reference pose)[^\"]* and Output Pose \\(Output Pose had no input: reconnected [^\"]*; unbound input pins: LookAtTarget, LookAtWeight"
+  }
+}

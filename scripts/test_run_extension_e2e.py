@@ -369,6 +369,7 @@ CREATE_RIG = 'CreateRig(string Path, string Mesh)'
 LOOK_AT = 'AddLookAt(ControlRigBlueprint Rig, string Bone, string Target, string Weight, string Axis, string After)'
 ADD_VARIABLE = 'AddVariable(ControlRigBlueprint Rig, string Name, string Type, string Default, bool bPublic)'
 SET_VARIABLE = 'AddSetVariable(ControlRigBlueprint Rig, string Variable, string Value, string After, string Name)'
+SET_INPUT = 'SetRigInput(AnimBlueprint AnimBlueprint, string Node, string Input, string Value)'
 WIRE = 'AddToAnimBlueprint(AnimBlueprint AnimBlueprint, ControlRigBlueprint Rig, string After, bool bBindVariables)'
 TRACK = ('TrackNearestActor(AnimBlueprint AnimBlueprint, string ActorClass, string LocationVariable, string WeightVariable, '
          'float Radius, float Speed)')
@@ -403,6 +404,22 @@ CONTROL_RIG = {
                     'Before:Output Pose,Inputs:{LookAtTarget:@LookAtTarget,LookAtWeight:@LookAtWeight}}]'),
         text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_0,Rig:CR_HeadLookAt,Graph:AnimGraph,After:x,'
                     'Before:Output Pose,Inputs:{LookAtTarget:(X=0,Y=0,Z=0)}}]')),
+    'control-rig-lookat-8-setting-alpha.e2e.json': (
+        rig_receipt(SET_INPUT, 'Alpha = 0.75 (node setting)'),
+        text_result("error call-threw: SetRigInput threw: AnimGraphNode_ControlRig_0's rig CR_HeadLookAt has no input 'Alpha'")),
+    'control-rig-lookat-8-x-replace-1-destroy.e2e.json': (
+        text_result('1 result\n$ref|method|result\nAnimGraphNode_ControlRig#4410|Destroy()|null'), text_result('0 results')),
+    'control-rig-lookat-8-x-replace-2-add.e2e.json': (
+        rig_receipt(WIRE, 'AnimGraphNode_ControlRig_1 runs CR_HeadLookAt between Default Slot and Output Pose (Output Pose had no '
+                          'input: reconnected AnimGraphNode_Slot_0 (Default Slot), the only pose that fed nothing); unbound input '
+                          'pins: LookAtTarget, LookAtWeight (set or bind each with SetRigInput(abp, \\"AnimGraphNode_ControlRig_1\\", '
+                          'input, \\"@Variable\\" | value))'),
+        rig_receipt(WIRE, 'AnimGraphNode_ControlRig_1 runs CR_HeadLookAt between the reference pose and Output Pose')),
+    'control-rig-lookat-8-x-replace-3-readback.e2e.json': (
+        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_1,Rig:CR_HeadLookAt,Graph:AnimGraph,After:Default Slot,'
+                    'Before:Output Pose,Inputs:{Alpha:1.0,LookAtTarget:(X=0,Y=0,Z=0)},Settings:{Alpha:1.000000,LODThreshold:-1}}]'),
+        text_result('1 result\nControlRigs\n[{Node:AnimGraphNode_ControlRig_1,Rig:CR_HeadLookAt,Graph:AnimGraph,After:,'
+                    'Before:Output Pose,Inputs:{Alpha:1.0},Settings:{LODThreshold:-1}}]')),
     'control-rig-lookat-8-unknown-unit.e2e.json': (
         '{"error": "error call-threw: AddUnit threw: no rig unit named \'Aimm\'; similar: AimItem (Aim)"}',
         '{"error": "error call-threw: AddUnit threw: CR_HeadLookAt has no rig graph"}'),
@@ -574,7 +591,7 @@ class CheckFileTests(unittest.TestCase):
         for plugin, folder in release.components().items():
             self.assertTrue(e2e.checks_for(plugin), plugin)
             self.assertEqual(list((folder / 'Tests/e2e/tools').glob('*.ps1')), [], plugin)
-        self.assertEqual(len(all_checks()), 180)
+        self.assertEqual(len(all_checks()), 184)
 
     def test_every_assert_matches_its_intended_shape_and_rejects_others(self):
         for (plugin, name), check in all_checks().items():

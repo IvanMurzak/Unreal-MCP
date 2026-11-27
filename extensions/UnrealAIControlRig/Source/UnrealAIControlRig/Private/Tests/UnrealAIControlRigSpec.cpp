@@ -8,6 +8,7 @@
 #include "Dom/JsonObject.h"
 #include "Misc/Guid.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -22,6 +23,8 @@
 #include "GameFramework/Actor.h"
 #include "ControlRigComponent.h"
 
+#include "AnimGraphNode_ControlRig.h"
+#include "AnimationGraphSchema.h"
 #include "Animation/AnimBlueprint.h"
 #include "ControlRigBlueprintLegacy.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -541,6 +544,88 @@ void FUnrealAIControlRigSpec::Define()
 			// editor | call DeleteAsset("@ABP@", true)      DeleteAsset("@RIG@", true): the test leaves no unsaved asset behind
 			TestTrue(TEXT("anim blueprint deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(AbpPath), TEXT(R"({"lit":true})") })));
 			TestTrue(TEXT("rig deleted"), Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(RigPath), TEXT(R"({"lit":true})") })));
+		});
+	});
+
+	Describe("Anim Blueprint integration: replacing a rig node", [this]()
+	{
+		It("reconnects the pose a removed rig node had, shows unbound inputs without binding, and sets the node's own settings", [this]()
+		{
+			const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits).Left(12);
+			const FString RigPath = TEXT("/Game/RqlSpec/CR_RqlSpecReplace_") + Id;
+			const FString AbpPath = TEXT("/Game/RqlSpec/ABP_RqlSpecReplace_") + Id;
+			auto Run = [](const FString& Plan, TSharedPtr<FJsonObject>* Out = nullptr) { return UnrealMcpRqlTools::RunPlan(Plan, true, Out); };
+			ON_SCOPE_EXIT
+			{
+				// editor | call DeleteAsset("@ABP@", true)      DeleteAsset("@RIG@", true)
+				Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(AbpPath), TEXT(R"({"lit":true})") }));
+				Run(SpecCall(TEXT("editor"), TEXT("DeleteAsset"), { SpecLit(RigPath), TEXT(R"({"lit":true})") }));
+			};
+			// controlRig | call CreateRig("@RIG@", "/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP")      AddVariable("@RIG@", "IKWeight", "float", "1")
+			TestTrue(TEXT("rig from the mesh"), Run(SpecCall(TEXT("controlRig"), TEXT("CreateRig"), { SpecLit(RigPath), SpecLit(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP")) })));
+			TestTrue(TEXT("weight variable"), Run(SpecCall(TEXT("controlRig"), TEXT("AddVariable"), { SpecLit(RigPath), SpecLit(TEXT("IKWeight")), SpecLit(TEXT("float")), SpecLit(TEXT("1")) })));
+			// editor | call CopyAsset("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_AnimBlueprint", "@ABP@")
+			TestTrue(TEXT("anim blueprint copied"), Run(SpecCall(TEXT("editor"), TEXT("CopyAsset"), { SpecLit(TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_AnimBlueprint")), SpecLit(AbpPath) })));
+			UAnimBlueprint* Abp = SpecAsset<UAnimBlueprint>(AbpPath);
+			if (!TestNotNull(TEXT("the Anim Blueprint"), Abp))
+				return;
+			// controlRig | call AddToAnimBlueprint("@ABP@", "@RIG@")
+			TestTrue(TEXT("first rig node"), Run(SpecCall(TEXT("controlRig"), TEXT("AddToAnimBlueprint"), { SpecLit(AbpPath), SpecLit(RigPath) })));
+			TArray<UAnimGraphNode_ControlRig*> Nodes;
+			FBlueprintEditorUtils::GetAllNodesOfClass(Abp, Nodes);
+			if (!TestEqual(TEXT("one rig node"), Nodes.Num(), 1))
+				return;
+			const UEdGraphPin* const* OldInFound = Nodes[0]->Pins.FindByPredicate([](const UEdGraphPin* Pin) { return Pin->Direction == EGPD_Input && UAnimationGraphSchema::IsPosePin(Pin->PinType); });
+			const UEdGraphPin* OldIn = OldInFound ? *OldInFound : nullptr;
+			const UEdGraphNode* Feeding = OldIn && OldIn->LinkedTo.Num() ? OldIn->LinkedTo[0]->GetOwningNode() : nullptr;
+			if (!TestNotNull(TEXT("a pose feeds the first rig node"), Feeding))
+				return;
+			const FString FeedingTitle = Feeding->GetNodeTitle(ENodeTitleType::ListView).ToString();
+			// What `... | call Destroy()` on the rig node does: the node goes, the pose that fed it now feeds nothing.
+			FBlueprintEditorUtils::RemoveNode(Abp, Nodes[0], /*bDontRecompile*/ true);
+
+			// controlRig | call AddToAnimBlueprint("@ABP@", "@RIG@", "", false)
+			TSharedPtr<FJsonObject> Replaced;
+			TestTrue(TEXT("replacing rig node"), Run(SpecCall(TEXT("controlRig"), TEXT("AddToAnimBlueprint"), { SpecLit(AbpPath), SpecLit(RigPath), SpecLit(TEXT("")), TEXT(R"({"lit":false})") }), &Replaced));
+			const FString Said = SpecJson(Replaced);
+			TestTrue(*FString::Printf(TEXT("says it reconnected %s and left IKWeight unbound (%s)"), *FeedingTitle, *Said.Left(800)),
+				Said.Contains(TEXT("between ") + FeedingTitle + TEXT(" and Output Pose")) && Said.Contains(TEXT("reconnected")) && Said.Contains(TEXT("unbound input pins: IKWeight")));
+			FString Rigs = SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp));
+			TestTrue(*FString::Printf(TEXT("ControlRigs: after %s, before Output Pose, IKWeight a pin with no binding (%s)"), *FeedingTitle, *Rigs),
+				Rigs.Contains(FString::Printf(TEXT("\"After\":\"%s\""), *FeedingTitle)) && Rigs.Contains(TEXT("\"Before\":\"Output Pose\"")) && Rigs.Contains(TEXT("\"IKWeight\":\"")) && !Rigs.Contains(TEXT("@IKWeight")));
+			TestEqual(TEXT("no Anim Blueprint variable added"), FBlueprintEditorUtils::FindNewVariableIndex(Abp, TEXT("IKWeight")), INDEX_NONE);
+
+			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "0.25")      the node's own Alpha (a pin shown by default)
+			TSharedPtr<FJsonObject> Alpha;
+			TestTrue(TEXT("Alpha set"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("0.25")) }), &Alpha));
+			TestTrue(*FString::Printf(TEXT("Alpha = 0.25 (%s)"), *SpecJson(Alpha)), SpecJson(Alpha).Contains(TEXT("Alpha = 0.25")) && SpecJson(Alpha).Contains(TEXT("node setting")));
+			// controlRig | call SetRigInput("@ABP@", "", "LODThreshold", "2")      a setting without a shown pin: the property
+			TSharedPtr<FJsonObject> Lod;
+			TestTrue(TEXT("LODThreshold set"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("LODThreshold")), SpecLit(TEXT("2")) }), &Lod));
+			TestTrue(*FString::Printf(TEXT("LODThreshold = 2 (%s)"), *SpecJson(Lod)), SpecJson(Lod).Contains(TEXT("LODThreshold = 2")));
+			Nodes.Reset();
+			FBlueprintEditorUtils::GetAllNodesOfClass(Abp, Nodes);
+			if (TestEqual(TEXT("still one rig node"), Nodes.Num(), 1))
+				TestEqual(TEXT("the node's LODThreshold"), Nodes[0]->Node.LODThreshold, 2);
+			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "@RigAlpha")      a setting bound like an input
+			TSharedPtr<FJsonObject> AlphaBound;
+			TestTrue(TEXT("Alpha bound"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("@RigAlpha")) }), &AlphaBound));
+			TestTrue(*FString::Printf(TEXT("Alpha <- RigAlpha (%s)"), *SpecJson(AlphaBound)), SpecJson(AlphaBound).Contains(TEXT("Alpha <- RigAlpha")));
+			// controlRig | call SetRigInput("@ABP@", "", "Nope", "1")      an unknown name lists the inputs and the settings
+			TSharedPtr<FJsonObject> Unknown;
+			TestFalse(TEXT("an unknown input"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Nope")), SpecLit(TEXT("1")) }), &Unknown));
+			TestTrue(*FString::Printf(TEXT("naming inputs and settings (%s)"), *SpecJson(Unknown).Left(600)), SpecJson(Unknown).Contains(TEXT("IKWeight")) && SpecJson(Unknown).Contains(TEXT("LODThreshold")));
+			// controlRig | call SetRigInput("@ABP@", "", "IKWeight", "@IKWeight")      binding the unbound input later
+			TSharedPtr<FJsonObject> Later;
+			TestTrue(TEXT("input bound later"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("IKWeight")), SpecLit(TEXT("@IKWeight")) }), &Later));
+			TestTrue(*FString::Printf(TEXT("IKWeight <- IKWeight (%s)"), *SpecJson(Later)), SpecJson(Later).Contains(TEXT("IKWeight <- IKWeight")));
+
+			// unreal.asset("@ABP@") | call Compile()
+			TSharedPtr<FJsonObject> Compiled;
+			TestTrue(TEXT("anim blueprint compile ran"), Run(SpecCall(AbpPath, TEXT("Compile"), {}), &Compiled));
+			TestTrue(*FString::Printf(TEXT("the Anim Blueprint compiles (%s)"), *SpecJson(Compiled).Left(1500)), SpecJson(Compiled).Contains(TEXT("Succeeded\":true")));
+			Rigs = SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp));
+			TestTrue(*FString::Printf(TEXT("ControlRigs lists the settings (%s)"), *Rigs), Rigs.Contains(TEXT("\"LODThreshold\":\"2\"")) && Rigs.Contains(TEXT("\"Alpha\":\"@RigAlpha\"")));
 		});
 	});
 

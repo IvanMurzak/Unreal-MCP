@@ -34,7 +34,7 @@ The extension adds its feature to the editor's RQL data layer (`rql-query` / `rq
 | --- | --- |
 | Sources | `controlRigs` (rig assets), `controlRigUnits` (the rig units a rig can run: name, title, category, pins), `controlRig` (operations) |
 | Operations (`call`) | Rigs: `CreateRig` (optionally from a character's mesh), `AddVariable`, `AddUnit`, `AddSetVariable`, `SetPin`, `Connect`, `RemoveNode`, `AddLookAt`, `AddTwoBoneIK`, `AddBone`, `AddControl`. While playing: `RigValues`. Anim Blueprints: `AddToAnimBlueprint`, `SetRigInput`, `TrackNearestActor` |
-| Members | `ControlRigBlueprint.Nodes` (graph: units, execution order, pin values and links), `ControlRigBlueprint.Variables`, `ControlRigBlueprint.Elements`, `.Hierarchy`, `.Controls`, `.Bones`, `AnimBlueprint.ControlRigs` (its Control Rig nodes, pose neighbours, bound inputs), `ControlRigComponent.BoundRig` (the running rig) |
+| Members | `ControlRigBlueprint.Nodes` (graph: units, execution order, pin values and links), `ControlRigBlueprint.Variables`, `ControlRigBlueprint.Elements`, `.Hierarchy`, `.Controls`, `.Bones`, `AnimBlueprint.ControlRigs` (its Control Rig nodes, pose neighbours, bound inputs, node settings), `ControlRigComponent.BoundRig` (the running rig) |
 
 A head that turns smoothly toward the nearest orb, on the UE5 mannequin, in seven calls:
 
@@ -54,8 +54,10 @@ unreal.asset("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed") | call Com
   world location, converted to rig space with a From World node.
 - `AddToAnimBlueprint(abp, rig, after, bindVariables)` splices a Control Rig node into the AnimGraph's pose chain right
   before Output Pose (after a foot IK rig the template already runs) or after a named node, compiles the rig, and binds
-  each public rig variable to an Anim Blueprint variable of the same name (added when missing); `SetRigInput` rebinds
-  an input or sets a constant.
+  each public rig variable to an Anim Blueprint variable of the same name (added when missing; `bindVariables` false
+  leaves the input pins unbound); when Output Pose has no input (a rig node it replaces was removed) the one pose that
+  feeds nothing is reconnected through the rig. `SetRigInput` rebinds an input or sets a constant, also for the node's
+  own settings (`Alpha`, `AlphaInputType`, `LODThreshold`, ...).
 - `TrackNearestActor(abp, class, locationVar, weightVar, radius, speed)` adds the Event Blueprint Update Animation logic
   that moves the location variable to the nearest actor of the class in range (smoothed) and blends the weight in and out.
 
