@@ -108,11 +108,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddLookAt(UControlRigBlueprint* Rig, const FString& Bone, const FString& Target, const FString& Weight = TEXT("1"), const FString& Axis = TEXT(""), const FString& After = TEXT(""));
 
-	/** run Rig in the Anim Blueprint: a Control Rig node in its AnimGraph right before Output Pose (after every pose node, e.g. after a foot IK rig), or after the node After (node name, title or rig name); compiles the rig first; bBindVariables binds each public rig variable to an Anim Blueprint variable of the same name (added when missing); returns what it did */
+	/** run Rig in the Anim Blueprint: a Control Rig node in its AnimGraph right before Output Pose (after every pose node, e.g. after a foot IK rig), or after the node After (node name, title or rig name); compiles the rig first; each public rig variable becomes an input pin, bound to an Anim Blueprint variable of the same name (added when missing) when bBindVariables, else left unbound for SetRigInput / Connect; when Output Pose has no input (the node feeding it was removed) the one pose that feeds nothing is reconnected through the rig, and the result warns when there is none; returns what it did */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString AddToAnimBlueprint(UAnimBlueprint* AnimBlueprint, UControlRigBlueprint* Rig, const FString& After = TEXT(""), bool bBindVariables = true);
 
-	/** set the input Input (a public rig variable or control) of the Control Rig node Node (node name or rig name; "" = the only one) of an Anim Blueprint: Value "@Variable" binds an Anim Blueprint variable (added when missing), else a constant ("0.5", "(0, 0, 100)"); returns the input's new source */
+	/** set the input Input (a public rig variable or control) of the Control Rig node Node (node name or rig name; "" = the only one) of an Anim Blueprint, or a setting of the node itself (Alpha, AlphaInputType, bAlphaBoolEnabled, LODThreshold, ...; AnimBlueprint.ControlRigs lists them): Value "@Variable" binds an Anim Blueprint variable (added when missing), else a constant ("0.5", "(0, 0, 100)", "Bool"); returns the input's new source */
 	UFUNCTION(BlueprintCallable, Category = "Unreal AI|Control Rig", meta = (BlueprintInternalUseOnly = "true"))
 	FString SetRigInput(UAnimBlueprint* AnimBlueprint, const FString& Node, const FString& Input, const FString& Value);
 

@@ -1,0 +1,10 @@
+{
+  "description": "ControlRigs reads the new node back: a pose before it, Output Pose after it, the node's own settings",
+  "tool": "rql-query",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/ABP_HeadLookAt\") | select ControlRigs"
+  },
+  "assert": {
+    "pattern": "Rig:CR_HeadLookAt,Graph:AnimGraph,After:(?!,)[^,]+,Before:\\\\?\"?Output Pose\\\\?\"?,.*LODThreshold:"
+  }
+}

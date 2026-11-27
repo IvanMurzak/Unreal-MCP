@@ -40,6 +40,7 @@
 #include "FileHelpers.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Volume.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "IAssetTools.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -789,8 +790,21 @@ TArray<UObject*> UUnrealMcpRqlEditorApi::ImportAsset(const FString& File, const 
 
 void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 {
-	if (!UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false))
-		Failed(FString::Printf(TEXT("could not save %s"), *Asset->GetPathName()));
+	// The editor's asset library refuses every save while Play In Editor runs, with nothing but a log line: say so.
+	if (GEditor && GEditor->PlayWorld)
+	{
+		Failed(FString::Printf(TEXT("could not save %s: Play In Editor is running (assets cannot be saved while playing): editor | call StopPlay(), then save"), *Asset->GetPathName()));
+		return;
+	}
+	if (UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false))
+		return;
+	// Try...: a package outside every content mount (/Script, /Memory) has no file, and the plain conversion is fatal there.
+	FString File;
+	const bool bHasFile = FPackageName::TryConvertLongPackageNameToFilename(Asset->GetOutermost()->GetName(), File,
+		Asset->IsA<UWorld>() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension());
+	Failed(bHasFile && IFileManager::Get().IsReadOnly(*File)
+		? FString::Printf(TEXT("could not save %s: its file %s is read-only (checked in to source control?)"), *Asset->GetPathName(), *FPaths::ConvertRelativePathToFull(File))
+		: FString::Printf(TEXT("could not save %s: the reason is in the editor log: console | where Verbosity == \"Error\""), *Asset->GetPathName()));
 }
 
 FUnrealMcpPlayState UUnrealMcpRqlEditorApi::StartPlay(bool bPaused)

@@ -1,0 +1,10 @@
+{
+  "description": "the Control Rig node's own Alpha is set by name, as a rig input is",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "controlRig | call SetRigInput(\"/Game/E2E/ABP_HeadLookAt\", \"\", \"Alpha\", \"0.75\")"
+  },
+  "assert": {
+    "pattern": "Alpha = 0\\.75 \\(node setting\\)"
+  }
+}

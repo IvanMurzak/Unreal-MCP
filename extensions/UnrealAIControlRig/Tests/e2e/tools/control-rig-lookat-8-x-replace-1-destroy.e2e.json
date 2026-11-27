@@ -1,0 +1,10 @@
+{
+  "description": "the rig node is destroyed, leaving Output Pose without an input (the first half of replacing it)",
+  "tool": "rql-mutate",
+  "input": {
+    "query": "unreal.asset(\"/Game/E2E/ABP_HeadLookAt\") | get Graphs | where Name == \"AnimGraph\" | get Nodes | where $type == \"AnimGraphNode_ControlRig\" | call Destroy()"
+  },
+  "assert": {
+    "pattern": "\\b1 result\\b.*Destroy\\(\\)"
+  }
+}

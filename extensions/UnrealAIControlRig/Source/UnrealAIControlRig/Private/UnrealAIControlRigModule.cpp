@@ -70,7 +70,7 @@ public:
 			TEXT("the rig's variables: Name, Type, Public (an input of the rig's Control Rig node in Anim Blueprints), Default"),
 			[](UObject* Object) { return UnrealAIControlRigGraph::VariablesJson(Object); });
 		Context.AddJsonMember(UAnimBlueprint::StaticClass(), TEXT("ControlRigs"),
-			TEXT("the Control Rig nodes of the Anim Blueprint: Node, Rig, Graph, After / Before (the pose nodes around it), Inputs (pin: value, or @Variable when bound)"),
+			TEXT("the Control Rig nodes of the Anim Blueprint: Node, Rig, Graph, After / Before (the pose nodes around it), Inputs (pin: value, or @Variable when bound), Settings (the node's own: Alpha, AlphaInputType, LODThreshold, ...; set with SetRigInput)"),
 			[](UObject* Object) { return UnrealAIControlRigAnim::ControlRigsJson(Object); });
 		Context.AddJsonMember(UControlRigBlueprint::StaticClass(), TEXT("Elements"),
 			TEXT("rig element counts: Bones, Nulls, Controls, Curves"),
@@ -177,8 +177,13 @@ editor | call SaveAsset("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed")
 
 - `AddToAnimBlueprint(abp, rig, after = "", bindVariables = true)` puts a Control Rig node right before Output Pose
   (after every pose node, so after a foot IK rig), or after the node `after` (node name, title or rig name); each public
-  rig variable becomes an input bound to an Anim Blueprint variable of the same name (added when missing).
-  `SetRigInput(abp, node, input, "@Var" | "0.5")` rebinds one or sets a constant.
+  rig variable becomes an input bound to an Anim Blueprint variable of the same name (added when missing);
+  `bindVariables = false` leaves the input pins unbound. Replacing a rig node: remove the old node, then add the new
+  one; Output Pose without an input gets the one pose that now feeds nothing back through the rig (the result says
+  which, or warns when it starts from the reference pose).
+  `SetRigInput(abp, node, input, "@Var" | "0.5")` rebinds one or sets a constant; `input` can also be a setting of
+  the node itself: `Alpha`, `AlphaInputType` (`Float` / `Bool` / `Curve`), `bAlphaBoolEnabled`, `LODThreshold`
+  (`ControlRigs` lists them under Settings).
 - `TrackNearestActor(abp, actorClass, locationVar, weightVar = "", radius = 1000, speed = 5)` adds, on Event Blueprint
   Update Animation, the nearest actor of the class within radius (cm) of the owner: its location (smoothed at speed,
   0 = snap) into locationVar, weightVar blending to 1 in range and to 0 out of it. Anything else the rig needs from the
