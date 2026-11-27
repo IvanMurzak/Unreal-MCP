@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
+#include "Serialization/CustomVersion.h"
 
 class FJsonObject;
 class FJsonValue;
@@ -213,6 +214,18 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName);
 	/** fab-search's closing line: what adding a listing needs, given whether this editor is signed in to Fab. */
 	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn);
+	/** The engines a listing's unreal-engine format lists (technicalSpecs.unrealEngineEngineVersions), oldest first: "5.7". */
+	UNREALMCPEDITOR_API TArray<FString> ListingEngines(const FJsonObject& Listing);
+	/** Why this engine cannot load the package file @p Filename (empty when it can); @p bOutFatal false for a warning only. */
+	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutFatal);
+	/** The custom versions newer than this engine's ("<name> <saved> (this engine: <n>)"); unregistered ones go to @p OutUnknown. */
+	UNREALMCPEDITOR_API TArray<FString> CustomVersionProblems(const FCustomVersionArray& Versions, TArray<FString>& OutUnknown);
+	/** The plugin a package dependency needs (a /Script/<Module> owner or a /<Plugin>/ content root); empty for engine / project. */
+	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency);
+	/** fab-add's post-import checks of the content folder @p Path: the `requirements` object; @p OutLines the lines its text adds. */
+	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> CheckImport(const FString& Path, TArray<FString>& OutLines);
+	/** Reparent @p Path's material instances off read-only engine base materials onto project copies; "<copy> (<n> instance(s))". */
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path);
 }
 
 /**

@@ -24,6 +24,19 @@
 #include "AssetRegistry/IAssetRegistry.h"
 #include "UObject/Package.h"
 #include "UObject/StructOnScope.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "FileHelpers.h"
+#include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
+#include "Interfaces/IPluginManager.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Safety/UnrealMcpEngineContentGuard.h"
+#include "Serialization/CustomVersion.h"
+#include "UObject/PackageFileSummary.h"
+#include "UObject/ObjectVersion.h"
 #include "UObject/UnrealType.h"
 
 /**
@@ -173,7 +186,11 @@ namespace UnrealMcpFabToolsLocal
 		int32 Route = 0; // index into FabRoutes
 		FString Format;
 		FString FileUid;
+		/** fab-add: the engines the downloaded unreal-engine version lists ("5.8"); empty for other formats. */
+		TArray<FString> VersionEngines;
 		int64 LogSequence = 0;
+		/** fab-add: the log sequence when the import started, for what the import logged (Nanite Assembly warnings). */
+		int64 ImportLogStart = 0;
 	};
 
 	static TMap<const FJsonObject*, TSharedPtr<FFabCallState>>& FabCalls()
@@ -628,6 +645,48 @@ namespace UnrealMcpFabToolsLocal
 		return Codes;
 	}
 
+	/** "UE_5.4" -> 504; 0 when unparsable. */
+	static int32 FabEngineNumber(const FString& Engine)
+	{
+		FString Major, Minor;
+		const FString Digits = Engine.Replace(TEXT("UE_"), TEXT(""));
+		if (!Digits.Split(TEXT("."), &Major, &Minor))
+			return 0;
+		return FCString::Atoi(*Major) * 100 + FCString::Atoi(*Minor);
+	}
+
+	/** This editor's engine as Fab writes it after "UE_" ("5.7"). */
+	static FString FabCurrentEngine()
+	{
+		return FString::Printf(TEXT("%d.%d"), FEngineVersion::Current().GetMajor(), FEngineVersion::Current().GetMinor());
+	}
+
+	/** The engines a listing's unreal-engine format says it supports (technicalSpecs.unrealEngineEngineVersions), oldest first: "5.7". */
+	static TArray<FString> FabListingEngines(const FJsonObject& Listing)
+	{
+		TArray<FString> Engines;
+		const TArray<TSharedPtr<FJsonValue>>* Formats = nullptr;
+		if (!Listing.TryGetArrayField(TEXT("assetFormats"), Formats))
+			return Engines;
+		for (const TSharedPtr<FJsonValue>& Format : *Formats)
+		{
+			const TSharedPtr<FJsonObject>* Object = nullptr;
+			const TSharedPtr<FJsonObject>* Specs = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Versions = nullptr;
+			if (!Format.IsValid() || !Format->TryGetObject(Object) || !(*Object)->TryGetObjectField(TEXT("technicalSpecs"), Specs)
+				|| !(*Specs)->TryGetArrayField(TEXT("unrealEngineEngineVersions"), Versions))
+				continue;
+			for (const TSharedPtr<FJsonValue>& Version : *Versions)
+			{
+				FString Engine;
+				if (Version.IsValid() && Version->TryGetString(Engine) && FabEngineNumber(Engine) > 0)
+					Engines.AddUnique(Engine.Replace(TEXT("UE_"), TEXT("")));
+			}
+		}
+		Engines.Sort([](const FString& A, const FString& B) { return FabEngineNumber(A) < FabEngineNumber(B); });
+		return Engines;
+	}
+
 	/** One search / library row for the structured result and the text summary. */
 	static TSharedPtr<FJsonObject> FabSearchRow(const FJsonObject& Listing, FString& OutLine)
 	{
@@ -664,9 +723,23 @@ namespace UnrealMcpFabToolsLocal
 		for (const FString& Format : Formats)
 			FormatValues.Add(MakeShared<FJsonValueString>(Format));
 		Row->SetArrayField(TEXT("formats"), FormatValues);
-		OutLine = FString::Printf(TEXT("%s | %s | %s, %s%s%s | formats: %s"), *Uid, *Title, *Type, *PriceText,
+		// DEV-290: a pack built only for newer engines imports, then does not load; say so before the agent picks it.
+		const TArray<FString> Engines = FabListingEngines(Listing);
+		FString EngineText;
+		if (Engines.Num())
+		{
+			TArray<TSharedPtr<FJsonValue>> EngineValues;
+			for (const FString& Engine : Engines)
+				EngineValues.Add(MakeShared<FJsonValueString>(Engine));
+			Row->SetArrayField(TEXT("engineVersions"), EngineValues);
+			const bool bThisEngine = Engines.Contains(FabCurrentEngine());
+			Row->SetBoolField(TEXT("supportsThisEngine"), bThisEngine);
+			EngineText = FString::Printf(TEXT(" | UE %s%s"), *FString::Join(Engines, TEXT(",")),
+				bThisEngine ? TEXT("") : *FString::Printf(TEXT(" (not listed for this editor's UE %s)"), *FabCurrentEngine()));
+		}
+		OutLine = FString::Printf(TEXT("%s | %s | %s, %s%s%s | formats: %s%s"), *Uid, *Title, *Type, *PriceText,
 			CategoryName.IsEmpty() ? TEXT("") : *(TEXT(", ") + CategoryName), Seller.IsEmpty() ? TEXT("") : *(TEXT(", by ") + Seller),
-			Formats.Num() ? *FString::Join(Formats, TEXT(",")) : TEXT("-"));
+			Formats.Num() ? *FString::Join(Formats, TEXT(",")) : TEXT("-"), *EngineText);
 		return Row;
 	}
 
@@ -757,7 +830,7 @@ namespace UnrealMcpFabToolsLocal
 		FString PluginError;
 		const bool bSignedIn = FabPluginLoaded(PluginError) && !FabReadToken(State).IsEmpty();
 		FUnrealMcpToolResult Result = FabPageResult(Call, Rows, Lines, FabNextCursor(*Json),
-			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats):"), Rows.Num()),
+			FString::Printf(TEXT("%d Fab listing(s) (uid | title | type, price | formats | Unreal Engine versions, when Fab lists them):"), Rows.Num()),
 			PluginError.IsEmpty() ? FabSearchFooterText(bSignedIn, FabService() == EUnrealMcpFabSignInService::NotStarted)
 			: TEXT("\n") + PluginError);
 		Result.Structured->SetBoolField(TEXT("signedIn"), bSignedIn);
@@ -845,6 +918,402 @@ namespace UnrealMcpFabToolsLocal
 			TEXT("\nImport one with fab-add {\"listing\": \"<uid>\"}."));
 	}
 
+	// ---------------------------------------------------------------- fab-add: will this engine load what it imported (DEV-290)
+
+	/** At most this many names of one kind are listed in a result; the rest are counted. */
+	static constexpr int32 FabShownNames = 10;
+	/** An import's package files read for their versions: more than this many are left unchecked (and said so). */
+	static constexpr int32 FabMaxCheckedPackages = 5000;
+
+	/**
+	 * The custom versions of a package this engine cannot load: newer than this engine's (or invalid), as "<name> <saved>
+	 * (this engine: <current>)"; @p OutUnknown gets the ones this editor has no registration for (it loads them with a
+	 * warning; usually a plugin that registers them is missing).
+	 */
+	static TArray<FString> FabCustomVersionProblems(const FCustomVersionArray& Versions, const FString& DebugName, TArray<FString>& OutUnknown)
+	{
+		TArray<FString> TooNew;
+		for (const FCustomVersionDifference& Diff : FCurrentCustomVersions::Compare(Versions, *DebugName))
+		{
+			if (!Diff.Version)
+				continue;
+			if (Diff.Type == ECustomVersionDifference::Missing)
+			{
+				OutUnknown.Add(Diff.Version->Key.ToString());
+				continue;
+			}
+			if (Diff.Type != ECustomVersionDifference::Newer && Diff.Type != ECustomVersionDifference::Invalid)
+				continue;
+			const TOptional<FCustomVersion> Latest = FCurrentCustomVersions::Get(Diff.Version->Key);
+			const FString Name = Latest ? Latest->GetFriendlyName().ToString() : Diff.Version->Key.ToString();
+			TooNew.Add(Diff.Type == ECustomVersionDifference::Invalid ? FString::Printf(TEXT("%s (invalid version %d)"), *Name, Diff.Version->Version)
+				: FString::Printf(TEXT("%s %d (this engine: %d)"), *Name, Diff.Version->Version, Latest ? Latest->Version : 0));
+		}
+		return TooNew;
+	}
+
+	/**
+	 * Why this engine cannot load the package file @p Filename, or empty when it can. @p bOutFatal: false for a warning
+	 * only (custom versions this editor does not know, which load with a warning).
+	 */
+	static FString FabPackageFileProblem(const FString& Filename, bool& bOutFatal)
+	{
+		bOutFatal = true;
+		TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Filename, FILEREAD_Silent));
+		if (!Reader.IsValid())
+			return TEXT("the file cannot be read");
+		// The versions first, read raw: the summary resets them when they are out of range, so it cannot say which way.
+		int32 Tag = 0, LegacyVersion = 0, LegacyUE3Version = 0, VersionUE4 = 0, VersionUE5 = 0;
+		if (Reader->TotalSize() >= 20)
+		{
+			*Reader << Tag << LegacyVersion;
+			if (LegacyVersion != -4)
+				*Reader << LegacyUE3Version;
+			*Reader << VersionUE4;
+			if (LegacyVersion <= -8)
+				*Reader << VersionUE5;
+		}
+		if (Reader->IsError() || Tag != (int32)PACKAGE_FILE_TAG)
+			return TEXT("not a package file this engine reads");
+		if (VersionUE4 > GPackageFileUEVersion.FileVersionUE4 || VersionUE5 > GPackageFileUEVersion.FileVersionUE5)
+			return FString::Printf(TEXT("saved by a newer engine (package version %d/%d; this engine loads up to %d/%d)"), VersionUE4, VersionUE5,
+				GPackageFileUEVersion.FileVersionUE4, GPackageFileUEVersion.FileVersionUE5);
+		Reader->Seek(0);
+		FPackageFileSummary Summary;
+		*Reader << Summary;
+		if (Reader->IsError() || Summary.IsFileVersionTooOld())
+			return TEXT("saved by an engine version this editor does not load");
+		if (Summary.bUnversioned)
+			return FString(); // the summary already stands for this engine's versions
+		TArray<FString> Unknown;
+		const TArray<FString> TooNew = FabCustomVersionProblems(Summary.GetCustomVersionContainer().GetAllVersions(), Filename, Unknown);
+		if (TooNew.Num())
+			return TEXT("saved with newer custom versions than this engine's: ") + FString::Join(TooNew, TEXT(", "));
+		bOutFatal = false;
+		if (Unknown.Num())
+			return FString::Printf(TEXT("saved with %d custom version(s) this editor does not know (a plugin that registers them may be missing)"), Unknown.Num());
+		return FString();
+	}
+
+	/** "a; b; c; and 4 more" of at most FabShownNames names. */
+	static FString FabNameList(const TArray<FString>& Names)
+	{
+		TArray<FString> Shown(Names.GetData(), FMath::Min(Names.Num(), FabShownNames));
+		FString Text = FString::Join(Shown, TEXT("; "));
+		if (Names.Num() > Shown.Num())
+			Text += FString::Printf(TEXT("; and %d more"), Names.Num() - Shown.Num());
+		return Text;
+	}
+
+	static TArray<TSharedPtr<FJsonValue>> FabJsonStrings(const TArray<FString>& Values)
+	{
+		TArray<TSharedPtr<FJsonValue>> Array;
+		for (const FString& Value : Values)
+			Array.Add(MakeShared<FJsonValueString>(Value));
+		return Array;
+	}
+
+	/** The plugin that has a module named @p Module, or null (an engine module, or none of that name). */
+	static TSharedPtr<IPlugin> FabPluginOfModule(const FString& Module)
+	{
+		for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetDiscoveredPlugins())
+		{
+			for (const FModuleDescriptor& Descriptor : Plugin->GetDescriptor().Modules)
+			{
+				if (Descriptor.Name.ToString().Equals(Module, ESearchCase::IgnoreCase))
+					return Plugin;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * The plugin a dependency of an imported package needs: the owner of a /Script/<Module> package, or the plugin whose
+	 * content root a /<Plugin>/... package lies under. Null for engine and project content.
+	 */
+	static TSharedPtr<IPlugin> FabPluginOfDependency(const FString& Dependency)
+	{
+		if (Dependency.StartsWith(TEXT("/Script/")))
+			return FabPluginOfModule(Dependency.Mid(8));
+		FString Root = Dependency.Mid(1);
+		int32 Slash = INDEX_NONE;
+		if (Root.FindChar(TEXT('/'), Slash))
+			Root.LeftInline(Slash);
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Root);
+		return Plugin.IsValid() && Plugin->CanContainContent() ? Plugin : nullptr;
+	}
+
+	/** Whether a loaded static or skeletal mesh is a Nanite Assembly (NaniteSettings.NaniteAssemblyData has parts; UE 5.6+). */
+	static bool FabIsNaniteAssembly(const UObject* Mesh)
+	{
+		const FStructProperty* Settings = Mesh ? FindFProperty<FStructProperty>(Mesh->GetClass(), TEXT("NaniteSettings")) : nullptr;
+		const FStructProperty* Assembly = Settings ? FindFProperty<FStructProperty>(Settings->Struct, TEXT("NaniteAssemblyData")) : nullptr;
+		const FArrayProperty* Parts = Assembly ? FindFProperty<FArrayProperty>(Assembly->Struct, TEXT("Parts")) : nullptr;
+		if (!Parts)
+			return false;
+		const void* AssemblyData = Assembly->ContainerPtrToValuePtr<void>(Settings->ContainerPtrToValuePtr<void>(Mesh));
+		return FScriptArrayHelper(Parts, Parts->ContainerPtrToValuePtr<void>(AssemblyData)).Num() > 0;
+	}
+
+	/** Known extra steps of a plugin that imported content needs, beyond enabling it. */
+	static FString FabPluginNote(const FString& Plugin)
+	{
+		if (Plugin == TEXT("DynamicWind"))
+			return TEXT("wind animates only meshes placed as an InstancedSkinnedMeshComponent with a DynamicWindData transform provider, and a "
+			            "new DynamicWindData starts with Enabled=False (the meshes then stay in their reference pose): set Enabled=True.");
+		return FString();
+	}
+
+	/** What the post-import checks found: the result's `requirements` object and the lines its text adds. */
+	struct FFabImportReport
+	{
+		TSharedPtr<FJsonObject> Requirements = MakeShared<FJsonObject>();
+		TArray<FString> Lines;
+		TArray<FString> Unloadable;
+	};
+
+	/**
+	 * Read the import's package files against this engine (file and custom versions), and from the asset registry the
+	 * plugins its packages need (enabled or not), the references that do not resolve, and whether its meshes are Nanite
+	 * Assemblies (they need a startup cvar). @p LogStart: the log sequence when this call's import began (0: none).
+	 */
+	static FFabImportReport FabCheckImport(const FString& Path, const TArray<FString>& VersionEngines, int64 LogStart)
+	{
+		FFabImportReport Report;
+		const TSharedPtr<FJsonObject>& R = Report.Requirements;
+
+		if (VersionEngines.Num() && !VersionEngines.Contains(FabCurrentEngine()))
+		{
+			R->SetArrayField(TEXT("builtFor"), FabJsonStrings(VersionEngines));
+			Report.Lines.Add(FString::Printf(TEXT("Fab has no version of this pack for UE %s; the one downloaded is listed for UE %s."),
+				*FabCurrentEngine(), *FString::Join(VersionEngines, TEXT(", "))));
+		}
+
+		// 1. Package files: the asset registry skips the ones this engine cannot load, so they are read from disk.
+		TArray<FString> Files;
+		FString Dir;
+		if (FPackageName::TryConvertLongPackageNameToFilename(Path / TEXT(""), Dir))
+		{
+			IFileManager::Get().FindFilesRecursive(Files, *Dir, TEXT("*.uasset"), true, false);
+			IFileManager::Get().FindFilesRecursive(Files, *Dir, TEXT("*.umap"), true, false, /*bClearFileNames*/ false);
+		}
+		TArray<FString> Warnings;
+		const int32 Checked = FMath::Min(Files.Num(), FabMaxCheckedPackages);
+		for (int32 Index = 0; Index < Checked; ++Index)
+		{
+			bool bFatal = true;
+			const FString Problem = FabPackageFileProblem(Files[Index], bFatal);
+			if (Problem.IsEmpty())
+				continue;
+			FString Package;
+			if (!FPackageName::TryConvertFilenameToLongPackageName(Files[Index], Package))
+				Package = FPaths::GetBaseFilename(Files[Index]);
+			(bFatal ? Report.Unloadable : Warnings).Add(Package + TEXT(": ") + Problem);
+		}
+		R->SetNumberField(TEXT("packagesChecked"), Checked);
+		R->SetArrayField(TEXT("unloadablePackages"), FabJsonStrings(Report.Unloadable));
+		if (Report.Unloadable.Num())
+			Report.Lines.Add(FString::Printf(TEXT("%d of %d package(s) cannot be loaded by this editor (UE %s): the editor skips them, so they are "
+				"missing from the project, its levels and its cooks: %s."), Report.Unloadable.Num(), Checked, *FabCurrentEngine(),
+				*FabNameList(Report.Unloadable)));
+		if (Warnings.Num())
+		{
+			R->SetArrayField(TEXT("packageWarnings"), FabJsonStrings(Warnings));
+			Report.Lines.Add(TEXT("Package warnings: ") + FabNameList(Warnings) + TEXT("."));
+		}
+		if (Files.Num() > Checked)
+			Report.Lines.Add(FString::Printf(TEXT("Only the first %d of %d package files were checked."), Checked, Files.Num()));
+
+		// 2. What the loadable packages reference: plugins (enabled or not) and references that do not resolve.
+		IAssetRegistry* Registry = IAssetRegistry::Get();
+		TArray<FAssetData> Assets;
+		if (Registry)
+			Registry->GetAssetsByPath(FName(*Path), Assets, /*bRecursive*/ true);
+		TSet<FName> Packages;
+		for (const FAssetData& Asset : Assets)
+			Packages.Add(Asset.PackageName);
+		TMap<FString, FString> NeededPlugins; // plugin name -> the first package that needs it
+		TArray<FString> Unresolved;
+		TSet<FName> Seen;
+		for (const FName& Package : Packages)
+		{
+			TArray<FName> Dependencies;
+			Registry->GetDependencies(Package, Dependencies);
+			for (const FName& DependencyName : Dependencies)
+			{
+				bool bAlreadySeen = false;
+				Seen.Add(DependencyName, &bAlreadySeen);
+				if (bAlreadySeen)
+					continue;
+				const FString Dependency = DependencyName.ToString();
+				const TSharedPtr<IPlugin> Plugin = FabPluginOfDependency(Dependency);
+				if (Plugin.IsValid())
+				{
+					NeededPlugins.FindOrAdd(Plugin->GetName(), Package.ToString());
+					if (!Plugin->IsEnabled())
+						continue; // a disabled plugin's content and classes are reported as that plugin
+				}
+				if (FPackageName::IsMemoryPackage(Dependency) || FPackageName::IsTempPackage(Dependency))
+					continue;
+				const bool bExists = Dependency.StartsWith(TEXT("/Script/")) ? FindPackage(nullptr, *Dependency) != nullptr
+					: Packages.Contains(DependencyName) || FPackageName::DoesPackageExist(Dependency);
+				if (!bExists)
+					Unresolved.Add(FString::Printf(TEXT("%s (from %s)"), *Dependency, *Package.ToString()));
+			}
+		}
+		TArray<TSharedPtr<FJsonValue>> PluginValues;
+		TArray<FString> Disabled, Notes;
+		NeededPlugins.KeySort([](const FString& A, const FString& B) { return A < B; });
+		for (const TPair<FString, FString>& Needed : NeededPlugins)
+		{
+			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Needed.Key);
+			if (!Plugin.IsValid())
+				continue;
+			const FPluginDescriptor& Descriptor = Plugin->GetDescriptor();
+			const TCHAR* Stage = Descriptor.bIsExperimentalVersion ? TEXT("experimental") : Descriptor.bIsBetaVersion ? TEXT("beta") : nullptr;
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetStringField(TEXT("name"), Needed.Key);
+			Row->SetBoolField(TEXT("enabled"), Plugin->IsEnabled());
+			Row->SetStringField(TEXT("neededBy"), Needed.Value);
+			if (Stage)
+				Row->SetStringField(TEXT("stage"), Stage);
+			const FString Note = FabPluginNote(Needed.Key);
+			if (!Note.IsEmpty())
+			{
+				Row->SetStringField(TEXT("note"), Note);
+				Notes.Add(Needed.Key + TEXT(": ") + Note);
+			}
+			PluginValues.Add(MakeShared<FJsonValueObject>(Row));
+			if (!Plugin->IsEnabled())
+				Disabled.Add(FString::Printf(TEXT("%s%s (needed by %s)"), *Needed.Key, Stage ? *(FString(TEXT(", ")) + Stage) : TEXT(""), *Needed.Value));
+		}
+		R->SetArrayField(TEXT("plugins"), PluginValues);
+		if (Disabled.Num())
+			Report.Lines.Add(FString::Printf(TEXT("Needs plugin(s) that are not enabled in this project: %s. Without them these assets do not load "
+				"or render correctly: ask the user before enabling them (Edit > Plugins, or the .uproject's Plugins list), then restart the "
+				"editor."), *FabNameList(Disabled)));
+		Report.Lines.Append(Notes);
+		R->SetArrayField(TEXT("unresolvedReferences"), FabJsonStrings(Unresolved));
+		if (Unresolved.Num())
+			Report.Lines.Add(FString::Printf(TEXT("%d reference(s) of the imported packages point at content that is not in this project or "
+				"engine (they load as missing, e.g. a blank texture): %s."), Unresolved.Num(), *FabNameList(Unresolved)));
+
+		// 3. Startup cvars: Nanite Assemblies (Megaplants trees) build only with r.Nanite.Foliage or r.Nanite.AllowAssemblies.
+		bool bAssemblies = false;
+		for (const FAssetData& Asset : Assets)
+			bAssemblies = bAssemblies || FabIsNaniteAssembly(Asset.FastGetAsset(/*bLoad*/ false));
+		if (LogStart > 0 && !bAssemblies)
+		{
+			for (const FUnrealMcpLogEntry& Entry : FUnrealMcpLogCollector::Get().SnapshotAfter(LogStart))
+				bAssemblies = bAssemblies || Entry.Message.Contains(TEXT("Nanite Assemblies are not enabled"));
+		}
+		TArray<TSharedPtr<FJsonValue>> CvarValues;
+		if (bAssemblies)
+		{
+			bool bEnabled = false;
+			TArray<FString> Values;
+			for (const TCHAR* Name : { TEXT("r.Nanite.Foliage"), TEXT("r.Nanite.AllowAssemblies") })
+			{
+				const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+				const FString Value = Variable ? Variable->GetString() : TEXT("(not in this engine)");
+				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetStringField(TEXT("name"), Name);
+				Row->SetStringField(TEXT("value"), Value);
+				Row->SetStringField(TEXT("needed"), TEXT("1 (either of the two)"));
+				Row->SetStringField(TEXT("where"), TEXT("[/Script/Engine.RendererSettings] in Config/DefaultEngine.ini, read when the editor starts"));
+				CvarValues.Add(MakeShared<FJsonValueObject>(Row));
+				bEnabled = bEnabled || (Variable && Variable->GetInt() != 0);
+				Values.Add(FString::Printf(TEXT("%s=%s"), Name, *Value));
+			}
+			if (!bEnabled)
+				Report.Lines.Add(FString::Printf(TEXT("Its meshes are Nanite Assemblies, which this project does not build (%s): without "
+					"r.Nanite.Foliage=1 or r.Nanite.AllowAssemblies=1 under [/Script/Engine.RendererSettings] in Config/DefaultEngine.ini "
+					"they render as bare parts. These are startup settings: ask the user, set one, then restart the editor."),
+					*FString::Join(Values, TEXT(", "))));
+		}
+		R->SetArrayField(TEXT("cvars"), CvarValues);
+		return Report;
+	}
+
+	// ---------------------------------------------------------------- fab-add: base materials out of engine content (DEV-291)
+
+	/** Where fab-add keeps its project copies of base materials that live in installed engine content (M_MS_Base). */
+	static const TCHAR* FabBaseMaterialFolder = TEXT("/Game/Fab/Materials");
+
+	static bool FabIsInstalledEnginePackage(const UObject* Object)
+	{
+		FString Filename;
+		return Object && FPackageName::TryConvertLongPackageNameToFilename(Object->GetOutermost()->GetName(), Filename)
+			&& FUnrealMcpEngineContentGuard::IsInstalledEngineFile(Filename);
+	}
+
+	/** The project copy of the engine-content material @p Base (made once, with the Nanite and instanced usages set), or null. */
+	static UMaterial* FabProjectBaseMaterial(UMaterial* Base, TArray<UPackage*>& OutToSave)
+	{
+		const FString PackageName = FString(FabBaseMaterialFolder) / Base->GetName();
+		const FString ObjectPath = PackageName + TEXT(".") + Base->GetName();
+		if (UMaterial* Existing = FindObject<UMaterial>(nullptr, *ObjectPath))
+			return Existing;
+		if (FPackageName::DoesPackageExist(PackageName))
+			return LoadObject<UMaterial>(nullptr, *ObjectPath); // null when something else of that name is there
+		UPackage* Package = CreatePackage(*PackageName);
+		UMaterial* Copy = DuplicateObject<UMaterial>(Base, Package, Base->GetFName());
+		if (!Copy)
+			return nullptr;
+		Copy->SetFlags(RF_Public | RF_Standalone);
+		// The usages PCG / Nanite / foliage set at first use, set up front: using the copy never dirties anything read-only.
+		Copy->bUsedWithNanite = true;
+		Copy->bUsedWithInstancedStaticMeshes = true;
+		Copy->PostEditChange();
+		FAssetRegistryModule::AssetCreated(Copy);
+		Package->MarkPackageDirty();
+		OutToSave.Add(Package);
+		return Copy;
+	}
+
+	/**
+	 * Reparent the imported material instances whose parent is a material in installed engine content (the Fab plugin's
+	 * M_MS_Base under Program Files) to a project copy of it with its Nanite / instanced usages already set: a PCG or
+	 * Nanite use would otherwise set them on the engine material, which cannot be saved, and leave it dirty (that blocked
+	 * an editor restart). Returns "<copy> (<n> instance(s))" per copy used.
+	 */
+	static TArray<FString> FabLocalizeBaseMaterials(const FString& Path)
+	{
+		TArray<FString> Done;
+		IAssetRegistry* Registry = IAssetRegistry::Get();
+		if (!Registry)
+			return Done;
+		FARFilter Filter;
+		Filter.PackagePaths.Add(FName(*Path));
+		Filter.bRecursivePaths = true;
+		Filter.ClassPaths.Add(UMaterialInstanceConstant::StaticClass()->GetClassPathName());
+		Filter.bRecursiveClasses = true;
+		TArray<FAssetData> Assets;
+		Registry->GetAssets(Filter, Assets);
+		TMap<UMaterial*, int32> Reparented;
+		TArray<UPackage*> ToSave;
+		for (const FAssetData& Asset : Assets)
+		{
+			UMaterialInstanceConstant* Instance = Cast<UMaterialInstanceConstant>(Asset.GetAsset());
+			UMaterial* Base = Instance ? Cast<UMaterial>(Instance->Parent) : nullptr;
+			if (!Base || !FabIsInstalledEnginePackage(Base))
+				continue;
+			UMaterial* Copy = FabProjectBaseMaterial(Base, ToSave);
+			if (!Copy)
+				continue;
+			Instance->SetParentEditorOnly(Copy);
+			Instance->PostEditChange();
+			Instance->MarkPackageDirty();
+			ToSave.AddUnique(Instance->GetOutermost());
+			++Reparented.FindOrAdd(Copy);
+		}
+		if (ToSave.Num())
+			UEditorLoadingAndSavingUtils::SavePackages(ToSave, /*bOnlyDirty*/ false);
+		for (const TPair<UMaterial*, int32>& Pair : Reparented)
+			Done.Add(FString::Printf(TEXT("%s (%d instance(s))"), *Pair.Key->GetPathName(), Pair.Value));
+		return Done;
+	}
+
 	// ---------------------------------------------------------------- fab-add
 
 	enum EFabAddStage : int32
@@ -896,21 +1365,11 @@ namespace UnrealMcpFabToolsLocal
 		return Method.ToLower();
 	}
 
-	/** "UE_5.4" -> 504; 0 when unparsable. */
-	static int32 FabEngineNumber(const FString& Engine)
-	{
-		FString Major, Minor;
-		const FString Digits = Engine.Replace(TEXT("UE_"), TEXT(""));
-		if (!Digits.Split(TEXT("."), &Major, &Minor))
-			return 0;
-		return FCString::Atoi(*Major) * 100 + FCString::Atoi(*Minor);
-	}
-
 	/**
 	 * The unreal-engine version to download: one built for this editor's UE, else the newest one built for an older UE
-	 * (content opens in newer editors), else the oldest newer one.
+	 * (content opens in newer editors), else the oldest newer one. @p OutEngines: the engines the chosen one lists ("5.8").
 	 */
-	static FString FabUnrealVersionUid(const TArray<TSharedPtr<FJsonValue>>& Versions)
+	static FString FabUnrealVersionUid(const TArray<TSharedPtr<FJsonValue>>& Versions, TArray<FString>* OutEngines = nullptr)
 	{
 		const int32 Mine = FEngineVersion::Current().GetMajor() * 100 + FEngineVersion::Current().GetMinor();
 		FString Best;
@@ -930,6 +1389,12 @@ namespace UnrealMcpFabToolsLocal
 				{
 					BestScore = Score;
 					Best = FabString(**Object, TEXT("uid"));
+					if (OutEngines)
+					{
+						OutEngines->Reset();
+						for (const TSharedPtr<FJsonValue>& Listed : *Engines)
+							OutEngines->Add(Listed->AsString().Replace(TEXT("UE_"), TEXT("")));
+					}
 				}
 			}
 		}
@@ -952,20 +1417,43 @@ namespace UnrealMcpFabToolsLocal
 		return true;
 	}
 
-	static FUnrealMcpToolResult FabAddDone(const FUnrealMcpToolCall& Call, const FString& Uid, const FString& Title, const FString& Path,
-		bool bAlready)
+	/**
+	 * fab-add's answer once the listing is in the project at @p Path: the post-import checks (DEV-290: packages this
+	 * engine cannot load, plugins, startup cvars, unresolved references) and the base-material copy (DEV-291). Packages
+	 * this engine cannot load make it an error: the import landed, but the editor skips them.
+	 */
+	static FUnrealMcpToolResult FabAddDone(const FUnrealMcpToolCall& Call, const FFabCallState& State, const FString& Uid, const FString& Title,
+		const FString& Path, bool bAlready)
 	{
+		const FString Name = Title.IsEmpty() ? Uid : Title;
+		const FFabImportReport Report = FabCheckImport(Path, State.VersionEngines, bAlready ? 0 : State.ImportLogStart);
+		TArray<FString> Lines = Report.Lines;
+		const TArray<FString> BaseMaterials = Call.GetBool(TEXT("localBaseMaterial"), true) ? FabLocalizeBaseMaterials(Path) : TArray<FString>();
+		if (BaseMaterials.Num())
+		{
+			Report.Requirements->SetArrayField(TEXT("baseMaterialCopies"), FabJsonStrings(BaseMaterials));
+			Lines.Add(FString::Printf(TEXT("Its material instances used a base material in the installed engine's content (read-only), so they "
+				"now use a project copy with the Nanite and instanced usages set (PCG / Nanite use then never dirties engine content): %s."),
+				*FabNameList(BaseMaterials)));
+		}
+		const FString Details = Lines.Num() ? TEXT("\n") + FString::Join(Lines, TEXT("\n")) : FString();
+		if (Report.Unloadable.Num())
+		{
+			return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' %s at %s, but this editor cannot use it.%s\nDo not build on "
+				"this pack in this editor and do not call fab-add for it again here: it needs a newer engine. Pick another listing whose "
+				"versions include UE %s (fab-search shows them), or ask the user whether to delete %s."), *Name,
+				bAlready ? TEXT("is in the project") : TEXT("was imported"), *Path, *Details, *FabCurrentEngine(), *Path)));
+		}
 		TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
 		S->SetStringField(TEXT("uid"), Uid);
 		S->SetStringField(TEXT("title"), Title);
 		S->SetStringField(TEXT("path"), Path);
 		S->SetBoolField(TEXT("alreadyInProject"), bAlready);
+		S->SetObjectField(TEXT("requirements"), Report.Requirements);
 		const FString Text = FString::Printf(TEXT("%s '%s' %s at %s. List what it holds: rql-query `assets | where Path startswith \"%s\" | "
-			"select Name, Class, Path`."), bAlready ? TEXT("Already in the project:") : TEXT("Imported"), *(Title.IsEmpty() ? Uid : Title),
-			bAlready ? TEXT("is") : TEXT("into the project"), *Path, *Path);
-		FUnrealMcpToolResult Result = FUnrealMcpToolResult::Success(Text, S);
-		Result.bMessageCoversStructured = true;
-		return FabFinish(Call, Result);
+			"select Name, Class, Path`.%s"), bAlready ? TEXT("Already in the project:") : TEXT("Imported"), *Name,
+			bAlready ? TEXT("is") : TEXT("into the project"), *Path, *Path, *Details);
+		return FabFinish(Call, FUnrealMcpToolResult::Success(Text, S));
 	}
 
 	/**
@@ -1009,7 +1497,7 @@ namespace UnrealMcpFabToolsLocal
 			{
 				const FString Existing = FabImportedPath(Uid);
 				if (!Existing.IsEmpty())
-					return FabAddDone(Call, Uid, Title, Existing, true);
+					return FabAddDone(Call, State, Uid, Title, Existing, true);
 			}
 			{
 				FFabHttpResult Http;
@@ -1109,7 +1597,7 @@ namespace UnrealMcpFabToolsLocal
 					return FabFinish(Call, FUnrealMcpToolResult::Error(FString::Printf(TEXT("'%s' is a complete project, not content to add: the user "
 						"creates it as a new project from the Epic Games Launcher (Fab Library > Create Project)."), *Title)));
 				if (Json->TryGetArrayField(TEXT("versions"), Items))
-					State.FileUid = FabUnrealVersionUid(*Items);
+					State.FileUid = FabUnrealVersionUid(*Items, &State.VersionEngines);
 			}
 			else if (Json->TryGetArrayField(TEXT("files"), Items))
 			{
@@ -1161,6 +1649,7 @@ namespace UnrealMcpFabToolsLocal
 
 			FabForgetImport(Uid); // a reimport's old record, or one whose folder is gone, must not count as this import done
 			State.LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
+			State.ImportLogStart = State.LogSequence;
 			bool bFilled = false;
 			const bool bCalled = FabInvoke(FabApi(), TEXT("AddToProject"), [&](UFunction* Function, uint8* Params)
 			{
@@ -1183,7 +1672,7 @@ namespace UnrealMcpFabToolsLocal
 		// AddImport: the workflow records the listing in UFabLocalAssets when it is done.
 		const FString Path = FabImportedPath(Uid);
 		if (!Path.IsEmpty())
-			return FabAddDone(Call, Uid, Title, Path, false);
+			return FabAddDone(Call, State, Uid, Title, Path, false);
 		const FString Errors = FabImportErrors(State.LogSequence, Uid, Title);
 		if (!Errors.IsEmpty())
 		{
@@ -1287,6 +1776,27 @@ namespace UnrealMcpFabTools
 	UNREALMCPEDITOR_API FString PickUnrealVersion(const TArray<TSharedPtr<FJsonValue>>& Versions) { return UnrealMcpFabToolsLocal::FabUnrealVersionUid(Versions); }
 	UNREALMCPEDITOR_API FString SignInRequiredText(const FString& ToolName) { return UnrealMcpFabToolsLocal::FabSignInRequiredText(ToolName); }
 	UNREALMCPEDITOR_API FString SearchFooter(bool bSignedIn) { return UnrealMcpFabToolsLocal::FabSearchFooterText(bSignedIn); }
+	UNREALMCPEDITOR_API TArray<FString> ListingEngines(const FJsonObject& Listing) { return UnrealMcpFabToolsLocal::FabListingEngines(Listing); }
+	UNREALMCPEDITOR_API FString PackageFileProblem(const FString& Filename, bool& bOutFatal)
+	{
+		return UnrealMcpFabToolsLocal::FabPackageFileProblem(Filename, bOutFatal);
+	}
+	UNREALMCPEDITOR_API TArray<FString> CustomVersionProblems(const FCustomVersionArray& Versions, TArray<FString>& OutUnknown)
+	{
+		return UnrealMcpFabToolsLocal::FabCustomVersionProblems(Versions, TEXT("UnrealMcpFabTools"), OutUnknown);
+	}
+	UNREALMCPEDITOR_API TSharedPtr<FJsonObject> CheckImport(const FString& Path, TArray<FString>& OutLines)
+	{
+		const UnrealMcpFabToolsLocal::FFabImportReport Report = UnrealMcpFabToolsLocal::FabCheckImport(Path, {}, 0);
+		OutLines = Report.Lines;
+		return Report.Requirements;
+	}
+	UNREALMCPEDITOR_API TArray<FString> LocalizeBaseMaterials(const FString& Path) { return UnrealMcpFabToolsLocal::FabLocalizeBaseMaterials(Path); }
+	UNREALMCPEDITOR_API FString PluginOfDependency(const FString& Dependency)
+	{
+		const TSharedPtr<IPlugin> Plugin = UnrealMcpFabToolsLocal::FabPluginOfDependency(Dependency);
+		return Plugin.IsValid() ? Plugin->GetName() : FString();
+	}
 
 	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry)
 	{
@@ -1295,7 +1805,8 @@ namespace UnrealMcpFabTools
 		Registry.Tool(TEXT("fab-search"))
 			.Title(TEXT("Search Fab"))
 			.Description(TEXT("Search the Fab marketplace (fab.com: 3D models, materials, Megascans, Unreal Engine packs, ...). Returns each "
-			                  "listing's uid, title, type, price and file formats, and whether this editor is signed in to Fab. Import "
+			                  "listing's uid, title, type, price, file formats and the Unreal Engine versions Fab lists for it (a pack not listed for "
+			                  "this editor's version may not load here), and whether this editor is signed in to Fab. Import "
 			                  "one the user owns with fab-add, which needs the user's Fab sign-in (fab-sign-in)."))
 			.ParamString(TEXT("query"), TEXT("Search text, e.g. 'medieval barrel' or 'mossy rock'."))
 			.ParamString(TEXT("listingType"), TEXT("Only this listing type, e.g. 3d-model, material, decal, environment, sprite, audio, "
@@ -1322,7 +1833,10 @@ namespace UnrealMcpFabTools
 			.Title(TEXT("Add Fab Asset to Project"))
 			.Description(TEXT("Download a Fab listing the user owns and import it into the project, like the Fab panel's 'Add to Project': "
 			                  "Unreal Engine packs go to /Game/<Pack>, Megascans to /Game/Fab/Megascans/..., glTF/FBX models to /Game/Fab/... "
-			                  "Returns the content folder it landed in. A listing already in the project is not downloaded again. Large "
+			                  "Returns the content folder it landed in and the pack's 'requirements' in this editor: packages it cannot "
+			                  "load (saved by a newer engine; the call is then an error), plugins its content needs and whether they are "
+			                  "enabled, startup cvars it needs (Nanite Assemblies) with their values, and references that do not resolve. "
+			                  "A listing already in the project is not downloaded again. Large "
 			                  "packs may take minutes: when the call ends before the import does, call it again with the same listing. "
 			                  "Complete projects and engine code plugins are not added to a project (the Epic Games Launcher installs them). "
 			                  "Needs the user's Fab sign-in in this editor: without it the call says so at once and never opens a browser."))
@@ -1332,6 +1846,9 @@ namespace UnrealMcpFabTools
 			.ParamString(TEXT("quality"), TEXT("Megascans only: low, medium (default), high or raw."))
 			.ParamBool(TEXT("reimport"), TEXT("Download and import again even when the listing is already in the project, replacing its "
 			                                   "assets (default false)."))
+			.ParamBool(TEXT("localBaseMaterial"), TEXT("Reparent imported material instances whose base material is read-only engine content "
+			                                            "(Megascans' M_MS_Base) to a copy in /Game/Fab/Materials with the Nanite and instanced "
+			                                            "usages set, so PCG / Nanite use never dirties engine content (default true)."))
 			.ReadOnlyHint(false).DestructiveHint(true).IdempotentHint(false).OpenWorldHint(true)
 			.Handle(&FabAdd);
 

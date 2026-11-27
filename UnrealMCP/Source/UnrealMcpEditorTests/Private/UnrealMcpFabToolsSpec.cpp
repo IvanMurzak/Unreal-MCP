@@ -7,7 +7,24 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Base64.h"
 #include "Misc/EngineVersion.h"
+#include "HAL/FileManager.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Serialization/MemoryWriter.h"
+#include "Serialization/CustomVersion.h"
+#include "UObject/ObjectVersion.h"
+#include "UObject/UE5MainStreamObjectVersion.h"
 #include "Misc/ScopeExit.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "EditorAssetLibrary.h"
+#include "FileHelpers.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Misc/App.h"
+#include "UObject/Package.h"
 #include "UnrealMcpCoreTools.h"
 #include "UnrealMcpFabSignIn.h"
 #include "UnrealMcpToolRegistry.h"
@@ -208,6 +225,154 @@ void FUnrealMcpFabToolsSpec::Define()
 		});
 		TestFalse(TEXT("bad quality fails"), Result.bSuccess || Result.bRetryLater);
 		TestTrue(TEXT("bad quality names the options"), Result.Message.Contains(TEXT("low, medium, high, raw")));
+	});
+	It("reads the engine versions a listing supports (DEV-290)", [this]()
+	{
+		const TSharedPtr<FJsonObject> Listing = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Formats;
+		{
+			TSharedPtr<FJsonObject> Specs = MakeShared<FJsonObject>();
+			Specs->SetArrayField(TEXT("unrealEngineEngineVersions"), { MakeShared<FJsonValueString>(TEXT("UE_5.8")),
+				MakeShared<FJsonValueString>(TEXT("UE_5.10")), MakeShared<FJsonValueString>(TEXT("UE_5.7")), MakeShared<FJsonValueString>(TEXT("junk")) });
+			TSharedPtr<FJsonObject> Format = MakeShared<FJsonObject>();
+			Format->SetObjectField(TEXT("technicalSpecs"), Specs);
+			Formats.Add(MakeShared<FJsonValueObject>(Format));
+			TSharedPtr<FJsonObject> Gltf = MakeShared<FJsonObject>();
+			Gltf->SetObjectField(TEXT("technicalSpecs"), MakeShared<FJsonObject>());
+			Formats.Add(MakeShared<FJsonValueObject>(Gltf));
+		}
+		Listing->SetArrayField(TEXT("assetFormats"), Formats);
+		TestEqual(TEXT("sorted by version, junk dropped"), UnrealMcpFabTools::ListingEngines(*Listing), TArray<FString>{ TEXT("5.7"), TEXT("5.8"), TEXT("5.10") });
+		TestTrue(TEXT("no formats, no engines"), UnrealMcpFabTools::ListingEngines(FJsonObject()).IsEmpty());
+	});
+
+	It("tells which package files this engine cannot load (DEV-290)", [this]()
+	{
+		// An engine package loads.
+		FString EngineFile;
+		TestTrue(TEXT("engine package has a file"), FPackageName::TryConvertLongPackageNameToFilename(TEXT("/Engine/EngineMaterials/DefaultMaterial"),
+			EngineFile, FPackageName::GetAssetPackageExtension()));
+		bool bFatal = true;
+		TestEqual(TEXT("an engine package loads"), UnrealMcpFabTools::PackageFileProblem(EngineFile, bFatal), FString());
+		TestFalse(TEXT("nothing fatal"), bFatal);
+
+		const FString Dir = FPaths::ProjectSavedDir() / TEXT("UnrealMcpFabToolsSpec");
+		ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Dir, false, true); };
+		const FString NotPackage = Dir / TEXT("NotAPackage.uasset");
+		TestTrue(TEXT("wrote a text file"), FFileHelper::SaveStringToFile(TEXT("this is not a package file at all"), *NotPackage));
+		TestTrue(TEXT("a text file is no package"), UnrealMcpFabTools::PackageFileProblem(NotPackage, bFatal).Contains(TEXT("not a package file")));
+		TestTrue(TEXT("fatal"), bFatal);
+
+		// A package header saved by a newer engine: tag, legacy version, UE3 version, UE4 / UE5 file versions.
+		TArray<uint8> Bytes;
+		FMemoryWriter Writer(Bytes);
+		int32 Tag = (int32)PACKAGE_FILE_TAG, Legacy = -8, LegacyUE3 = 864;
+		int32 UE4 = GPackageFileUEVersion.FileVersionUE4, UE5 = GPackageFileUEVersion.FileVersionUE5 + 1;
+		Writer << Tag << Legacy << LegacyUE3 << UE4 << UE5;
+		Bytes.AddZeroed(256);
+		const FString Newer = Dir / TEXT("Newer.uasset");
+		TestTrue(TEXT("wrote the header"), FFileHelper::SaveArrayToFile(Bytes, *Newer));
+		const FString Problem = UnrealMcpFabTools::PackageFileProblem(Newer, bFatal);
+		TestTrue(TEXT("a newer package is named so"), Problem.Contains(TEXT("newer engine")));
+		TestTrue(TEXT("fatal"), bFatal);
+	});
+
+	It("names custom versions newer than this engine's and unknown ones (DEV-290)", [this]()
+	{
+		const TOptional<FCustomVersion> Latest = FCurrentCustomVersions::Get(FUE5MainStreamObjectVersion::GUID);
+		if (!TestTrue(TEXT("UE5-Main is registered"), Latest.IsSet()))
+			return;
+		FCustomVersionArray Versions;
+		Versions.Add(FCustomVersion(FUE5MainStreamObjectVersion::GUID, Latest->Version + 2, TEXT("UE5-Main")));
+		Versions.Add(FCustomVersion(FGuid(0x1234, 0x5678, 0x9abc, 0xdef0), 3, TEXT("NotRegistered")));
+		TArray<FString> Unknown;
+		const TArray<FString> TooNew = UnrealMcpFabTools::CustomVersionProblems(Versions, Unknown);
+		if (TestEqual(TEXT("one too new"), TooNew.Num(), 1))
+			TestTrue(TEXT("says saved and current"), TooNew[0].Contains(FString::Printf(TEXT("%d (this engine: %d)"), Latest->Version + 2, Latest->Version)));
+		TestEqual(TEXT("one unknown"), Unknown.Num(), 1);
+
+		Versions = { FCustomVersion(FUE5MainStreamObjectVersion::GUID, Latest->Version, TEXT("UE5-Main")) };
+		Unknown.Reset();
+		TestTrue(TEXT("the current version is fine"), UnrealMcpFabTools::CustomVersionProblems(Versions, Unknown).IsEmpty() && Unknown.IsEmpty());
+	});
+
+	It("maps a package dependency to the plugin it needs (DEV-290)", [this]()
+	{
+		TestEqual(TEXT("a plugin module"), UnrealMcpFabTools::PluginOfDependency(TEXT("/Script/UnrealMcpEditor")), FString(TEXT("UnrealMCP")));
+		TestEqual(TEXT("an engine module"), UnrealMcpFabTools::PluginOfDependency(TEXT("/Script/Engine")), FString());
+		TestEqual(TEXT("project content"), UnrealMcpFabTools::PluginOfDependency(TEXT("/Game/Foo/Bar")), FString());
+		TestEqual(TEXT("engine content"), UnrealMcpFabTools::PluginOfDependency(TEXT("/Engine/EngineMaterials/DefaultMaterial")), FString());
+		if (IPluginManager::Get().FindPlugin(TEXT("Fab")).IsValid())
+			TestEqual(TEXT("plugin content"), UnrealMcpFabTools::PluginOfDependency(TEXT("/Fab/Materials/Standard/M_MS_Base")), FString(TEXT("Fab")));
+	});
+	It("checks an imported folder and moves its instances off a read-only engine base material (DEV-290, DEV-291)", [this]()
+	{
+		UMaterial* EngineBase = LoadObject<UMaterial>(nullptr, TEXT("/Fab/Materials/Standard/M_MS_Base.M_MS_Base"));
+		const FString CopyPackage = TEXT("/Game/Fab/Materials/M_MS_Base");
+		if (!EngineBase || !FApp::IsEngineInstalled() || FPackageName::DoesPackageExist(CopyPackage))
+			return; // needs the Fab plugin's content in an installed engine, and a project without that copy yet
+		const bool bBaseWasDirty = EngineBase->GetOutermost()->IsDirty();
+		const FString Folder = TEXT("/Game/UnrealMcpFabSpec");
+		const FString Dir = FPaths::ProjectContentDir() / TEXT("UnrealMcpFabSpec");
+		const FString FabDir = FPaths::ProjectContentDir() / TEXT("Fab");
+		const bool bHadFabDir = IFileManager::Get().DirectoryExists(*FabDir);
+		ON_SCOPE_EXIT
+		{
+			UEditorAssetLibrary::DeleteDirectory(Folder);
+			if (UEditorAssetLibrary::DoesAssetExist(CopyPackage))
+				UEditorAssetLibrary::DeleteAsset(CopyPackage);
+			IFileManager::Get().DeleteDirectory(*Dir, false, true);
+			if (!bHadFabDir)
+				IFileManager::Get().DeleteDirectory(*FabDir, false, true); // only the folders this spec made
+		};
+
+		// An "import": one instance of the engine's M_MS_Base, saved, and one package file a newer engine wrote.
+		UPackage* Package = CreatePackage(*(Folder / TEXT("MI_FabSpec")));
+		UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, TEXT("MI_FabSpec"), RF_Public | RF_Standalone);
+		Instance->SetParentEditorOnly(EngineBase);
+		FAssetRegistryModule::AssetCreated(Instance);
+		if (!TestTrue(TEXT("saved the instance"), UEditorLoadingAndSavingUtils::SavePackages({ Package }, false)))
+			return;
+		FString InstanceFile;
+		FPackageName::TryConvertLongPackageNameToFilename(Package->GetName(), InstanceFile, FPackageName::GetAssetPackageExtension());
+		IAssetRegistry::Get()->ScanFilesSynchronous({ InstanceFile }, /*bForceRescan*/ true);
+		TArray<uint8> Bytes;
+		FMemoryWriter Writer(Bytes);
+		int32 Tag = (int32)PACKAGE_FILE_TAG, Legacy = -8, LegacyUE3 = 864;
+		int32 UE4 = GPackageFileUEVersion.FileVersionUE4, UE5 = GPackageFileUEVersion.FileVersionUE5 + 1;
+		Writer << Tag << Legacy << LegacyUE3 << UE4 << UE5;
+		Bytes.AddZeroed(256);
+		TestTrue(TEXT("wrote the newer package"), FFileHelper::SaveArrayToFile(Bytes, *(Dir / TEXT("SM_FromNewerEngine.uasset"))));
+
+		TArray<FString> Lines;
+		const TSharedPtr<FJsonObject> Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
+		const TArray<TSharedPtr<FJsonValue>>* Unloadable = nullptr;
+		if (TestTrue(TEXT("lists unloadable packages"), Requirements->TryGetArrayField(TEXT("unloadablePackages"), Unloadable)) && TestEqual(TEXT("one"), Unloadable->Num(), 1))
+			TestTrue(TEXT("the newer one"), (*Unloadable)[0]->AsString().Contains(TEXT("SM_FromNewerEngine")));
+		TestTrue(TEXT("the text says it cannot be loaded"), FString::Join(Lines, TEXT("\n")).Contains(TEXT("cannot be loaded by this editor")));
+		bool bFab = false;
+		const TArray<TSharedPtr<FJsonValue>>* Plugins = nullptr;
+		if (Requirements->TryGetArrayField(TEXT("plugins"), Plugins))
+		{
+			for (const TSharedPtr<FJsonValue>& Plugin : *Plugins)
+				bFab |= Plugin->AsObject()->GetStringField(TEXT("name")) == TEXT("Fab") && Plugin->AsObject()->GetBoolField(TEXT("enabled"));
+		}
+		TestTrue(TEXT("the Fab plugin is needed (its base material), and enabled"), bFab);
+		const TArray<TSharedPtr<FJsonValue>>* Unresolved = nullptr;
+		TestTrue(TEXT("nothing unresolved"), Requirements->TryGetArrayField(TEXT("unresolvedReferences"), Unresolved) && Unresolved->IsEmpty());
+
+		const TArray<FString> Copies = UnrealMcpFabTools::LocalizeBaseMaterials(Folder);
+		if (TestEqual(TEXT("one copy used"), Copies.Num(), 1))
+			TestTrue(TEXT("named with its instance count"), Copies[0].Contains(CopyPackage) && Copies[0].Contains(TEXT("1 instance")));
+		const UMaterial* Copy = Cast<UMaterial>(Instance->Parent);
+		if (TestNotNull(TEXT("reparented to a material"), Copy))
+		{
+			TestEqual(TEXT("the project copy"), Copy->GetOutermost()->GetName(), CopyPackage);
+			TestTrue(TEXT("Nanite and instanced usages set"), Copy->bUsedWithNanite && Copy->bUsedWithInstancedStaticMeshes);
+			TestFalse(TEXT("the copy is saved"), Copy->GetOutermost()->IsDirty());
+		}
+		TestEqual(TEXT("the engine material is untouched"), EngineBase->GetOutermost()->IsDirty(), bBaseWasDirty);
+		TestTrue(TEXT("a second pass changes nothing"), UnrealMcpFabTools::LocalizeBaseMaterials(Folder).IsEmpty());
 	});
 }
 
