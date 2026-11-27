@@ -614,11 +614,12 @@ machine-wide mutex (`Global\UnrealBuildTool_Mutex_<hash>`):
   is denied` instead of waiting (UBT's `-WaitMutex` waits for its own session only).
 
 So the CI builds (`ue_ci.py` BuildPlugin: `build-plugin-dist`, `plugin-zip`,
-`prebuilt-zip`; the extension suite's UBT build) wait such a conflict out
+`prebuilt-zip`; `build-host`; the extension suite's UBT build) wait such a conflict out
 (`scripts/ubt_conflict.py`): a build whose output shows one of those messages is
 rerun after 30, 60, 120, 180 and 210 s, each wait logged as a `::warning::` naming
 the step. All builds of one step share one 10-min wait budget (the suite step runs
-several builds), so the retries cannot push a job past its `timeout-minutes`. The
+several builds), so a plugin job (BuildPlugin step + suite step) waits at most about
+20 min in total, well inside its `timeout-minutes`. The
 cross-session `Global\AutomationTool_<hash> ... is denied` of a local RunUAT is
 retried the same way. A build that also printed a compiler or linker error is never
 retried, and when the attempts or the budget run out the step fails with a `::error::`.

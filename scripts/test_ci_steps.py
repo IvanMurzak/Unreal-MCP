@@ -724,5 +724,34 @@ class MachineLockCliTests(unittest.TestCase):
             self.assertIn("nothing to release", result.stdout)
 
 
+class RunWatchEncodingTests(unittest.TestCase):
+    """run(watch=...) must keep draining the pipe whatever bytes the build prints (DEV-287 review)."""
+
+    def test_non_utf8_output_through_a_cp1252_stdout_neither_hangs_nor_loses_lines(self):
+        import io
+        # A non-UTF-8 byte (OEM codepage) and a character cp1252 cannot encode, then enough output to fill
+        # the pipe if the reader stopped draining, then the conflict line the watcher must still see.
+        lines = [b"caf\xe9 \xe2\x98\x83\n", *([b"x" * 120 + b"\n"] * 4000),
+                 b"A conflicting instance of UnrealBuildTool is already running.\n"]
+        child = "import sys\n" + "".join(f"sys.stdout.buffer.write({line!r})\n" for line in lines) + "sys.stdout.flush()\n"
+        script = Path(tempfile.mkdtemp()) / "child.py"
+        script.write_text(child, encoding="ascii")
+        seen = []
+        sink = io.BytesIO()
+        stdout = io.TextIOWrapper(sink, encoding="cp1252", errors="strict")
+        real = sys.stdout
+        sys.stdout = stdout
+        try:
+            started = time.monotonic()
+            code = ci.run([sys.executable, str(script)], watch=seen.append)
+        finally:
+            stdout.flush()
+            sys.stdout = real
+        self.assertEqual(code, 0)
+        self.assertLess(time.monotonic() - started, 60)
+        self.assertTrue(any("conflicting instance" in line for line in seen))
+        self.assertIn(b"caf\xe9", sink.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

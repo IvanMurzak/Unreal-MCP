@@ -93,13 +93,23 @@ def run(command: list, watch=None, **options) -> int:
     print("+ " + subprocess.list2cmdline(command), flush=True)
     if watch is None:
         return subprocess.run(command, **options).returncode
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                               errors="replace", **options)
+    # Binary pipe, echoed as raw bytes: UBT/MSVC write the OEM codepage when redirected, and re-encoding a
+    # decoded line through a cp1252 sys.stdout raised in the reader thread, which then stopped draining the
+    # pipe and hung the build. Only the copy passed to `watch` is decoded (lossy is fine for detection).
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options)
+    out = getattr(sys.stdout, "buffer", None)
 
     def echo() -> None:
-        for line in process.stdout:
-            print(line, end="", flush=True)
-            watch(line)
+        for raw in process.stdout:
+            try:
+                if out is not None:
+                    out.write(raw)
+                    out.flush()
+                else:
+                    print(raw.decode("utf-8", "replace"), end="", flush=True)
+                watch(raw.decode("utf-8", "replace"))
+            except Exception as error:  # never stop draining: a stopped reader blocks the child on a full pipe
+                print(f"(output echo failed: {error!r}; still draining)", file=sys.stderr, flush=True)
 
     # The pipe stays open while any grandchild that inherited it lives (mspdbsrv, an MSBuild node), so the step
     # waits for the command itself, then gives the reader a moment to drain what the command wrote.
@@ -308,8 +318,10 @@ def build_host(_args) -> None:
     uproject = Path(env("HOST_UPROJECT"))
     target = uproject.stem + "Editor"
     log = temp() / f"UBT-{target}-{os.environ.get('GITHUB_JOB', 'job')}-{os.environ.get('RUNNER_NAME', 'runner')}.log"
-    code = run([env("UE_BUILD"), target, env("UE_PLATFORM"), "Development", f"-project={uproject}", "-WaitMutex",
-                "-NoLiveCoding", f"-log={log}"])
+    command = [env("UE_BUILD"), target, env("UE_PLATFORM"), "Development", f"-project={uproject}", "-WaitMutex",
+               "-NoLiveCoding", f"-log={log}"]
+    # -WaitMutex does not wait for a UBT in another Windows session (DEV-287): retry that conflict too.
+    code = ubt_conflict.retry(lambda watch: run(command, watch=watch), "Build host")
     if code != 0:
         raise StepError(f"Host editor target ({target}) build failed for UE_ROOT={env('UE_ROOT')} (exit {code})")
 
