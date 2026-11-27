@@ -64,6 +64,8 @@ namespace UnrealMcpFabToolsLocal
 	static constexpr double FabPortalReopenSeconds = 600.0;
 	/** One fab-add call waits at most this long for the import; a later call with the same listing keeps waiting. */
 	static constexpr double FabImportWaitSeconds = 240.0;
+	/** fab-search waits at most this long for the remembered sign-in to be restored before it searches (DEV-293). */
+	static constexpr double FabSearchRestoreWaitSeconds = 30.0;
 	static constexpr int32 FabMaxCount = 48;
 	/** fab-library with a filter reads at most this many pages of 100. */
 	static constexpr int32 FabLibraryMaxPages = 20;
@@ -730,10 +732,16 @@ namespace UnrealMcpFabToolsLocal
 			return FabFinish(Call, FUnrealMcpToolResult::Error(TEXT("'sort' is one of: relevance, rating, newest, price, -price.")));
 		const int32 Count = (int32)FMath::Clamp<int64>(Call.GetInt(TEXT("count"), 12), 1, FabMaxCount);
 		// Right after the editor starts, the remembered sign-in may still be restoring: wait for it rather than report
-		// signedIn:false, which makes the agent ask the user to sign in again (DEV-293). Checked before the search starts.
-		if (!State.Http.IsValid() && FabReadToken(State).IsEmpty() && FabService() == EUnrealMcpFabSignInService::Restoring
-			&& FabTimeLeft(Call) > 0.0)
-			return FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the remembered Fab sign-in to be restored."));
+		// signedIn:false, which makes the agent ask the user to sign in again (DEV-293). Checked before the search starts, and
+		// for at most FabSearchRestoreWaitSeconds, so the search itself keeps its time (the footer then says to call again).
+		if (!State.Http.IsValid() && FabReadToken(State).IsEmpty() && FabService() == EUnrealMcpFabSignInService::Restoring)
+		{
+			const double Now = FPlatformTime::Seconds();
+			if (State.StageStarted <= 0.0)
+				State.StageStarted = Now;
+			if (Now - State.StageStarted < FabSearchRestoreWaitSeconds && FabTimeLeft(Call) > 0.0)
+				return FUnrealMcpToolResult::RetryLater(TEXT("Waiting for the remembered Fab sign-in to be restored."));
+		}
 		const FString Url = FString::Printf(TEXT("%s/i/listings/search?%s"), FabRoot, *FabQuery({
 			{ TEXT("q"), Call.GetString(TEXT("query")) },
 			{ TEXT("listing_types"), Call.GetString(TEXT("listingType")) },

@@ -39,6 +39,18 @@ namespace UnrealMcpFabLocal
 	/** No new try before this time (FPlatformTime::Seconds): a passing failure is retried, but not on every frame. */
 	static double FabRestoreNotBefore = 0.0;
 	static constexpr double FabRestoreRetrySeconds = 15.0;
+	/** Passing failures retried so far; after FabRestoreMaxRetries the next one is final. */
+	static int32 FabRestoreRetries = 0;
+	static constexpr int32 FabRestoreMaxRetries = 3;
+
+	/**
+	 * A retry of a passing failure is due later (FabRestoreDone). The tools then wait as for a restore in flight: fab-search
+	 * does not report a missing sign-in, and fab-sign-in opens no browser page that the retried login would collide with.
+	 */
+	static bool FabRestorePending()
+	{
+		return !bRestoreTried && FPlatformTime::Seconds() < FabRestoreNotBefore;
+	}
 
 	/** Where Fab's EOS platform stands: no SDK, no candidate, exactly one (returned) or more than one. */
 	enum class EFabPlatform : uint8 { NoSdk, None, Found, Ambiguous };
@@ -107,7 +119,8 @@ namespace UnrealMcpFabLocal
 
 	/**
 	 * A failed restore that may succeed later with the same remembered sign-in: no network yet, a timeout, a busy or failing
-	 * service. Epic's SDK keeps the remembered sign-in then. Every other failure (none remembered, or Epic refused it) is final.
+	 * service. Epic's SDK keeps the remembered sign-in then. Every other failure is final: none remembered, Epic refused it, or
+	 * another login holds Fab's platform (EOS_RequestInProgress: a retry would only collide with it again).
 	 */
 	static bool FabRestoreRetryable(EOS_EResult Result)
 	{
@@ -118,7 +131,6 @@ namespace UnrealMcpFabLocal
 		case EOS_EResult::EOS_TimedOut:
 		case EOS_EResult::EOS_TooManyRequests:
 		case EOS_EResult::EOS_ServiceFailure:
-		case EOS_EResult::EOS_RequestInProgress:
 			return true;
 		default:
 			return false;
@@ -134,8 +146,9 @@ namespace UnrealMcpFabLocal
 		{
 			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: restored the Epic sign-in remembered on this computer (no browser)."));
 		}
-		else if (FabRestoreRetryable(Data->ResultCode))
+		else if (FabRestoreRetryable(Data->ResultCode) && FabRestoreRetries < FabRestoreMaxRetries)
 		{
+			++FabRestoreRetries;
 			bRestoreTried = false;
 			FabRestoreNotBefore = FPlatformTime::Seconds() + FabRestoreRetrySeconds;
 			UE_LOG(LogUnrealMcp, Display, TEXT("[Unreal-MCP] Fab: the remembered Epic sign-in was not restored yet (%s); the next Fab tool call "
@@ -204,7 +217,7 @@ namespace UnrealMcpFabLocal
 			return EUnrealMcpFabSignInService::NotStarted;
 		case EFabPlatform::Found:
 			FabRestoreOnce(Platform);
-			return bRestoring ? EUnrealMcpFabSignInService::Restoring : EUnrealMcpFabSignInService::Running;
+			return bRestoring || FabRestorePending() ? EUnrealMcpFabSignInService::Restoring : EUnrealMcpFabSignInService::Running;
 		default:
 			// No candidate yet, or several: not known here (fab-sign-in's own check of the Fab plugin's Login decides).
 			return EUnrealMcpFabSignInService::Unknown;
