@@ -798,9 +798,11 @@ void UUnrealMcpRqlEditorApi::SaveAsset(UObject* Asset)
 	}
 	if (UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false))
 		return;
-	const FString File = FPackageName::LongPackageNameToFilename(Asset->GetOutermost()->GetName(),
+	// Try...: a package outside every content mount (/Script, /Memory) has no file, and the plain conversion is fatal there.
+	FString File;
+	const bool bHasFile = FPackageName::TryConvertLongPackageNameToFilename(Asset->GetOutermost()->GetName(), File,
 		Asset->IsA<UWorld>() ? FPackageName::GetMapPackageExtension() : FPackageName::GetAssetPackageExtension());
-	Failed(IFileManager::Get().IsReadOnly(*File)
+	Failed(bHasFile && IFileManager::Get().IsReadOnly(*File)
 		? FString::Printf(TEXT("could not save %s: its file %s is read-only (checked in to source control?)"), *Asset->GetPathName(), *FPaths::ConvertRelativePathToFull(File))
 		: FString::Printf(TEXT("could not save %s: the reason is in the editor log: console | where Verbosity == \"Error\""), *Asset->GetPathName()));
 }

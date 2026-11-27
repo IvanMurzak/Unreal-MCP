@@ -36,7 +36,9 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/CompilerResultsLog.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Misc/DefaultValueHelper.h"
 #include "Misc/EngineVersionComparison.h"
+#include "Misc/StringOutputDevice.h"
 #include "Misc/ITransaction.h"
 #include "Rigs/RigHierarchy.h"
 #include "UObject/StructOnScope.h"
@@ -308,49 +310,44 @@ namespace UnrealAIControlRigAnimLocal
 			Matches.Num() > 1 ? TEXT("several nodes match") : TEXT("no node"), *Name, *FString::Join(Labels, TEXT(", "))));
 	}
 
-	/**
-	 * The entry named @p Name of @p Node's optional-pin list @p List: "CustomPinProperties" (the rig's inputs) or
-	 * "ShowPinForProperties" (the anim node's own settings: Alpha, LODThreshold, ...); null when none. @p OutNames gets the
-	 * list's names. Both lists are UPROPERTYs (CustomPinProperties is protected), so reflection reaches them.
-	 */
-	FOptionalPinFromProperty* OptionalPin(UAnimGraphNode_Base* Node, const TCHAR* List, const FString& Name, TArray<FString>* OutNames = nullptr)
+	/** The rig's inputs of @p Node (CustomPinProperties: protected, but a UPROPERTY, so reflection reaches it); null after Fail. */
+	TArray<FOptionalPinFromProperty>* RigInputs(UAnimGraphNode_ControlRig* Node)
 	{
-		const FArrayProperty* Property = FindFProperty<FArrayProperty>(Node->GetClass(), List);
+		const FArrayProperty* Property = FindFProperty<FArrayProperty>(UAnimGraphNode_CustomProperty::StaticClass(), TEXT("CustomPinProperties"));
 		const FStructProperty* Inner = Property ? CastField<FStructProperty>(Property->Inner) : nullptr;
 		if (!Inner || Inner->Struct != FOptionalPinFromProperty::StaticStruct())
-			return nullptr;
-		FScriptArrayHelper Pins(Property, Property->ContainerPtrToValuePtr<void>(Node));
-		FOptionalPinFromProperty* Found = nullptr;
-		for (int32 Index = 0; Index < Pins.Num(); ++Index)
-		{
-			FOptionalPinFromProperty& Pin = *reinterpret_cast<FOptionalPinFromProperty*>(Pins.GetRawPtr(Index));
-			if (OutNames)
-				OutNames->Add(Pin.PropertyName.ToString());
-			if (!Found && Pin.PropertyName.ToString().Equals(Name.TrimStartAndEnd(), ESearchCase::IgnoreCase))
-				Found = &Pin;
-		}
-		return Found;
+			return UnrealMcpRql::Failed<TArray<FOptionalPinFromProperty>*>(TEXT("this engine's Control Rig node has no exposable inputs list"));
+		return Property->ContainerPtrToValuePtr<TArray<FOptionalPinFromProperty>>(Node);
 	}
 
-	/** Show the rig input @p Input as a pin of @p Node (the Details panel's "Use Pin" box); the pin, or null after Fail. */
-	UEdGraphPin* ExposeInput(UAnimGraphNode_ControlRig* Node, const FString& Input)
+	/** The entry of @p List named @p Name (case-insensitive); null when none. */
+	FOptionalPinFromProperty* FindOptionalPin(TArray<FOptionalPinFromProperty>& List, const FString& Name)
+	{
+		const FString Wanted = Name.TrimStartAndEnd();
+		return List.FindByPredicate([&Wanted](const FOptionalPinFromProperty& Pin) { return Pin.PropertyName.ToString().Equals(Wanted, ESearchCase::IgnoreCase); });
+	}
+
+	FString OptionalPinNames(const TArray<FOptionalPinFromProperty>& List)
 	{
 		TArray<FString> Names;
-		FOptionalPinFromProperty* Pin = OptionalPin(Node, TEXT("CustomPinProperties"), Input, &Names);
-		if (!Pin)
-			return UnrealMcpRql::Failed<UEdGraphPin*>(FString::Printf(TEXT("%s's rig %s has no input '%s' (inputs: %s; a rig variable is an input when it is public: AddVariable(..., true))"),
-				*Node->GetName(), *RigName(Node), *Input, Names.Num() ? *FString::Join(Names, TEXT(", ")) : TEXT("none")));
-		const FName Name = Pin->PropertyName; // ReconstructNode rebuilds the list
-		if (!Pin->bShowPin)
+		for (const FOptionalPinFromProperty& Pin : List)
+			Names.Add(Pin.PropertyName.ToString());
+		return Names.Num() ? FString::Join(Names, TEXT(", ")) : FString(TEXT("none"));
+	}
+
+	/** Show the rig input @p Input of @p Node as a pin (the Details panel's "Use Pin" box); the pin, or null after Fail. */
+	UEdGraphPin* ShowInput(UAnimGraphNode_ControlRig* Node, FOptionalPinFromProperty& Input)
+	{
+		const FName Name = Input.PropertyName; // ReconstructNode rebuilds the list
+		if (!Input.bShowPin)
 		{
 			Node->Modify();
-			Pin->bShowPin = true;
+			Input.bShowPin = true;
 			// As the Details panel's checkbox does: a pin replaces a curve mapping of the input (FAnimNode_ControlRig::InputMapping).
-			const FStructProperty* NodeProperty = FindFProperty<FStructProperty>(Node->GetClass(), TEXT("Node"));
-			const FMapProperty* Mapping = NodeProperty ? FindFProperty<FMapProperty>(NodeProperty->Struct, TEXT("InputMapping")) : nullptr;
+			const FMapProperty* Mapping = FindFProperty<FMapProperty>(FAnimNode_ControlRig::StaticStruct(), TEXT("InputMapping"));
 			if (Mapping && Mapping->KeyProp->IsA<FNameProperty>())
 			{
-				FScriptMapHelper Map(Mapping, Mapping->ContainerPtrToValuePtr<void>(NodeProperty->ContainerPtrToValuePtr<void>(Node)));
+				FScriptMapHelper Map(Mapping, Mapping->ContainerPtrToValuePtr<void>(&Node->Node));
 				const int32 Found = Map.FindMapIndexWithKey(&Name);
 				if (Found != INDEX_NONE)
 					Map.RemoveAt(Found);
@@ -360,29 +357,30 @@ namespace UnrealAIControlRigAnimLocal
 		return PinOf(Node, Name, EGPD_Input);
 	}
 
-	/** The struct the Control Rig node runs (FAnimNode_ControlRig) and its value in @p Node; null when this engine's node has none. */
-	const FStructProperty* AnimNodeStruct(const UAnimGraphNode_ControlRig* Node)
+	/** Show the rig input named @p Input of @p Node as a pin; the pin, or null after Fail. */
+	UEdGraphPin* ExposeInput(UAnimGraphNode_ControlRig* Node, const FString& Input)
 	{
-		const FStructProperty* Property = FindFProperty<FStructProperty>(Node->GetClass(), TEXT("Node"));
-		return Property && Property->Struct ? Property : nullptr;
+		TArray<FOptionalPinFromProperty>* Inputs = RigInputs(Node);
+		FOptionalPinFromProperty* Found = Inputs ? FindOptionalPin(*Inputs, Input) : nullptr;
+		if (Inputs && !Found)
+			UnrealMcpRql::Fail(FString::Printf(TEXT("%s's rig %s has no input '%s' (inputs: %s; a rig variable is an input when it is public: AddVariable(..., true))"),
+				*Node->GetName(), *RigName(Node), *Input, *OptionalPinNames(*Inputs)));
+		return Found ? ShowInput(Node, *Found) : nullptr;
 	}
 
 	/**
-	 * The anim node's own settings: the editable properties of the struct it runs (FAnimNode_ControlRig: Alpha,
-	 * AlphaInputType, LODThreshold, ...), without the rig it runs (AddToAnimBlueprint's).
+	 * The anim node's own settings: the editable properties of FAnimNode_ControlRig (Alpha, AlphaInputType, LODThreshold, ...),
+	 * without the rig it runs (AddToAnimBlueprint's), the input pose (Source) or object lists (AssetUserData).
 	 */
-	TArray<FProperty*> NodeSettings(const UAnimGraphNode_ControlRig* Node)
+	TArray<FProperty*> NodeSettings()
 	{
 		TArray<FProperty*> Settings;
-		const FStructProperty* Struct = AnimNodeStruct(Node);
-		if (!Struct)
-			return Settings;
-		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+		for (TFieldIterator<FProperty> It(FAnimNode_ControlRig::StaticStruct()); It; ++It)
 		{
-			// Not the rig it runs, nor the input pose (Source, an FPoseLink).
 			const FStructProperty* Link = CastField<FStructProperty>(*It);
+			const FArrayProperty* List = CastField<FArrayProperty>(*It);
 			if (It->HasAnyPropertyFlags(CPF_Edit) && !It->IsA<FObjectPropertyBase>() && It->GetMetaData(TEXT("Category")) != TEXT("ControlRig")
-				&& !(Link && Link->Struct->IsChildOf(FPoseLinkBase::StaticStruct())))
+				&& !(Link && Link->Struct->IsChildOf(FPoseLinkBase::StaticStruct())) && !(List && List->Inner->IsA<FObjectPropertyBase>()))
 				Settings.Add(*It);
 		}
 		return Settings;
@@ -401,41 +399,65 @@ namespace UnrealAIControlRigAnimLocal
 	FString SettingText(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting)
 	{
 		FString Text;
-		const void* Container = AnimNodeStruct(Node)->ContainerPtrToValuePtr<void>(Node);
-		Setting->ExportText_InContainer(0, Text, Container, Container, const_cast<UAnimGraphNode_ControlRig*>(Node), PPF_None);
+		Setting->ExportText_InContainer(0, Text, &Node->Node, &Node->Node, const_cast<UAnimGraphNode_ControlRig*>(Node), PPF_None);
 		return Text;
 	}
 
-	/** Whether @p Text is a whole value of @p Setting ("0.5" for Alpha, "Bool" for AlphaInputType), tried on a copy of the node's struct. */
-	bool SettingAccepts(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting, const FString& Text)
+	/**
+	 * Import @p Text into @p Setting of the node struct at @p Container; empty when it is a whole value of the setting ("0.5"
+	 * or "1.0f" for Alpha, "-1" for LODThreshold, "Bool" for AlphaInputType), else why not.
+	 */
+	FString ImportSetting(const FProperty* Setting, const FString& Text, void* Container, UObject* Owner)
 	{
+		FString Value = Text;
 		const FNumericProperty* Number = CastField<FNumericProperty>(Setting);
-		if (Text.IsEmpty() || (Number && !Number->IsEnum() && !Text.IsNumeric()))
-			return false; // a number's import reads "abc" as 0
-		const FStructProperty* Struct = AnimNodeStruct(Node);
-		FStructOnScope Copy(Struct->Struct);
-		Struct->Struct->CopyScriptStruct(Copy.GetStructMemory(), Struct->ContainerPtrToValuePtr<void>(Node));
-		const TCHAR* Rest = Setting->ImportText_InContainer(*Text, Copy.GetStructMemory(), const_cast<UAnimGraphNode_ControlRig*>(Node), PPF_None);
-		return Rest && FString(Rest).TrimStartAndEnd().IsEmpty();
+		if (Number && !Number->IsEnum())
+		{
+			// A number's import reads "abc", "-" or "." as 0: the text is checked first.
+			if (Number->IsFloatingPoint() && (Value.EndsWith(TEXT("f")) || Value.EndsWith(TEXT("F"))))
+				Value.LeftChopInline(1);
+			if (Number->IsFloatingPoint() ? !FDefaultValueHelper::IsStringValidFloat(Value) : !FDefaultValueHelper::IsStringValidInteger(Value))
+				return FString::Printf(TEXT("not a%s number"), Number->IsFloatingPoint() ? TEXT("") : TEXT(" whole"));
+		}
+		if (Value.IsEmpty())
+			return TEXT("empty");
+		FStringOutputDevice Errors;
+		const TCHAR* Rest = Setting->ImportText_InContainer(*Value, Container, Owner, PPF_None, &Errors);
+		if (!Rest || !FString(Rest).TrimStartAndEnd().IsEmpty())
+			return Errors.IsEmpty() ? FString(TEXT("not a value of it")) : FString(Errors).TrimStartAndEnd();
+		return FString();
+	}
+
+	/** Why @p Text is no value of @p Setting (tried on a copy of the node's struct); empty when it is one. */
+	FString SettingRefuses(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting, const FString& Text)
+	{
+		FStructOnScope Copy(FAnimNode_ControlRig::StaticStruct());
+		FAnimNode_ControlRig::StaticStruct()->CopyScriptStruct(Copy.GetStructMemory(), &Node->Node);
+		return ImportSetting(Setting, Text, Copy.GetStructMemory(), const_cast<UAnimGraphNode_ControlRig*>(Node));
+	}
+
+	/** The shown pin of the node setting @p Setting; null when it has none (LODThreshold, Alpha while AlphaInputType is not Float). */
+	UEdGraphPin* ShownSettingPin(const UAnimGraphNode_ControlRig* Node, const FProperty* Setting)
+	{
+		UEdGraphPin* Pin = Node->FindPin(Setting->GetFName(), EGPD_Input);
+		return Pin && !Pin->bHidden ? Pin : nullptr;
 	}
 
 	/**
-	 * The pin of the node setting @p Setting when it is shown; for a binding (@p bShow) a hidden optional pin (LODThreshold)
-	 * is shown first. Null when the setting has no shown pin (Alpha while AlphaInputType is not Float): it is set as a property.
+	 * The pin of the node setting @p Setting to bind, a hidden optional pin (LODThreshold) shown first; null when the setting
+	 * cannot have one now (Alpha while AlphaInputType is not Float).
 	 */
-	UEdGraphPin* SettingPin(UAnimGraphNode_ControlRig* Node, const FProperty* Setting, bool bShow)
+	UEdGraphPin* ShowSettingPin(UAnimGraphNode_ControlRig* Node, const FProperty* Setting)
 	{
-		const FName Name = Setting->GetFName();
-		UEdGraphPin* Pin = Node->FindPin(Name, EGPD_Input);
-		FOptionalPinFromProperty* Optional = bShow && (!Pin || Pin->bHidden) ? OptionalPin(Node, TEXT("ShowPinForProperties"), Name.ToString()) : nullptr;
-		if (Optional && Optional->bCanToggleVisibility && !Optional->bShowPin)
-		{
-			Node->Modify();
-			Optional->bShowPin = true;
-			Node->ReconstructNode();
-			Pin = Node->FindPin(Name, EGPD_Input);
-		}
-		return Pin && !Pin->bHidden ? Pin : nullptr;
+		if (UEdGraphPin* Pin = ShownSettingPin(Node, Setting))
+			return Pin;
+		FOptionalPinFromProperty* Optional = FindOptionalPin(Node->ShowPinForProperties, Setting->GetName());
+		if (!Optional || !Optional->bCanToggleVisibility || Optional->bShowPin)
+			return nullptr;
+		Node->Modify();
+		Optional->bShowPin = true;
+		Node->ReconstructNode();
+		return ShownSettingPin(Node, Setting);
 	}
 
 	/** Bind @p Pin to the Anim Blueprint variable @p Variable (added with the pin's type when missing); a note, or empty after Fail. */
@@ -511,14 +533,15 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 	TArray<UAnimGraphNode_Root*> Roots;
 	Graph->GetNodesOfClass(Roots);
 	UEdGraphPin* Output = Roots.Num() ? PosePin(Roots[0], EGPD_Input) : nullptr;
-	auto LoosePose = [Graph, &Note]() -> UEdGraphPin*
+	auto LoosePose = [Graph, Output, &Note]() -> UEdGraphPin*
 	{
+		// Only a pose Output Pose (local space, as the rig node's input) can take: not a component-space one.
 		TArray<UEdGraphPin*> Loose;
 		TArray<FString> Labels;
 		for (UEdGraphNode* Candidate : Graph->Nodes)
 		{
 			UEdGraphPin* Pin = Candidate && !Candidate->IsA<UAnimGraphNode_Root>() ? PosePin(Candidate, EGPD_Output) : nullptr;
-			if (Pin && Pin->LinkedTo.Num() == 0)
+			if (Pin && Pin->LinkedTo.Num() == 0 && Graph->GetSchema()->CanCreateConnection(Pin, Output).Response != CONNECT_RESPONSE_DISALLOW)
 			{
 				Loose.Add(Pin);
 				Labels.Add(NodeLabel(Candidate));
@@ -531,7 +554,7 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 		}
 		Note = Loose.Num()
 			? FString::Printf(TEXT(" (WARNING: Output Pose had no input and several poses feed nothing: %s; the rig starts from the reference pose: remove this node and pass After to pick one)"), *FString::Join(Labels, TEXT(", ")))
-			: FString(TEXT(" (WARNING: Output Pose had no input and every other pose feeds a node: the rig starts from the reference pose; pass After to pick a pose)"));
+			: FString(TEXT(" (Output Pose had no input: the rig starts from the reference pose)"));
 		return nullptr;
 	};
 	if (After.TrimStartAndEnd().IsEmpty())
@@ -630,23 +653,18 @@ FString UnrealAIControlRigAnim::AddRig(UAnimBlueprint* AnimBlueprint, UControlRi
 FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FString& NodeName, const FString& Input, const FString& Value)
 {
 	UAnimGraphNode_ControlRig* Node = FindRigNode(AnimBlueprint, NodeName);
-	if (!Node)
+	TArray<FOptionalPinFromProperty>* Inputs = Node ? RigInputs(Node) : nullptr;
+	if (!Inputs)
 		return FString();
 	const FString Trimmed = Value.TrimStartAndEnd();
 	const bool bBind = Trimmed.StartsWith(TEXT("@"));
+	const FName Variable(*Trimmed.RightChop(1).TrimStartAndEnd());
 	// A rig input first, else the anim node's own setting (Alpha, LODThreshold, ...): a pin when it has one shown, else the property.
-	TArray<FString> Inputs;
+	FOptionalPinFromProperty* RigInput = FindOptionalPin(*Inputs, Input);
 	FProperty* Setting = nullptr;
-	UEdGraphPin* Pin = nullptr;
-	if (OptionalPin(Node, TEXT("CustomPinProperties"), Input, &Inputs))
+	if (!RigInput)
 	{
-		Pin = ExposeInput(Node, Input);
-		if (!Pin)
-			return FString();
-	}
-	else
-	{
-		const TArray<FProperty*> Settings = NodeSettings(Node);
+		const TArray<FProperty*> Settings = NodeSettings();
 		Setting = FindSetting(Settings, Input);
 		if (!Setting)
 		{
@@ -654,20 +672,37 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 			for (const FProperty* Property : Settings)
 				Names.Add(Property->GetName());
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s has no rig input or node setting '%s' (rig %s's inputs: %s, a rig variable is an input when it is public: AddVariable(..., true); node settings: %s)"),
-				*Node->GetName(), *Input, *RigName(Node), Inputs.Num() ? *FString::Join(Inputs, TEXT(", ")) : TEXT("none"), *FString::Join(Names, TEXT(", "))));
+				*Node->GetName(), *Input, *RigName(Node), *OptionalPinNames(*Inputs), *FString::Join(Names, TEXT(", "))));
 		}
-		Pin = SettingPin(Node, Setting, bBind);
-		if (!Pin && bBind)
-			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's setting %s has no pin to bind (Alpha binds while AlphaInputType is Float, bAlphaBoolEnabled while it is Bool): set a constant, or change AlphaInputType first"),
-				*Node->GetName(), *Setting->GetName()));
 	}
 	if (bBind)
 	{
-		const FString Bound = BindInput(AnimBlueprint, Pin, FName(*Trimmed.RightChop(1).TrimStartAndEnd()));
+		// The variable is checked before a hidden pin is shown, so a refused binding changes nothing.
+		const FProperty* Typed = Setting;
+		if (RigInput && !RigInput->bShowPin)
+			Typed = Node->GetTargetClass() ? Node->GetTargetClass()->FindPropertyByName(RigInput->PropertyName) : nullptr;
+		const UEdGraphPin* Existing = Node->FindPin(Setting ? Setting->GetFName() : RigInput->PropertyName, EGPD_Input);
+		FEdGraphPinType Type;
+		bool bTyped = Existing && !Existing->bHidden;
+		if (bTyped)
+			Type = Existing->PinType;
+		else
+			bTyped = Typed && GetDefault<UEdGraphSchema_K2>()->ConvertPropertyToPinType(Typed, Type);
+		FString Note;
+		if (bTyped && !EnsureVariable(AnimBlueprint, Variable, Type, Note, /*bApply*/ false))
+			return FString();
+		UEdGraphPin* Pin = Setting ? ShowSettingPin(Node, Setting) : ShowInput(Node, *RigInput);
+		if (!Pin && Setting)
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("%s's setting %s has no pin to bind now (another setting hides it, as AlphaInputType hides Alpha unless it is Float): set a constant, or change that setting first"),
+				*Node->GetName(), *Setting->GetName()));
+		const FString Bound = Pin ? BindInput(AnimBlueprint, Pin, Variable) : FString();
 		if (!Bound.IsEmpty())
 			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
 		return Bound;
 	}
+	UEdGraphPin* Pin = Setting ? ShownSettingPin(Node, Setting) : ShowInput(Node, *RigInput);
+	if (!Pin && !Setting)
+		return FString();
 	// Everything is checked before anything changes: the pin's text form, then the property's (on a copy of the node's struct).
 	const FString Text = Pin ? PinDefaultText(Pin, Trimmed) : FString();
 	if (Pin)
@@ -676,20 +711,24 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 		if (!Invalid.IsEmpty())
 			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value: %s"), *Value, *UEdGraphSchema_K2::TypeToText(Pin->PinType).ToString(), *Invalid));
 	}
-	if (Setting && !SettingAccepts(Node, Setting, Trimmed))
-		return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value for %s (now %s)"), *Value, *Setting->GetCPPType(), *Setting->GetName(), *SettingText(Node, Setting)));
+	if (Setting)
+	{
+		const FString Refused = SettingRefuses(Node, Setting, Trimmed);
+		if (!Refused.IsEmpty())
+			return UnrealMcpRql::Failed<FString>(FString::Printf(TEXT("'%s' is not a %s value for %s (%s); it stays %s"), *Value, *Setting->GetCPPType(), *Setting->GetName(), *Refused, *SettingText(Node, Setting)));
+	}
 	Node->Modify();
 	if (Setting)
 	{
 		// The property is the value while no pin is shown, and the pin's default once one is (kept the same).
-		Setting->ImportText_InContainer(*Trimmed, AnimNodeStruct(Node)->ContainerPtrToValuePtr<void>(Node), Node, PPF_None);
+		ImportSetting(Setting, Trimmed, &Node->Node, Node);
 		if (UEdGraphPin* Hidden = Pin ? nullptr : Node->FindPin(Setting->GetFName(), EGPD_Input))
-			Hidden->GetSchema()->TrySetDefaultValue(*Hidden, PinDefaultText(Hidden, Trimmed));
+			SetDefault(Hidden, PinDefaultText(Hidden, Trimmed));
 	}
 	if (Pin)
 	{
 		Pin->GetSchema()->BreakPinLinks(*Pin, /*bSendsNodeNotifcation*/ true); // a constant replaces a binding
-		Pin->GetSchema()->TrySetDefaultValue(*Pin, Text);
+		SetDefault(Pin, Text);
 	}
 	if (Setting)
 	{
@@ -700,9 +739,8 @@ FString UnrealAIControlRigAnim::SetInput(UAnimBlueprint* AnimBlueprint, const FS
 	FBlueprintEditorUtils::MarkBlueprintAsModified(AnimBlueprint);
 	if (Setting)
 	{
-		const FName Name = Setting->GetFName();
-		const UEdGraphPin* Shown = Node->FindPin(Name, EGPD_Input); // the node may have been rebuilt
-		return FString::Printf(TEXT("%s = %s (node setting)"), *Name.ToString(), Shown && !Shown->bHidden ? *PinValue(Shown) : *SettingText(Node, Setting));
+		const UEdGraphPin* Shown = ShownSettingPin(Node, Setting); // the node may have been rebuilt
+		return FString::Printf(TEXT("%s = %s (node setting)"), *Setting->GetName(), Shown ? *PinValue(Shown) : *SettingText(Node, Setting));
 	}
 	return FString::Printf(TEXT("%s = %s"), *Pin->PinName.ToString(), *PinValue(Pin));
 }
@@ -948,8 +986,12 @@ TSharedPtr<FJsonValue> UnrealAIControlRigAnim::ControlRigsJson(UObject* Object)
 		}
 		Row->SetObjectField(TEXT("Inputs"), Inputs);
 		TSharedPtr<FJsonObject> Settings = MakeShared<FJsonObject>();
-		for (const FProperty* Setting : NodeSettings(Node))
-			Settings->SetStringField(Setting->GetName(), SettingText(Node, Setting));
+		for (const FProperty* Setting : NodeSettings())
+		{
+			// A shown pin is the value (a link shows as @Variable), the property otherwise.
+			const UEdGraphPin* Shown = ShownSettingPin(Node, Setting);
+			Settings->SetStringField(Setting->GetName(), Shown ? PinValue(Shown) : SettingText(Node, Setting));
+		}
 		Row->SetObjectField(TEXT("Settings"), Settings);
 		Rows.Add(MakeShared<FJsonValueObject>(Row));
 	}

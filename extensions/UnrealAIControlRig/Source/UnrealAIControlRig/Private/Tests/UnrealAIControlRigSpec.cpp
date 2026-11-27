@@ -608,10 +608,27 @@ void FUnrealAIControlRigSpec::Define()
 			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "abc")      a value that is no number changes nothing
 			TestFalse(TEXT("Alpha abc refused"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("abc")) })));
 			TestTrue(TEXT("Alpha still 0.25"), SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp)).Contains(TEXT("\"Alpha\":\"0.25\"")));
+			// SetRigInput(..., "LODThreshold", "-" | "abc"), SetRigInput(..., "AlphaInputType", "Nope")      a property without a pin refuses bad text and keeps its value
+			for (const TPair<const TCHAR*, const TCHAR*>& Bad : TArray<TPair<const TCHAR*, const TCHAR*>>{ { TEXT("LODThreshold"), TEXT("-") }, { TEXT("LODThreshold"), TEXT("abc") }, { TEXT("AlphaInputType"), TEXT("Nope") } })
+			{
+				TSharedPtr<FJsonObject> Refused;
+				TestFalse(*FString::Printf(TEXT("%s '%s' refused"), Bad.Key, Bad.Value), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(Bad.Key), SpecLit(Bad.Value) }), &Refused));
+				TestTrue(*FString::Printf(TEXT("saying it stays (%s)"), *SpecJson(Refused).Left(400)), SpecJson(Refused).Contains(TEXT("it stays")));
+			}
+			const FString Kept = SpecJson(UnrealAIControlRigAnim::ControlRigsJson(Abp));
+			TestTrue(*FString::Printf(TEXT("LODThreshold still 2, AlphaInputType still Float (%s)"), *Kept), Kept.Contains(TEXT("\"LODThreshold\":\"2\"")) && Kept.Contains(TEXT("\"AlphaInputType\":\"Float\"")));
 			// controlRig | call SetRigInput("@ABP@", "", "Alpha", "@RigAlpha")      a setting bound like an input
 			TSharedPtr<FJsonObject> AlphaBound;
 			TestTrue(TEXT("Alpha bound"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Alpha")), SpecLit(TEXT("@RigAlpha")) }), &AlphaBound));
 			TestTrue(*FString::Printf(TEXT("Alpha <- RigAlpha (%s)"), *SpecJson(AlphaBound)), SpecJson(AlphaBound).Contains(TEXT("Alpha <- RigAlpha")));
+			// controlRig | call SetRigInput("@ABP@", "", "LODThreshold", "@RigAlpha")      a float variable for an int setting: refused, its pin stays hidden
+			TSharedPtr<FJsonObject> WrongType;
+			TestFalse(TEXT("LODThreshold bound to a float refused"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("LODThreshold")), SpecLit(TEXT("@RigAlpha")) }), &WrongType));
+			TestTrue(*FString::Printf(TEXT("naming the type clash (%s)"), *SpecJson(WrongType).Left(400)), SpecJson(WrongType).Contains(TEXT("already has a variable RigAlpha")));
+			Nodes.Reset();
+			FBlueprintEditorUtils::GetAllNodesOfClass(Abp, Nodes);
+			const UEdGraphPin* LodPin = Nodes.Num() == 1 ? Nodes[0]->FindPin(TEXT("LODThreshold"), EGPD_Input) : nullptr;
+			TestTrue(TEXT("no LODThreshold pin shown"), !LodPin || LodPin->bHidden);
 			// controlRig | call SetRigInput("@ABP@", "", "Nope", "1")      an unknown name lists the inputs and the settings
 			TSharedPtr<FJsonObject> Unknown;
 			TestFalse(TEXT("an unknown input"), Run(SpecCall(TEXT("controlRig"), TEXT("SetRigInput"), { SpecLit(AbpPath), SpecLit(TEXT("")), SpecLit(TEXT("Nope")), SpecLit(TEXT("1")) }), &Unknown));
