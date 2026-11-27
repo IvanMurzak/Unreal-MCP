@@ -23,6 +23,10 @@
 #include "FileHelpers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
+#include "Editor.h"
+#include "Engine/World.h"
+#include "InterchangeManager.h"
+#include "Subsystems/ImportSubsystem.h"
 #include "Misc/App.h"
 #include "UObject/Package.h"
 #include "UnrealMcpCoreTools.h"
@@ -412,35 +416,49 @@ void FUnrealMcpFabToolsSpec::Define()
 		TestTrue(TEXT("nothing unresolved"), Requirements->TryGetArrayField(TEXT("unresolvedReferences"), Unresolved) && Unresolved->IsEmpty());
 	});
 
-	It("saves only the packages an import created and left unsaved, then checks them (DEV-306)", [this]()
+	It("saves only what an import created and left in memory, with its dependencies, then reports and checks it (DEV-306)", [this]()
 	{
-		// A folder of this run only: nothing of the project (or of another run) is touched or removed.
+		// Folders of this run only: nothing of the project (or of another run) is touched or removed.
 		const FString Name = FString::Printf(TEXT("UnrealMcpFabSpec_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
 		const FString Folder = TEXT("/Game/") + Name;
-		const FString Dir = FPaths::ProjectContentDir() / Name;
+		const FString Shared = Folder + TEXT("_Shared"); // outside the import folder
 		TArray<UPackage*> Made;
 		ON_SCOPE_EXIT
 		{
 			for (UPackage* Package : Made)
 				Package->SetDirtyFlag(false); // no save prompt for the spec's packages in a local editor
 			UEditorAssetLibrary::DeleteDirectory(Folder);
-			IFileManager::Get().DeleteDirectory(*Dir, false, true);
+			UEditorAssetLibrary::DeleteDirectory(Shared);
+			IFileManager::Get().DeleteDirectory(*(FPaths::ProjectContentDir() / Name), false, true);
+			IFileManager::Get().DeleteDirectory(*(FPaths::ProjectContentDir() / Name + TEXT("_Shared")), false, true);
 		};
-		auto MakeAsset = [&](const FString& AssetName, bool bSave) -> UPackage*
+		auto MakeInstance = [&](const FString& PackageName, bool bSave) -> UMaterialInstanceConstant*
 		{
-			UPackage* Package = CreatePackage(*(Folder / AssetName));
+			UPackage* Package = CreatePackage(*PackageName);
 			Made.Add(Package);
-			UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, *FPackageName::GetShortName(AssetName),
+			UMaterialInstanceConstant* Instance = NewObject<UMaterialInstanceConstant>(Package, *FPackageName::GetShortName(PackageName),
 				RF_Public | RF_Standalone);
 			FAssetRegistryModule::AssetCreated(Instance);
 			Package->MarkPackageDirty();
 			if (bSave)
-				TestTrue(TEXT("saved ") + AssetName, UEditorLoadingAndSavingUtils::SavePackages({ Package }, false));
-			return Package;
+				TestTrue(TEXT("saved ") + PackageName, UEditorLoadingAndSavingUtils::SavePackages({ Package }, false));
+			return Instance;
+		};
+		auto Names = [](const TSharedPtr<FJsonObject>& Requirements, const TCHAR* Field)
+		{
+			TArray<FString> Out;
+			const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+			if (Requirements->TryGetArrayField(Field, Values))
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *Values)
+					Out.Add(FPackageName::GetShortName(Value->AsString()));
+			}
+			Out.Sort();
+			return Out;
 		};
 
 		// Nothing on disk yet: the check says why it read nothing instead of a silent 0.
-		UPackage* UsersUnsaved = MakeAsset(TEXT("MI_UsersUnsaved"), false); // the user's, loaded before the import began
+		MakeInstance(Folder / TEXT("MI_UsersUnsaved"), false); // the user's, loaded before the import began
 		TArray<FString> Lines;
 		TSharedPtr<FJsonObject> Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
 		TestEqual(TEXT("nothing on disk to check"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 0);
@@ -450,34 +468,77 @@ void FUnrealMcpFabToolsSpec::Define()
 		const FString Listing = FGuid::NewGuid().ToString();
 		UnrealMcpFabTools::OpenImportWindow(Listing);
 		ON_SCOPE_EXIT { UnrealMcpFabTools::CloseImportWindow(Listing); };
-		// The import's: two it left only in memory (Fab's Interchange / Megascans glTF importers), one it wrote to disk that is
-		// then changed in memory (not the import's to save).
-		UPackage* FreshA = MakeAsset(TEXT("MI_ImportedA"), false);
-		UPackage* FreshB = MakeAsset(TEXT("Textures/T_ImportedB"), false);
-		FreshB->SetDirtyFlag(false); // only in memory, yet not marked dirty: still unsaved
-		UPackage* OnDisk = MakeAsset(TEXT("MI_OnDiskEdited"), true);
-		OnDisk->MarkPackageDirty();
+		// The import's, as its importers report them: one Interchange left dirty, one a factory import left unmarked in a
+		// subfolder, one written to disk that is then changed in memory (on disk: not the import's to save), and the
+		// in-memory material the first one uses, outside the folder (reported by nobody: reached as a dependency).
+		UMaterialInstanceConstant* FreshA = MakeInstance(Folder / TEXT("MI_ImportedA"), false);
+		UPackage* SharedPackage = CreatePackage(*(Shared / TEXT("M_SharedBase")));
+		Made.Add(SharedPackage);
+		UMaterial* SharedBase = NewObject<UMaterial>(SharedPackage, TEXT("M_SharedBase"), RF_Public | RF_Standalone);
+		FAssetRegistryModule::AssetCreated(SharedBase);
+		FreshA->SetParentEditorOnly(SharedBase);
+		UMaterialInstanceConstant* FreshB = MakeInstance(Folder / TEXT("Textures/MI_ImportedB"), false);
+		FreshB->GetOutermost()->SetDirtyFlag(false); // only in memory, yet not marked dirty: still unsaved
+		UMaterialInstanceConstant* OnDisk = MakeInstance(Folder / TEXT("MI_OnDiskEdited"), true);
+		OnDisk->GetOutermost()->MarkPackageDirty();
+		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.Broadcast(FreshA);
+		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.Broadcast(OnDisk);
+		GEditor->GetEditorSubsystem<UImportSubsystem>()->BroadcastAssetPostImport(nullptr, FreshB);
+		// The user's: a new asset made in the import folder while the import runs (no importer reports it).
+		MakeInstance(Folder / TEXT("MI_UsersCreatedDuring"), false);
 
-		TArray<FString> Errors;
-		TestTrue(TEXT("no window, nothing saved"), UnrealMcpFabTools::SaveImport(Folder, TEXT("no-such-listing"), Errors).IsEmpty());
-		TArray<FString> Saved = UnrealMcpFabTools::SaveImport(Folder, Listing, Errors);
-		Saved.Sort();
-		TestTrue(TEXT("no errors"), Errors.IsEmpty());
-		if (TestEqual(TEXT("saved the two the import left unsaved"), Saved.Num(), 2))
-		{
-			TestEqual(TEXT("the first"), Saved[0], FreshA->GetName());
-			TestEqual(TEXT("the one in a subfolder"), Saved[1], FreshB->GetName());
-		}
-		TestTrue(TEXT("they are on disk and clean"), FPackageName::DoesPackageExist(FreshA->GetName()) && FPackageName::DoesPackageExist(FreshB->GetName())
-			&& !FreshA->IsDirty() && !FreshB->IsDirty());
-		TestTrue(TEXT("the user's package stays unsaved and off disk"), UsersUnsaved->IsDirty() && !FPackageName::DoesPackageExist(UsersUnsaved->GetName()));
-		TestTrue(TEXT("a package on disk with unsaved changes is left so"), OnDisk->IsDirty());
-
-		Requirements = UnrealMcpFabTools::CheckImport(Folder, Lines);
-		TestEqual(TEXT("checks what is on disk now"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 3);
+		TestTrue(TEXT("no window, nothing saved"), Names(UnrealMcpFabTools::ImportReport(Folder, TEXT("no-such-listing"), Lines),
+			TEXT("savedPackages")).IsEmpty());
+		Requirements = UnrealMcpFabTools::ImportReport(Folder, Listing, Lines);
+		TestEqual(TEXT("saved what the import left in memory, and its in-memory dependency"), Names(Requirements, TEXT("savedPackages")),
+			TArray<FString>({ TEXT("MI_ImportedA"), TEXT("MI_ImportedB"), TEXT("M_SharedBase") }));
+		TestEqual(TEXT("lists the rest of the folder as unsaved"), Names(Requirements, TEXT("unsavedPackages")),
+			TArray<FString>({ TEXT("MI_OnDiskEdited"), TEXT("MI_UsersCreatedDuring"), TEXT("MI_UsersUnsaved") }));
+		TestEqual(TEXT("checks what is on disk under the folder now"), (int32)Requirements->GetNumberField(TEXT("packagesChecked")), 3);
 		TestFalse(TEXT("no reason for an empty check"), Requirements->HasField(TEXT("packagesNotChecked")));
-		const TArray<TSharedPtr<FJsonValue>>* Unloadable = nullptr;
-		TestTrue(TEXT("all loadable"), Requirements->TryGetArrayField(TEXT("unloadablePackages"), Unloadable) && Unloadable->IsEmpty());
+		const FString Text = FString::Join(Lines, TEXT("\n"));
+		TestTrue(TEXT("says the never-saved ones are lost on any close"), Text.Contains(TEXT("lost on any close or crash")));
+		TestTrue(TEXT("says the dirty one is lost on a crash"), Text.Contains(TEXT("lost on a crash; closing the editor asks to save them")));
+		TestFalse(TEXT("never advises saving all"), Text.Contains(TEXT("SaveAll")));
+		TestTrue(TEXT("the saved ones are on disk and clean"), FPackageName::DoesPackageExist(FreshA->GetOutermost()->GetName())
+			&& FPackageName::DoesPackageExist(FreshB->GetOutermost()->GetName()) && FPackageName::DoesPackageExist(SharedPackage->GetName())
+			&& !FreshA->GetOutermost()->IsDirty() && !FreshB->GetOutermost()->IsDirty());
+		TestTrue(TEXT("a package on disk with unsaved changes is left so"), OnDisk->GetOutermost()->IsDirty());
+	});
+
+	It("saves a level an import created as a .umap (DEV-306)", [this]()
+	{
+		const FString Name = FString::Printf(TEXT("UnrealMcpFabSpec_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
+		const FString Folder = TEXT("/Game/") + Name;
+		const FString Listing = FGuid::NewGuid().ToString();
+		UnrealMcpFabTools::OpenImportWindow(Listing);
+		UPackage* Package = CreatePackage(*(Folder / TEXT("L_Imported")));
+		UWorld* World = UWorld::CreateWorld(EWorldType::Inactive, false, TEXT("L_Imported"), Package);
+		ON_SCOPE_EXIT
+		{
+			UnrealMcpFabTools::CloseImportWindow(Listing);
+			if (World)
+			{
+				World->DestroyWorld(false);
+				World->RemoveFromRoot();
+			}
+			Package->SetDirtyFlag(false);
+			UEditorAssetLibrary::DeleteDirectory(Folder);
+			IFileManager::Get().DeleteDirectory(*(FPaths::ProjectContentDir() / Name), false, true);
+		};
+		if (!TestNotNull(TEXT("made a level"), World))
+			return;
+		World->SetFlags(RF_Public | RF_Standalone);
+		FAssetRegistryModule::AssetCreated(World);
+		Package->ClearPackageFlags(PKG_ContainsMap); // the level is found by its world, as the editor's SaveAsset does
+		UInterchangeManager::GetInterchangeManager().OnAssetPostImport.Broadcast(World);
+		TArray<FString> Lines;
+		const TSharedPtr<FJsonObject> Requirements = UnrealMcpFabTools::ImportReport(Folder, Listing, Lines);
+		const TArray<TSharedPtr<FJsonValue>>* Saved = nullptr;
+		TestTrue(TEXT("saved the level"), Requirements->TryGetArrayField(TEXT("savedPackages"), Saved) && Saved->Num() == 1);
+		const FString Base = FPackageName::LongPackageNameToFilename(Package->GetName());
+		TestTrue(TEXT("as a .umap"), IFileManager::Get().FileExists(*(Base + FPackageName::GetMapPackageExtension())));
+		TestFalse(TEXT("not as a .uasset"), IFileManager::Get().FileExists(*(Base + FPackageName::GetAssetPackageExtension())));
 	});
 
 	It("moves only this import's instances off a read-only engine base material, onto a tagged copy on disk (DEV-291)", [this]()

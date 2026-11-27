@@ -31,6 +31,8 @@ public class UnrealMcpEditorTests : ModuleRules
 			"GameplayTags",
 			"Settings",
 			"AssetRegistry",
+			"InterchangeCore",   // the Fab spec reports imports as Interchange does (DEV-306)
+			"InterchangeEngine",
 			"EditorScriptingUtilities",
 			"UMG",
 			"UMGEditor",
