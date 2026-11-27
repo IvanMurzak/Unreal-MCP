@@ -20,6 +20,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,12 +93,21 @@ def run(command: list, watch=None, **options) -> int:
     print("+ " + subprocess.list2cmdline(command), flush=True)
     if watch is None:
         return subprocess.run(command, **options).returncode
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                          errors="replace", **options) as process:
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                               errors="replace", **options)
+
+    def echo() -> None:
         for line in process.stdout:
             print(line, end="", flush=True)
             watch(line)
-    return process.returncode
+
+    # The pipe stays open while any grandchild that inherited it lives (mspdbsrv, an MSBuild node), so the step
+    # waits for the command itself, then gives the reader a moment to drain what the command wrote.
+    reader = threading.Thread(target=echo, daemon=True)
+    reader.start()
+    code = process.wait()
+    reader.join(timeout=30)
+    return code
 
 
 def remove_tree(path: Path) -> None:

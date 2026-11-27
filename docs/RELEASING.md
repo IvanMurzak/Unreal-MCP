@@ -616,9 +616,12 @@ machine-wide mutex (`Global\UnrealBuildTool_Mutex_<hash>`):
 So the CI builds (`ue_ci.py` BuildPlugin: `build-plugin-dist`, `plugin-zip`,
 `prebuilt-zip`; the extension suite's UBT build) wait such a conflict out
 (`scripts/ubt_conflict.py`): a build whose output shows one of those messages is
-rerun after 30, 60, 120, 180 and 210 s (10 min in all), each wait logged as a
-`::warning::` naming the step. A build that also printed a compiler or linker error is
-never retried, and after the last attempt the step fails with a `::error::`.
+rerun after 30, 60, 120, 180 and 210 s, each wait logged as a `::warning::` naming
+the step. All builds of one step share one 10-min wait budget (the suite step runs
+several builds), so the retries cannot push a job past its `timeout-minutes`. The
+cross-session `Global\AutomationTool_<hash> ... is denied` of a local RunUAT is
+retried the same way. A build that also printed a compiler or linker error is never
+retried, and when the attempts or the budget run out the step fails with a `::error::`.
 
 A local or agent UE build on that machine can still fail the same way (nothing
 retries it for you): wait and rerun it, and never kill a UBT, UAT or editor you did

@@ -132,7 +132,8 @@ class CiStepTests(unittest.TestCase):
         """build-plugin-dist against a fake RunUAT; returns (exit code, the retry sleeps)."""
         sleeps = []
         with mock.patch.dict(os.environ, {"UE_RUNUAT": fake_uat(self.temp, uat_body)}), \
-                mock.patch.object(ci.ubt_conflict.time, "sleep", sleeps.append):
+                mock.patch.object(ci.ubt_conflict.time, "sleep", sleeps.append), \
+                mock.patch.dict(ci.ubt_conflict.WAIT_BUDGET, {"left": 600}):
             return ci.main(["build-plugin-dist"]), sleeps
 
     def test_build_plugin_waits_out_a_ubt_mutex_conflict(self):

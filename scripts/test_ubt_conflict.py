@@ -37,7 +37,8 @@ def detect(lines) -> ubt_conflict.Detector:
 class DetectorTests(unittest.TestCase):
     def test_the_mutex_conflicts_are_retryable(self):
         for lines in (CONFLICT_57, CONFLICT_55, ACCESS_DENIED, ["Result: Failed (ConflictingInstance)"],
-                      ["A conflicting instance of AutomationTool is already running."]):
+                      ["A conflicting instance of AutomationTool is already running."],
+                      [r"System.UnauthorizedAccessException: Access to the path 'Global\AutomationTool_0f3a9c' is denied."]):
             self.assertTrue(detect(lines).retryable, lines)
 
     def test_a_compile_error_is_never_retried(self):
@@ -53,9 +54,10 @@ class DetectorTests(unittest.TestCase):
 
 
 class RetryTests(unittest.TestCase):
-    def run_retry(self, outcomes, delays=(1, 2, 3)):
+    def run_retry(self, outcomes, delays=(1, 2, 3), budget=None):
         """`outcomes`: per attempt, (exit code, output lines). Returns (exit code, attempts, sleeps, log)."""
         attempts, sleeps, logged = [], [], []
+        budget = {"left": 100} if budget is None else budget
 
         def attempt(feed):
             code, lines = outcomes[len(attempts)]
@@ -64,7 +66,7 @@ class RetryTests(unittest.TestCase):
                 feed(line)
             return code
 
-        code = ubt_conflict.retry(attempt, "Build", delays=delays, sleep=sleeps.append, log=logged.append)
+        code = ubt_conflict.retry(attempt, "Build", delays=delays, budget=budget, sleep=sleeps.append, log=logged.append)
         return code, attempts, sleeps, logged
 
     def test_a_conflict_is_retried_until_the_build_succeeds(self):
@@ -76,7 +78,15 @@ class RetryTests(unittest.TestCase):
         code, attempts, sleeps, logged = self.run_retry([(10, CONFLICT_57)] * 4)
         self.assertEqual((code, len(attempts), sleeps), (10, 4, [1, 2, 3]))
         self.assertIn("::error::Build: UnrealBuildTool is still held", logged[-1])
-        self.assertIn("4 attempts (6 s of waiting)", logged[-1])
+        self.assertIn("after 4 attempts", logged[-1])
+
+    def test_every_build_of_a_step_shares_one_wait_budget(self):
+        budget = {"left": 4}
+        self.assertEqual(self.run_retry([(10, CONFLICT_57), (0, [])], budget=budget)[:3], (0, [10, 0], [1]))
+        # 3 s left: the second build waits 1 + 2 s, then gives up instead of waiting 3 s more.
+        code, attempts, sleeps, logged = self.run_retry([(6, CONFLICT_55)] * 4, budget=budget)
+        self.assertEqual((code, attempts, sleeps, budget), (6, [6, 6, 6], [1, 2], {"left": 0}))
+        self.assertIn("0 s of this step's wait budget left", logged[-1])
 
     def test_a_real_failure_fails_at_once(self):
         for outcome in ((5, ["BUILD FAILED"]), (6, [COMPILE_ERRORS[0], *CONFLICT_55])):
@@ -101,7 +111,8 @@ class ExtensionSuiteBuildTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, code)
 
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(suite.subprocess, "run", fake_run), \
-                mock.patch.object(ubt_conflict.time, "sleep", sleeps.append), mock.patch("builtins.print"):
+                mock.patch.object(ubt_conflict.time, "sleep", sleeps.append), mock.patch("builtins.print"), \
+                mock.patch.dict(ubt_conflict.WAIT_BUDGET, {"left": 600}):
             project = Path(folder) / "Suite/Suite.uproject"
             project.parent.mkdir()
             try:
