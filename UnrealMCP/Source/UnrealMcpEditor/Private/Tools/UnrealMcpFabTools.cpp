@@ -1585,7 +1585,7 @@ namespace UnrealMcpFabToolsLocal
 	}
 
 	/**
-	 * The packages under the content folder @p Path (itself or below it) loaded in this editor that are not saved: with
+	 * The packages under the content folder @p Path loaded in this editor that are not saved: with
 	 * unsaved changes, or only in memory (an import may leave a package it created unmarked, yet never written).
 	 */
 	static TArray<UPackage*> FabUnsavedPackagesUnder(const FString& Path)
@@ -1594,7 +1594,7 @@ namespace UnrealMcpFabToolsLocal
 		const FString Prefix = Path / TEXT("");
 		for (TObjectIterator<UPackage> It; It; ++It)
 		{
-			if ((It->GetName().StartsWith(Prefix) || It->GetName() == Path) && (It->IsDirty() || FabOnlyInMemory(*It)))
+			if (It->GetName().StartsWith(Prefix) && (It->IsDirty() || FabOnlyInMemory(*It)))
 				Unsaved.Add(*It);
 		}
 		Unsaved.Sort([](const UPackage& A, const UPackage& B) { return A.GetName() < B.GetName(); });
