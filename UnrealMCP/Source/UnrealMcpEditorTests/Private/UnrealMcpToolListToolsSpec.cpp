@@ -38,19 +38,20 @@ void FUnrealMcpToolListToolsSpec::Define()
 		UnrealMcpEditorTools::Register(Registry);
 		UnrealMcpPythonTools::Register(Registry);
 		UnrealMcpToolListTools::Register(Registry);
-		TestTrue(TEXT("hide python-execute"), Registry.SetToolVisible(TEXT("python-execute"), false));
+		TestTrue(TEXT("hide python-exec"), Registry.SetToolVisible(TEXT("python-exec"), false));
 
 		const FUnrealMcpToolResult Result = List(Registry);
 		TestTrue(TEXT("succeeds"), Result.bSuccess);
 		const FString Text = Result.Message;
-		TestTrue(*FString::Printf(TEXT("python-execute is listed as hidden (%s)"), *Text.Left(400)), Text.Contains(TEXT("python-execute | Execute Python | hidden")));
+		TestTrue(*FString::Printf(TEXT("python-exec is listed as hidden (%s)"), *Text.Left(400)), Text.Contains(TEXT("python-exec | Execute Python | hidden")));
 		TestTrue(TEXT("console-run-command is listed as visible"), Text.Contains(TEXT("console-run-command | Run Console Command | visible")));
 		TestTrue(TEXT("lists itself"), Text.Contains(TEXT("unreal-tool-list | List Tools | visible")));
 		TestTrue(TEXT("says hidden tools still run by name"), Text.Contains(TEXT("still run when called by name")));
 		TestFalse(TEXT("leaves the system tool out"), Text.Contains(TEXT("ping |")));
+		TestFalse(TEXT("leaves the deprecated python-execute alias out"), Text.Contains(TEXT("python-execute |")));
 		TestTrue(TEXT("points at rql-schema for extension features"), Text.Contains(TEXT("rql-schema lists them")));
 		TestTrue(TEXT("counts one hidden"), Text.StartsWith(TEXT("3 tool(s), 1 hidden")));
-		const FUnrealMcpRegisteredTool* Python = Registry.Find(TEXT("python-execute"));
+		const FUnrealMcpRegisteredTool* Python = Registry.Find(TEXT("python-exec"));
 		TestTrue(TEXT("still hidden afterwards"), Python && !Python->bVisible);
 		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
 		TestTrue(TEXT("structured rows"), Result.Structured.IsValid() && Result.Structured->TryGetArrayField(TEXT("tools"), Rows) && Rows->Num() == 3);
@@ -64,7 +65,7 @@ void FUnrealMcpToolListToolsSpec::Define()
 		UnrealMcpToolListTools::Register(Registry);
 
 		const FString Filtered = List(Registry, [](FJsonObject& Args) { Args.SetStringField(TEXT("filter"), TEXT("^PYTHON")); }).Message;
-		TestTrue(*FString::Printf(TEXT("only python-execute (%s)"), *Filtered.Left(300)), Filtered.Contains(TEXT("python-execute |")) && !Filtered.Contains(TEXT("console-run-command |")));
+		TestTrue(*FString::Printf(TEXT("only python-exec (%s)"), *Filtered.Left(300)), Filtered.Contains(TEXT("python-exec |")) && !Filtered.Contains(TEXT("console-run-command |")));
 		TestFalse(TEXT("no description by default"), Filtered.Contains(TEXT("Run Python inside the Unreal Editor")));
 
 		const FString Detailed = List(Registry, [](FJsonObject& Args)

@@ -110,6 +110,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         /// cannot drift between them — and an existing system-tool skill folder from before §2.4 is pruned as
         /// stale on the next run.
         /// </para>
+        /// <para>
+        /// A deprecated alias (<see cref="ToolDescriptor.AliasOf"/>, the old id of a renamed tool) is excluded too: it
+        /// runs the same code as the tool it names, so its SKILL.md would show agents that tool twice.
+        /// </para>
         /// </summary>
         public Result Generate(IReadOnlyList<ToolDescriptor> tools, string skillsRootAbsolute)
         {
@@ -132,8 +136,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             }
 
             // Stable order (the C++ generator sorted by name) so a regenerate is deterministic. System tools are
-            // filtered out first — see the §2.4 note on this method.
-            var ordered = tools.Where(t => !t.IsSystem).OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
+            // and deprecated aliases are filtered out first — see the notes on this method.
+            var ordered = tools.Where(t => !t.IsSystem && string.IsNullOrEmpty(t.AliasOf)).OrderBy(t => t.Name, StringComparer.Ordinal).ToList();
             var currentFolders = new HashSet<string>(StringComparer.Ordinal);
             var written = 0;
 

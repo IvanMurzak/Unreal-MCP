@@ -18,7 +18,7 @@
 #include "Dom/JsonValue.h"
 
 /**
- * Python tool family specs: python-execute through PythonScriptPlugin and the vendored code_exec runtime. Executed in
+ * Python tool family specs: python-exec through PythonScriptPlugin and the vendored code_exec runtime. Executed in
  * EditorContext so Python and the `unreal` module are live. The contract cases mirror Code-Exec's
  * fixtures/golden/python.json (value, logs, syntax/runtime errors, includes).
  */
@@ -43,26 +43,83 @@ BEGIN_DEFINE_SPEC(FUnrealMcpPythonToolsSpec, "UnrealMcp.Tools.Python",
 		}
 		FUnrealMcpToolCall Call(A);
 		Call.TimeoutMs = CallTimeoutMs;
-		return Registry.Execute(TEXT("python-execute"), Call);
+		return Registry.Execute(TEXT("python-exec"), Call);
 	}
 
 END_DEFINE_SPEC(FUnrealMcpPythonToolsSpec)
 
 void FUnrealMcpPythonToolsSpec::Define()
 {
-	It("registers python-execute as a core tool", [this]()
+	It("registers python-exec as a core tool, and python-execute as its hidden deprecated alias", [this]()
 	{
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpPythonTools::Register(Registry);
-		TestTrue(TEXT("has python-execute"), Registry.HasTool(TEXT("python-execute")));
-		TestEqual(TEXT("tool count"), Registry.Num(), 1);
+		TestTrue(TEXT("has python-exec"), Registry.HasTool(TEXT("python-exec")));
+		TestEqual(TEXT("tool count (python-exec + the python-execute alias)"), Registry.Num(), 2);
+		TestEqual(TEXT("one listed tool"), Registry.NumVisibleTools(), 1);
+
+		const FUnrealMcpRegisteredTool* Current = Registry.Find(TEXT("python-exec"));
+		const FUnrealMcpRegisteredTool* Alias = Registry.Find(TEXT("python-execute"));
+		if (!TestNotNull(TEXT("python-exec"), Current) || !TestNotNull(TEXT("python-execute"), Alias))
+			return;
+		TestTrue(TEXT("python-exec is listed"), Current->bVisible && !Current->IsAlias());
+		TestFalse(TEXT("the alias is not listed"), Alias->bVisible);
+		TestEqual(TEXT("the alias names its tool"), Alias->AliasOf, FString(TEXT("python-exec")));
+		TestEqual(TEXT("the alias has the same description"), Alias->Description, Current->Description);
+		TestTrue(TEXT("the alias is served"), Alias->bEnabled);
+
+		// No §7 hidden-list re-apply lists it again, nor the granular toggle.
+		Registry.ApplyHiddenTools({});
+		TestFalse(TEXT("still hidden after a hidden-list re-apply"), Registry.Find(TEXT("python-execute"))->bVisible);
+		TestFalse(TEXT("SetToolVisible cannot list it"), Registry.SetToolVisible(TEXT("python-execute"), true));
+
+		// The manifest carries it as hidden (wire key enabled: false) with aliasOf, so the sidecar registers it unlisted.
+		bool bFound = false;
+		const TSharedPtr<FJsonObject> Manifest = Registry.BuildManifestJson();
+		const TArray<TSharedPtr<FJsonValue>>* Tools = nullptr;
+		if (Manifest.IsValid() && Manifest->TryGetArrayField(TEXT("tools"), Tools) && Tools != nullptr)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Tools)
+			{
+				const TSharedPtr<FJsonObject> Tool = Value->AsObject();
+				if (!Tool.IsValid() || Tool->GetStringField(TEXT("name")) != TEXT("python-execute"))
+					continue;
+				bFound = true;
+				TestFalse(TEXT("alias descriptor is not listed"), Tool->GetBoolField(TEXT("enabled")));
+				TestEqual(TEXT("alias descriptor aliasOf"), Tool->GetStringField(TEXT("aliasOf")), FString(TEXT("python-exec")));
+			}
+		}
+		TestTrue(TEXT("the alias is in the manifest"), bFound);
+	});
+
+	It("serves the python-execute alias exactly when python-exec is served", [this]()
+	{
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpPythonTools::Register(Registry);
+		Registry.SetEnabledToolsFilter({ TEXT("python-exec") });
+		TestTrue(TEXT("python-exec served"), Registry.Find(TEXT("python-exec"))->bEnabled);
+		TestTrue(TEXT("an allowlist naming python-exec serves the alias"), Registry.Find(TEXT("python-execute"))->bEnabled);
+		Registry.SetEnabledToolsFilter({ TEXT("rql-query") });
+		TestFalse(TEXT("python-exec not served"), Registry.Find(TEXT("python-exec"))->bEnabled);
+		TestFalse(TEXT("nor the alias"), Registry.Find(TEXT("python-execute"))->bEnabled);
+	});
+
+	It("runs the same code when called by the deprecated python-execute name", [this]()
+	{
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpPythonTools::Register(Registry);
+		TSharedPtr<FJsonObject> A = MakeShared<FJsonObject>();
+		A->SetStringField(TEXT("code"), TEXT("40 + 2"));
+		const FUnrealMcpToolResult R = Registry.Execute(TEXT("python-execute"), FUnrealMcpToolCall(A));
+		TestTrue(*FString::Printf(TEXT("succeeds (%s)"), *R.Message.Left(300)), R.bSuccess);
+		TestTrue(*FString::Printf(TEXT("value 42 (%s)"), *R.Message.Left(300)), R.Message.StartsWith(TEXT("42")));
 	});
 
 	It("tells agents to build rotators and colours with keywords, and the positional orders it names hold", [this]()
 	{
 		FUnrealMcpToolRegistry Registry;
 		UnrealMcpPythonTools::Register(Registry);
-		const FUnrealMcpRegisteredTool* Tool = Registry.Find(TEXT("python-execute"));
+		const FUnrealMcpRegisteredTool* Tool = Registry.Find(TEXT("python-exec"));
 		TestTrue(TEXT("the description has the keyword hint"), Tool && Tool->Description.Contains(TEXT("unreal.Rotator(pitch=, yaw=, roll=)"))
 			&& Tool->Description.Contains(TEXT("unreal.Color(r=, g=, b=, a=)"))
 			&& Tool->Description.Contains(TEXT("Rotator: roll, pitch, yaw; Color: b, g, r, a"))
@@ -310,7 +367,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("read-only ok"), Run(Find + TEXT("light.intensity")).bSuccess);
 		// The step is named after the snippet's first statement, so the Undo History says which run it reverts.
 		const FString Title = GEditor->Trans ? GEditor->Trans->GetUndoContext().Title.ToString() : FString();
-		TestTrue(*FString::Printf(TEXT("undo step named after the code (%s)"), *Title), Title.StartsWith(TEXT("python-execute: lamp = [a for a in")));
+		TestTrue(*FString::Printf(TEXT("undo step named after the code (%s)"), *Title), Title.StartsWith(TEXT("python-exec: lamp = [a for a in")));
 
 		// The read-only snippet left no transaction behind, so one undo reverts the edit.
 		TestTrue(TEXT("undo"), GEditor->UndoTransaction());

@@ -47,8 +47,9 @@ struct UNREALMCPRUNTIME_API FUnrealMcpExtensionRegistrationResult
  * keeping the extension-manager call sites + the public API byte-for-byte stable.
  *
  * A `TTraits` policy supplies the kind-specific statics (key accessor, validation, manifest strings,
- * noun). `TEntry` must expose: `bool bEnabled` (served: in the manifest, dispatchable), `bool bVisible` (listed;
- * only tools use it — see ApplyHiddenList), `FString ExtensionId`, `FString SchemaHash`, and
+ * noun, `IsListable`: false for an entry that is never listed, a tool's deprecated alias, and `FilterKeyOf`: the key the
+ * enablement filter checks, the aliased tool's for an alias). `TEntry` must expose:
+ * `bool bEnabled` (served: in the manifest, dispatchable), `bool bVisible` (listed; only tools use it — see ApplyHiddenList), `FString ExtensionId`, `FString SchemaHash`, and
  * `TSharedPtr<FJsonObject> ToDescriptorJson() const`.
  *
  * Threading contract (unchanged from the originals): NOT thread-safe. All mutation happens at startup
@@ -275,7 +276,7 @@ public:
 	bool SetVisible(const FString& Key, bool bVisible)
 	{
 		TEntry* Found = Entries.Find(Key);
-		if (Found == nullptr || Found->bVisible == bVisible)
+		if (Found == nullptr || Found->bVisible == bVisible || (bVisible && !TTraits::IsListable(*Found)))
 			return false;
 		Found->bVisible = bVisible;
 		++Revision;
@@ -373,11 +374,14 @@ protected:
 	 */
 	bool ShouldBeEnabled(const FString& Key) const { return Enablement.ShouldBeEnabled(Key); }
 
-	/** Apply the retained filter to one entry (served: ShouldBeEnabled; listed: not hidden); true when a flag changed. */
+	/** Apply the retained filter to one entry (served: ShouldBeEnabled; listed: listable and not hidden); true when a flag changed. */
 	bool ApplyFilter(const FString& Key, TEntry& Entry) const
 	{
-		const bool bServed = ShouldBeEnabled(Key);
-		const bool bVisible = Enablement.IsVisible(Key);
+		// A tool's deprecated alias follows its tool (FilterKeyOf): served when the tool is, so an allowlist naming the
+		// current id still serves calls by the old one.
+		const FString& FilterKey = TTraits::FilterKeyOf(Entry, Key);
+		const bool bServed = ShouldBeEnabled(FilterKey);
+		const bool bVisible = TTraits::IsListable(Entry) && Enablement.IsVisible(FilterKey);
 		const bool bChanged = Entry.bEnabled != bServed || Entry.bVisible != bVisible;
 		Entry.bEnabled = bServed;
 		Entry.bVisible = bVisible;

@@ -70,7 +70,7 @@ void FUnrealMcpDispatcherSpec::Define()
 			});
 		});
 
-		// A body that waits on game-thread tasks itself (an Interchange import from python-execute) asserted the task
+		// A body that waits on game-thread tasks itself (an Interchange import from python-exec) asserted the task
 		// graph's recursion guard and crashed the editor when the body ran inside the game thread's task queue.
 		LatentIt("runs an off-thread call at the end of a frame: outside the task queue and the ticker, which its body may pump", FTimespan::FromSeconds(15), [this](const FDoneDelegate& Done)
 		{

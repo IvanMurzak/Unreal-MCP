@@ -66,6 +66,29 @@ namespace
 	const TCHAR* KeySkillAutoGenerateAgents = TEXT("skillAutoGenerateAgents");
 	const TCHAR* KeySkillsPath     = TEXT("skillsPath");
 
+	/**
+	 * Renamed tool ids (old -> current) whose old id is still registered as a hidden deprecated alias (DEV-314). A saved
+	 * enabledTools / hiddenTools entry or a UNREAL_MCP_TOOLS id that names the old id is read as the current one, so an
+	 * allowlist keeps serving the renamed tool and a hidden one stays hidden; the alias follows its tool. Remove an entry
+	 * together with its alias (UnrealMcpPythonTools::PythonExecuteDeprecatedAlias).
+	 */
+	void MigrateRenamedToolIds(TArray<FString>& Tools)
+	{
+		static const TCHAR* const Renamed[][2] = { { TEXT("python-execute"), TEXT("python-exec") } };
+		TArray<FString> Out;
+		for (const FString& Tool : Tools)
+		{
+			FString Current = Tool;
+			for (const TCHAR* const* Pair : Renamed)
+			{
+				if (Current == Pair[0])
+					Current = Pair[1];
+			}
+			Out.AddUnique(Current);
+		}
+		Tools = MoveTemp(Out);
+	}
+
 	// Read a JSON array field into a string array (skipping empty/non-string entries). Shared by the
 	// enabledTools / hiddenTools list fields so their parsing stays identical.
 	void ReadStringArrayField(const TSharedPtr<FJsonObject>& Json, const TCHAR* Key, TArray<FString>& Out)
@@ -196,6 +219,8 @@ void FUnrealMcpConfig::LoadFromJson(const TSharedPtr<FJsonObject>& Json)
 		ReadStringArrayField(Json, KeyLegacyDisabledTools, LegacyHidden);
 		for (const FString& Tool : LegacyHidden)
 			HiddenTools.AddUnique(Tool);
+		MigrateRenamedToolIds(EnabledTools);
+		MigrateRenamedToolIds(HiddenTools);
 
 		// Pure UI persistence (no env override). A blank/missing value keeps the default selection.
 		if (Json->TryGetStringField(KeySelectedAgentId, Str) && !Str.IsEmpty())
@@ -355,6 +380,7 @@ void FUnrealMcpConfig::ApplyOne(const FString& EnvName, const FString& Source)
 			if (!Part.IsEmpty())
 				EnabledTools.Add(Part);
 		}
+		MigrateRenamedToolIds(EnabledTools);
 		OverriddenKeys.Add(KeyEnabledTools);
 	}
 	else if (EnvName == EnvToken)

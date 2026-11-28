@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
-import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
+import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, toolErrorText, PYTHON_EXEC_TOOL } from '../src/lib/exec.js';
 import {
   closeOwnedSession,
   createUnrealSession,
@@ -103,8 +103,43 @@ describe('execPython', () => {
     if (result.kind === 'success') expect(result.source).toBe('running');
     expect(editors.spawned).toHaveLength(0);
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
-      toolName: PYTHON_EXECUTE_TOOL, url: 'http://localhost:5199', input: { code: '1 + 2' },
+      toolName: PYTHON_EXEC_TOOL, url: 'http://localhost:5199', input: { code: '1 + 2' },
     }));
+  });
+
+  it('falls back to python-execute when the editor plugin predates the rename (DEV-314)', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    editors.alive.add(1);
+    const invoke = vi.fn(async (options: RunToolOptions): Promise<RunToolResult> => options.toolName === PYTHON_EXEC_TOOL
+      ? { kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 404, message: "Tool 'python-exec' not found." }
+      : { kind: 'success', success: true, endpoint: 'x', httpStatus: 200, data: { status: 'success', structured: { success: true, value: '3', logs: [] } } });
+    const result = await execPython({
+      projectDir: dir,
+      code: '1 + 2',
+      url: CONNECTION.url,
+      invoke,
+      sessionOptions: { probeReady: async () => 'http://localhost:5199', processOps: editors.ops, editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild },
+    });
+    expect(result.kind).toBe('success');
+    expect(invoke.mock.calls.map(([options]) => options.toolName)).toEqual([PYTHON_EXEC_TOOL, 'python-execute']);
+  });
+
+  it('does not retry under the old name when python-exec itself fails', async () => {
+    const dir = project();
+    const editors = fakeEditors();
+    editors.alive.add(1);
+    const invoke = vi.fn(async (_options: RunToolOptions): Promise<RunToolResult> => (
+      { kind: 'failure', success: false, endpoint: 'x', reason: 'http-error', httpStatus: 500, message: 'NameError' }));
+    const result = await execPython({
+      projectDir: dir,
+      code: 'x',
+      url: CONNECTION.url,
+      invoke,
+      sessionOptions: { probeReady: async () => 'http://localhost:5199', processOps: editors.ops, editorBinary: 'UnrealEditor.exe', beforeLaunch: noBuild },
+    });
+    expect(result.kind).toBe('failure');
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it('starts a headless editor with -RenderOffscreen, the session env and a local server, then runs the code', async () => {

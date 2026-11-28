@@ -12,7 +12,7 @@ The canonical inventory of the tools the **UnrealMCP** editor plugin registers. 
 | Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
 | Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Console | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | Tool list | `unreal-tool-list` |
 | **System** (not shown to the AI) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
@@ -33,7 +33,7 @@ One query language for the whole editor instead of one tool per operation ([`doc
 | `rql-mutate` | RQL query ending with `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): all-or-nothing, one undo step, `dry_run` previews; several separated by `;` are one change each |
 | `rql-schema` | Sources, functions, the installed extensions and the classes in the editor world; `type` lists one type's members and methods; `guide` returns an installed extension's guide (`{"guide": "landscape"}`) |
 
-Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`) Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`). Materials report their compile errors per feature level and shader platform and the usage flags the meshes using them need (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), which `python-execute`'s `recompile_material` does not; a material that fails to compile also shows in the editor diagnostics note.
+Beyond reflected properties, RQL reaches DataTable rows (`dataTables`, `Rows["Sword"].Damage`), gameplay tags as text (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings saved to their ini (`unreal.settings("Maps & Modes")`) Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) and Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`). Materials report their compile errors per feature level and shader platform and the usage flags the meshes using them need (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), which `python-exec`'s `recompile_material` does not; a material that fails to compile also shows in the editor diagnostics note.
 
 The `unreal-rql` skill (written by `unreal-skill-generate`) teaches the language and lists what installed extensions add.
 
@@ -83,9 +83,11 @@ Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"
 
 | Tool id | What it does |
 | --- | --- |
-| `python-execute` | Run Python in the editor (full `unreal` API, pre-imported): plain statements, the last expression is the result, `print` comes back as logs, errors point at `snippet.py` lines; `include` adds helpers from `<Project>/.ai-game-dev/snippets`: a `.py` file runs into the snippet's namespace before the code (not importable), a folder goes on `sys.path` (its modules are importable); `timeout` (seconds, default 30) stops a runaway snippet |
+| `python-exec` | Run Python in the editor (full `unreal` API, pre-imported): plain statements, the last expression is the result, `print` comes back as logs, errors point at `snippet.py` lines; `include` adds helpers from `<Project>/.ai-game-dev/snippets`: a `.py` file runs into the snippet's namespace before the code (not importable), a folder goes on `sys.path` (its modules are importable); `timeout` (seconds, default 30) stops a runaway snippet |
 
 Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never in a packaged game) and the [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime vendored in `UnrealMCP/Content/Python`. Blueprint graph wiring is not exposed to Python: use the Blueprint tools for that.
+
+`python-execute`, the tool's old name, still runs as a hidden alias of `python-exec` for the next releases (calls by the old name keep working, and an `enabledTools` / `hiddenTools` entry with it is read as `python-exec`; an agent's permission rule for the old name does not cover `python-exec`); it is not in `tools/list`, has no skill file, and will be removed. Use `python-exec`.
 
 </details>
 

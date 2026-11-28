@@ -12,7 +12,7 @@ El inventario canónico de las herramientas que registra el plugin de editor **U
 | Captura de pantalla | `screenshot-*`: viewport, game-view, camera, isolated |
 | Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Consola | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | Lista de herramientas | `unreal-tool-list` |
 | **Sistema** (no se muestran a la IA) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
@@ -33,7 +33,7 @@ Un solo lenguaje de consultas para todo el editor en lugar de una herramienta po
 | `rql-mutate` | Consulta RQL que termina en `set` / `call` (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): todo o nada, un solo paso de deshacer, `dry_run` muestra una vista previa; varias separadas por `;` son un cambio cada una |
 | `rql-schema` | Fuentes, funciones, las extensiones instaladas y las clases del mundo del editor; `type` lista los miembros y métodos de un tipo; `guide` devuelve la guía de una extensión instalada (`{"guide": "landscape"}`) |
 
-Además de las propiedades reflejadas, RQL llega a filas de DataTable (`dataTables`, `Rows["Sword"].Damage`), gameplay tags como texto (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings guardados en su ini (`unreal.settings("Maps & Modes")`), grafos de Blueprint (`EventGraph | call AddCallFunction("PrintString")`, conexiones de pines, `call Compile()`), árboles de Widget Blueprint (`call AddWidget("Button", "Ok", parent)`) y Level Sequences (bindings, pistas, `call AddKey("Location.X", 30, 100)`). Los materiales informan de sus errores de compilación por nivel de funcionalidad y plataforma de shaders, y de los flags de uso que necesitan las mallas que los usan (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), algo que `recompile_material` de `python-execute` no hace; un material que no compila también aparece en la nota de diagnósticos del editor.
+Además de las propiedades reflejadas, RQL llega a filas de DataTable (`dataTables`, `Rows["Sword"].Damage`), gameplay tags como texto (`gameplayTags`, `set Tags = ["Ability.Fire"]`), Project Settings guardados en su ini (`unreal.settings("Maps & Modes")`), grafos de Blueprint (`EventGraph | call AddCallFunction("PrintString")`, conexiones de pines, `call Compile()`), árboles de Widget Blueprint (`call AddWidget("Button", "Ok", parent)`) y Level Sequences (bindings, pistas, `call AddKey("Location.X", 30, 100)`). Los materiales informan de sus errores de compilación por nivel de funcionalidad y plataforma de shaders, y de los flags de uso que necesitan las mallas que los usan (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), algo que `recompile_material` de `python-exec` no hace; un material que no compila también aparece en la nota de diagnósticos del editor.
 
 La skill `unreal-rql` (escrita por `unreal-skill-generate`) enseña el lenguaje y lista lo que añaden las extensiones instaladas.
 
@@ -83,9 +83,11 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 
 | Id de herramienta | Qué hace |
 | --- | --- |
-| `python-execute` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade auxiliares de `<Project>/.ai-game-dev/snippets`: un archivo `.py` se ejecuta en el espacio de nombres del snippet antes del código (no se puede importar), una carpeta va a `sys.path` (sus módulos se pueden importar); `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
+| `python-exec` | Ejecuta Python en el editor (toda la API `unreal`, ya importada): sentencias simples, la última expresión es el resultado, `print` vuelve como logs, los errores señalan líneas de `snippet.py`; `include` añade auxiliares de `<Project>/.ai-game-dev/snippets`: un archivo `.py` se ejecuta en el espacio de nombres del snippet antes del código (no se puede importar), una carpeta va a `sys.path` (sus módulos se pueden importar); `timeout` (segundos, por defecto 30) detiene un snippet descontrolado |
 
 Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca en un juego empaquetado) y el runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) incluido en `UnrealMCP/Content/Python`. El cableado de grafos de Blueprint no se expone a Python: usa las herramientas de Blueprint para eso.
+
+`python-execute`, el nombre anterior de la herramienta, sigue funcionando como alias oculto de `python-exec` durante las próximas versiones (las llamadas con el nombre anterior siguen funcionando, y una entrada de `enabledTools` / `hiddenTools` con él se lee como `python-exec`; una regla de permisos del agente para el nombre anterior no cubre `python-exec`); no aparece en `tools/list`, no tiene archivo de skill y se eliminará. Usa `python-exec`.
 
 </details>
 

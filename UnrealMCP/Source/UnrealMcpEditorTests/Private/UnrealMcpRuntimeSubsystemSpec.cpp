@@ -242,7 +242,7 @@ void FUnrealMcpRuntimeSubsystemSpec::Define()
 				// console (editor-only)
 				TEXT("console-run-command"),
 				// python (editor-only: runs agent code in the editor's interpreter)
-				TEXT("python-execute"),
+				TEXT("python-exec"), TEXT("python-execute"),
 				// screenshot (editor-only)
 				TEXT("screenshot-viewport"), TEXT("screenshot-isolated"),
 				TEXT("screenshot-game-view"), TEXT("screenshot-camera"),

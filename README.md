@@ -61,7 +61,7 @@ Unreal's editor is C++, so the .NET MCP host runs next to it as a small **sideca
 | "Count the trees in this level and move every point light 1 m up" | `rql-query`, `rql-mutate` |
 | "Take a screenshot from the player camera and check the lighting" | `screenshot-*` |
 | "Find a free rock pack on Fab and add it to the project" | `fab-search`, `fab-add` |
-| "Batch-rename the selected assets with a Python script" | `python-execute` |
+| "Batch-rename the selected assets with a Python script" | `python-exec` |
 
 **C++ is a first-class loop.** `source-compile` builds with Live Coding when it is active, else UnrealBuildTool, and returns every diagnostic with its file, line and severity, so the agent fixes errors without reading the build log. It says when a change needs a full build and an editor restart (new classes, changed `UCLASS` / `UPROPERTY` / `UFUNCTION` declarations). File operations stay inside `<Project>/Source/`. From a terminal, `unreal-mcp-cli compile` prints `file:line:col` diagnostics without an editor.
 
@@ -244,7 +244,7 @@ All commands and options: [cli/docs/commands.md](cli/docs/commands.md) or `unrea
 - **Controls over them:**
   - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` serves only the listed tools; any other tool is neither listed nor callable.
   - **Hide** (soft): the **Visible** checkbox in the **MCP Tools** window removes a tool from `tools/list`, but a client that calls it by name still runs it.
-  - **Bounded changes:** C++ file tools stay inside `<Project>/Source/`; an `rql-mutate` call is all-or-nothing, one undo step, previewable with `dry_run`, and refused above 200 targets unless the call raises `max_targets` (up to 1000); `python-execute` stops after `timeout` (30 s by default); every tool call has a time limit (`UNREAL_MCP_TOOL_TIMEOUT`, 5 min by default).
+  - **Bounded changes:** C++ file tools stay inside `<Project>/Source/`; an `rql-mutate` call is all-or-nothing, one undo step, previewable with `dry_run`, and refused above 200 targets unless the call raises `max_targets` (up to 1000); `python-exec` stops after `timeout` (30 s by default); every tool call has a time limit (`UNREAL_MCP_TOOL_TIMEOUT`, 5 min by default).
   - **Not for the AI:** the system tools (`ping`, skill generation, `editor-quit`) are absent from `tools/list`, and `editor-quit` refuses unless the CLI session's nonce matches.
   - Details: [docs/TOOLS.md](docs/TOOLS.md).
 - **Runtime mode is off by default:** a game never connects on its own. It needs the `bRuntimeMcpEnabled` setting (default off) and an explicit `Connect()` call, accepts only a loopback host unless you allow a remote one, and is refused in Shipping builds unless compiled in. Keep the plugin out of packaged games with a `TargetDenyList` ([docs/RUNTIME.md](docs/RUNTIME.md)).

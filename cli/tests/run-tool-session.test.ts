@@ -238,7 +238,7 @@ describe('exec and the sign-in rule', () => {
     fs.writeFileSync(file, JSON.stringify({ connectionMode: 'Cloud', cloudUrl: 'https://ai-game.dev' }));
     return dir;
   };
-  const rejected: RunToolFailure = { kind: 'failure', success: false, endpoint: 'https://ai-game.dev/mcp/api/tools/python-execute', reason: 'http-error', httpStatus: 401, message: 'Unauthorized' };
+  const rejected: RunToolFailure = { kind: 'failure', success: false, endpoint: 'https://ai-game.dev/mcp/api/tools/python-exec', reason: 'http-error', httpStatus: 401, message: 'Unauthorized' };
 
   it.each(['ok', 'unreadable'] as const)('a signed-in machine (%s) runs in the cloud editor, never a local one', async (state) => {
     const fake = fakeSession();

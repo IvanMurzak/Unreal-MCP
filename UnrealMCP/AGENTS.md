@@ -9,7 +9,7 @@ so this file stays out of the package; keep agent notes out of `Source/`.
 - `Source/UnrealMcpFab/` — the Fab sign-in companion (DEV-281): restores the Epic sign-in the Fab plugin's EOS platform remembers on editor start and hands its tokens to the Fab tools (`UnrealMcpEditor/Public/UnrealMcpFabSignIn.h`). The only module that links EOSShared/EOSSDK; keep everything else Fab-free (reflection only).
 - `Source/UnrealMcpRql/` — the RQL data layer ([`docs/rql.md`](../docs/rql.md)): the Unreal provider (`UnrealMcpRqlTypes`), the per-call session + core sources / members / methods (`UnrealMcpRqlSession`, `UnrealMcpRqlCore`), the `editor` operations (`UnrealMcpRqlEditorApi`), the rql-* tools, `Public/IUnrealMcpRqlModule.h` (the extension seam). Exceptions on, no unity build, no PCH; RQL types stay private to it.
 - `Source/ThirdParty/RQL/` — the vendored RQL C++ runtime (unmodified, **PolyForm Shield 1.0.0**, see its README); compiled only through `UnrealMcpRql/Private/Vendor/`.
-- `Content/Python/` — `python-execute`'s Python side: package `unreal_mcp/` — `python_execute.py` (glue) — and `Lib/site-packages/code_exec/` (vendored, unmodified
+- `Content/Python/` — `python-exec`'s Python side: package `unreal_mcp/` — `python_exec.py` (glue) — and `Lib/site-packages/code_exec/` (vendored, unmodified
   Code-Exec runtime, **PolyForm Shield 1.0.0**, see its `VENDORED.md`). Shipped via `Config/FilterPlugin.ini` and the
   release source staging; PythonScriptPlugin is a `.uplugin` dependency (editor-only, `UncookedOnly`).
 - `Source/UnrealMcpEditorTests/` — Automation specs (`WITH_DEV_AUTOMATION_TESTS`, prefix `UnrealMcp.`); new specs go here, no top-level test folder.

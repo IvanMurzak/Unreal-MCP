@@ -59,8 +59,9 @@ namespace UnrealMcpToolListTools
 				for (const FString& Name : RegistryPtr->GetToolNamesSorted())
 				{
 					const FUnrealMcpRegisteredTool* Tool = RegistryPtr->Find(Name);
-					// System tools are never callable through tools/call; a tool outside the enabledTools whitelist is not served.
-					if (!Tool || !Tool->bEnabled || Tool->ToolType != EUnrealMcpToolType::Standard)
+					// System tools are never callable through tools/call; a tool outside the enabledTools whitelist is not served;
+					// a deprecated alias (AliasOf) is the old id of a listed tool, so listing it would show the tool twice.
+					if (!Tool || !Tool->bEnabled || Tool->ToolType != EUnrealMcpToolType::Standard || Tool->IsAlias())
 						continue;
 					if (Pattern.IsSet())
 					{

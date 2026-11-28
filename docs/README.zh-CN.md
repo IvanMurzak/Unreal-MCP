@@ -61,7 +61,7 @@ Unreal 编辑器是 C++ 编写的，所以 .NET MCP 宿主作为一个小型**�
 | “数一数这个关卡里的树，并把所有点光源上移 1 米” | `rql-query`、`rql-mutate` |
 | “从玩家摄像机截一张图，检查一下光照” | `screenshot-*` |
 | “在 Fab 上找一个免费的岩石资源包并添加到项目中” | `fab-search`、`fab-add` |
-| “用 Python 脚本批量重命名选中的资源” | `python-execute` |
+| “用 Python 脚本批量重命名选中的资源” | `python-exec` |
 
 **C++ 是一等公民的工作循环。**`source-compile` 在 Live Coding 启用时用它编译，否则用 UnrealBuildTool，并返回每条诊断的文件、行号和严重级别，智能体无需读构建日志就能修复错误。当改动需要完整构建并重启编辑器时（新增类、修改了 `UCLASS` / `UPROPERTY` / `UFUNCTION` 声明），它会明确提示。文件操作限定在 `<Project>/Source/` 内。在终端中，`unreal-mcp-cli compile` 无需编辑器即可输出 `file:line:col` 格式的诊断。
 
@@ -244,7 +244,7 @@ unreal-mcp-cli test ./MyGame
 - **对工具的控制：**
   - **白名单**（硬限制）：`UNREAL_MCP_TOOLS` 只提供列出的工具；其他工具既不会列出，也无法调用。
   - **隐藏**（软限制）：**MCP Tools** 窗口中的 **Visible** 复选框会把工具从 `tools/list` 中移除，但按名称调用它的客户端仍能运行它。
-  - **有边界的修改：**C++ 文件工具限定在 `<Project>/Source/` 内；一次 `rql-mutate` 调用要么全部成功要么全部不生效，只占一个撤销步骤，可用 `dry_run` 预览，目标超过 200 个时会被拒绝，除非调用调高 `max_targets`（最多 1000）；`python-execute` 在 `timeout` 后停止（默认 30 秒）；每次工具调用都有时间上限（`UNREAL_MCP_TOOL_TIMEOUT`，默认 5 分钟）。
+  - **有边界的修改：**C++ 文件工具限定在 `<Project>/Source/` 内；一次 `rql-mutate` 调用要么全部成功要么全部不生效，只占一个撤销步骤，可用 `dry_run` 预览，目标超过 200 个时会被拒绝，除非调用调高 `max_targets`（最多 1000）；`python-exec` 在 `timeout` 后停止（默认 30 秒）；每次工具调用都有时间上限（`UNREAL_MCP_TOOL_TIMEOUT`，默认 5 分钟）。
   - **不开放给 AI：**系统工具（`ping`、skill 生成、`editor-quit`）不出现在 `tools/list` 中，且 `editor-quit` 只有在 CLI 会话的 nonce 匹配时才会执行。
   - 详情：[docs/TOOLS.md](TOOLS.zh-CN.md)。
 - **运行时模式默认关闭：**游戏永远不会自行连接。它需要 `bRuntimeMcpEnabled` 设置（默认关闭）和一次显式的 `Connect()` 调用，除非你允许远程主机，否则只接受 loopback 主机，并且在 Shipping 构建中会被拒绝，除非编译时包含它。用 `TargetDenyList` 把插件排除在打包的游戏之外（[docs/RUNTIME.md](RUNTIME.zh-CN.md)）。

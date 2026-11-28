@@ -61,7 +61,7 @@ Unreal のエディターは C++ なので、.NET の MCP ホストは小さな*
 | 「このレベルの木を数えて、ポイントライトをすべて 1 m 上げて」 | `rql-query`、`rql-mutate` |
 | 「プレイヤーカメラからスクリーンショットを撮ってライティングを確認して」 | `screenshot-*` |
 | 「Fab で無料の岩パックを探してプロジェクトに追加して」 | `fab-search`、`fab-add` |
-| 「選択したアセットを Python スクリプトで一括リネームして」 | `python-execute` |
+| 「選択したアセットを Python スクリプトで一括リネームして」 | `python-exec` |
 
 **C++ は第一級のループです。**`source-compile` は Live Coding が有効ならそれを、そうでなければ UnrealBuildTool を使ってビルドし、すべての診断をファイル、行、重大度付きで返すので、エージェントはビルドログを読まずにエラーを直せます。変更にフルビルドとエディター再起動が必要な場合（新しいクラス、`UCLASS` / `UPROPERTY` / `UFUNCTION` 宣言の変更）はそう伝えます。ファイル操作は `<Project>/Source/` の中に限られます。ターミナルからは `unreal-mcp-cli compile` がエディターなしで `file:line:col` 形式の診断を出力します。
 
@@ -244,7 +244,7 @@ unreal-mcp-cli test ./MyGame
 - **ツールの制御：**
   - **ホワイトリスト**（強い制限）：`UNREAL_MCP_TOOLS` は列挙したツールだけを提供します。それ以外のツールは一覧にも出ず、呼び出すこともできません。
   - **非表示**（弱い制限）：**MCP Tools** ウィンドウの **Visible** チェックボックスはツールを `tools/list` から外しますが、名前で呼び出すクライアントは実行できます。
-  - **範囲の限られた変更：**C++ ファイルツールは `<Project>/Source/` 内にとどまります。`rql-mutate` の呼び出しはすべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ、`dry_run` でプレビューでき、対象が 200 を超えると、呼び出しが `max_targets` を上げない限り（最大 1000）拒否されます。`python-execute` は `timeout`（既定 30 秒）後に停止し、すべてのツール呼び出しに時間制限があります（`UNREAL_MCP_TOOL_TIMEOUT`、既定 5 分）。
+  - **範囲の限られた変更：**C++ ファイルツールは `<Project>/Source/` 内にとどまります。`rql-mutate` の呼び出しはすべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ、`dry_run` でプレビューでき、対象が 200 を超えると、呼び出しが `max_targets` を上げない限り（最大 1000）拒否されます。`python-exec` は `timeout`（既定 30 秒）後に停止し、すべてのツール呼び出しに時間制限があります（`UNREAL_MCP_TOOL_TIMEOUT`、既定 5 分）。
   - **AI 向けではないもの：**システムツール（`ping`、スキル生成、`editor-quit`）は `tools/list` に現れず、`editor-quit` は CLI セッションの nonce が一致しない限り拒否します。
   - 詳細：[docs/TOOLS.md](TOOLS.ja.md)。
 - **ランタイムモードは既定でオフ：**ゲームが勝手に接続することはありません。`bRuntimeMcpEnabled` 設定（既定はオフ）と明示的な `Connect()` 呼び出しが必要で、リモートホストを許可しない限りループバックのホストしか受け付けず、組み込んでコンパイルしない限り Shipping ビルドでは拒否されます。`TargetDenyList` でパッケージ化したゲームからプラグインを外せます（[docs/RUNTIME.md](RUNTIME.ja.md)）。

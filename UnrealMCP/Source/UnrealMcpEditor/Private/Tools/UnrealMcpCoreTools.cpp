@@ -18,7 +18,7 @@ namespace UnrealMcpCoreTools
 		UnrealMcpBlueprintTools::Register(Registry); // §10 flagship Blueprint family (CORE)
 		UnrealMcpEditorTools::Register(Registry); // §10 console family: console-run-command
 		UnrealMcpToolListTools::Register(Registry); // unreal-tool-list: every callable tool, hidden ones included
-		UnrealMcpPythonTools::Register(Registry); // python-execute (PythonScriptPlugin + vendored code_exec)
+		UnrealMcpPythonTools::Register(Registry); // python-exec (PythonScriptPlugin + vendored code_exec)
 		UnrealMcpScreenshotTools::Register(Registry); // §10 screenshot / viewport-capture family (issue #17)
 		UnrealMcpSourceTools::Register(Registry); // §10 C++ source / script family (issue #18)
 		UnrealMcpFabTools::Register(Registry); // fab-search / fab-library / fab-add / fab-sign-in (the engine's Fab plugin, by reflection)

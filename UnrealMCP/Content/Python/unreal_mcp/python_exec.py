@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Ivan Murzak. Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the repository root for more information.
-"""Glue between the `python-execute` tool (C++, UnrealMcpPythonTools.cpp) and the vendored code_exec runtime.
+"""Glue between the `python-exec` tool (C++, UnrealMcpPythonTools.cpp) and the vendored code_exec runtime.
 
 The tool evaluates ``run(<base64 JSON request>)`` (EvaluateStatement) and reads the returned base64 JSON response from
 the command result: base64 has nothing to escape, so its Python repr is just the string in quotes.
@@ -15,7 +15,7 @@ import code_exec
 
 try:
     import ctypes
-except ImportError:  # no ctypes (embedded builds): python-execute still works, _repair_bound_method_type says what it cannot do
+except ImportError:  # no ctypes (embedded builds): python-exec still works, _repair_bound_method_type says what it cannot do
     ctypes = None
 
 # Where CPython keeps tp_basicsize and tp_weaklistoffset in a PyTypeObject (64-bit, stable since Python 3.8).
@@ -81,7 +81,7 @@ def _convert(value):
 
 
 code_exec.set_value_converter(_convert)
-# python-execute's default 'timeout' (30 s; the tool always sends its budget, this covers a request without one).
+# python-exec's default 'timeout' (30 s; the tool always sends its budget, this covers a request without one).
 code_exec.set_default_timeout_ms(30000)
 
 

@@ -126,7 +126,7 @@ agent ──query text──▶ unreal-mcp-bridge (sidecar, .NET)          Unrea
   Blueprint compile, hot reload or user-defined struct edit recreates `FProperty` / `UFunction` objects, so no
   descriptor may outlive the call that built it.
 - **Mutations** run in one editor transaction (one Ctrl+Z step, named `RQL: <query>` in the Undo History, so `TRANSACTION UNDO`
-  says which change it reverts; `python-execute` steps are named after the snippet's first statement); owners are `Modify()`d before the first write and
+  says which change it reverts; `python-exec` steps are named after the snippet's first statement); owners are `Modify()`d before the first write and
   their packages marked dirty after. The receipt's `new` column is the value read back after the write (what the
   setter and the class's `PostEditChangeProperty` left); `rql-mutate` refuses a query without `set` / `call`, and a
   throwing operation is `call-threw`. Unlike Unity-MCP, `rql-mutate` does **not** save to disk: Unreal edits stay
@@ -352,7 +352,7 @@ Editor diagnostics (new since your last call; fix them or tell the user, and che
 ```
 
 At most 10 lines of at most 400 characters, errors first, then `+N more`; each row is reported once (unchanged rows are not
-repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-execute` return, the rows a `diagnostics` query returned) are left out.
+repeated), and rows whose message the tool's own text already holds (the log lines `console-run-command` / `python-exec` return, the rows a `diagnostics` query returned) are left out.
 The `UnrealMcp.DiagnosticsPush` console variable sets when: `mutating` (only tools that are not read-only, the default),
 `all` (every tool) or `off` (the source only). `UNREAL_MCP_DIAGNOSTICS_PUSH` sets its value at editor start.
 
@@ -574,7 +574,7 @@ Every change is undoable (one transaction per mutation). Spawnables are listed b
 | `reflection-method-find` / `-call` | `rql-schema(type)` (members and methods), `call` on `CallInEditor` functions and the exposed operations |
 
 Kept as tools: `blueprint-*` (Blueprint authoring is Unreal's script surface, like Unity-MCP's `script-*`),
-`source-*`, `screenshot-*`, `console-run-command`, `python-execute` (code, not data access), and the system tools `ping`, `unreal-skill-create`,
+`source-*`, `screenshot-*`, `console-run-command`, `python-exec` (code, not data access), and the system tools `ping`, `unreal-skill-create`,
 `unreal-skill-generate`. The runtime (packaged game) surface is unchanged: `ping` only.
 
 `reflection-method-call` could invoke any BlueprintCallable function; RQL `call` is an allowlist (as in Unity-MCP):
