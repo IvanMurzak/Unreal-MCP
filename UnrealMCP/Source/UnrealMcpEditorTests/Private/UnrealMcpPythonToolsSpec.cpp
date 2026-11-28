@@ -62,7 +62,7 @@ void FUnrealMcpPythonToolsSpec::Define()
 		const FUnrealMcpRegisteredTool* Alias = Registry.Find(TEXT("python-execute"));
 		if (!TestNotNull(TEXT("python-exec"), Current) || !TestNotNull(TEXT("python-execute"), Alias))
 			return;
-		TestTrue(TEXT("python-exec is listed"), Current->bVisible && Current->AliasOf.IsEmpty());
+		TestTrue(TEXT("python-exec is listed"), Current->bVisible && !Current->IsAlias());
 		TestFalse(TEXT("the alias is not listed"), Alias->bVisible);
 		TestEqual(TEXT("the alias names its tool"), Alias->AliasOf, FString(TEXT("python-exec")));
 		TestEqual(TEXT("the alias has the same description"), Alias->Description, Current->Description);

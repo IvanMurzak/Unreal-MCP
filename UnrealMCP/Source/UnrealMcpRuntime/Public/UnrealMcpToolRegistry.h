@@ -271,12 +271,14 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	bool bVisible = true;
 	/**
 	 * Set on a DEPRECATED ALIAS: the old id of a renamed tool, registered as a second tool with the same handler so saved
-	 * permissions, allowlists and prompts that name the old id keep working (DEV-314: `python-exec` → `python-exec`).
+	 * permissions, allowlists and prompts that name the old id keep working (DEV-314: `python-execute` → `python-exec`).
 	 * Holds the current tool's name. An alias is never listed (bVisible stays false, whatever the §7 hidden list says),
 	 * gets no SKILL.md, and is left out of `unreal-tool-list` and the MCP Tools window, so an agent never sees two copies;
 	 * it still runs when called by name. Shipped as `aliasOf` only when set. Declared via FUnrealMcpToolBuilder::AliasOf().
 	 */
 	FString AliasOf;
+	/** True for a deprecated alias (AliasOf set). */
+	bool IsAlias() const { return !AliasOf.IsEmpty(); }
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpToolHandler Handler;
@@ -355,7 +357,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 	static const TCHAR* ManifestType() { return TEXT("tool-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
 	/** A deprecated alias (FUnrealMcpRegisteredTool::AliasOf) is never listed in tools/list, whatever the hidden list says. */
-	static bool IsListable(const FUnrealMcpRegisteredTool& Entry) { return Entry.AliasOf.IsEmpty(); }
+	static bool IsListable(const FUnrealMcpRegisteredTool& Entry) { return !Entry.IsAlias(); }
 	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

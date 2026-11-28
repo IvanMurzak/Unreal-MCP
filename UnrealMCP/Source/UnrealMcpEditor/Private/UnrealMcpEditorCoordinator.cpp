@@ -575,7 +575,7 @@ void FUnrealMcpEditorCoordinator::Startup()
 				{
 					// A deprecated alias (AliasOf) is never listed, so it has no Visible toggle to show.
 					const FUnrealMcpRegisteredTool* Tool = RegistryPtr->Find(Name);
-					if (Tool && Tool->AliasOf.IsEmpty())
+					if (Tool && !Tool->IsAlias())
 						Entries.Add(FUnrealMcpToolListEntry{ Tool->Name, Tool->Title, Tool->Description, Tool->ExtensionId,
 							RegistryPtr->PassesEnabledToolsWhitelist(Name) });
 				}
