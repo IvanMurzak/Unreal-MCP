@@ -87,7 +87,7 @@ Los logs, el estado de PIE y la selección son RQL: `console | where Verbosity =
 
 Usa el PythonScriptPlugin del motor (lo activa Unreal-MCP; solo de editor, nunca en un juego empaquetado) y el runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) incluido en `UnrealMCP/Content/Python`. El cableado de grafos de Blueprint no se expone a Python: usa las herramientas de Blueprint para eso.
 
-`python-execute`, el nombre anterior de la herramienta, sigue funcionando como alias oculto de `python-exec` durante las próximas versiones (los permisos y prompts guardados siguen valiendo); no aparece en `tools/list`, no tiene archivo de skill y se eliminará. Usa `python-exec`.
+`python-execute`, el nombre anterior de la herramienta, sigue funcionando como alias oculto de `python-exec` durante las próximas versiones (las llamadas con el nombre anterior siguen funcionando, y una entrada de `enabledTools` / `hiddenTools` con él se lee como `python-exec`; una regla de permisos del agente para el nombre anterior no cubre `python-exec`); no aparece en `tools/list`, no tiene archivo de skill y se eliminará. Usa `python-exec`.
 
 </details>
 

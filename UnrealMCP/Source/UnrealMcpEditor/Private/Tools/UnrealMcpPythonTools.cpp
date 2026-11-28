@@ -412,7 +412,8 @@ namespace UnrealMcpPythonTools
 		DeclarePythonExec(Registry, PythonExecToolName, FString());
 		// DEPRECATED (DEV-314): `python-execute` is the old id of `python-exec`, kept as a hidden alias so saved permissions,
 		// allowlists and prompts that name it keep working. Not listed, no SKILL.md, same handler. Remove it two releases
-		// after the rename ships (the release after next).
+		// after the rename ships (the release after next), together with its config migration (UnrealMcpConfig.cpp
+		// MigrateRenamedToolIds) and the CLI fallback (cli/src/lib/exec.ts PYTHON_EXECUTE_DEPRECATED_TOOL).
 		DeclarePythonExec(Registry, PythonExecuteDeprecatedAlias, PythonExecToolName);
 	}
 }

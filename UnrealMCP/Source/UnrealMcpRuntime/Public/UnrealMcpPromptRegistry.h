@@ -145,6 +145,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpPromptRegistryTraits
 	static const TCHAR* ManifestArrayKey() { return TEXT("prompts"); }
 	/** Every prompt can be listed (only a tool can be a never-listed alias). */
 	static bool IsListable(const FUnrealMcpRegisteredPrompt&) { return true; }
+	static const FString& FilterKeyOf(const FUnrealMcpRegisteredPrompt&, const FString& Key) { return Key; }
 	/** True iff @p Name is a valid kebab-case prompt id (same rule as the tool registry). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a prompt descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

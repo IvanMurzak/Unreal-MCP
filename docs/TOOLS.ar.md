@@ -89,7 +89,7 @@
 
 يستخدم PythonScriptPlugin الخاص بالمحرك (يفعّله Unreal-MCP؛ للمحرر فقط، ولا يكون أبدًا في لعبة محزّمة) وبيئة تشغيل [Code-Exec](https://github.com/IvanMurzak/Code-Exec) المضمّنة في `UnrealMCP/Content/Python`. توصيل مخططات Blueprint غير متاح في Python: استخدم أدوات Blueprint لذلك.
 
-`python-execute`، الاسم القديم للأداة، يظل يعمل كاسم بديل مخفي لـ `python-exec` خلال الإصدارات القادمة (تبقى الأذونات والموجّهات المحفوظة صالحة)؛ لا يظهر في `tools/list` وليس له ملف skill وسيُزال لاحقًا. استخدم `python-exec`.
+`python-execute`، الاسم القديم للأداة، يظل يعمل كاسم بديل مخفي لـ `python-exec` خلال الإصدارات القادمة (تبقى الاستدعاءات بالاسم القديم صالحة، ويُقرأ الاسم القديم في `enabledTools` / `hiddenTools` على أنه `python-exec`؛ لكن قاعدة أذونات الوكيل للاسم القديم لا تشمل `python-exec`)؛ لا يظهر في `tools/list` وليس له ملف skill وسيُزال لاحقًا. استخدم `python-exec`.
 
 </details>
 

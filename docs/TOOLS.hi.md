@@ -87,7 +87,7 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 
 यह engine का PythonScriptPlugin (Unreal-MCP इसे enable करता है; सिर्फ़ editor में, packaged game में कभी नहीं) और `UnrealMCP/Content/Python` में vendored [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime इस्तेमाल करता है। Blueprint graph की wiring Python को उपलब्ध नहीं है: उसके लिए Blueprint tools इस्तेमाल करें।
 
-tool का पुराना नाम `python-execute` अगली कुछ releases तक `python-exec` के hidden alias के रूप में चलता रहेगा (saved permissions और prompts काम करते रहेंगे); यह `tools/list` में नहीं है, इसकी कोई skill file नहीं है, और इसे हटा दिया जाएगा। `python-exec` इस्तेमाल करें।
+tool का पुराना नाम `python-execute` अगली कुछ releases तक `python-exec` के hidden alias के रूप में चलता रहेगा (पुराने नाम से calls काम करती रहेंगी, और `enabledTools` / `hiddenTools` में पुराना नाम `python-exec` के रूप में पढ़ा जाता है; agent का पुराने नाम वाला permission rule `python-exec` पर लागू नहीं होता); यह `tools/list` में नहीं है, इसकी कोई skill file नहीं है, और इसे हटा दिया जाएगा। `python-exec` इस्तेमाल करें।
 
 </details>
 

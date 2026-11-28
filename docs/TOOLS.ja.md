@@ -87,7 +87,7 @@
 
 エンジンの PythonScriptPlugin（Unreal-MCP が有効にします。エディター専用で、パッケージ化したゲームには含まれません）と、`UnrealMCP/Content/Python` に同梱された [Code-Exec](https://github.com/IvanMurzak/Code-Exec) ランタイムを使います。Blueprint グラフの配線は Python には公開されていません。それには Blueprint ツールを使ってください。
 
-ツールの旧名 `python-execute` は、今後のいくつかのリリースの間 `python-exec` の非表示エイリアスとして動作します（保存済みの権限やプロンプトはそのまま使えます）。`tools/list` には表示されず、スキルファイルもなく、いずれ削除されます。`python-exec` を使ってください。
+ツールの旧名 `python-execute` は、今後のいくつかのリリースの間 `python-exec` の非表示エイリアスとして動作します（旧名での呼び出しはそのまま動作し、`enabledTools` / `hiddenTools` の旧名は `python-exec` として読み込まれます。ただしエージェントの旧名向けの権限ルールは `python-exec` には適用されません）。`tools/list` には表示されず、スキルファイルもなく、いずれ削除されます。`python-exec` を使ってください。
 
 </details>
 

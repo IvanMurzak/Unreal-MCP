@@ -87,7 +87,7 @@
 
 使用引擎的 PythonScriptPlugin（由 Unreal-MCP 启用；仅限编辑器，绝不会进入打包的游戏）以及内置在 `UnrealMCP/Content/Python` 中的 [Code-Exec](https://github.com/IvanMurzak/Code-Exec) 运行时。Blueprint 图表连线不向 Python 开放：请使用 Blueprint 工具。
 
-该工具的旧名称 `python-execute` 在接下来的几个版本中仍作为 `python-exec` 的隐藏别名运行（已保存的权限和提示词继续有效）；它不出现在 `tools/list` 中，没有技能文件，之后会被移除。请使用 `python-exec`。
+该工具的旧名称 `python-execute` 在接下来的几个版本中仍作为 `python-exec` 的隐藏别名运行（用旧名称的调用继续有效，`enabledTools` / `hiddenTools` 中的旧名称按 `python-exec` 读取；但智能体针对旧名称的权限规则不适用于 `python-exec`）；它不出现在 `tools/list` 中，没有技能文件，之后会被移除。请使用 `python-exec`。
 
 </details>
 

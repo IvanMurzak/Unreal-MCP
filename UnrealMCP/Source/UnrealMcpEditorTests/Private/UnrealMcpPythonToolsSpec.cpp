@@ -92,6 +92,18 @@ void FUnrealMcpPythonToolsSpec::Define()
 		TestTrue(TEXT("the alias is in the manifest"), bFound);
 	});
 
+	It("serves the python-execute alias exactly when python-exec is served", [this]()
+	{
+		FUnrealMcpToolRegistry Registry;
+		UnrealMcpPythonTools::Register(Registry);
+		Registry.SetEnabledToolsFilter({ TEXT("python-exec") });
+		TestTrue(TEXT("python-exec served"), Registry.Find(TEXT("python-exec"))->bEnabled);
+		TestTrue(TEXT("an allowlist naming python-exec serves the alias"), Registry.Find(TEXT("python-execute"))->bEnabled);
+		Registry.SetEnabledToolsFilter({ TEXT("rql-query") });
+		TestFalse(TEXT("python-exec not served"), Registry.Find(TEXT("python-exec"))->bEnabled);
+		TestFalse(TEXT("nor the alias"), Registry.Find(TEXT("python-execute"))->bEnabled);
+	});
+
 	It("runs the same code when called by the deprecated python-execute name", [this]()
 	{
 		FUnrealMcpToolRegistry Registry;

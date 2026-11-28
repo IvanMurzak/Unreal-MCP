@@ -158,6 +158,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpResourceRegistryTraits
 	static const TCHAR* ManifestArrayKey() { return TEXT("resources"); }
 	/** Every resource can be listed (only a tool can be a never-listed alias). */
 	static bool IsListable(const FUnrealMcpRegisteredResource&) { return true; }
+	static const FString& FilterKeyOf(const FUnrealMcpRegisteredResource&, const FString& Key) { return Key; }
 	/** True iff @p Uri is a valid resource URI (non-empty, no control/whitespace chars). */
 	static bool IsValidKey(const FString& Uri);
 	/** Validate a resource descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

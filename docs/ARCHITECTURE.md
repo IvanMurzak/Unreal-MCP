@@ -495,7 +495,11 @@ flag off (`FUnrealMcpToolRegistryTraits::IsListable`), whatever the §7 hidden l
 `"enabled": false` plus `"aliasOf"`, and the sidecar registers it as a hidden proxy (McpPlugin's `Visible = false`:
 left out of `tools/list`, still run by `tools/call`). It gets no SKILL.md
 (`SkillFileGenerator`), and `unreal-tool-list` and the MCP Tools window leave it out, so an agent never sees the tool
-twice. Remove the alias two releases after the rename ships.
+twice. The alias is served exactly when its tool is (`FilterKeyOf`: the §8 whitelist and the §7 lists are checked
+under the tool's id), and `FUnrealMcpConfig` reads an old id in `enabledTools` / `hiddenTools` / `UNREAL_MCP_TOOLS`
+as the current one (`MigrateRenamedToolIds`), so a saved allowlist or hidden toggle carries over. `unreal-mcp-cli exec`
+retries once under the old id when the editor has no `python-exec` (a plugin from before the rename). Remove the
+alias, its config migration entry and the CLI fallback two releases after the rename ships.
 
 ---
 

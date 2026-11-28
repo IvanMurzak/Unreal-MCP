@@ -358,6 +358,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
 	/** A deprecated alias (FUnrealMcpRegisteredTool::AliasOf) is never listed in tools/list, whatever the hidden list says. */
 	static bool IsListable(const FUnrealMcpRegisteredTool& Entry) { return !Entry.IsAlias(); }
+	/** An alias is served / hidden as the tool it names (its AliasOf), so it follows that tool's allowlist entry. */
+	static const FString& FilterKeyOf(const FUnrealMcpRegisteredTool& Entry, const FString& Key) { return Entry.IsAlias() ? Entry.AliasOf : Key; }
 	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

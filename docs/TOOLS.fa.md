@@ -89,7 +89,7 @@
 
 از PythonScriptPlugin موتور (که Unreal-MCP فعالش می‌کند؛ فقط در ویرایشگر، هرگز در بازی بسته‌بندی‌شده) و runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) که در `UnrealMCP/Content/Python` گنجانده شده استفاده می‌کند. سیم‌کشی گراف Blueprint در Python در دسترس نیست: برای آن از ابزارهای Blueprint استفاده کنید.
 
-`python-execute`، نام قبلی این ابزار، در چند نسخهٔ بعدی همچنان به‌عنوان نام مستعار پنهانِ `python-exec` اجرا می‌شود (مجوزها و پرامپت‌های ذخیره‌شده کار می‌کنند)؛ در `tools/list` نیست، فایل skill ندارد و حذف خواهد شد. از `python-exec` استفاده کنید.
+`python-execute`، نام قبلی این ابزار، در چند نسخهٔ بعدی همچنان به‌عنوان نام مستعار پنهانِ `python-exec` اجرا می‌شود (فراخوانی با نام قبلی کار می‌کند و مدخل `enabledTools` / `hiddenTools` با آن نام به‌صورت `python-exec` خوانده می‌شود؛ قاعدهٔ مجوز عامل برای نام قبلی شامل `python-exec` نمی‌شود)؛ در `tools/list` نیست، فایل skill ندارد و حذف خواهد شد. از `python-exec` استفاده کنید.
 
 </details>
 

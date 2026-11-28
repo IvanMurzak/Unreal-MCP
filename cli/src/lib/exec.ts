@@ -18,6 +18,11 @@ import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
 export const PYTHON_EXEC_TOOL = 'python-exec';
+/**
+ * DEPRECATED (DEV-314): the tool's old id, which plugins from before the rename serve instead of `python-exec`. Newer
+ * plugins keep it as a hidden alias. Tried once when `python-exec` is unknown; remove together with that alias.
+ */
+const PYTHON_EXECUTE_DEPRECATED_TOOL = 'python-execute';
 /** The plugin's answer while PythonScriptPlugin is not initialized (UnrealMcpPythonTools.cpp). */
 const PYTHON_NOT_AVAILABLE_PREFIX = 'NotAvailable: Python is not available';
 /** How long a fresh editor (started or joined by this call) gets for Python to come up after MCP answers. */
@@ -96,7 +101,7 @@ export type ExecPythonResult = ExecPythonSuccess | ExecPythonFailure;
  */
 export async function execPython(options: ExecPythonOptions): Promise<ExecPythonResult> {
   const input = { code: options.code, ...(options.include && options.include.length > 0 ? { include: options.include } : {}) };
-  const invoke = options.invoke ?? runTool;
+  const invoke = withDeprecatedToolFallback(options.invoke ?? runTool);
 
   // A Cloud-mode project on a machine with an ai-game.dev sign-in stays in Cloud mode: run in the editor connected to
   // the cloud, never in a local editor started here (only a machine that never signed in falls back to local).
@@ -168,6 +173,24 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
     return { kind: 'failure', success: false, reason: 'tool-failed', toolFailure: result, message: toolErrorText(result), error: result.error };
   }
   return { kind: 'success', success: true, baseUrl: ready.ready, source: ready.source, data: result.data };
+}
+
+/**
+ * Whether the call failed because the editor has no `python-exec` (a plugin from before the rename): HTTP 404 or the
+ * plugin's own "Unknown tool 'python-exec'." Never a failure of the snippet itself, which must not run twice.
+ */
+function isUnknownPythonExec(result: RunToolResult): boolean {
+  return result.kind === 'failure' && (result.httpStatus === 404 || toolErrorText(result).includes(`Unknown tool '${PYTHON_EXEC_TOOL}'`));
+}
+
+/** Calls `python-exec`, and `python-execute` once when the editor's plugin predates the rename (DEV-314). */
+function withDeprecatedToolFallback(invoke: (options: RunToolOptions) => Promise<RunToolResult>): (options: RunToolOptions) => Promise<RunToolResult> {
+  return async (options) => {
+    const result = await invoke(options);
+    if (options.toolName !== PYTHON_EXEC_TOOL || !isUnknownPythonExec(result)) return result;
+    const legacy = await invoke({ ...options, toolName: PYTHON_EXECUTE_DEPRECATED_TOOL });
+    return legacy.kind === 'failure' && legacy.httpStatus === 404 ? result : legacy;
+  };
 }
 
 /** Whether `python-exec` answered that the editor's Python interpreter is not (yet) initialized. */

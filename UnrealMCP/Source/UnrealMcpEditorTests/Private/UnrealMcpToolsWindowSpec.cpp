@@ -164,6 +164,20 @@ void FUnrealMcpToolsWindowSpec::Define()
 			TestTrue("gamma from the new key", Loaded.HiddenTools.Contains(TEXT("gamma")));
 		});
 
+		It("reads a renamed tool's old id in enabledTools and hiddenTools as its current id (DEV-314)", [this]()
+		{
+			const TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetArrayField(TEXT("enabledTools"), ToolsWindowJsonNames({ TEXT("rql-query"), TEXT("python-execute") }));
+			Json->SetArrayField(TEXT("hiddenTools"), ToolsWindowJsonNames({ TEXT("python-execute"), TEXT("python-exec") }));
+
+			FUnrealMcpConfig Loaded;
+			Loaded.LoadFromJson(Json);
+			TestTrue("the allowlist names python-exec", Loaded.EnabledTools.Contains(TEXT("python-exec")));
+			TestFalse("the allowlist drops the old id", Loaded.EnabledTools.Contains(TEXT("python-execute")));
+			TestEqual("the hidden list holds python-exec once", Loaded.HiddenTools.Num(), 1);
+			TestTrue("python-exec stays hidden", Loaded.HiddenTools.Contains(TEXT("python-exec")));
+		});
+
 		It("survives a real Save() / LoadFromFile() reload and migrates an old file to hiddenTools", [this]()
 		{
 			const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("UnrealMcpTests"),

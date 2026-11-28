@@ -87,7 +87,7 @@ Logs, PIE state and the selection are RQL: `console | where Verbosity == "Error"
 
 Uses the engine's PythonScriptPlugin (enabled by Unreal-MCP; editor-only, never in a packaged game) and the [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime vendored in `UnrealMCP/Content/Python`. Blueprint graph wiring is not exposed to Python: use the Blueprint tools for that.
 
-`python-execute`, the tool's old name, still runs as a hidden alias of `python-exec` for the next releases (saved permissions and prompts keep working); it is not in `tools/list`, has no skill file, and will be removed. Use `python-exec`.
+`python-execute`, the tool's old name, still runs as a hidden alias of `python-exec` for the next releases (calls by the old name keep working, and an `enabledTools` / `hiddenTools` entry with it is read as `python-exec`; an agent's permission rule for the old name does not cover `python-exec`); it is not in `tools/list`, has no skill file, and will be removed. Use `python-exec`.
 
 </details>
 
