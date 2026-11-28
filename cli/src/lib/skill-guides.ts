@@ -13,9 +13,13 @@ const APP_SKILL_NAME = 'ai-game-dev-app';
 export const RETIRED_SKILL_NAMES: readonly string[] = ['unreal-mcp'];
 const APP_SKILL_DESCRIPTION = "AI Game Dev App: image, texture, 3D model, audio and video generation; animation, rigging, Blender, music and sound effects. Consult when a game-development task needs creative tools unavailable in the current environment, or an integrated workflow for Unity, Unreal Engine or Godot.";
 const CLI_SKILL_DESCRIPTION = `Unreal editor work with ${CLI_NAME} (levels, actors, components, assets): read before the first editor command. Not needed to edit C++: \`${CLI_NAME} compile\` lists file:line errors.`;
+/**
+ * Both skills are knowledge, not a copy of an MCP tool, so the AI Game Dev App shows them to its agent
+ * (`ai-game-dev: include`; the editor marks its per-tool pages `exclude`, DEV-313).
+ */
 export const SKILL_METADATA = {
   'generated-by': 'unreal-mcp',
-  'ai-game-dev': 'exclude',
+  'ai-game-dev': 'include',
 } as const;
 
 function skillMetadataLines(): string[] {

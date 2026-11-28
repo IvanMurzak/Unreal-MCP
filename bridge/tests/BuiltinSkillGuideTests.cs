@@ -16,6 +16,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
+using com.IvanMurzak.Unreal.MCP.Bridge.Host;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
 using Xunit;
 
@@ -98,17 +99,31 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
-        public void GeneratesStandaloneGuidesWithoutRql_AndAppliesTheSameGlobalMetadata()
+        public void GeneratesStandaloneGuidesWithoutRql_AndMarksEachKindForTheApp()
         {
-            var generator = new SkillFileGenerator(metadata: new Dictionary<string, string>
+            // The sidecar's own metadata (DEV-313): the App hides a tool page and shows a standalone skill.
+            using var host = new SidecarHost(new IpcClient("127.0.0.1", 39997, token: "test-token", sidecarVersion: "0.1.0"), "0.1.0");
+            var generator = new SkillFileGenerator(toolMetadata: host.ToolSkillMetadata, standaloneMetadata: host.StandaloneSkillMetadata);
+            var tools = new List<ToolDescriptor>(_tools)
             {
-                ["generated-by"] = "unreal-mcp", ["ai-game-dev"] = "exclude",
-            });
-            var result = generator.Generate(_tools, _root);
+                new() { Name = "rql-query", Description = "Run a query.",
+                    Skills = new List<ToolSkillDescriptor> { new() { Name = "unreal-rql", Description = "RQL.", Markdown = "# RQL\n" } } },
+                new() { Name = "python-exec", Description = "Run Python." },
+                // The renamed tool's hidden old id (DEV-314) still gets no page.
+                new() { Name = "python-execute", Description = "Run Python.", AliasOf = "python-exec" },
+            };
+            var result = generator.Generate(tools, _root);
             Assert.True(result.Success, result.Error);
-            Assert.Equal(3, result.FilesWritten);
-            foreach (var file in Directory.GetFiles(_root, "SKILL.md", SearchOption.AllDirectories))
-                Assert.Contains("metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: exclude\n", File.ReadAllText(file));
+            Assert.Equal(6, result.FilesWritten);
+            Assert.False(Directory.Exists(Path.Combine(_root, "python-execute")));
+            Assert.Equal(6, Directory.GetFiles(_root, "SKILL.md", SearchOption.AllDirectories).Length);
+
+            const string toolMarker = "metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: exclude\n---\n";
+            const string standaloneMarker = "metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: include\n---\n";
+            foreach (var name in new[] { "actor-create", "rql-query", "python-exec" })
+                Assert.Contains(toolMarker, File.ReadAllText(Path.Combine(_root, name, "SKILL.md")));
+            foreach (var name in new[] { "unreal-rql", BuiltinSkillGuides.CliSkillName, BuiltinSkillGuides.AppSkillName })
+                Assert.Contains(standaloneMarker, File.ReadAllText(Path.Combine(_root, name, "SKILL.md")));
 
             var tool = File.ReadAllText(Path.Combine(_root, "actor-create", "SKILL.md"));
             Assert.Contains("the `unreal-mcp-cli` skill", tool);
@@ -119,7 +134,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.Contains("Blender", File.ReadAllText(Path.Combine(_root, "ai-game-dev-app", "SKILL.md")));
 
             var snapshot = Directory.GetFiles(_root, "SKILL.md", SearchOption.AllDirectories).ToDictionary(p => p, File.ReadAllText);
-            Assert.True(generator.Generate(_tools, _root).Success);
+            Assert.True(generator.Generate(tools, _root).Success);
             foreach (var entry in snapshot) Assert.Equal(entry.Value, File.ReadAllText(entry.Key));
         }
 
@@ -136,7 +151,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Skill("removed-tool", ours);                                   // a tool the catalog no longer has
             Skill(BuiltinSkillGuides.CliUsageSkillName, ours);             // written by unreal-mcp-cli setup-skills
             Skill("my-notes", "---\nname: my-notes\n---\nmine\n");       // a user's own skill
-            var generator = new SkillFileGenerator(metadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" });
+            var generator = new SkillFileGenerator(toolMetadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" });
 
             var result = generator.Generate(_tools, _root);
 

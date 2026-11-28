@@ -34,7 +34,7 @@ const read = (file: string) => fs.readFileSync(file, 'utf-8');
 const skillMd = () => buildGuideFiles().find((f) => f.relativePath === 'unreal-mcp-cli/SKILL.md')!.content;
 
 describe('setupSkills', () => {
-  it('writes the CLI skill, its references and the App skill offline, with the exclusion metadata', async () => {
+  it('writes the CLI skill, its references and the App skill offline, marked for the App to show', async () => {
     const dir = tmp();
     writeUProject(dir, 'MyGame', '5.7');
     const r = await setupSkills({ projectDir: dir });
@@ -45,7 +45,7 @@ describe('setupSkills', () => {
     for (const name of ['unreal-mcp-cli', 'ai-game-dev-app']) {
       const doc = read(skillsOf(dir, name, 'SKILL.md'));
       expect(doc.startsWith(`---\nname: ${name}\ndescription: "`)).toBe(true);
-      expect(doc.slice(0, doc.indexOf('\n---', 4))).toContain('metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: exclude');
+      expect(doc.slice(0, doc.indexOf('\n---', 4))).toContain('metadata:\n  generated-by: unreal-mcp\n  ai-game-dev: include');
     }
     expect(fs.existsSync(skillsOf(dir, 'unreal-mcp-cli', 'references', 'rql.md'))).toBe(true);
     expect(read(skillsOf(dir, 'unreal-mcp-cli', 'references', 'install.md'))).toContain('install-plugin');

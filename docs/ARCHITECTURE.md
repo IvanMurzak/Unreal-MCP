@@ -470,6 +470,12 @@ matter's `name:`); such a consumer is expected to be **fail-open** — an unmark
 such consumer in this repo yet, and `PruneStaleSkillFolders` is **not** one: it prunes on the presence of a
 `SKILL.md`, not on the marker.
 
+**The `ai-game-dev` entry is per kind** (DEV-313). The sidecar (`SidecarHost`) sets `generated-by: unreal-mcp` on
+every file, `ai-game-dev: exclude` on a tool page (the AI Game Dev App already has the tool, so it hides the page),
+and `ai-game-dev: include` on a standalone skill (a tool's shipped skill such as `unreal-rql`, the built-in
+`unreal-cli` / `ai-game-dev-app` guides, and the CLI's offline `unreal-mcp-cli` / `ai-game-dev-app`), which the App
+shows. A deprecated alias (`aliasOf`) gets no file at all.
+
 The same two lines the shared `com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator` emits, but this class is
 independent of it rather than a subclass, so it stamps its own copy (unifying the two is a known deferred
 follow-up). Same line *content*, not the same bytes: the shared generator terminates with

@@ -52,7 +52,7 @@
   <!--
     Reused NuGet pins — normally owned by the upstream release pipelines and kept in lockstep
     with Godot-MCP (Godot-MCP.csproj), except where a ⚠ DEVIATION entry below records an owner-approved
-    early adoption. Current: McpPlugin 8.25.5 + ReflectorNet 5.6.1 + Rql 0.5.0.
+    early adoption. Current: McpPlugin 8.26.0 + ReflectorNet 5.6.1 + Rql 0.5.0.
     The MCP/reflection stack is NOT forked. Historical context: the 6.8.0 bump consumed the new
     shared engine-agnostic com.IvanMurzak.McpPlugin.AgentConfig module (the AI-agent configurators
     + the AgentConfiguratorDescription UI-DTO) so the sidecar hosts the AI-agent configuration
@@ -158,6 +158,10 @@
     McpPlugin 8.17.0 -> 8.18.0 (MCP-Plugin-dotnet #289, same fix): AgentSetupKind (ConfigFile / Manual / Unsupported)
     via AiAgentConfigurator.GetSetupKind; Claude Desktop in Cloud mode is Manual, its description is the steps to add
     the project's Cloud URL as a Claude custom connector. TransportSupported is now SetupKind == ConfigFile.
+    ⚠ DEVIATION (owner-approved DEV-313, outside the train; Godot-MCP / Unity-MCP adopt it in their own tasks):
+    McpPlugin 8.25.5 -> 8.26.0 (MCP-Plugin-dotnet #337): per-kind SKILL.md metadata (ConnectionConfig.ToolSkillMetadata /
+    StandaloneSkillMetadata, SkillFileGenerator.MergeMetadata). SidecarHost marks tool pages `ai-game-dev: exclude` and
+    standalone skills `ai-game-dev: include`. ReflectorNet stays 5.6.1.
   -->
   <!--
     Local-LIB dev toggle (auth-fixes f1b — parity with the GameDev-MCP-Server + Unity/Godot
@@ -192,7 +196,7 @@
 
   <ItemGroup Condition="'$(UseLocalMcpPlugin)' != 'true'">
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.6.1" />
-    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.25.5" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="8.26.0" />
   </ItemGroup>
 
   <!--

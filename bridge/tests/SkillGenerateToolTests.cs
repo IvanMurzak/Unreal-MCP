@@ -55,7 +55,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
 
         private ResponseCallTool Run(IReadOnlyDictionary<string, JsonElement>? args, params ToolDescriptor[] tools) =>
             SkillGenerateTool.Run(() => tools, () => _projectRoot,
-                new SkillFileGenerator(metadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" }), args);
+                new SkillFileGenerator(toolMetadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" }), args);
 
         [Fact]
         public void Create_DeclaresTheToolOnTheSystemSurface()
