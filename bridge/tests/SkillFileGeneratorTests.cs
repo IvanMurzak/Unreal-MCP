@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig;
 using com.IvanMurzak.Unreal.MCP.Bridge.Ipc;
@@ -201,6 +202,24 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             Assert.True(Directory.Exists(Path.Combine(_root, "demo-tool")));
             // A system tool is never documented — writing it would re-expose it through the skills channel.
             Assert.False(Directory.Exists(Path.Combine(_root, "ping")));
+        }
+
+        [Fact]
+        public void Generate_SkipsDeprecatedAliases()
+        {
+            var gen = new SkillFileGenerator();
+            // The plugin's manifest shape for a renamed tool (DEV-314): the current id plus its old id, hidden, with aliasOf.
+            var manifest = JsonSerializer.Deserialize<ToolManifestMessage>(
+                """{"type":"tool-manifest","revision":1,"tools":[{"name":"python-exec","description":"Run Python"},{"name":"python-execute","description":"Run Python","enabled":false,"aliasOf":"python-exec"}]}""",
+                IpcProtocol.JsonOptions)!;
+            Assert.Equal("python-exec", manifest.Tools.Single(t => t.Name == "python-execute").AliasOf);
+
+            var result = gen.Generate(manifest.Tools, _root);
+
+            Assert.True(result.Success);
+            Assert.True(Directory.Exists(Path.Combine(_root, "python-exec")));
+            // The alias runs the same code: a SKILL.md for it would show agents the tool twice.
+            Assert.False(Directory.Exists(Path.Combine(_root, "python-execute")));
         }
 
         [Fact]

@@ -146,6 +146,8 @@ TSharedPtr<FJsonObject> FUnrealMcpRegisteredTool::ToDescriptorJson() const
 	}
 	if (!Rql.IsEmpty())
 		Desc->SetStringField(TEXT("rql"), Rql);
+	if (!AliasOf.IsEmpty())
+		Desc->SetStringField(TEXT("aliasOf"), AliasOf);
 	Desc->SetObjectField(TEXT("inputSchema"), BuildInputSchema());
 	if (OutputSchema.IsValid())
 		Desc->SetObjectField(TEXT("outputSchema"), OutputSchema);
@@ -230,6 +232,7 @@ FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::Param(const FString& Name, const F
 	return *this;
 }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ToolType(EUnrealMcpToolType InToolType) { Tool.ToolType = InToolType; return *this; }
+FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::AliasOf(const FString& CurrentName) { Tool.AliasOf = CurrentName; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::ReadOnlyHint(bool bValue) { Tool.bReadOnlyHint = bValue; Tool.bReadOnlyHintDeclared = true; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::DestructiveHint(bool bValue) { Tool.bDestructiveHint = bValue; Tool.bDestructiveHintDeclared = true; return *this; }
 FUnrealMcpToolBuilder& FUnrealMcpToolBuilder::IdempotentHint(bool bValue) { Tool.bIdempotentHint = bValue; return *this; }

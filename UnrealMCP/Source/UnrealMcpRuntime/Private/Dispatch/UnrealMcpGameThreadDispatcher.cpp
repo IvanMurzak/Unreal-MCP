@@ -246,7 +246,7 @@ namespace
 	/**
 	 * Where off-thread calls run: the game thread at the end of a frame (FCoreDelegates::OnEndFrame, right after the
 	 * core ticker), outside both the task graph's game-thread processing and the ticker. A body run from a game-thread
-	 * AsyncTask that waits on game-thread tasks itself (an Interchange import from python-execute) tripped the task graph's
+	 * AsyncTask that waits on game-thread tasks itself (an Interchange import from python-exec) tripped the task graph's
 	 * recursion guard; one run from the core ticker that ticks the ticker itself (HLOD builds, material baking) breaks
 	 * the ticker's non-reentrant Tick. Both crashed the editor. Process-lifetime, like the watchdog; the delegate is
 	 * removed on engine pre-exit (queued calls then end by their timeouts).

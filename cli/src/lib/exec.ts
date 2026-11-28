@@ -1,4 +1,4 @@
-// `exec` — run Python in the project's Unreal Editor through `python-execute`, starting a warm headless editor
+// `exec` — run Python in the project's Unreal Editor through `python-exec`, starting a warm headless editor
 // (`-RenderOffscreen`) when none is running. Library-safe: never prints, never exits.
 
 import {
@@ -17,7 +17,7 @@ import { isToolSuccess, openProjectSession, sessionFailureMessage, type UnrealSe
 import { asError } from '../utils/error.js';
 import type { RunToolFailure, RunToolOptions, RunToolResult } from './types.js';
 
-export const PYTHON_EXECUTE_TOOL = 'python-execute';
+export const PYTHON_EXEC_TOOL = 'python-exec';
 /** The plugin's answer while PythonScriptPlugin is not initialized (UnrealMcpPythonTools.cpp). */
 const PYTHON_NOT_AVAILABLE_PREFIX = 'NotAvailable: Python is not available';
 /** How long a fresh editor (started or joined by this call) gets for Python to come up after MCP answers. */
@@ -66,7 +66,7 @@ export interface ExecPythonSuccess {
   baseUrl: string;
   /** How the editor was obtained (`started` = this call launched it). */
   source: EnsureSource;
-  /** The raw `python-execute` response. */
+  /** The raw `python-exec` response. */
   data: unknown;
 }
 
@@ -103,7 +103,7 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
   const projectRoot = readUProject(path.resolve(options.projectDir ?? process.cwd()))?.projectDir;
   if (projectRoot && mustStayInCloud({ projectDir: projectRoot, url: options.url, token: options.token }, options.credentialState)) {
     options.onStatus?.('Cloud mode: running in the editor connected to ai-game.dev...');
-    const result = await invoke({ toolName: PYTHON_EXECUTE_TOOL, projectDir: projectRoot, input, timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS });
+    const result = await invoke({ toolName: PYTHON_EXEC_TOOL, projectDir: projectRoot, input, timeoutMs: options.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS });
     if (result.kind === 'success') return { kind: 'success', success: true, baseUrl: new URL(result.endpoint).origin, source: 'running', data: result.data };
     if (isAuthFailure(result)) return { kind: 'failure', success: false, reason: 'not-authenticated', message: SIGNED_IN_BUT_UNUSABLE_MESSAGE };
     return { kind: 'failure', success: false, reason: 'tool-failed', toolFailure: result, message: toolErrorText(result), error: result.error };
@@ -147,7 +147,7 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
 
   options.onStatus?.('Running...');
   const call = (): Promise<RunToolResult> => invoke({
-    toolName: PYTHON_EXECUTE_TOOL,
+    toolName: PYTHON_EXEC_TOOL,
     url: ready.ready,
     ...(connection.token ? { token: connection.token } : {}),
     input,
@@ -170,7 +170,7 @@ export async function execPython(options: ExecPythonOptions): Promise<ExecPython
   return { kind: 'success', success: true, baseUrl: ready.ready, source: ready.source, data: result.data };
 }
 
-/** Whether `python-execute` answered that the editor's Python interpreter is not (yet) initialized. */
+/** Whether `python-exec` answered that the editor's Python interpreter is not (yet) initialized. */
 export function pythonNotYetAvailable(result: RunToolResult): boolean {
   const text = result.kind === 'failure' ? toolErrorText(result) : readPythonResponse(result.data).value;
   return text.startsWith(PYTHON_NOT_AVAILABLE_PREFIX);
@@ -184,7 +184,7 @@ export interface PythonLogLine {
 }
 
 /**
- * The parts of a `python-execute` answer a terminal shows. Success is answered as `{ status, structured }` where
+ * The parts of a `python-exec` answer a terminal shows. Success is answered as `{ status, structured }` where
  * `structured` is the Code-Exec response (`value`, `logs`, ...); an error as `{ status: "error", content: [text] }`.
  */
 export function readPythonResponse(data: unknown): { ok: boolean; value: string; logs: PythonLogLine[] } {

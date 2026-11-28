@@ -42,7 +42,7 @@ delivered it. Identifiers below (tool ids, command names, env vars, paths) were 
 | §10 editor/reflection family (9) | superseded by RQL except `console-run-command` (the console family, 1) | #22 |
 | §10 level family (7) | superseded by RQL | #25 |
 | Tool list family (1) | implemented: `unreal-tool-list` (every callable tool, hidden ones marked; Unity's `unity-tool-list`) | — |
-| Python family (1) | implemented: `python-execute` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
+| Python family (1) | implemented: `python-exec` (PythonScriptPlugin + vendored Code-Exec `code_exec`) | — |
 | Fab family (4) | implemented: `fab-search` / `fab-library` / `fab-add` / `fab-sign-in` (the engine Fab plugin by reflection, `UnrealMcpFabTools.cpp`; only `fab-sign-in` opens Epic's sign-in page, DEV-273; the optional `UnrealMcpFab` module, loaded only with the Fab plugin, restores the remembered sign-in on editor start, DEV-281) | — |
 
 **Total shipped: 31 STANDARD core tools across 8 families (rql 3, blueprint 11, console 1, tool list 1, python 1, source 6,
@@ -485,6 +485,18 @@ note the `### Input JSON Schema` fences further down are serialized by `System.T
 exercises it over the REST system route instead. SKILL.md files are generated for standard tools only —
 documenting a system tool would re-expose it through the skills channel.
 
+### 2.5 Deprecated aliases (renamed tools)
+
+A renamed tool keeps its old id for a release or two as a **deprecated alias**: a second Standard tool with the
+same declaration and handler, declared with `FUnrealMcpToolBuilder::AliasOf("<current id>")`
+(`FUnrealMcpRegisteredTool::AliasOf`), so saved permissions, allowlists and prompts that name the old id keep
+working. Today: `python-execute` → `python-exec` (DEV-314). An alias is never listed: the registry forces its Visible
+flag off (`FUnrealMcpToolRegistryTraits::IsListable`), whatever the §7 hidden list says, so its descriptor ships with
+`"enabled": false` plus `"aliasOf"`, and the sidecar registers it as a hidden proxy (McpPlugin's `Visible = false`:
+left out of `tools/list`, still run by `tools/call`). It gets no SKILL.md
+(`SkillFileGenerator`), and `unreal-tool-list` and the MCP Tools window leave it out, so an agent never sees the tool
+twice. Remove the alias two releases after the rename ships.
+
 ---
 
 ## 3. Tool schema generation from UE reflection
@@ -606,7 +618,7 @@ Godot's `GodotMainThread`:
   run's result. A parallel timer fires the promise with a structured timeout error;
   the flag set on `FUnrealMcpToolCall::CancelRequested` (a `FThreadSafeBool`) lets long tool bodies
   exit early at their own checkpoints, and `FUnrealMcpToolCall::TimeoutMs` (the call's timeout) lets them bound their
-  own work: `python-execute` gives Code-Exec the call's `timeout` argument (seconds, default 30) as its time budget, capped (`set_max_timeout_ms`) at what is left of the call's timeout (`FUnrealMcpToolCall::ReceivedSeconds`) less a margin (10 %, 2–15 s; at least half the time left), whose watchdog
+  own work: `python-exec` gives Code-Exec the call's `timeout` argument (seconds, default 30) as its time budget, capped (`set_max_timeout_ms`) at what is left of the call's timeout (`FUnrealMcpToolCall::ReceivedSeconds`) less a margin (10 %, 2–15 s; at least half the time left), whose watchdog
   stops a runaway snippet (`while True: pass`) with a `Timeout` error and frees the game thread before the deadline. A game-thread task cannot be force-killed — an abandoned
   body finishes silently, logs at `Verbose`, and its late result is dropped (requestId already
   completed; double-set of the promise is guarded).
@@ -636,7 +648,7 @@ Godot's `GodotMainThread`:
   finished a frame for 5 s or more.
 - **Not ready yet:** a handler may return `FUnrealMcpToolResult::RetryLater(reason)`; the dispatcher runs it
   again on a later tick (core ticker, ~100 ms) until it returns a result or the call times out, never
-  blocking the game thread. `python-execute` uses it while Python finishes starting on a fresh editor
+  blocking the game thread. `python-exec` uses it while Python finishes starting on a fresh editor
   (UE 5.6+); it answers `NotAvailable` only when Python is disabled or failed to start.
 - **Async tools** (e.g. `source-compile` waiting on UBT, `blueprint-compile` follow-ups) return a
   `TFuture` from the handler itself; the dispatcher chains rather than blocks, so the game thread
@@ -1432,8 +1444,8 @@ no such field. Python's cyclic collector therefore treats the bytes after such a
 object is in a reference cycle, and writes through them. A snippet that keeps one (`c = mel.connect_material_expressions`) and
 defines a function makes that cycle. Level saves run an Unreal GC, which from UE 5.6 runs a Python GC, so the editor crashes in
 `python311` under `SaveLevel` / `SaveAll`, long after the snippet ended (on 5.5 at Python's own next collection). On import
-`unreal_mcp/python_execute.py` sets the type's offset to 0, after checking the type layout, unless the engine already has the
-type right; if it cannot, every `python-execute` result carries a warning saying so. Spec: `UnrealMcp.Tools.Python`.
+`unreal_mcp/python_exec.py` sets the type's offset to 0, after checking the type layout, unless the engine already has the
+type right; if it cannot, every `python-exec` result carries a warning saying so. Spec: `UnrealMcp.Tools.Python`.
 
 ---
 

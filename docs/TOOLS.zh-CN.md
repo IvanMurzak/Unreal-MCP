@@ -12,7 +12,7 @@
 | 截图 | `screenshot-*`：viewport、game-view、camera、isolated |
 | Fab | `fab-search`、`fab-library`、`fab-add`、`fab-sign-in` |
 | 控制台 | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | 工具列表 | `unreal-tool-list` |
 | **系统**（不向 AI 展示） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` |
 
@@ -33,7 +33,7 @@
 | `rql-mutate` | 以 `set` / `call` 结尾的 RQL 查询（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）：全部成功或全部不执行，一个撤销步骤，`dry_run` 可预览；以 `;` 分隔的多条查询各自是一次更改 |
 | `rql-schema` | 数据源、函数、已安装的扩展以及编辑器世界中的类；`type` 列出某个类型的成员和方法；`guide` 返回已安装扩展的指南（`{"guide": "landscape"}`） |
 
-除了反射属性，RQL 还能访问 DataTable 行（`dataTables`、`Rows["Sword"].Damage`）、文本形式的 gameplay tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、保存到 ini 的 Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint 图表（`EventGraph | call AddCallFunction("PrintString")`、引脚连接、`call Compile()`）、Widget Blueprint 树（`call AddWidget("Button", "Ok", parent)`）以及 Level Sequence（绑定、轨道、`call AddKey("Location.X", 30, 100)`）。 材质会按功能级别和着色器平台报告编译错误，以及使用它的网格所需的使用标志（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`），而 `python-execute` 的 `recompile_material` 不会返回这些；编译失败的材质也会出现在编辑器诊断说明中。
+除了反射属性，RQL 还能访问 DataTable 行（`dataTables`、`Rows["Sword"].Damage`）、文本形式的 gameplay tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、保存到 ini 的 Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint 图表（`EventGraph | call AddCallFunction("PrintString")`、引脚连接、`call Compile()`）、Widget Blueprint 树（`call AddWidget("Button", "Ok", parent)`）以及 Level Sequence（绑定、轨道、`call AddKey("Location.X", 30, 100)`）。 材质会按功能级别和着色器平台报告编译错误，以及使用它的网格所需的使用标志（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`），而 `python-exec` 的 `recompile_material` 不会返回这些；编译失败的材质也会出现在编辑器诊断说明中。
 
 `unreal-rql` skill（由 `unreal-skill-generate` 写出）讲解这门语言，并列出已安装的扩展添加了什么。
 
@@ -83,9 +83,11 @@
 
 | 工具 id | 作用 |
 | --- | --- |
-| `python-execute` | 在编辑器中运行 Python（完整的 `unreal` API，已预先导入）：普通语句，最后一个表达式即为结果，`print` 作为日志返回，错误指向 `snippet.py` 的行号；`include` 从 `<Project>/.ai-game-dev/snippets` 添加辅助内容：`.py` 文件在代码之前运行于代码片段自身的命名空间（不可导入），文件夹加入 `sys.path`（其中的模块可导入）；`timeout`（秒，默认 30）会停止失控的代码片段 |
+| `python-exec` | 在编辑器中运行 Python（完整的 `unreal` API，已预先导入）：普通语句，最后一个表达式即为结果，`print` 作为日志返回，错误指向 `snippet.py` 的行号；`include` 从 `<Project>/.ai-game-dev/snippets` 添加辅助内容：`.py` 文件在代码之前运行于代码片段自身的命名空间（不可导入），文件夹加入 `sys.path`（其中的模块可导入）；`timeout`（秒，默认 30）会停止失控的代码片段 |
 
 使用引擎的 PythonScriptPlugin（由 Unreal-MCP 启用；仅限编辑器，绝不会进入打包的游戏）以及内置在 `UnrealMCP/Content/Python` 中的 [Code-Exec](https://github.com/IvanMurzak/Code-Exec) 运行时。Blueprint 图表连线不向 Python 开放：请使用 Blueprint 工具。
+
+该工具的旧名称 `python-execute` 在接下来的几个版本中仍作为 `python-exec` 的隐藏别名运行（已保存的权限和提示词继续有效）；它不出现在 `tools/list` 中，没有技能文件，之后会被移除。请使用 `python-exec`。
 
 </details>
 

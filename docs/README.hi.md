@@ -61,7 +61,7 @@ Unreal का editor C++ में है, इसलिए .NET MCP host उस�
 | "इस level में पेड़ गिनो और हर point light को 1 m ऊपर करो" | `rql-query`, `rql-mutate` |
 | "Player camera से screenshot लो और lighting जाँचो" | `screenshot-*` |
 | "Fab पर एक free rock pack ढूँढो और project में जोड़ो" | `fab-search`, `fab-add` |
-| "चुने हुए assets को Python script से एक साथ rename करो" | `python-execute` |
+| "चुने हुए assets को Python script से एक साथ rename करो" | `python-exec` |
 
 **C++ एक first-class loop है।** `source-compile` Live Coding चालू होने पर उससे, वरना UnrealBuildTool से build करता है, और हर diagnostic उसकी file, line और severity के साथ लौटाता है, इसलिए agent build log पढ़े बिना errors ठीक कर लेता है। जब किसी बदलाव के लिए full build और editor restart चाहिए (नई classes, बदली हुई `UCLASS` / `UPROPERTY` / `UFUNCTION` declarations), तो वह यह बताता है। File operations `<Project>/Source/` के अंदर ही रहते हैं। Terminal से `unreal-mcp-cli compile` बिना editor के `file:line:col` diagnostics print करता है।
 
@@ -244,7 +244,7 @@ unreal-mcp-cli test ./MyGame
 - **उन पर नियंत्रण:**
   - **Whitelist** (hard limit): `UNREAL_MCP_TOOLS` सिर्फ़ सूची वाले tools देता है; कोई और tool न list होता है, न call हो सकता है।
   - **Hide** (soft): **MCP Tools** window का **Visible** checkbox tool को `tools/list` से हटाता है, लेकिन नाम से call करने वाला client उसे फिर भी चला सकता है।
-  - **सीमित बदलाव:** C++ file tools `<Project>/Source/` के अंदर रहते हैं; एक `rql-mutate` call all-or-nothing है, एक undo step, `dry_run` से preview हो सकता है, और 200 से ज़्यादा targets पर मना कर दिया जाता है जब तक call `max_targets` न बढ़ाए (1000 तक); `python-execute` `timeout` के बाद रुक जाता है (default 30 s); हर tool call की time limit है (`UNREAL_MCP_TOOL_TIMEOUT`, default 5 min)।
+  - **सीमित बदलाव:** C++ file tools `<Project>/Source/` के अंदर रहते हैं; एक `rql-mutate` call all-or-nothing है, एक undo step, `dry_run` से preview हो सकता है, और 200 से ज़्यादा targets पर मना कर दिया जाता है जब तक call `max_targets` न बढ़ाए (1000 तक); `python-exec` `timeout` के बाद रुक जाता है (default 30 s); हर tool call की time limit है (`UNREAL_MCP_TOOL_TIMEOUT`, default 5 min)।
   - **AI के लिए नहीं:** system tools (`ping`, skill generation, `editor-quit`) `tools/list` में नहीं होते, और `editor-quit` तब तक मना करता है जब तक CLI session का nonce match न करे।
   - Details: [docs/TOOLS.md](TOOLS.hi.md)।
 - **Runtime mode default रूप से बंद है:** game कभी अपने-आप connect नहीं होता। इसके लिए `bRuntimeMcpEnabled` setting (default बंद) और एक explicit `Connect()` call चाहिए, यह सिर्फ़ loopback host स्वीकार करता है जब तक आप remote host की अनुमति न दें, और Shipping builds में मना हो जाता है जब तक compile में शामिल न किया जाए। `TargetDenyList` से plugin को packaged games से बाहर रखें ([docs/RUNTIME.md](RUNTIME.hi.md))।

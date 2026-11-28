@@ -123,7 +123,7 @@ namespace UnrealMcpPythonTools
 	}
 
 	/**
-	 * The undo-step title of a run: "python-execute: " and the first line of the code that is not an import or a comment
+	 * The undo-step title of a run: "python-exec: " and the first line of the code that is not an import or a comment
 	 * (at most 80 characters), so the Undo History and TRANSACTION UNDO say which run they revert.
 	 */
 	static FString PythonUndoTitle(const FString& Code)
@@ -136,9 +136,9 @@ namespace UnrealMcpPythonTools
 			const FString Line = Raw.TrimStartAndEnd();
 			if (Line.IsEmpty() || Line.StartsWith(TEXT("#")) || Line.StartsWith(TEXT("import ")) || Line.StartsWith(TEXT("from ")))
 				continue;
-			return TEXT("python-execute: ") + (Line.Len() > MaxChars ? Line.Left(MaxChars - 3) + TEXT("...") : Line);
+			return TEXT("python-exec: ") + (Line.Len() > MaxChars ? Line.Left(MaxChars - 3) + TEXT("...") : Line);
 		}
-		return TEXT("python-execute");
+		return TEXT("python-exec");
 	}
 
 	static FString PythonClip(const FString& Text, int32 Max, const TCHAR* Hint)
@@ -224,9 +224,11 @@ namespace UnrealMcpPythonTools
 		return Text;
 	}
 
-	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry)
+	/** Declare the Python tool as @p Name; a non-empty @p AliasOf makes it a hidden, callable deprecated alias of that tool. */
+	static void DeclarePythonExec(FUnrealMcpToolRegistry& Registry, const FString& Name, const FString& AliasOf)
 	{
-		Registry.Tool(TEXT("python-execute"))
+		Registry.Tool(Name)
+			.AliasOf(AliasOf)
 			.Title(TEXT("Execute Python"))
 			.Description(TEXT("Run Python inside the Unreal Editor (PythonScriptPlugin, full `unreal` API, pre-imported). Write "
 			                  "plain statements; the LAST EXPRESSION is the result (objects come back as their paths). "
@@ -341,7 +343,7 @@ namespace UnrealMcpPythonTools
 				FPythonCommandEx Command;
 				Command.ExecutionMode = EPythonCommandExecutionMode::EvaluateStatement;
 				Command.Flags = EPythonCommandFlags::Unattended;
-				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_execute', fromlist=['run']).run('%s', %d)"),
+				Command.Command = FString::Printf(TEXT("__import__('unreal_mcp.python_exec', fromlist=['run']).run('%s', %d)"),
 					*FBase64::Encode(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length()), MaxTimeoutMs);
 				// One undo step, as rql-mutate (the transaction buffer drops it when a read-only snippet recorded nothing).
 				const int64 LogSequence = FUnrealMcpLogCollector::Get().GetLastSequence();
@@ -403,5 +405,14 @@ namespace UnrealMcpPythonTools
 				Result.bMessageCoversStructured = true; // the value, logs and diagnostics are rendered in the text
 				return Result;
 			});
+	}
+
+	UNREALMCPEDITOR_API void Register(FUnrealMcpToolRegistry& Registry)
+	{
+		DeclarePythonExec(Registry, PythonExecToolName, FString());
+		// DEPRECATED (DEV-314): `python-execute` is the old id of `python-exec`, kept as a hidden alias so saved permissions,
+		// allowlists and prompts that name it keep working. Not listed, no SKILL.md, same handler. Remove it two releases
+		// after the rename ships (the release after next).
+		DeclarePythonExec(Registry, PythonExecuteDeprecatedAlias, PythonExecToolName);
 	}
 }

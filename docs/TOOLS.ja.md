@@ -12,7 +12,7 @@
 | スクリーンショット | `screenshot-*`: viewport、game-view、camera、isolated |
 | Fab | `fab-search`、`fab-library`、`fab-add`、`fab-sign-in` |
 | コンソール | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | ツール一覧 | `unreal-tool-list` |
 | **システム**（AI には表示されない） | `ping`、`unreal-skill-create`、`unreal-skill-generate`、`editor-quit` |
 
@@ -33,7 +33,7 @@
 | `rql-mutate` | `set` / `call` で終わる RQL クエリ（`... | set Location = "(0, 0, 100)"`、`editor | call SpawnActor("PointLight")`）。すべて成功するか何も変えないかのどちらかで、取り消しは 1 ステップ。`dry_run` でプレビュー。`;` で区切った複数のクエリはそれぞれ 1 つの変更 |
 | `rql-schema` | ソース、関数、インストール済みの拡張機能、エディターのワールドにあるクラス。`type` でひとつの型のメンバーとメソッドを一覧表示。`guide` でインストール済み拡張機能のガイドを返す（`{"guide": "landscape"}`） |
 
-リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。 マテリアルは、フィーチャーレベルとシェーダープラットフォームごとのコンパイルエラーと、それを使うメッシュに必要な使用フラグを報告します（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`）。`python-execute` の `recompile_material` はこれを返しません。コンパイルに失敗したマテリアルはエディター診断のメモにも表示されます。
+リフレクションされたプロパティ以外にも、RQL は DataTable の行（`dataTables`、`Rows["Sword"].Damage`）、テキストとしての Gameplay Tag（`gameplayTags`、`set Tags = ["Ability.Fire"]`）、ini に保存される Project Settings（`unreal.settings("Maps & Modes")`）、Blueprint グラフ（`EventGraph | call AddCallFunction("PrintString")`、ピンの接続、`call Compile()`）、Widget Blueprint のツリー（`call AddWidget("Button", "Ok", parent)`）、Level Sequence（バインディング、トラック、`call AddKey("Location.X", 30, 100)`）にも届きます。 マテリアルは、フィーチャーレベルとシェーダープラットフォームごとのコンパイルエラーと、それを使うメッシュに必要な使用フラグを報告します（`unreal.asset("/Game/M_Rock") | call Compile()`、`CompileErrors`、`MissingUsages`）。`python-exec` の `recompile_material` はこれを返しません。コンパイルに失敗したマテリアルはエディター診断のメモにも表示されます。
 
 `unreal-rql` スキル（`unreal-skill-generate` が書き出します）は、この言語の使い方と、インストール済みの拡張機能が追加するものを説明します。
 
@@ -83,9 +83,11 @@
 
 | ツール id | 内容 |
 | --- | --- |
-| `python-execute` | エディターで Python を実行（完全な `unreal` API をインポート済み）。普通の文を書けば、最後の式が結果になり、`print` はログとして返り、エラーは `snippet.py` の行を指す。`include` で `<Project>/.ai-game-dev/snippets` のヘルパーを追加（`.py` ファイルはコードの前にスニペット自身の名前空間で実行され、import はできない。フォルダーは `sys.path` に入り、その中のモジュールを import できる）。`timeout`（秒、既定 30）で暴走したスニペットを止める |
+| `python-exec` | エディターで Python を実行（完全な `unreal` API をインポート済み）。普通の文を書けば、最後の式が結果になり、`print` はログとして返り、エラーは `snippet.py` の行を指す。`include` で `<Project>/.ai-game-dev/snippets` のヘルパーを追加（`.py` ファイルはコードの前にスニペット自身の名前空間で実行され、import はできない。フォルダーは `sys.path` に入り、その中のモジュールを import できる）。`timeout`（秒、既定 30）で暴走したスニペットを止める |
 
 エンジンの PythonScriptPlugin（Unreal-MCP が有効にします。エディター専用で、パッケージ化したゲームには含まれません）と、`UnrealMCP/Content/Python` に同梱された [Code-Exec](https://github.com/IvanMurzak/Code-Exec) ランタイムを使います。Blueprint グラフの配線は Python には公開されていません。それには Blueprint ツールを使ってください。
+
+ツールの旧名 `python-execute` は、今後のいくつかのリリースの間 `python-exec` の非表示エイリアスとして動作します（保存済みの権限やプロンプトはそのまま使えます）。`tools/list` には表示されず、スキルファイルもなく、いずれ削除されます。`python-exec` を使ってください。
 
 </details>
 

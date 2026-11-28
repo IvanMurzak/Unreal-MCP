@@ -99,6 +99,15 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         /// Absent for every other tool.
         /// </summary>
         [JsonPropertyName("rql")] public string? Rql { get; set; }
+
+        /// <summary>
+        /// Set on a DEPRECATED ALIAS: the old id of a renamed tool, which runs the same plugin code under its old name so
+        /// saved permissions, allowlists and prompts keep working (DEV-314: <c>python-execute</c> → <c>python-exec</c>). Holds
+        /// the current tool's name. The plugin always sends an alias hidden (<see cref="Visible"/> false: not in
+        /// <c>tools/list</c>, still runs through <c>tools/call</c>), and <see cref="AgentConfig.SkillFileGenerator"/> writes
+        /// no SKILL.md for it, so an agent never sees two copies. Absent for every other tool.
+        /// </summary>
+        [JsonPropertyName("aliasOf")] public string? AliasOf { get; set; }
         [JsonPropertyName("inputSchema")] public JsonNode? InputSchema { get; set; }
         [JsonPropertyName("outputSchema")] public JsonNode? OutputSchema { get; set; }
         [JsonPropertyName("readOnlyHint")] public bool? ReadOnlyHint { get; set; }
@@ -157,7 +166,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
                 var output = OutputSchema?.ToJsonString() ?? "null";
                 var skills = Skills == null ? "" : string.Join("", Skills.Select(s => s.Name + s.Description + s.Markdown));
                 return string.Join("",
-                    Name, Title, Description, SkillDescription, SkillBody, skills, Rql,
+                    Name, Title, Description, SkillDescription, SkillBody, skills, Rql, AliasOf,
                     input, output,
                     ReadOnlyHint, DestructiveHint, IdempotentHint, OpenWorldHint, ExtensionId, IsSystem);
             }

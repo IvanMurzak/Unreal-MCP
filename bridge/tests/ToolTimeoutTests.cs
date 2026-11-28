@@ -45,7 +45,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public async Task Proxy_WithoutReader_SendsDefaultToolTimeout()
         {
             var channel = new FakeToolCallChannel();
-            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "python-execute" }, channel);
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "python-exec" }, channel);
 
             await proxy.Run("req-1", null);
 
@@ -57,7 +57,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         {
             var channel = new FakeToolCallChannel();
             var timeoutMs = 45000;
-            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "python-execute" }, channel, () => timeoutMs);
+            var proxy = ProxyToolFactory.Create(new ToolDescriptor { Name = "python-exec" }, channel, () => timeoutMs);
 
             await proxy.Run("req-1", null);
             Assert.Equal(45000, channel.LastTimeoutMs);
@@ -76,10 +76,10 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
             registrar.Apply(new ToolManifestMessage
             {
                 Revision = 1,
-                Tools = new[] { new ToolDescriptor { Name = "python-execute", SchemaHash = "h" } }.ToList(),
+                Tools = new[] { new ToolDescriptor { Name = "python-exec", SchemaHash = "h" } }.ToList(),
             });
 
-            await sink.Tools["python-execute"].Run("req-1", null);
+            await sink.Tools["python-exec"].Run("req-1", null);
 
             Assert.Equal(12345, channel.LastTimeoutMs);
         }

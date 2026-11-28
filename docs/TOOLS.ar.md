@@ -14,7 +14,7 @@
 | لقطات الشاشة | `screenshot-*`: viewport, game-view, camera, isolated |
 | Fab | `fab-search`، `fab-library`، `fab-add`، `fab-sign-in` |
 | وحدة التحكم | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | قائمة الأدوات | `unreal-tool-list` |
 | **النظام** (لا تُعرض على الذكاء الاصطناعي) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` |
 
@@ -35,7 +35,7 @@
 | `rql-mutate` | استعلام RQL ينتهي بـ `set` / `call` (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): كل شيء أو لا شيء، خطوة تراجع واحدة، ومعاينة عبر `dry_run`؛ كل استعلام من عدة استعلامات مفصولة بـ `;` تغيير مستقل |
 | `rql-schema` | المصادر والدوال والامتدادات المثبتة والأصناف الموجودة في عالم المحرر؛ ويعرض `type` أعضاء نوع واحد ودواله؛ ويعيد `guide` دليل امتداد مثبّت (`{"guide": "landscape"}`) |
 
-إلى جانب الخصائص المنعكسة، يصل RQL إلى صفوف DataTable (`dataTables`، `Rows["Sword"].Damage`)، ووسوم gameplay كنص (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، وإعدادات Project Settings المحفوظة في ملف ini الخاص بها (`unreal.settings("Maps & Modes")`)، ومخططات Blueprint (`EventGraph | call AddCallFunction("PrintString")`، وتوصيلات المنافذ، و`call Compile()`)، وأشجار Widget Blueprint (`call AddWidget("Button", "Ok", parent)`)، وLevel Sequences (الارتباطات، والمسارات، و`call AddKey("Location.X", 30, 100)`). تُبلغ المواد عن أخطاء الترجمة البرمجية لكل مستوى ميزات ومنصة shader، وعن علامات الاستخدام التي تحتاجها الشبكات التي تستخدمها (`unreal.asset("/Game/M_Rock") | call Compile()`، `CompileErrors`، `MissingUsages`)، وهو ما لا يُرجعه `recompile_material` في `python-execute`؛ وتظهر المادة التي تفشل ترجمتها أيضًا في ملاحظة تشخيصات المحرر.
+إلى جانب الخصائص المنعكسة، يصل RQL إلى صفوف DataTable (`dataTables`، `Rows["Sword"].Damage`)، ووسوم gameplay كنص (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، وإعدادات Project Settings المحفوظة في ملف ini الخاص بها (`unreal.settings("Maps & Modes")`)، ومخططات Blueprint (`EventGraph | call AddCallFunction("PrintString")`، وتوصيلات المنافذ، و`call Compile()`)، وأشجار Widget Blueprint (`call AddWidget("Button", "Ok", parent)`)، وLevel Sequences (الارتباطات، والمسارات، و`call AddKey("Location.X", 30, 100)`). تُبلغ المواد عن أخطاء الترجمة البرمجية لكل مستوى ميزات ومنصة shader، وعن علامات الاستخدام التي تحتاجها الشبكات التي تستخدمها (`unreal.asset("/Game/M_Rock") | call Compile()`، `CompileErrors`، `MissingUsages`)، وهو ما لا يُرجعه `recompile_material` في `python-exec`؛ وتظهر المادة التي تفشل ترجمتها أيضًا في ملاحظة تشخيصات المحرر.
 
 مهارة `unreal-rql` (التي يكتبها `unreal-skill-generate`) تعلّم اللغة وتسرد ما تضيفه الامتدادات المثبتة.
 
@@ -85,9 +85,11 @@
 
 | معرّف الأداة | ما تفعله |
 | --- | --- |
-| `python-execute` | تشغيل Python في المحرر (واجهة `unreal` كاملة، مستوردة مسبقًا): تعليمات عادية، وآخر تعبير هو النتيجة، ويعود `print` كسجلات، وتشير الأخطاء إلى أسطر `snippet.py`؛ يضيف `include` مساعدات من `<Project>/.ai-game-dev/snippets`: يُشغَّل ملف `.py` في فضاء أسماء المقتطف نفسه قبل الشيفرة (لا يمكن استيراده)، ويُضاف المجلد إلى `sys.path` (يمكن استيراد وحداته)؛ ويوقف `timeout` (بالثواني، الافتراضي 30) المقتطف الخارج عن السيطرة |
+| `python-exec` | تشغيل Python في المحرر (واجهة `unreal` كاملة، مستوردة مسبقًا): تعليمات عادية، وآخر تعبير هو النتيجة، ويعود `print` كسجلات، وتشير الأخطاء إلى أسطر `snippet.py`؛ يضيف `include` مساعدات من `<Project>/.ai-game-dev/snippets`: يُشغَّل ملف `.py` في فضاء أسماء المقتطف نفسه قبل الشيفرة (لا يمكن استيراده)، ويُضاف المجلد إلى `sys.path` (يمكن استيراد وحداته)؛ ويوقف `timeout` (بالثواني، الافتراضي 30) المقتطف الخارج عن السيطرة |
 
 يستخدم PythonScriptPlugin الخاص بالمحرك (يفعّله Unreal-MCP؛ للمحرر فقط، ولا يكون أبدًا في لعبة محزّمة) وبيئة تشغيل [Code-Exec](https://github.com/IvanMurzak/Code-Exec) المضمّنة في `UnrealMCP/Content/Python`. توصيل مخططات Blueprint غير متاح في Python: استخدم أدوات Blueprint لذلك.
+
+`python-execute`، الاسم القديم للأداة، يظل يعمل كاسم بديل مخفي لـ `python-exec` خلال الإصدارات القادمة (تبقى الأذونات والموجّهات المحفوظة صالحة)؛ لا يظهر في `tools/list` وليس له ملف skill وسيُزال لاحقًا. استخدم `python-exec`.
 
 </details>
 

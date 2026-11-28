@@ -14,7 +14,7 @@
 | اسکرین‌شات | `screenshot-*`: viewport, game-view, camera, isolated |
 | Fab | `fab-search`، `fab-library`، `fab-add`، `fab-sign-in` |
 | کنسول | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | فهرست ابزارها | `unreal-tool-list` |
 | **سیستمی** (به هوش مصنوعی نشان داده نمی‌شود) | `ping`، `unreal-skill-create`، `unreal-skill-generate`، `editor-quit` |
 
@@ -35,7 +35,7 @@
 | `rql-mutate` | کوئری RQL که با `set` / `call` تمام می‌شود (`... | set Location = "(0, 0, 100)"`، `editor | call SpawnActor("PointLight")`): همه یا هیچ، یک مرحله undo، پیش‌نمایش با `dry_run`؛ هر کوئری از چند کوئری جداشده با `;` یک تغییر جداگانه است |
 | `rql-schema` | منابع، توابع، افزونه‌های نصب‌شده و کلاس‌های موجود در دنیای ویرایشگر؛ `type` اعضا و متدهای یک نوع را فهرست می‌کند؛ `guide` راهنمای یک افزونه نصب‌شده را برمی‌گرداند (`{"guide": "landscape"}`) |
 
-فراتر از propertyهای reflect‌شده، RQL به ردیف‌های DataTable (`dataTables`، `Rows["Sword"].Damage`)، gameplay tag ها به صورت متن (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، Project Settings ذخیره‌شده در ini خودشان (`unreal.settings("Maps & Modes")`)، گراف‌های Blueprint (`EventGraph | call AddCallFunction("PrintString")`، اتصال پین‌ها، `call Compile()`)، درخت‌های Widget Blueprint (`call AddWidget("Button", "Ok", parent)`) و Level Sequence ها (binding ها، track ها، `call AddKey("Location.X", 30, 100)`) دسترسی دارد. متریال‌ها خطاهای کامپایل خود را برای هر feature level و shader platform و flag های usage لازم برای mesh هایی که از آن‌ها استفاده می‌کنند گزارش می‌دهند (`unreal.asset("/Game/M_Rock") | call Compile()`، `CompileErrors`، `MissingUsages`)، چیزی که `recompile_material` در `python-execute` برنمی‌گرداند؛ متریالی که کامپایل نمی‌شود در یادداشت diagnostics ویرایشگر هم نمایش داده می‌شود.
+فراتر از propertyهای reflect‌شده، RQL به ردیف‌های DataTable (`dataTables`، `Rows["Sword"].Damage`)، gameplay tag ها به صورت متن (`gameplayTags`، `set Tags = ["Ability.Fire"]`)، Project Settings ذخیره‌شده در ini خودشان (`unreal.settings("Maps & Modes")`)، گراف‌های Blueprint (`EventGraph | call AddCallFunction("PrintString")`، اتصال پین‌ها، `call Compile()`)، درخت‌های Widget Blueprint (`call AddWidget("Button", "Ok", parent)`) و Level Sequence ها (binding ها، track ها، `call AddKey("Location.X", 30, 100)`) دسترسی دارد. متریال‌ها خطاهای کامپایل خود را برای هر feature level و shader platform و flag های usage لازم برای mesh هایی که از آن‌ها استفاده می‌کنند گزارش می‌دهند (`unreal.asset("/Game/M_Rock") | call Compile()`، `CompileErrors`، `MissingUsages`)، چیزی که `recompile_material` در `python-exec` برنمی‌گرداند؛ متریالی که کامپایل نمی‌شود در یادداشت diagnostics ویرایشگر هم نمایش داده می‌شود.
 
 ‏Skill با نام `unreal-rql` (که `unreal-skill-generate` آن را می‌نویسد) این زبان را آموزش می‌دهد و آنچه افزونه‌های نصب‌شده اضافه می‌کنند را فهرست می‌کند.
 
@@ -85,9 +85,11 @@
 
 | شناسه ابزار | کار آن |
 | --- | --- |
-| `python-execute` | اجرای Python در ویرایشگر (کل API `unreal`، از پیش import‌شده): دستورهای ساده، آخرین عبارت نتیجه است، `print` به صورت لاگ برمی‌گردد، خطاها به خطوط `snippet.py` اشاره می‌کنند؛ `include` کمک‌ها را از `<Project>/.ai-game-dev/snippets` اضافه می‌کند: یک فایل `.py` پیش از کد در فضای نام خود snippet اجرا می‌شود (قابل import نیست)، یک پوشه به `sys.path` افزوده می‌شود (ماژول‌هایش قابل import هستند)؛ `timeout` (ثانیه، پیش‌فرض 30) یک snippet گیرکرده را متوقف می‌کند |
+| `python-exec` | اجرای Python در ویرایشگر (کل API `unreal`، از پیش import‌شده): دستورهای ساده، آخرین عبارت نتیجه است، `print` به صورت لاگ برمی‌گردد، خطاها به خطوط `snippet.py` اشاره می‌کنند؛ `include` کمک‌ها را از `<Project>/.ai-game-dev/snippets` اضافه می‌کند: یک فایل `.py` پیش از کد در فضای نام خود snippet اجرا می‌شود (قابل import نیست)، یک پوشه به `sys.path` افزوده می‌شود (ماژول‌هایش قابل import هستند)؛ `timeout` (ثانیه، پیش‌فرض 30) یک snippet گیرکرده را متوقف می‌کند |
 
 از PythonScriptPlugin موتور (که Unreal-MCP فعالش می‌کند؛ فقط در ویرایشگر، هرگز در بازی بسته‌بندی‌شده) و runtime [Code-Exec](https://github.com/IvanMurzak/Code-Exec) که در `UnrealMCP/Content/Python` گنجانده شده استفاده می‌کند. سیم‌کشی گراف Blueprint در Python در دسترس نیست: برای آن از ابزارهای Blueprint استفاده کنید.
+
+`python-execute`، نام قبلی این ابزار، در چند نسخهٔ بعدی همچنان به‌عنوان نام مستعار پنهانِ `python-exec` اجرا می‌شود (مجوزها و پرامپت‌های ذخیره‌شده کار می‌کنند)؛ در `tools/list` نیست، فایل skill ندارد و حذف خواهد شد. از `python-exec` استفاده کنید.
 
 </details>
 

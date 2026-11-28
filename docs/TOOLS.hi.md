@@ -12,7 +12,7 @@
 | Screenshot | `screenshot-*`: viewport, game-view, camera, isolated |
 | Fab | `fab-search`, `fab-library`, `fab-add`, `fab-sign-in` |
 | Console | `console-run-command` |
-| Python | `python-execute` |
+| Python | `python-exec` |
 | Tool list | `unreal-tool-list` |
 | **System** (AI को नहीं दिखते) | `ping`, `unreal-skill-create`, `unreal-skill-generate`, `editor-quit` |
 
@@ -33,7 +33,7 @@
 | `rql-mutate` | `set` / `call` पर खत्म होने वाली RQL query (`... | set Location = "(0, 0, 100)"`, `editor | call SpawnActor("PointLight")`): या तो सब या कुछ नहीं, एक undo step, `dry_run` से preview; `;` से अलग की गई हर query एक अलग बदलाव है |
 | `rql-schema` | Sources, functions, install किए गए extensions और editor world की classes; `type` किसी एक type के members और methods दिखाता है; `guide` install किए गए extension की गाइड लौटाता है (`{"guide": "landscape"}`) |
 
-Reflected properties के अलावा RQL इन तक भी पहुँचता है: DataTable rows (`dataTables`, `Rows["Sword"].Damage`), text के रूप में gameplay tags (`gameplayTags`, `set Tags = ["Ability.Fire"]`), अपनी ini में save होने वाली Project Settings (`unreal.settings("Maps & Modes")`), Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) और Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`)। Materials हर feature level और shader platform के compile errors और उन्हें इस्तेमाल करने वाले meshes के लिए ज़रूरी usage flags बताते हैं (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), जो `python-execute` का `recompile_material` नहीं बताता; compile न होने वाला material editor diagnostics note में भी दिखता है।
+Reflected properties के अलावा RQL इन तक भी पहुँचता है: DataTable rows (`dataTables`, `Rows["Sword"].Damage`), text के रूप में gameplay tags (`gameplayTags`, `set Tags = ["Ability.Fire"]`), अपनी ini में save होने वाली Project Settings (`unreal.settings("Maps & Modes")`), Blueprint graphs (`EventGraph | call AddCallFunction("PrintString")`, pin connections, `call Compile()`), Widget Blueprint trees (`call AddWidget("Button", "Ok", parent)`) और Level Sequences (bindings, tracks, `call AddKey("Location.X", 30, 100)`)। Materials हर feature level और shader platform के compile errors और उन्हें इस्तेमाल करने वाले meshes के लिए ज़रूरी usage flags बताते हैं (`unreal.asset("/Game/M_Rock") | call Compile()`, `CompileErrors`, `MissingUsages`), जो `python-exec` का `recompile_material` नहीं बताता; compile न होने वाला material editor diagnostics note में भी दिखता है।
 
 `unreal-rql` skill (जिसे `unreal-skill-generate` लिखता है) यह भाषा सिखाता है और बताता है कि install किए गए extensions क्या जोड़ते हैं।
 
@@ -83,9 +83,11 @@ Logs, PIE state और selection RQL से मिलते हैं: `console 
 
 | Tool id | यह क्या करता है |
 | --- | --- |
-| `python-execute` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helpers जोड़ता है: `.py` file code से पहले snippet के अपने namespace में चलती है (import नहीं होती), folder `sys.path` पर जाता है (उसके modules import होते हैं); `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
+| `python-exec` | Editor में Python चलाता है (पूरा `unreal` API, पहले से import): सामान्य statements, आखिरी expression ही result है, `print` logs के रूप में लौटता है, errors `snippet.py` की lines बताते हैं; `include` `<Project>/.ai-game-dev/snippets` से helpers जोड़ता है: `.py` file code से पहले snippet के अपने namespace में चलती है (import नहीं होती), folder `sys.path` पर जाता है (उसके modules import होते हैं); `timeout` (seconds, default 30) बेकाबू snippet को रोकता है |
 
 यह engine का PythonScriptPlugin (Unreal-MCP इसे enable करता है; सिर्फ़ editor में, packaged game में कभी नहीं) और `UnrealMCP/Content/Python` में vendored [Code-Exec](https://github.com/IvanMurzak/Code-Exec) runtime इस्तेमाल करता है। Blueprint graph की wiring Python को उपलब्ध नहीं है: उसके लिए Blueprint tools इस्तेमाल करें।
+
+tool का पुराना नाम `python-execute` अगली कुछ releases तक `python-exec` के hidden alias के रूप में चलता रहेगा (saved permissions और prompts काम करते रहेंगे); यह `tools/list` में नहीं है, इसकी कोई skill file नहीं है, और इसे हटा दिया जाएगा। `python-exec` इस्तेमाल करें।
 
 </details>
 

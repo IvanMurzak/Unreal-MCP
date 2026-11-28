@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { SessionProcessOps } from '@baizor/gamedev-cli-core';
-import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, toolErrorText, PYTHON_EXECUTE_TOOL } from '../src/lib/exec.js';
+import { DEFAULT_EXEC_TIMEOUT_MS, execPython, readPythonResponse, toolErrorText, PYTHON_EXEC_TOOL } from '../src/lib/exec.js';
 import {
   closeOwnedSession,
   createUnrealSession,
@@ -103,7 +103,7 @@ describe('execPython', () => {
     if (result.kind === 'success') expect(result.source).toBe('running');
     expect(editors.spawned).toHaveLength(0);
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({
-      toolName: PYTHON_EXECUTE_TOOL, url: 'http://localhost:5199', input: { code: '1 + 2' },
+      toolName: PYTHON_EXEC_TOOL, url: 'http://localhost:5199', input: { code: '1 + 2' },
     }));
   });
 

@@ -58,7 +58,7 @@
 | `UNREAL_MCP_START_SERVER` | `true`: bridge がプロジェクトのポートを報告した時点で、エディター自身がローカルの `gamedev-mcp-server` を起動し（Custom モード + http のみ。`startServer` として保存）、終了時に停止します。`unreal-mcp-cli exec` / `open --headless` がこれを設定します。 |
 | `UNREAL_MCP_TRANSPORT` | `stdio` または `http` |
 | `UNREAL_MCP_LOG_LEVEL` | ログの詳細度 |
-| `UNREAL_MCP_TOOL_TIMEOUT` | 1 回のツール呼び出しをエディターで実行できる時間（ミリ秒。既定 `300000`。`toolTimeoutMs` として保存）。長い `python-execute` スニペットやアセット処理では大きくしてください。エディターは、自分が起動するローカルサーバーにこの値に 10 秒を足したものを `tool-timeout` として渡します。古いサーバー（McpPlugin 8.11.0 より前）は、この値にかかわらずツール呼び出しを 5 分で打ち切ります（[ARCHITECTURE §4](ARCHITECTURE.md)）。エディターが開始する前にタイムアウトまたはキャンセルされた呼び出しはスキップされ、後から実行されることはありません。 |
+| `UNREAL_MCP_TOOL_TIMEOUT` | 1 回のツール呼び出しをエディターで実行できる時間（ミリ秒。既定 `300000`。`toolTimeoutMs` として保存）。長い `python-exec` スニペットやアセット処理では大きくしてください。エディターは、自分が起動するローカルサーバーにこの値に 10 秒を足したものを `tool-timeout` として渡します。古いサーバー（McpPlugin 8.11.0 より前）は、この値にかかわらずツール呼び出しを 5 分で打ち切ります（[ARCHITECTURE §4](ARCHITECTURE.md)）。エディターが開始する前にタイムアウトまたはキャンセルされた呼び出しはスキップされ、後から実行されることはありません。 |
 | `UNREAL_MCP_BRIDGE_PATH` | サイドカーのバイナリへのパス。**開発/CI 用の上書き指定**で、同梱のバイナリより優先されます（§6）。パッケージ化されたリリースは同梱のサイドカーを自動で見つけるので、エンドユーザーが設定することはありません。ソースからのビルドで使います。 |
 | `UNREAL_MCP_CREDENTIALS_DIR` | bridge が `~/.ai-game-dev` の代わりに読み込む（そして更新する）マシンの認証情報ストアの絶対パスのフォルダー。エディターのプロセス環境で設定します（`.env` からは読み込まれません）。値はパスであり、トークンではありません。相対パスはログに記録されて無視されます。ランチャーが別のプロファイルでサインインする開発/テスト用エディター（AI Game Dev App のローカル開発環境）向けです。Godot の `GODOT_MCP_CREDENTIALS_DIR` に相当します。 |
 | `UNREAL_MCP_SERVER_PATH` | ローカルの `gamedev-mcp-server` バイナリへのパス（プラグインではなく `unreal-mcp-cli` が読み込みます）。サーバーのダウンロードとバージョン確認を省略します（§6）。 |

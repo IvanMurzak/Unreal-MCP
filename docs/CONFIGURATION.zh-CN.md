@@ -58,7 +58,7 @@
 | `UNREAL_MCP_START_SERVER` | `true`：bridge 报告项目端口后，编辑器自己启动本地 `gamedev-mcp-server`（仅限 Custom 模式 + http；保存为 `startServer`），并在退出时停止它。`unreal-mcp-cli exec` / `open --headless` 会设置它。 |
 | `UNREAL_MCP_TRANSPORT` | `stdio` 或 `http` |
 | `UNREAL_MCP_LOG_LEVEL` | 日志详细程度 |
-| `UNREAL_MCP_TOOL_TIMEOUT` | 一次工具调用在编辑器中可运行的时长，单位为毫秒（默认 `300000`；保存为 `toolTimeoutMs`）。运行较长的 `python-execute` 代码片段或资源操作时请调大它。编辑器会把该值加 10 秒作为 `tool-timeout` 传给它启动的本地服务器；较旧的服务器（McpPlugin 8.11.0 之前）无论此处如何设置，都会把工具调用限制在 5 分钟（[ARCHITECTURE §4](ARCHITECTURE.md)）。在编辑器开始执行之前就已超时或被取消的调用会被跳过，不会稍后再运行。 |
+| `UNREAL_MCP_TOOL_TIMEOUT` | 一次工具调用在编辑器中可运行的时长，单位为毫秒（默认 `300000`；保存为 `toolTimeoutMs`）。运行较长的 `python-exec` 代码片段或资源操作时请调大它。编辑器会把该值加 10 秒作为 `tool-timeout` 传给它启动的本地服务器；较旧的服务器（McpPlugin 8.11.0 之前）无论此处如何设置，都会把工具调用限制在 5 分钟（[ARCHITECTURE §4](ARCHITECTURE.md)）。在编辑器开始执行之前就已超时或被取消的调用会被跳过，不会稍后再运行。 |
 | `UNREAL_MCP_BRIDGE_PATH` | 边车进程二进制文件的路径——**开发/CI 覆盖**；优先于捆绑的二进制文件（§6）。打包发布版会自动找到捆绑的边车进程，因此最终用户永远不需要设置它；从源码构建时使用它。 |
 | `UNREAL_MCP_CREDENTIALS_DIR` | bridge 读取（并刷新）的本机凭据存储的绝对路径文件夹，用来代替 `~/.ai-game-dev`，需在编辑器的进程环境中设置（不从 `.env` 读取）——是一个路径，绝不是令牌；相对路径会被记录到日志并忽略。用于启动器以另一个配置文件登录的开发/测试编辑器（AI Game Dev App 的本地开发环境）；对应 Godot 的 `GODOT_MCP_CREDENTIALS_DIR`。 |
 | `UNREAL_MCP_SERVER_PATH` | 本地 `gamedev-mcp-server` 二进制文件的路径（由 `unreal-mcp-cli` 读取，而不是插件）——跳过服务器下载 + 版本检查（§6）。 |

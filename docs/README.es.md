@@ -61,7 +61,7 @@ El editor de Unreal está escrito en C++, así que el host MCP de .NET se ejecut
 | "Cuenta los árboles de este nivel y sube 1 m todas las luces puntuales" | `rql-query`, `rql-mutate` |
 | "Haz una captura desde la cámara del jugador y revisa la iluminación" | `screenshot-*` |
 | "Busca un pack de rocas gratuito en Fab y añádelo al proyecto" | `fab-search`, `fab-add` |
-| "Renombra en lote los assets seleccionados con un script de Python" | `python-execute` |
+| "Renombra en lote los assets seleccionados con un script de Python" | `python-exec` |
 
 **C++ es un ciclo de primera clase.** `source-compile` compila con Live Coding cuando está activo y, si no, con UnrealBuildTool, y devuelve cada diagnóstico con su archivo, línea y severidad, así que el agente corrige errores sin leer el log de compilación. Avisa cuando un cambio necesita una compilación completa y reiniciar el editor (clases nuevas, declaraciones `UCLASS` / `UPROPERTY` / `UFUNCTION` cambiadas). Las operaciones con archivos se quedan dentro de `<Project>/Source/`. Desde una terminal, `unreal-mcp-cli compile` imprime diagnósticos `file:line:col` sin editor.
 
@@ -244,7 +244,7 @@ Todos los comandos y opciones: [cli/docs/commands.md](../cli/docs/commands.md) o
 - **Controles sobre ellas:**
   - **Lista blanca** (límite estricto): `UNREAL_MCP_TOOLS` sirve solo las herramientas indicadas; cualquier otra no se lista ni se puede llamar.
   - **Ocultar** (suave): la casilla **Visible** de la ventana **MCP Tools** quita una herramienta de `tools/list`, pero un cliente que la llame por su nombre aún la ejecuta.
-  - **Cambios acotados:** las herramientas de archivos C++ se quedan dentro de `<Project>/Source/`; una llamada a `rql-mutate` es todo o nada, un solo paso de deshacer, se puede previsualizar con `dry_run` y se rechaza por encima de 200 objetivos salvo que la llamada suba `max_targets` (hasta 1000); `python-execute` se detiene tras `timeout` (30 s por defecto); cada llamada a una herramienta tiene un límite de tiempo (`UNREAL_MCP_TOOL_TIMEOUT`, 5 min por defecto).
+  - **Cambios acotados:** las herramientas de archivos C++ se quedan dentro de `<Project>/Source/`; una llamada a `rql-mutate` es todo o nada, un solo paso de deshacer, se puede previsualizar con `dry_run` y se rechaza por encima de 200 objetivos salvo que la llamada suba `max_targets` (hasta 1000); `python-exec` se detiene tras `timeout` (30 s por defecto); cada llamada a una herramienta tiene un límite de tiempo (`UNREAL_MCP_TOOL_TIMEOUT`, 5 min por defecto).
   - **No para la IA:** las herramientas de sistema (`ping`, generación de skills, `editor-quit`) no aparecen en `tools/list`, y `editor-quit` se niega salvo que coincida el nonce de la sesión de la CLI.
   - Detalles: [docs/TOOLS.md](TOOLS.es.md).
 - **El modo runtime está desactivado por defecto:** un juego nunca se conecta por sí solo. Necesita el ajuste `bRuntimeMcpEnabled` (desactivado por defecto) y una llamada explícita a `Connect()`, solo acepta un host de loopback salvo que permitas uno remoto, y se rechaza en builds Shipping salvo que se compile dentro. Deja el plugin fuera de los juegos empaquetados con un `TargetDenyList` ([docs/RUNTIME.md](RUNTIME.es.md)).

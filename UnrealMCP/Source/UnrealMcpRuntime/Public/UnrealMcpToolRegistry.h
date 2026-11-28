@@ -81,7 +81,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolCall
 
 	/**
 	 * This call's timeout in milliseconds (the sidecar's timeoutMs: UNREAL_MCP_TOOL_TIMEOUT); 0 when unknown (tests). A
-	 * handler that can run long (python-execute) stops its own work before it, so its answer arrives instead of the
+	 * handler that can run long (python-exec) stops its own work before it, so its answer arrives instead of the
 	 * dispatcher's "timed out".
 	 */
 	int32 TimeoutMs = 0;
@@ -132,7 +132,7 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolResult
 	// Not terminal: the dispatcher runs the handler again on a later game-thread tick, until the call's
 	// timeout. For a dependency that comes up after the editor (e.g. Python's first tick). See RetryLater.
 	bool bRetryLater = false;
-	// Message already renders everything Structured holds (python-execute's value and logs, a file's text): the wire
+	// Message already renders everything Structured holds (python-exec's value and logs, a file's text): the wire
 	// text block is Message alone. Otherwise the text block also carries Structured as condensed JSON (WireText).
 	bool bMessageCoversStructured = false;
 	// A note the call pipeline adds after the handler (new editor warnings, FUnrealMcpToolRegistry::SetResultAnnotator):
@@ -269,6 +269,14 @@ struct UNREALMCPRUNTIME_API FUnrealMcpRegisteredTool
 	 * manifest (wire key `enabled: false`, excluded from the schema hash) and still runs when called by name.
 	 */
 	bool bVisible = true;
+	/**
+	 * Set on a DEPRECATED ALIAS: the old id of a renamed tool, registered as a second tool with the same handler so saved
+	 * permissions, allowlists and prompts that name the old id keep working (DEV-314: `python-exec` → `python-exec`).
+	 * Holds the current tool's name. An alias is never listed (bVisible stays false, whatever the §7 hidden list says),
+	 * gets no SKILL.md, and is left out of `unreal-tool-list` and the MCP Tools window, so an agent never sees two copies;
+	 * it still runs when called by name. Shipped as `aliasOf` only when set. Declared via FUnrealMcpToolBuilder::AliasOf().
+	 */
+	FString AliasOf;
 	FString ExtensionId = TEXT("core");
 	FString SchemaHash;
 	FUnrealMcpToolHandler Handler;
@@ -317,6 +325,8 @@ public:
 	 * and is invoked only over `/api/system-tools/<name>` (the `ping` liveness probe, the skill tools).
 	 */
 	FUnrealMcpToolBuilder& ToolType(EUnrealMcpToolType InToolType);
+	/** Declare this tool a deprecated alias of @p CurrentName: hidden from tools/list but callable (FUnrealMcpRegisteredTool::AliasOf). */
+	FUnrealMcpToolBuilder& AliasOf(const FString& CurrentName);
 	FUnrealMcpToolBuilder& ReadOnlyHint(bool bValue);
 	FUnrealMcpToolBuilder& DestructiveHint(bool bValue);
 	FUnrealMcpToolBuilder& IdempotentHint(bool bValue);
@@ -344,6 +354,8 @@ struct UNREALMCPRUNTIME_API FUnrealMcpToolRegistryTraits
 	static const TCHAR* KeyNoun() { return TEXT("name"); }
 	static const TCHAR* ManifestType() { return TEXT("tool-manifest"); }
 	static const TCHAR* ManifestArrayKey() { return TEXT("tools"); }
+	/** A deprecated alias (FUnrealMcpRegisteredTool::AliasOf) is never listed in tools/list, whatever the hidden list says. */
+	static bool IsListable(const FUnrealMcpRegisteredTool& Entry) { return Entry.AliasOf.IsEmpty(); }
 	/** True iff @p Name is a valid kebab-case tool id (non-empty; lowercase letters/digits with single internal hyphens). */
 	static bool IsValidKey(const FString& Name);
 	/** Validate a tool descriptor for the §5 isolation contract. Returns false + a reason on the first problem. */

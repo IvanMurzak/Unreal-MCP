@@ -123,6 +123,36 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         }
 
         [Fact]
+        public async Task DeprecatedAlias_IsNotListedButRunsUnderItsOldName()
+        {
+            // DEV-314: the plugin ships `python-execute` as a hidden alias of `python-exec` (same handler).
+            var plugin = BuildPlugin();
+            var tm = plugin.McpManager.ToolManager!;
+            var channel = new FakeToolCallChannel((tool, args) => new ToolResponseMessage
+            {
+                Status = IpcProtocol.Status.Success,
+                Content = JsonNode.Parse("[{\"type\":\"text\",\"text\":\"42\"}]")!.AsArray(),
+            });
+            var registrar = new ManifestRegistrar(new ToolManagerSink(tm), channel);
+            var manifest = JsonSerializer.Deserialize<ToolManifestMessage>(
+                """{"type":"tool-manifest","revision":1,"tools":[{"name":"python-exec","schemaHash":"h1"},{"name":"python-execute","enabled":false,"aliasOf":"python-exec","schemaHash":"h2"}]}""",
+                IpcProtocol.JsonOptions)!;
+            registrar.Apply(manifest);
+
+            Assert.True(tm.IsToolVisible("python-exec"));
+            Assert.True(tm.HasTool("python-execute"));
+            Assert.False(tm.IsToolVisible("python-execute"));
+            Assert.Equal(1, tm.VisibleToolsCount);
+            var listed = await tm.RunListTool(new RequestListTool());
+            Assert.False(Assert.Single(listed.Value!, t => t.Name == "python-execute").Visible);
+
+            // A saved permission / prompt that names the old id still runs, and the call reaches the plugin under that id.
+            var result = await tm.RunCallTool(new RequestCallTool("req-1", "python-execute", new Dictionary<string, JsonElement>()));
+            Assert.Equal(ResponseStatus.Success, result.Value!.Status);
+            Assert.Equal("python-execute", channel.LastTool);
+        }
+
+        [Fact]
         public void RemovedTool_DisappearsFromToolManager()
         {
             var plugin = BuildPlugin();

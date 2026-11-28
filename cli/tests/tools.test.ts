@@ -25,7 +25,7 @@ const RESPONSE = {
   structured: {
     tools: [
       { name: 'rql-query', title: 'RQL Query', visible: true, extensionId: 'core', description: 'Read the editor with RQL', inputs: 'query: string (required)' },
-      { name: 'python-execute', title: 'Python', visible: false, extensionId: 'core', description: 'Run Python' },
+      { name: 'python-exec', title: 'Python', visible: false, extensionId: 'core', description: 'Run Python' },
       { name: 'niagara-spawn', title: 'Spawn Niagara', visible: true, extensionId: 'UnrealAINiagara' },
     ],
     availableExtensions: [{ id: 'UnrealAIAudio', state: 'not-installed', line: 'UnrealAIAudio: audio tools (install-extension ...)' }],
@@ -50,7 +50,7 @@ describe('tools', () => {
     if (r.kind !== 'success') return;
     expect(r.source).toBe('editor');
     expect(calls[0]).toMatchObject({ toolName: 'unreal-tool-list', input: { includeDescription: true, includeInputs: true } });
-    expect(r.cache.tools.map((t) => t.name)).toEqual(['rql-query', 'python-execute', 'niagara-spawn']);
+    expect(r.cache.tools.map((t) => t.name)).toEqual(['rql-query', 'python-exec', 'niagara-spawn']);
     expect(r.cache.tools[1]!.visible).toBe(false);
     expect(r.cache.tools[0]!.extensionId).toBeUndefined(); // core
     expect(readToolsCache(dir)?.key).toBe(toolsCacheKey(dir));
@@ -91,10 +91,10 @@ describe('tools', () => {
     expect(parseToolList({ status: 'success' })).toBeUndefined();
     const { tools } = parseToolList(RESPONSE)!;
     expect(filterTools(tools, 'rql').map((t) => t.name)).toEqual(['rql-query']);
-    expect(filterTools(tools, 'Python').map((t) => t.name)).toEqual(['python-execute']);
+    expect(filterTools(tools, 'Python').map((t) => t.name)).toEqual(['python-exec']);
     expect(filterTools([...tools, { name: 'x', title: 'X', visible: true, description: 'calls rql-query' }], 'rql-query').map((t) => t.name))
       .toEqual(['rql-query']); // the exact name wins over mentions
-    expect(filterTools(tools, 'python|niagara').map((t) => t.name)).toEqual(['python-execute', 'niagara-spawn']);
+    expect(filterTools(tools, 'python|niagara').map((t) => t.name)).toEqual(['python-exec', 'niagara-spawn']);
     expect(filterTools(tools, '(unclosed').map((t) => t.name)).toEqual([]); // a bad regex is a substring
   });
 });

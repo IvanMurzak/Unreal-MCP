@@ -79,7 +79,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Ipc
         public const int HeartbeatTimeoutMs = 15000;
 
         /// <summary>
-        /// Default per-tool-call timeout (§4): 5 min, so long <c>python-execute</c> snippets and asset work fit.
+        /// Default per-tool-call timeout (§4): 5 min, so long <c>python-exec</c> snippets and asset work fit.
         /// The plugin overrides it with the <c>toolTimeoutMs</c> field of the <c>config</c> message
         /// (<c>UNREAL_MCP_TOOL_TIMEOUT</c>, §8). This bounds the editor and sidecar only; the plugin passes it to a
         /// local MCP server it starts as <c>tool-timeout</c> (McpPlugin.Server 8.11.0+; see ARCHITECTURE §4).
