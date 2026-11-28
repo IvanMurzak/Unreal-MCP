@@ -33,6 +33,7 @@ using McpVersion = com.IvanMurzak.McpPlugin.Common.Version;
 // The shared machine credential store + DTO (McpPlugin 7.0). Aliased to avoid colliding the two AgentConfig
 // namespaces (this one + the bridge-local com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig imported above).
 using McpAgentConfig = com.IvanMurzak.McpPlugin.AgentConfig;
+using SharedSkillFileGenerator = com.IvanMurzak.McpPlugin.Skills.SkillFileGenerator;
 
 namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 {
@@ -298,10 +299,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             SetHost(_config.Host);
             // Default to the real IPC send; SetStatusEmitterForTest swaps it in the xUnit suite.
             _statusEmitter = status => _ipc.SendToPluginAsync(status, CancellationToken.None);
+            // SKILL.md metadata per kind (DEV-313): every page carries the provenance marker; the App hides a tool
+            // page (`ai-game-dev: exclude`, the tool is already one of its MCP tools) and shows a standalone skill
+            // (`include`: unreal-rql, the built-in guides), which is knowledge the agent has no other way to get.
             _config.SkillMetadata["generated-by"] = "unreal-mcp";
-            _config.SkillMetadata["ai-game-dev"] = "exclude";
+            _config.ToolSkillMetadata["ai-game-dev"] = "exclude";
+            _config.StandaloneSkillMetadata["ai-game-dev"] = "include";
             _agentConfig = new AgentConfigService(loggerProvider?.CreateLogger(nameof(AgentConfigService)),
-                ResolveProjectKeyProvider, _config.SkillMetadata);
+                ResolveProjectKeyProvider, ToolSkillMetadata, StandaloneSkillMetadata);
 
             // A single owned HttpClient covers the default device authenticator AND the default token
             // refresher / exchange / revocation clients; the injected-* paths (xUnit) supply their own — either
@@ -388,6 +393,14 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
 
         public IMcpPlugin? Plugin => _plugin;
         public ConnectionConfig Config => _config;
+
+        /// <summary>The metadata of a generated tool page: the shared entries plus the tool overlay.</summary>
+        internal IReadOnlyDictionary<string, string> ToolSkillMetadata =>
+            SharedSkillFileGenerator.MergeMetadata(_config.SkillMetadata, _config.ToolSkillMetadata);
+
+        /// <summary>The metadata of a generated standalone skill: the shared entries plus the standalone overlay.</summary>
+        internal IReadOnlyDictionary<string, string> StandaloneSkillMetadata =>
+            SharedSkillFileGenerator.MergeMetadata(_config.SkillMetadata, _config.StandaloneSkillMetadata);
 
         private volatile int _toolTimeoutMs = IpcProtocol.DefaultToolTimeoutMs;
 
@@ -710,7 +723,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Host
             builder.AddTool(SkillGenerateTool.ToolId, SkillGenerateTool.Create(
                 toolCatalog: () => _registrar?.AppliedDescriptors,
                 projectRoot: () => _config.ProjectRootPath,
-                generator: new SkillFileGenerator(_loggerProvider?.CreateLogger(nameof(SkillFileGenerator)), _config.SkillMetadata)));
+                generator: new SkillFileGenerator(_loggerProvider?.CreateLogger(nameof(SkillFileGenerator)),
+                    ToolSkillMetadata, StandaloneSkillMetadata)));
 
             _plugin = builder.Build(_reflector);
 

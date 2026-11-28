@@ -167,7 +167,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void Generate_PrunesStaleGeneratorOwnedFolders_ButKeepsUserContent()
         {
             // As in production (SidecarHost): the provenance marker is what makes a folder ours to prune.
-            var gen = new SkillFileGenerator(metadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" });
+            var gen = new SkillFileGenerator(toolMetadata: new Dictionary<string, string> { ["generated-by"] = "unreal-mcp" });
             // First run writes demo-tool + ping.
             gen.Generate(new List<ToolDescriptor> { DemoTool(), new ToolDescriptor { Name = "ping", Description = "p" } }, _root);
             // An unrelated user folder WITHOUT a SKILL.md must never be pruned.

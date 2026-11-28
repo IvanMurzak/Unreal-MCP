@@ -65,8 +65,8 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         public const string ProvenanceBlockKey = "metadata";
 
         /// <summary>
-        /// Generator provenance inside metadata. This does not control App visibility;
-        /// the host supplies the separate <c>ai-game-dev: exclude</c> policy entry.
+        /// Generator provenance inside metadata. This does not control App visibility: the host supplies the
+        /// per-kind <c>ai-game-dev</c> policy entry (<c>exclude</c> on tool pages, <c>include</c> on standalone skills).
         /// </summary>
         public const string ProvenanceKey = "generated-by";
 
@@ -77,12 +77,18 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
         public const string ProvenanceValue = "unreal-mcp";
 
         private readonly ILogger? _logger;
-        private readonly IReadOnlyDictionary<string, string>? _metadata;
+        private readonly IReadOnlyDictionary<string, string>? _toolMetadata;
+        private readonly IReadOnlyDictionary<string, string>? _standaloneMetadata;
 
-        public SkillFileGenerator(ILogger? logger = null, IReadOnlyDictionary<string, string>? metadata = null)
+        /// <param name="toolMetadata">Front-matter metadata of a tool page (one per tool).</param>
+        /// <param name="standaloneMetadata">Front-matter metadata of a standalone skill: the knowledge a tool ships
+        /// beside its page (<see cref="ToolDescriptor.Skills"/>) and the built-in guides (<see cref="BuiltinSkillGuides"/>).</param>
+        public SkillFileGenerator(ILogger? logger = null, IReadOnlyDictionary<string, string>? toolMetadata = null,
+            IReadOnlyDictionary<string, string>? standaloneMetadata = null)
         {
             _logger = logger;
-            _metadata = metadata;
+            _toolMetadata = toolMetadata;
+            _standaloneMetadata = standaloneMetadata;
         }
 
         /// <summary>Outcome of a generation run (for the IPC result + the panel's status line + the tests).</summary>
@@ -145,7 +151,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             {
                 var folderName = SanitizeSkillFolderName(tool.Name);
                 currentFolders.Add(folderName);
-                if (WriteSkill(skillsRootAbsolute, folderName, BuildSkillMarkdown(tool, _metadata)))
+                if (WriteSkill(skillsRootAbsolute, folderName, BuildSkillMarkdown(tool, _toolMetadata)))
                     written++;
                 // Skills the tool ships beside its page (rql-query: unreal-rql, docs/rql.md), named and written by the plugin.
                 foreach (var skill in tool.Skills ?? new List<ToolSkillDescriptor>())
@@ -154,7 +160,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                         continue;
                     var skillFolder = SanitizeSkillFolderName(skill.Name);
                     currentFolders.Add(skillFolder);
-                    if (WriteSkill(skillsRootAbsolute, skillFolder, BuildShippedSkillMarkdown(skill, _metadata)))
+                    if (WriteSkill(skillsRootAbsolute, skillFolder, BuildShippedSkillMarkdown(skill, _standaloneMetadata)))
                         written++;
                 }
             }
@@ -177,7 +183,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
             foreach (var skill in BuiltinSkillGuides.All())
             {
                 currentFolders.Add(skill.Name);
-                if (WriteSkill(skillsRootAbsolute, skill.Name, BuildShippedSkillMarkdown(skill, _metadata)))
+                if (WriteSkill(skillsRootAbsolute, skill.Name, BuildShippedSkillMarkdown(skill, _standaloneMetadata)))
                     written++;
                 else
                 {
@@ -188,7 +194,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
             currentFolders.Add(BuiltinSkillGuides.CliUsageSkillName);
             result.FilesPruned = PruneStaleSkillFolders(skillsRootAbsolute, currentFolders,
-                _metadata != null && _metadata.TryGetValue(ProvenanceKey, out var provenance) ? provenance : null);
+                ProvenanceOf(_toolMetadata) ?? ProvenanceOf(_standaloneMetadata));
 
             if (written == 0)
             {
@@ -202,6 +208,9 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
                 written, result.FilesPruned, skillsRootAbsolute);
             return result;
         }
+
+        private static string? ProvenanceOf(IReadOnlyDictionary<string, string>? metadata) =>
+            metadata != null && metadata.TryGetValue(ProvenanceKey, out var provenance) ? provenance : null;
 
         /// <summary>Write <c>&lt;root&gt;/&lt;folder&gt;/SKILL.md</c> (UTF-8 without BOM, as the C++ generator did). Never throws.</summary>
         private bool WriteSkill(string skillsRootAbsolute, string folderName, string markdown)
@@ -223,7 +232,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.AgentConfig
 
         /// <summary>
         /// The YAML front matter of a generated SKILL.md: <c>name</c>, the capped single-line <c>description</c>, then the
-        /// global metadata, encoded by the shared library's YAML writer. The description cannot break out of its scalar
+        /// per-kind metadata, encoded by the shared library's YAML writer. The description cannot break out of its scalar
         /// to forge metadata — see <see cref="SingleLineCapped"/> for the mechanism and its limits.
         /// </summary>
         private static List<string> FrontMatter(string name, string description, IReadOnlyDictionary<string, string>? metadata = null)
