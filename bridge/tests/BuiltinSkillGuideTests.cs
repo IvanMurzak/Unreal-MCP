@@ -102,7 +102,7 @@ namespace com.IvanMurzak.Unreal.MCP.Bridge.Tests
         public void GeneratesStandaloneGuidesWithoutRql_AndMarksEachKindForTheApp()
         {
             // The sidecar's own metadata (DEV-313): the App hides a tool page and shows a standalone skill.
-            var host = new SidecarHost(new IpcClient("127.0.0.1", 39997, token: "test-token", sidecarVersion: "0.1.0"), "0.1.0");
+            using var host = new SidecarHost(new IpcClient("127.0.0.1", 39997, token: "test-token", sidecarVersion: "0.1.0"), "0.1.0");
             var generator = new SkillFileGenerator(toolMetadata: host.ToolSkillMetadata, standaloneMetadata: host.StandaloneSkillMetadata);
             var tools = new List<ToolDescriptor>(_tools)
             {
